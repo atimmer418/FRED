@@ -204,7 +204,6 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
    * isActive, and scrolls to the latest message on activate.
    */
   onChatActiveChange(active: boolean) {
-    console.log('[DIAG] --- onChatActiveChange active=' + active + ' t=' + Math.round(performance.now()) + ' ---');
     this.isActive = active;
     if (!active) {
       // Close the drawer if it's open, but do NOT disable the menu. Re-enabling

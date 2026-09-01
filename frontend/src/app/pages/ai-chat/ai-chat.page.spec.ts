@@ -30,10 +30,7 @@ function makeTourMock() {
   const mock = {
     step$: step$.asObservable(),
     currentStep: null as TourStep | null,
-    isTourActive: () => false,
-    getCurrentStep: () => 0,
     storyChipTapped: jasmine.createSpy('storyChipTapped'),
-    completeTour: jasmine.createSpy('completeTour'),
     setStep(step: TourStep | null) { mock.currentStep = step; step$.next(step); },
   };
   return mock;
@@ -55,7 +52,6 @@ function configure(chat: ReturnType<typeof makeChatServiceMock>, tour: ReturnTyp
     // Action-card deps (PIN sheet, toasts) pull ModalController/HttpClient; unused on these paths
     .overrideProvider(PinService, { useValue: {} })
     .overrideProvider(ToastService, { useValue: {} })
-    // Shaped for both the legacy numeric-step API and tour v2 (step$/currentStep/storyChipTapped)
     .overrideProvider(FirstTimeTourService, { useValue: tour });
 }
 

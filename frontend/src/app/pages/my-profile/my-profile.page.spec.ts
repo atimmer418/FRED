@@ -10,6 +10,7 @@
  */
 import { of } from 'rxjs';
 import { MyProfilePage } from './my-profile.page';
+import { FirstTimeTourService } from '../../services/first-time-tour.service';
 
 function makePage(freedomYearStat: string): MyProfilePage {
   const accountStatusMock = { actionRequired$: of(false) } as any;

@@ -11,6 +11,7 @@ import { PasskeyService } from './services/passkey.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { JwtTokenUtils } from './utils/jwt-token.utils';
 import { PortfolioStoreService } from './services/portfolio-store.service';
+import { FirstTimeTourComponent } from './components/first-time-tour/first-time-tour.component';
 import { environment } from '../environments/environment';
 import { combineLatest, debounceTime, distinctUntilChanged, filter, Subject, throttleTime } from 'rxjs';
 import { addIcons } from 'ionicons';
@@ -32,7 +33,7 @@ const CRITICAL_FONT_SPECS = [
   templateUrl: 'app.component.html',
   styleUrls: ['app.component.scss'],
   standalone: true,
-  imports: [IonApp, IonRouterOutlet, CommonModule],
+  imports: [IonApp, IonRouterOutlet, CommonModule, FirstTimeTourComponent],
 })
 export class AppComponent implements OnInit {
 

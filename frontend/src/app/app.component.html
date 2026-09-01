@@ -1,3 +1,6 @@
 <ion-app>
   <ion-router-outlet></ion-router-outlet>
+  <!-- Tour overlay lives here, not in TabsPage: Ionic display:none's the
+       tabs page when /my-profile is pushed, and the tour must survive that. -->
+  <app-first-time-tour></app-first-time-tour>
 </ion-app>

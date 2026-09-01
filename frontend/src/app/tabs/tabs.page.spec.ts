@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingModule } from '@angular/router/testing';
 import { Location } from '@angular/common';
-import { NavController } from '@ionic/angular/standalone';
+import { IonRouterOutlet } from '@ionic/angular/standalone';
 import { of } from 'rxjs';
 import { TabsPage } from './tabs.page';
 import { Tab1Page } from '../tab1/tab1.page';
@@ -46,9 +46,7 @@ describe('TabsPage pager', () => {
     scrollSvc = jasmine.createSpyObj('TabBarScrollService', ['reset', 'setHoldFull']);
     TestBed.configureTestingModule({
       imports: [TabsPage, RouterTestingModule],
-      // FirstTimeTourComponent (real, unconditional in TabsPage's template) injects
-      // NavController — trivial no-op stub, since construction only stores the ref.
-      providers: [{ provide: NavController, useValue: {} }],
+      providers: [],
     })
       .overrideComponent(TabsPage, {
         remove: { imports: [Tab1Page, Tab2Page, AiChatPage, Tab3Page] },

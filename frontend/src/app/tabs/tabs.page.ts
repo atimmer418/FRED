@@ -11,7 +11,6 @@ import { AccountStatusService } from '../services/account-status.service';
 import { AuthService } from '../services/auth.service';
 import { TabBarScrollService } from '../services/tab-bar-scroll.service';
 import { TabActivationService } from '../services/tab-activation.service';
-import { FirstTimeTourComponent } from '../components/first-time-tour/first-time-tour.component';
 import { FloatingTabBarComponent } from '../components/floating-tab-bar/floating-tab-bar.component';
 import { Tab1Page } from '../tab1/tab1.page';
 import { Tab2Page } from '../tab2/tab2.page';
@@ -27,7 +26,7 @@ const TAB_ORDER = ['tab1', 'tab2', 'chat', 'tab3'] as const;
   standalone: true,
   imports: [
     CommonModule, AsyncPipe, FormsModule,
-    FirstTimeTourComponent, FloatingTabBarComponent,
+    FloatingTabBarComponent,
     Tab1Page, Tab2Page, AiChatPage, Tab3Page,
     IonTextarea, IonButton, IonIcon,
   ],

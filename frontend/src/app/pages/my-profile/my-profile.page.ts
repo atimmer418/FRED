@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -23,6 +23,7 @@ import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils
 import { GoalsService, Goal, GoalIcon, RebalanceSchedule } from '../../services/goals.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalAddSheetComponent } from '../../components/goal-add-sheet/goal-add-sheet.component';
+import { FirstTimeTourService } from '../../services/first-time-tour.service';
 
 /** Computed projection for a single user-added goal. */
 export interface GoalProjection {
@@ -153,6 +154,12 @@ export class MyProfilePage implements OnInit, OnDestroy {
   // ── Constants ──────────────────────────────────────────────────────────────
   private readonly SAFE_WITHDRAWAL_RATE = 0.04;
   private readonly AVG_MARKET_YIELD = 0.10;
+
+  // Guarded for the same reason as ratesService: the math specs construct this
+  // page with `new MyProfilePage(...)`, outside any injection context.
+  private tourService: FirstTimeTourService | null = (() => {
+    try { return inject(FirstTimeTourService); } catch { return null; }
+  })();
 
   // ── Rebalancing ────────────────────────────────────────────────────────────
   readonly rebalanceSchedules = REBALANCE_SCHEDULES;

@@ -9,6 +9,7 @@ import { AuthService, UserProgress } from './services/auth.service';
 import { PasskeyService } from './services/passkey.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { PortfolioStoreService } from './services/portfolio-store.service';
+import { FirstTimeTourService } from './services/first-time-tour.service';
 import { JwtTokenUtils } from './utils/jwt-token.utils';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,10 @@ const pushNotificationServiceStub = {
 const portfolioStoreStub = {
   prime: jasmine.createSpy('prime'),
 };
+const firstTimeTourStub = {
+  step$: new BehaviorSubject(null).asObservable(),
+  suspended$: new BehaviorSubject(false).asObservable(),
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +101,7 @@ describe('AppComponent — tryOptimisticNav (cold-start + post-reauth)', () => {
         { provide: PasskeyService, useValue: passkeyServiceStub },
         { provide: PushNotificationService, useValue: pushNotificationServiceStub },
         { provide: PortfolioStoreService, useValue: portfolioStoreStub },
+        { provide: FirstTimeTourService, useValue: firstTimeTourStub },
       ],
     }).compileComponents();
 
@@ -232,6 +238,7 @@ describe('AppComponent', () => {
         { provide: PasskeyService, useValue: passkeyServiceStub },
         { provide: PushNotificationService, useValue: pushNotificationServiceStub },
         { provide: PortfolioStoreService, useValue: portfolioStoreStub },
+        { provide: FirstTimeTourService, useValue: firstTimeTourStub },
       ],
     }).compileComponents();
 

@@ -93,6 +93,19 @@ describe('TabsPage pager', () => {
     expect(slideTo).toHaveBeenCalledWith(3, undefined);
   });
 
+  // The first-time tour moves between tabs through TabActivationService rather
+  // than by router-navigating to /tabs/<tab>: Ionic reuses views by their
+  // stamped URL, so a route move to a different tab builds a SECOND TabsPage.
+  it('slides the pager on a TabActivationService.requestTab', () => {
+    const c = build().componentInstance;
+    c.ngOnInit();
+    const slideTo = jasmine.createSpy('slideTo');
+    (c as any).swiperRef = { nativeElement: { swiper: { slideTo, allowTouchMove: true } } };
+
+    TestBed.inject(TabActivationService).requestTab('chat');
+    expect(slideTo).toHaveBeenCalledWith(2, undefined);
+  });
+
   it('ionViewWillEnter re-pulses activation for the current tab', () => {
     const fixture = build();
     const c = fixture.componentInstance;

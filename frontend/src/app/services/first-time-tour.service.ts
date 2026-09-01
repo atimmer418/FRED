@@ -3,6 +3,7 @@ import { NavigationEnd, Router } from '@angular/router';
 import { NavController } from '@ionic/angular/standalone';
 import { BehaviorSubject } from 'rxjs';
 import { filter } from 'rxjs/operators';
+import { TabActivationService } from './tab-activation.service';
 
 /**
  * Tour steps, in order. 'tab1' and 'tab2' are explain steps (Next button).
@@ -31,7 +32,8 @@ export class FirstTimeTourService {
 
   constructor(
     private router: Router,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private tabActivation: TabActivationService
   ) {
     // The pig-avatar gate passes when the router lands on /my-profile. Driving
     // it from router events means tab3 needs no tour hook at all.
@@ -54,20 +56,29 @@ export class FirstTimeTourService {
   }
 
   startTour(): void {
-    if (this.hasSeenTour()) return;
+    // A running tour is never restarted: every remount of Tab1Page (AppLock's
+    // post-reauth /tabs/tab1 nav, a second TabsPage) calls this, and a reset
+    // would throw a mid-tour user back to step 1.
+    if (this.hasSeenTour() || this.currentStep !== null) return;
     this.suspendedSubject.next(false);
     this.stepSubject.next('tab1');
   }
 
-  /** Explain steps only. Ignored on gated steps. */
+  /**
+   * Explain steps only. Ignored on gated steps. The tab moves go through
+   * TabActivationService, which slides the existing pager: a router
+   * navigation to /tabs/<tab> would build a second TabsPage instead (Ionic
+   * reuses views by their stamped URL), and its fresh Tab1Page would restart
+   * the tour.
+   */
   next(): void {
     switch (this.currentStep) {
       case 'tab1':
-        this.go('/tabs/tab2');
+        this.tabActivation.requestTab('tab2');
         this.stepSubject.next('tab2');
         break;
       case 'tab2':
-        this.go('/tabs/tab3');
+        this.tabActivation.requestTab('tab3');
         this.stepSubject.next('tab3Avatar');
         break;
     }
@@ -103,13 +114,24 @@ export class FirstTimeTourService {
 
   /** Called by my-profile after the Freedom sheet dismisses (any role). */
   freedomSheetClosed(): void {
-    if (this.currentStep !== 'profileFreedom') return;
+    // Always clear a suspend, even off-step, so the overlay can never stay hidden.
     this.suspendedSubject.next(false);
-    // TabsPage is cached in the root outlet; its paramMap subscription slides
-    // the pager to chat and navigateBack plays the back transition.
-    this.navCtrl.navigateBack('/tabs/chat')
-      .catch(err => console.warn('[tour] navigateBack to chat failed', err));
+    if (this.currentStep !== 'profileFreedom') return;
     this.stepSubject.next('chatStory');
+    // pop() returns to the cached TabsPage by its own URL (a router navigation
+    // to /tabs/chat would create a second TabsPage, see TabActivationService),
+    // then the pager is moved to chat once that navigation has settled.
+    this.navCtrl.pop()
+      .then(popped => {
+        if (popped) {
+          this.tabActivation.requestTab('chat');
+        } else {
+          // Nothing to pop (deep link straight into my-profile): fall back to a route.
+          return this.router.navigateByUrl('/tabs/chat').then(() => undefined);
+        }
+        return undefined;
+      })
+      .catch(err => console.warn('[tour] return to chat failed', err));
   }
 
   /** Called by ai-chat when the story chip is tapped. */

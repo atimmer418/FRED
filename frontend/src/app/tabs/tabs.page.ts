@@ -82,6 +82,9 @@ export class TabsPage implements OnInit, AfterViewInit {
         this.slideToTab(tab);
       }
     });
+
+    // Tour-driven pager moves (see TabActivationService.requestTab).
+    this.tabActivation.tabRequest$.subscribe((tab) => this.slideToTab(tab));
   }
 
   ngAfterViewInit() {

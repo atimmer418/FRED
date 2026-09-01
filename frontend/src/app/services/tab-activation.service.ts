@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { Subject } from 'rxjs';
 
 /**
  * Tells each top-level tab when it becomes the active slide in the swipeable
@@ -15,5 +16,17 @@ export class TabActivationService {
 
   setActive(tab: string): void {
     this._activeTab.set(tab);
+  }
+
+  // Programmatic "move the pager to <tab>" requests (first-time tour). TabsPage
+  // subscribes and calls slideToTab, which syncs the URL via replaceState. This
+  // deliberately avoids a router navigation to /tabs/<tab>: Ionic's route reuse
+  // is keyed on the stamped view URL, so a router move to a different tab URL
+  // creates a second TabsPage instead of moving the existing pager.
+  private readonly tabRequests = new Subject<string>();
+  readonly tabRequest$ = this.tabRequests.asObservable();
+
+  requestTab(tab: string): void {
+    this.tabRequests.next(tab);
   }
 }

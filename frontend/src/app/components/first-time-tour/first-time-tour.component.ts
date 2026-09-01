@@ -25,12 +25,22 @@ const TOUR_STEPS: TourStepDef[] = [
 export const TARGET_POLL_MS = 16;
 /** ~3s at 16ms: after this the step falls back to explain rendering. */
 export const TARGET_POLL_MAX_ATTEMPTS = 188;
+/**
+ * Consecutive identical measurements required before the poll stops. The step
+ * changes while the pager/page transition is still running, so the first hit
+ * is often a mid-flight position; the hole would sit where the target WAS.
+ */
+export const STABLE_TICKS = 3;
 /** Re-measure once after the page/slide transition settles. */
 const SETTLE_REMEASURE_MS = 600;
 /** Space kept clear above the floating tab bar when placing the card. */
 const BOTTOM_RESERVE_PX = 110;
 /** Card height used before the card has been measured. */
 const CARD_HEIGHT_FALLBACK_PX = 140;
+
+function sameRect(a: Rect, b: Rect): boolean {
+  return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+}
 
 @Component({
   selector: 'app-first-time-tour',
@@ -143,20 +153,40 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Polls for the gated target, applying every new rect it sees and stopping
+   * only once the rect has held still for STABLE_TICKS in a row. The
+   * TARGET_POLL_MAX_ATTEMPTS budget bounds the whole loop; spending it with a
+   * rect already applied simply keeps that last rect. Only a target that was
+   * NEVER found falls back to explain rendering.
+   */
   private startTargetPoll(selector: string) {
     let attempts = 0;
+    let applied: Rect | null = null;
+    let stableTicks = 0;
     const tick = () => {
       this.pollTimer = null;
+      attempts++;
       const rect = this.measure(selector);
-      if (rect) {
+      if (rect && (!applied || !sameRect(applied, rect))) {
+        applied = rect;
+        stableTicks = 1;
         this.applyRect(rect);
+        if (this.settleTimer) {
+          clearTimeout(this.settleTimer);
+        }
         this.settleTimer = setTimeout(() => this.remeasure(), SETTLE_REMEASURE_MS);
+      } else if (rect) {
+        stableTicks++;
+      }
+      if (rect && stableTicks >= STABLE_TICKS) {
         return;
       }
-      attempts++;
       if (attempts >= TARGET_POLL_MAX_ATTEMPTS) {
-        this.fallback = true;
-        this.cdr.markForCheck();
+        if (!applied) {
+          this.fallback = true;
+          this.cdr.markForCheck();
+        }
         return;
       }
       this.pollTimer = setTimeout(tick, TARGET_POLL_MS);
@@ -168,7 +198,11 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
     const el = document.querySelector(selector);
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return null;
+    // A target translated off-screen mid-transition still has a real size, but
+    // computeSpotlight would clamp it to a zero-width hole at the viewport edge
+    // (a fully dark screen). Treat it as not measurable yet.
+    const offScreen = r.right <= 0 || r.bottom <= 0 || r.left >= window.innerWidth || r.top >= window.innerHeight;
+    if (r.width <= 0 || r.height <= 0 || offScreen) return null;
     return { top: r.top, left: r.left, width: r.width, height: r.height };
   }
 

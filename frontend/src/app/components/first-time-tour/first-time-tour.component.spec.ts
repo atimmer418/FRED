@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { BehaviorSubject } from 'rxjs';
-import { FirstTimeTourComponent, TARGET_POLL_MS, TARGET_POLL_MAX_ATTEMPTS } from './first-time-tour.component';
+import { FirstTimeTourComponent, TARGET_POLL_MS, TARGET_POLL_MAX_ATTEMPTS, STABLE_TICKS } from './first-time-tour.component';
 import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.service';
 
 describe('FirstTimeTourComponent', () => {
@@ -133,6 +133,27 @@ describe('FirstTimeTourComponent', () => {
     q('.ftt-skip')!.click();
     expect(svc.skip).toHaveBeenCalled();
   });
+
+  // The step flips while the pager/page transition is still running, so the
+  // target can be measured mid-slide: translated off-screen. Committing that
+  // rect clamps the hole to a zero-width sliver at the screen edge, i.e. a
+  // fully dark screen for the rest of the transition.
+  it('ignores a target that is fully off-screen until it enters the viewport', fakeAsync(() => {
+    const el = mountTarget('profile-avatar');
+    el.style.left = `${window.innerWidth + 40}px`;   // mid-slide: translated off-screen
+    step$.next('tab3Avatar');
+    fixture.detectChanges();
+    tick(TARGET_POLL_MS * 5);
+    fixture.detectChanges();
+    expect(q('.ftt-panel')).toBeNull();               // still measuring, no degenerate hole
+
+    el.style.left = '20px';                           // slide settled
+    tick(TARGET_POLL_MS * (STABLE_TICKS + 1));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.ftt-panel').length).toBe(4);
+    expect(q('.ftt-ring')!.style.left).toBe('12px');
+    tick(3000);
+  }));
 
   it('cancels the card re-measure timer when the step changes before it fires', fakeAsync(() => {
     mountTarget('profile-avatar');

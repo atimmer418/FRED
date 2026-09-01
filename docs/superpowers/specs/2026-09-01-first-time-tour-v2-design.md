@@ -60,7 +60,7 @@ Public surface:
 
 Router-driven advance: the service subscribes to `Router.events` (`NavigationEnd`). When step is `tab3Avatar` and `urlAfterRedirects` starts with `/my-profile`, step becomes `profileFreedom`. No hook in tab3 is needed for the pig tap.
 
-Navigation uses the router paths TabsPage already handles: its `paramMap` subscription slides the pager for `/tabs/<tab>`, and TabsPage is cached in the root outlet so `navigateBack('/tabs/chat')` from my-profile reuses it (the swipe-back URL re-stamp in `onTransitionEnd` already covers the stack view).
+Intra-tab moves (`tab1 -> tab2 -> tab3`, and the return to chat) do NOT use router navigation to `/tabs/<tab>`: Ionic's route reuse is keyed on the view's stamped URL, so a router move to a different tab URL creates a second TabsPage (and its fresh Tab1Page would restart the tour). Instead the service calls `TabActivationService.requestTab(tab)`; TabsPage subscribes and calls `slideToTab`, whose `onSlideChange`/`onTransitionEnd` sync the URL via `replaceState`. The return from my-profile is `navCtrl.pop()` (which reuses the cached TabsPage by its own URL) followed by `requestTab('chat')` once the pop resolves. `/my-profile` remains a real forward navigation.
 
 Step state is in-memory only. If the app reloads mid-tour, the tour restarts at `tab1` on the next tab1 load (the flag is written only on complete/skip).
 
@@ -97,7 +97,7 @@ No em dashes anywhere in tour copy (house style).
 
 **Gated rendering:** four dark panels (`rgba(0,0,0,0.75)`) laid out around the target rect (top, bottom, left, right), leaving the hole itself with no overlay element. The real target receives the real tap; everything else is under a panel and inert. A ring element (border only, `pointer-events: none`, pulsing box-shadow) outlines the hole with 8px padding and a 12px radius. The card shows dots, label, and Skip tour only (no Next). Card sits below the hole if there is room for it above the tab bar, else above the hole.
 
-**Target measurement:** on entering a gated step, poll with `requestAnimationFrame` until `document.querySelector(selector)` exists with a nonzero `getBoundingClientRect()`, up to 3000ms. Re-measure once 600ms after first found (slide/page transition settle) and on `resize` / `orientationchange`. Store the rect and derive the four panel geometries from it.
+**Target measurement:** on entering a gated step, poll on a 16ms timer until `document.querySelector(selector)` exists with a nonzero `getBoundingClientRect()`, up to 3000ms. A rect fully outside the viewport counts as not found; after the first hit, polling continues until the rect is unchanged for 3 consecutive ticks so a mid-transition position is never committed. Re-measure once 600ms after first found (slide/page transition settle) and on `resize` / `orientationchange`. Store the rect and derive the four panel geometries from it.
 
 **Fallback:** if the target is not found within 3000ms, render the step as an explain step (full backdrop + label + Next). Next on a fallback advances the state machine as if the gate had been passed: `tab3Avatar` → navigate `/my-profile` and set `profileFreedom`; `profileFreedom` → `freedomSheetClosed()`; `chatStory` → `complete()`. The user never sees a dead dark screen.
 

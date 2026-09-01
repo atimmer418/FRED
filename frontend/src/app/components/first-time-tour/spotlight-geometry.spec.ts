@@ -33,6 +33,20 @@ describe('computeSpotlight', () => {
     expect(layout.panels[2].width).toBe(0);
   });
 
+  it('collapses the hole to zero size for a target fully outside the viewport', () => {
+    const below = computeSpotlight({ top: 900, left: 20, width: 52, height: 50 }, VW, VH, 140, 110);
+    expect(below.hole.height).toBe(0);
+    expect(below.hole.top).toBe(VH);
+    expect(below.panels.every((p: any) => p.width >= 0 && p.height >= 0)).toBeTrue();
+    const area = below.panels.reduce((a: number, p: any) => a + p.width * p.height, 0) + below.hole.width * below.hole.height;
+    expect(area).toBe(VW * VH);
+
+    const above = computeSpotlight({ top: -100, left: 20, width: 52, height: 50 }, VW, VH, 140, 110);
+    expect(above.hole.height).toBe(0);
+    expect(above.hole.top).toBe(0);
+    expect(above.panels.every((p: any) => p.width >= 0 && p.height >= 0)).toBeTrue();
+  });
+
   it('places the card below the hole when there is room above the bottom reserve', () => {
     const target = { top: 60, left: 20, width: 52, height: 52 };
     const layout = computeSpotlight(target, VW, VH, 140, 110);

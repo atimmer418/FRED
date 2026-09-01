@@ -31,10 +31,12 @@ export function computeSpotlight(
   cardHeight: number,
   bottomReserve: number
 ): SpotlightLayout {
-  const holeTop = Math.max(0, target.top - HOLE_PAD);
-  const holeLeft = Math.max(0, target.left - HOLE_PAD);
-  const holeBottom = Math.min(viewportH, target.top + target.height + HOLE_PAD);
-  const holeRight = Math.min(viewportW, target.left + target.width + HOLE_PAD);
+  const clampY = (v: number) => Math.min(viewportH, Math.max(0, v));
+  const clampX = (v: number) => Math.min(viewportW, Math.max(0, v));
+  const holeTop = clampY(target.top - HOLE_PAD);
+  const holeLeft = clampX(target.left - HOLE_PAD);
+  const holeBottom = clampY(target.top + target.height + HOLE_PAD);
+  const holeRight = clampX(target.left + target.width + HOLE_PAD);
 
   const hole: Rect = {
     top: holeTop,

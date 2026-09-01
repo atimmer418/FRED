@@ -100,6 +100,8 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   newMessage: string = '';
   isLoading: boolean = false;
   dailySuggestions: string[] = [];
+  /** Unfiltered day's set (cache or last fetch); dailySuggestions = this minus used ones */
+  private rawSuggestions: string[] = [];
   isActive: boolean = false;
 
   constructor(
@@ -156,6 +158,10 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnInit() {
+    // Suggestion cards must be in the FIRST paint: seed from the per-day cache
+    // synchronously (fetch only if cold) so they never pop in on entry.
+    this.primeSuggestions();
+
     // Chat data now loads on first activation (see onChatActiveChange), not on
     // mount — so eager pager mounting does not fire these on app entry.
 
@@ -232,25 +238,51 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * Seed the suggestion cards from today's cached set so they render with the
+   * rest of the empty state, not after a network round trip. Cold cache (first
+   * launch, new day, new user) fetches right away rather than waiting for the
+   * 2.5s preload timer or first activation; a warm cache is refreshed later by
+   * the normal preload/activation path.
+   */
+  primeSuggestions() {
+    const cached = this.chatService.getCachedDailySuggestions();
+    if (cached) {
+      this.applySuggestions(cached);
+    } else {
+      this.loadDailySuggestions();
+    }
+  }
+
   loadDailySuggestions() {
     this.chatService.getDailySuggestions().subscribe({
       next: (questions) => {
         // Phase 3: Backend returns [LLM, Popular, Personalized/FRED]
-        // Filter out used questions from positions 1 & 2 (static until midnight)
-        // Keep position 3 (personalized) always visible - backend handles rotation
-
-        const used = this.chatService.getUsedSuggestions();
-        const filteredQuestions = questions.filter(q => !used.includes(q));
-
-        this.dailySuggestions = filteredQuestions;
-        this.cdr.detectChanges();
+        this.chatService.cacheDailySuggestions(questions);
+        this.applySuggestions(questions);
       },
       error: (err) => {
+        // Keep whatever is already showing (the cached seed); nothing to blank
         console.error('Failed to load daily questions', err);
-        this.dailySuggestions = [];
-        this.cdr.detectChanges();
       }
     });
+  }
+
+  /**
+   * Filter out used questions from positions 1 & 2 (static until midnight);
+   * position 3 (personalized) is always visible, backend handles rotation.
+   * Keeps the existing array instance when nothing changed so *ngFor never
+   * re-creates the cards for identical content.
+   */
+  private applySuggestions(questions: string[]) {
+    this.rawSuggestions = questions;
+    const used = this.chatService.getUsedSuggestions();
+    const filtered = questions.filter(q => !used.includes(q));
+    const same = filtered.length === this.dailySuggestions.length
+      && filtered.every((q, i) => q === this.dailySuggestions[i]);
+    if (same) return;
+    this.dailySuggestions = filtered;
+    this.cdr.detectChanges();
   }
 
   selectSuggestion(question: string) {
@@ -373,8 +405,8 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
 
     this.currentSession = this.chatService.createSession();
     this.messages = [];
-    // Reload suggestions to ensure used ones are filtered out
-    this.loadDailySuggestions();
+    // Re-filter used ones locally; no refetch (the day's set is already known)
+    this.applySuggestions(this.rawSuggestions);
     // No greeting bubble — the empty-state hero (pig + time greeting) takes its place
     this.cdr.detectChanges();
   }

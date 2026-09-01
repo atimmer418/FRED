@@ -228,6 +228,35 @@ export class ChatService {
     return data ? JSON.parse(data) : [];
   }
 
+  // Daily Suggestions Cache
+  // The chat page seeds its suggestion cards from this synchronously so they
+  // are in the first paint instead of popping in after the /suggestions round
+  // trip. Scoped per day (backend regenerates at midnight) and per user
+  // (position 3 is personalized).
+
+  private dailySuggestionsCacheKey(): string {
+    const today = new Date().toISOString().split('T')[0];
+    const userId = localStorage.getItem('userId') ?? 'anon';
+    return `fred_daily_suggestions_${today}_${userId}`;
+  }
+
+  getCachedDailySuggestions(): string[] | null {
+    const data = localStorage.getItem(this.dailySuggestionsCacheKey());
+    if (!data) return null;
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  cacheDailySuggestions(questions: string[]): void {
+    // Never pin an empty set: a bad response must not blank the cards on the next launch
+    if (!questions || questions.length === 0) return;
+    localStorage.setItem(this.dailySuggestionsCacheKey(), JSON.stringify(questions));
+  }
+
   private generateId(): string {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
   }

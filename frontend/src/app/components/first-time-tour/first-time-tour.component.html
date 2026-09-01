@@ -1,36 +1,51 @@
-<div class="ftt-overlay" *ngIf="isVisible" [class.ftt-visible]="isVisible" [class.ftt-step4]="currentStep === 4">
+<div class="ftt-overlay" *ngIf="isVisible" [class.ftt-overlay--spotlight]="isSpotlight">
 
-  <!-- Full backdrop — hidden on step 3 where ftt-highlight provides the dimming -->
+  <!-- Explain / fallback / measuring: one full backdrop that blocks taps -->
   <div
-    *ngIf="currentStep !== 3"
+    *ngIf="!isSpotlight"
     class="ftt-backdrop"
-    [class.ftt-backdrop-permeable]="currentStep === 4"
+    [class.ftt-backdrop--dark]="isMeasuring || fallback"
   ></div>
 
-  <!-- Highlight cutout box (step 3 tab button) -->
-  <div
-    *ngIf="highlightRect"
-    class="ftt-highlight"
-    [style.top.px]="highlightRect.top - 8"
-    [style.left.px]="highlightRect.left - 8"
-    [style.width.px]="highlightRect.width + 16"
-    [style.height.px]="highlightRect.height + 16"
-  ></div>
+  <!-- Spotlight: four panels around the hole. The hole has NO element, so the
+       real target underneath receives the real tap. -->
+  <ng-container *ngIf="isSpotlight && layout">
+    <div
+      *ngFor="let p of layout.panels"
+      class="ftt-panel"
+      [style.top.px]="p.top"
+      [style.left.px]="p.left"
+      [style.width.px]="p.width"
+      [style.height.px]="p.height"
+    ></div>
+    <div
+      class="ftt-ring"
+      [style.top.px]="layout.hole.top"
+      [style.left.px]="layout.hole.left"
+      [style.width.px]="layout.hole.width"
+      [style.height.px]="layout.hole.height"
+    ></div>
+  </ng-container>
 
   <!-- Tooltip card -->
-  <div class="ftt-card" [class.ftt-card-bottom]="currentStep === 3">
+  <div
+    #card
+    class="ftt-card"
+    [class.ftt-card--placed]="cardTopPx !== null"
+    [style.top.px]="cardTopPx"
+  >
     <div class="ftt-step-indicator">
       <span
-        *ngFor="let dot of [1,2,3,4]"
+        *ngFor="let s of stepOrder"
         class="ftt-dot"
-        [class.ftt-dot-active]="dot === currentStep"
+        [class.ftt-dot-active]="s === currentStep"
       ></span>
     </div>
 
     <p class="ftt-label">{{ stepLabel }}</p>
 
     <div class="ftt-actions">
-      <button class="ftt-next" (click)="onNext()" *ngIf="!isLastStep">
+      <button class="ftt-next" (click)="onNext()" *ngIf="showsNext">
         Next
       </button>
       <button class="ftt-skip" (click)="onSkip()">Skip tour</button>

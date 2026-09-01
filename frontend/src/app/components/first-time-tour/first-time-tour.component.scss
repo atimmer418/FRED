@@ -1,52 +1,47 @@
 // -------------------------------------------------------
-// First-time tour overlay — FRED design system
+// First-time tour overlay, FRED design system.
+// Hosted at app level (app.component.html) so it survives page pushes.
 // -------------------------------------------------------
 
 .ftt-overlay {
   position: fixed;
   inset: 0;
+  // Above pages and the floating tab bar, below Ionic overlays (ion-modal is 20000+).
   z-index: 9999;
   pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-
-  &.ftt-visible {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  // On step 4, pass events through the overlay so the chip can be tapped
-  &.ftt-step4 {
-    pointer-events: none;
-
-    .ftt-card {
-      pointer-events: auto;
-    }
-  }
+  animation: ftt-fade-in 0.25s ease both;
 }
 
+// Explain / fallback: a single backdrop that blocks every tap.
 .ftt-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
 
-  // On step 4, let pointer events pass through so the chip can be tapped
-  &.ftt-backdrop-permeable {
-    pointer-events: none;
+  &--dark {
+    background: rgba(0, 0, 0, 0.75);
   }
 }
 
-// Highlight cutout — sits above the backdrop, punches a visible hole via mix-blend-mode
-.ftt-highlight {
+// Spotlight: four panels tile the viewport around the hole. Each blocks taps;
+// the hole has no element, so the target underneath is live.
+.ftt-panel {
   position: absolute;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75);
-  z-index: 1;
-  pointer-events: none;
+  background: rgba(0, 0, 0, 0.75);
+  pointer-events: auto;
 }
 
-// Tooltip card — centered vertically in the upper portion by default
+// Outline + pulse around the hole. Border only, never intercepts taps.
+.ftt-ring {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #2563eb;
+  border-radius: 12px;
+  pointer-events: none;
+  animation: ftt-ring-pulse 1.4s ease-in-out infinite;
+}
+
 .ftt-card {
   position: absolute;
   left: 50%;
@@ -57,13 +52,11 @@
   background: #fff;
   border-radius: 16px;
   padding: 24px;
-  z-index: 2;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
 
-  // When highlighting the tab bar (step 3), push card up above the bar
-  &.ftt-card-bottom {
-    top: auto;
-    bottom: 120px;
+  // Spotlight placement: top is set inline from the layout, no vertical centering.
+  &--placed {
     transform: translateX(-50%);
   }
 }
@@ -80,7 +73,7 @@
   height: 7px;
   border-radius: 50%;
   background: #d1d5db;
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, width 0.2s ease;
 
   &.ftt-dot-active {
     background: #2563eb;
@@ -132,4 +125,14 @@
   font-size: 13px;
   cursor: pointer;
   padding: 0;
+}
+
+@keyframes ftt-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ftt-ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+  50% { box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); }
 }

@@ -1,11 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingModule } from '@angular/router/testing';
 import { HttpClientTestingModule } from '@angular/common/http/testing';
-import { of, Subject, throwError } from 'rxjs';
+import { of, Subject, BehaviorSubject, throwError } from 'rxjs';
 import { MenuController } from '@ionic/angular';
 import { AiChatPage } from './ai-chat.page';
 import { ChatService } from '../../services/chat.service';
-import { FirstTimeTourService } from '../../services/first-time-tour.service';
+import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.service';
 import { TabActivationService } from '../../services/tab-activation.service';
 import { PinService } from '../../services/pin.service';
 import { ToastService } from '../../services/toast.service';
@@ -21,10 +21,25 @@ function makeChatServiceMock() {
     getUsedSuggestions: jasmine.createSpy('getUsedSuggestions').and.returnValue([]),
     createSession: jasmine.createSpy('createSession').and.returnValue({ id: 's1', messages: [] }),
     saveSession: jasmine.createSpy('saveSession'),
+    markSuggestionAsUsed: jasmine.createSpy('markSuggestionAsUsed'),
   };
 }
 
-function configure(chat: ReturnType<typeof makeChatServiceMock>) {
+function makeTourMock() {
+  const step$ = new BehaviorSubject<TourStep | null>(null);
+  const mock = {
+    step$: step$.asObservable(),
+    currentStep: null as TourStep | null,
+    isTourActive: () => false,
+    getCurrentStep: () => 0,
+    storyChipTapped: jasmine.createSpy('storyChipTapped'),
+    completeTour: jasmine.createSpy('completeTour'),
+    setStep(step: TourStep | null) { mock.currentStep = step; step$.next(step); },
+  };
+  return mock;
+}
+
+function configure(chat: ReturnType<typeof makeChatServiceMock>, tour: ReturnType<typeof makeTourMock> = makeTourMock()) {
   TestBed.configureTestingModule({
     imports: [AiChatPage, RouterTestingModule, HttpClientTestingModule],
     providers: [{
@@ -41,16 +56,7 @@ function configure(chat: ReturnType<typeof makeChatServiceMock>) {
     .overrideProvider(PinService, { useValue: {} })
     .overrideProvider(ToastService, { useValue: {} })
     // Shaped for both the legacy numeric-step API and tour v2 (step$/currentStep/storyChipTapped)
-    .overrideProvider(FirstTimeTourService, {
-      useValue: {
-        step$: of(null),
-        currentStep: null,
-        isTourActive: () => false,
-        getCurrentStep: () => 0,
-        storyChipTapped: jasmine.createSpy('storyChipTapped'),
-        completeTour: jasmine.createSpy('completeTour'),
-      },
-    });
+    .overrideProvider(FirstTimeTourService, { useValue: tour });
 }
 
 describe('AiChatPage activation gating', () => {
@@ -181,5 +187,92 @@ describe('AiChatPage suggestion cards first-paint', () => {
 
     expect(chat.getDailySuggestions).toHaveBeenCalledTimes(1);
     expect(c.dailySuggestions).toEqual(['b', 'c']);
+  });
+});
+
+/**
+ * Final tour step: the "What's your story FRED?" card must be on screen and
+ * tappable no matter what the backend returned, and tapping it reports to
+ * the tour.
+ */
+describe('AiChatPage first-time tour story chip', () => {
+  let chat: ReturnType<typeof makeChatServiceMock>;
+  let tour: ReturnType<typeof makeTourMock>;
+
+  beforeEach(() => {
+    chat = makeChatServiceMock();
+    tour = makeTourMock();
+    configure(chat, tour);
+  });
+
+  it('entering chatStory puts the story chip first, ahead of the cached cards', () => {
+    chat.getCachedDailySuggestions.and.returnValue(['How do ETFs work?', 'What is a Roth IRA?']);
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.primeSuggestions();
+    expect(c.dailySuggestions).not.toContain(c.FRED_STORY_TRIGGER);
+
+    tour.setStep('chatStory');
+
+    expect(c.dailySuggestions[0]).toBe(c.FRED_STORY_TRIGGER);
+    expect(c.dailySuggestions.length).toBe(3);
+  });
+
+  it('a late fetch cannot remove the story chip while on chatStory', () => {
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    tour.setStep('chatStory');
+    chat.getDailySuggestions.and.returnValue(of(['Only one question']));
+
+    c.loadDailySuggestions();
+
+    expect(c.dailySuggestions).toEqual([c.FRED_STORY_TRIGGER, 'Only one question']);
+  });
+
+  it('a failed fetch still leaves the story chip while on chatStory', () => {
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    tour.setStep('chatStory');
+    chat.getDailySuggestions.and.returnValue(throwError(() => new Error('boom')));
+
+    c.loadDailySuggestions();
+
+    expect(c.dailySuggestions).toEqual([c.FRED_STORY_TRIGGER]);
+  });
+
+  it('does not inject the story chip when the tour is not on chatStory', () => {
+    chat.getCachedDailySuggestions.and.returnValue(['a', 'b']);
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.primeSuggestions();
+    expect(c.dailySuggestions).toEqual(['a', 'b']);
+  });
+
+  it('entering chatStory with an existing conversation resets to an empty chat first', () => {
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.messages = [{ role: 'user', content: 'hi', timestamp: new Date() } as any];
+
+    tour.setStep('chatStory');
+
+    expect(c.messages.length).toBe(0);
+    expect(chat.createSession).toHaveBeenCalled();
+    expect(c.dailySuggestions[0]).toBe(c.FRED_STORY_TRIGGER);
+  });
+
+  it('tapping the story chip on chatStory notifies the tour and still sends', () => {
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    spyOn(c, 'sendMessage');
+    tour.setStep('chatStory');
+
+    c.selectSuggestion(c.FRED_STORY_TRIGGER);
+
+    expect(tour.storyChipTapped).toHaveBeenCalled();
+    expect(chat.markSuggestionAsUsed).toHaveBeenCalledWith(c.FRED_STORY_TRIGGER);
+    expect(c.sendMessage).toHaveBeenCalled();
+  });
+
+  it('tapping the story chip off the tour does not notify the tour', () => {
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    spyOn(c, 'sendMessage');
+
+    c.selectSuggestion(c.FRED_STORY_TRIGGER);
+
+    expect(tour.storyChipTapped).not.toHaveBeenCalled();
   });
 });

@@ -765,21 +765,6 @@ ion-footer {
   }
 }
 
-/* Tour step 4 — highlighted story chip sits above the global tour backdrop */
-.tour-story-chip {
-  position: relative;
-  z-index: 10001;
-  border-color: #2563eb !important;
-  --color: #2563eb !important;
-  animation: tour-chip-pulse 1.4s ease-in-out infinite;
-  pointer-events: auto !important;
-}
-
-@keyframes tour-chip-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); }
-}
-
 /* Retry button inline with message */
 .retry-button-inline {
   --border-radius: 50%;

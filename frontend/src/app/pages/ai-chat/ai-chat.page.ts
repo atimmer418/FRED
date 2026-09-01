@@ -17,7 +17,7 @@ import {
   IonMenuButton
 } from '@ionic/angular/standalone';
 import { ChatService, ChatMessage, ChatSession } from '../../services/chat.service';
-import { FirstTimeTourService } from '../../services/first-time-tour.service';
+import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.service';
 import { TabActivationService } from '../../services/tab-activation.service';
 import { Subscription } from 'rxjs';
 import { finalize } from 'rxjs/operators';
@@ -73,6 +73,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   readonly FRED_STORY_TRIGGER = "What's your story FRED?";
 
   private streamSubscription: Subscription | null = null;
+  private tourSub: Subscription | null = null;
 
   /** The assistant message currently receiving streamed tokens (null when idle) */
   private activeStreamMsg: ChatMessage | null = null;
@@ -117,10 +118,12 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     effect(() => {
       this.onChatActiveChange(this.tabActivation.activeTab() === 'chat');
     });
+
+    this.tourSub = this.tourService.step$.subscribe(step => this.onTourStep(step));
   }
 
-  get isTourOnStep4(): boolean {
-    return this.tourService.currentStep === 4;
+  get isTourOnStoryStep(): boolean {
+    return this.tourService.currentStep === 'chatStory';
   }
 
   /** Empty state = no user message yet in this chat (hero + suggestion cards shown) */
@@ -181,6 +184,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     this.kbShow?.then(h => h.remove());
     this.kbHide?.then(h => h.remove());
     this.streamSubscription?.unsubscribe();
+    this.tourSub?.unsubscribe();
   }
 
   ngAfterViewInit() {
@@ -277,7 +281,12 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   private applySuggestions(questions: string[]) {
     this.rawSuggestions = questions;
     const used = this.chatService.getUsedSuggestions();
-    const filtered = questions.filter(q => !used.includes(q));
+    let filtered = questions.filter(q => !used.includes(q));
+    // Final tour step: the story chip must be on screen no matter what the
+    // backend returned or what was already used. rawSuggestions stays clean.
+    if (this.isTourOnStoryStep && !filtered.includes(this.FRED_STORY_TRIGGER)) {
+      filtered = [this.FRED_STORY_TRIGGER, ...filtered];
+    }
     const same = filtered.length === this.dailySuggestions.length
       && filtered.every((q, i) => q === this.dailySuggestions[i]);
     if (same) return;
@@ -285,10 +294,25 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     this.cdr.detectChanges();
   }
 
+  /**
+   * Final tour step: show the empty state with the story chip pinned. A live
+   * conversation is only possible here when replaying the tour; reset it so
+   * the cards are visible, then re-apply the day's set with the chip injected.
+   */
+  private onTourStep(step: TourStep | null) {
+    if (step !== 'chatStory') return;
+    if (!this.isEmptyState) {
+      this.currentSession = this.chatService.createSession();
+      this.messages = [];
+    }
+    this.applySuggestions(this.rawSuggestions);
+    this.cdr.detectChanges();
+  }
+
   selectSuggestion(question: string) {
-    // If tour is on step 4 and this is the story chip, complete the tour
-    if (this.isTourOnStep4 && question === this.FRED_STORY_TRIGGER) {
-      this.tourService.completeTour();
+    // Final tour gate: the story chip tap completes the tour; the send proceeds as normal.
+    if (this.isTourOnStoryStep && question === this.FRED_STORY_TRIGGER) {
+      this.tourService.storyChipTapped();
     }
 
     this.newMessage = question;

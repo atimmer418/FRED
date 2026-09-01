@@ -93,7 +93,7 @@
             class="suggestion-card"
             *ngFor="let question of dailySuggestions; let i = index"
             (click)="selectSuggestion(question)"
-            [class.tour-story-chip]="isTourOnStep4 && question === FRED_STORY_TRIGGER">
+            [attr.data-tour]="question === FRED_STORY_TRIGGER ? 'story-chip' : null">
             <span class="card-icon"><ion-icon [name]="suggestionIcon(i)"></ion-icon></span>
             <span class="card-text">{{ question }}</span>
           </button>

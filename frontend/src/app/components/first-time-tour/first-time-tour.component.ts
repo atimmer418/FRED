@@ -54,6 +54,7 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
   private subs = new Subscription();
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
+  private cardMeasureTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTargetSelector: string | null = null;
   private readonly onViewportChange = () => this.remeasure();
 
@@ -184,17 +185,21 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
     // The card is measured for the first time on this pass; re-run once so the
     // placement uses the real height instead of the fallback.
     if (!this.cardRef) {
-      this.zone.runOutsideAngular(() => setTimeout(() => this.zone.run(() => {
-        if (this.layout && this.cardRef) {
-          this.layout = computeSpotlight(rect, window.innerWidth, window.innerHeight, this.cardRef.nativeElement.offsetHeight, BOTTOM_RESERVE_PX);
-          this.cdr.markForCheck();
-        }
-      }), 0));
+      this.zone.runOutsideAngular(() => {
+        this.cardMeasureTimer = setTimeout(() => this.zone.run(() => {
+          this.cardMeasureTimer = null;
+          if (this.currentStep !== null && this.layout && this.cardRef) {
+            this.layout = computeSpotlight(rect, window.innerWidth, window.innerHeight, this.cardRef.nativeElement.offsetHeight, BOTTOM_RESERVE_PX);
+            this.cdr.markForCheck();
+          }
+        }), 0);
+      });
     }
   }
 
   private cancelTimers() {
     if (this.pollTimer) { clearTimeout(this.pollTimer); this.pollTimer = null; }
     if (this.settleTimer) { clearTimeout(this.settleTimer); this.settleTimer = null; }
+    if (this.cardMeasureTimer) { clearTimeout(this.cardMeasureTimer); this.cardMeasureTimer = null; }
   }
 }

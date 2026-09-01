@@ -133,4 +133,13 @@ describe('FirstTimeTourComponent', () => {
     q('.ftt-skip')!.click();
     expect(svc.skip).toHaveBeenCalled();
   });
+
+  it('cancels the card re-measure timer when the step changes before it fires', fakeAsync(() => {
+    mountTarget('profile-avatar');
+    step$.next('tab3Avatar');           // applyRect runs before cardRef exists -> schedules the 0ms re-measure
+    step$.next(null);                   // step changes before that timer fires
+    fixture.detectChanges();
+    tick(1000);                         // would throw on a stale callback touching a null layout, and must leave no pending timers
+    expect(q('.ftt-overlay')).toBeNull();
+  }));
 });

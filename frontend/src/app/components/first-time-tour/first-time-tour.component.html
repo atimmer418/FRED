@@ -1,10 +1,12 @@
 <div class="ftt-overlay" *ngIf="isVisible" [class.ftt-overlay--spotlight]="isSpotlight">
 
-  <!-- Explain / fallback / measuring: one full backdrop that blocks taps -->
+  <!-- Explain / fallback / measuring / transit: one full backdrop that blocks
+       taps. During the transit back to chat it stays at the light dim so the
+       pop and swipe are visible through the veil. -->
   <div
     *ngIf="!isSpotlight"
     class="ftt-backdrop"
-    [class.ftt-backdrop--dark]="isMeasuring || fallback"
+    [class.ftt-backdrop--dark]="(isMeasuring || fallback) && !transiting"
   ></div>
 
   <!-- Spotlight: four panels around the hole. The hole has NO element, so the
@@ -27,8 +29,9 @@
     ></div>
   </ng-container>
 
-  <!-- Tooltip card -->
+  <!-- Tooltip card (hidden while the transit veil ferries the user to chat) -->
   <div
+    *ngIf="!transiting"
     #card
     class="ftt-card"
     [class.ftt-card--placed]="cardTopPx !== null"

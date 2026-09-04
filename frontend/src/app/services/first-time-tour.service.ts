@@ -37,6 +37,14 @@ export class FirstTimeTourService {
   /** True while the overlay should be hidden without changing step (Freedom sheet open). */
   readonly suspended$ = this.suspendedSubject.asObservable();
 
+  private transitSubject = new BehaviorSubject<boolean>(false);
+  /**
+   * True while the tour ferries the user from the Freedom sheet back to chat
+   * (pop to tab3, beat, swipe). The overlay shows a plain dim veil: no card,
+   * no spotlight, but the screen never flashes back to normal mid-tour.
+   */
+  readonly transit$ = this.transitSubject.asObservable();
+
   /** Pending timer for the tab3 beat / settle poll while returning to chat. */
   private transitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -58,6 +66,10 @@ export class FirstTimeTourService {
 
   get isSuspended(): boolean {
     return this.suspendedSubject.value;
+  }
+
+  get isInTransit(): boolean {
+    return this.transitSubject.value;
   }
 
   hasSeenTour(): boolean {
@@ -135,9 +147,13 @@ export class FirstTimeTourService {
     if (this.currentStep !== 'profileFreedom') {
       // Off-step a suspend must still lift, or the overlay stays hidden for good.
       this.suspendedSubject.next(false);
+      this.transitSubject.next(false);
       return;
     }
-    this.suspendedSubject.next(true);
+    // Lift the sheet's suspend and raise the transit veil instead: the screen
+    // stays grayed out for the whole ride back to chat.
+    this.suspendedSubject.next(false);
+    this.transitSubject.next(true);
     this.navCtrl.pop()
       .then(popped => {
         if (!popped) {
@@ -177,6 +193,7 @@ export class FirstTimeTourService {
     // A skip/complete during the transit wins; do not resurrect the tour.
     if (this.currentStep !== 'profileFreedom') return;
     this.suspendedSubject.next(false);
+    this.transitSubject.next(false);
     this.stepSubject.next('chatStory');
   }
 
@@ -197,6 +214,7 @@ export class FirstTimeTourService {
     }
     localStorage.setItem(TOUR_STORAGE_KEY, 'true');
     this.suspendedSubject.next(false);
+    this.transitSubject.next(false);
     this.stepSubject.next(null);
   }
 

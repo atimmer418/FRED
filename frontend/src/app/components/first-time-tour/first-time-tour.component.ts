@@ -55,6 +55,8 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
 
   currentStep: TourStep | null = null;
   suspended = false;
+  /** True while the tour ferries the user back to chat; show only a dim veil. */
+  transiting = false;
   /** Set when a gated target never appeared; the step renders like an explain step. */
   fallback = false;
   layout: SpotlightLayout | null = null;
@@ -78,6 +80,17 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
     this.subs.add(this.tourService.step$.subscribe(step => this.onStep(step)));
     this.subs.add(this.tourService.suspended$.subscribe(s => {
       this.suspended = s;
+      this.cdr.markForCheck();
+    }));
+    this.subs.add(this.tourService.transit$.subscribe(t => {
+      this.transiting = t;
+      if (t) {
+        // Transit veil: the pop/swipe back to chat plays under a plain dim.
+        // Tear the spotlight down; measurement restarts when the step changes.
+        this.cancelTimers();
+        this.layout = null;
+        this.fallback = false;
+      }
       this.cdr.markForCheck();
     }));
     window.addEventListener('resize', this.onViewportChange);

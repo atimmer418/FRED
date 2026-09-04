@@ -7,6 +7,7 @@ describe('FirstTimeTourComponent', () => {
   let fixture: ComponentFixture<FirstTimeTourComponent>;
   let step$: BehaviorSubject<TourStep | null>;
   let suspended$: BehaviorSubject<boolean>;
+  let transit$: BehaviorSubject<boolean>;
   let svc: { next: jasmine.Spy; forceGate: jasmine.Spy; skip: jasmine.Spy };
   let mounted: HTMLElement[] = [];
 
@@ -31,6 +32,7 @@ describe('FirstTimeTourComponent', () => {
     document.documentElement.classList.add('hydrated');
     step$ = new BehaviorSubject<TourStep | null>(null);
     suspended$ = new BehaviorSubject<boolean>(false);
+    transit$ = new BehaviorSubject<boolean>(false);
     svc = {
       next: jasmine.createSpy('next'),
       forceGate: jasmine.createSpy('forceGate'),
@@ -39,7 +41,7 @@ describe('FirstTimeTourComponent', () => {
     TestBed.configureTestingModule({
       imports: [FirstTimeTourComponent],
       providers: [
-        { provide: FirstTimeTourService, useValue: { ...svc, step$: step$.asObservable(), suspended$: suspended$.asObservable() } },
+        { provide: FirstTimeTourService, useValue: { ...svc, step$: step$.asObservable(), suspended$: suspended$.asObservable(), transit$: transit$.asObservable() } },
       ],
     });
     fixture = TestBed.createComponent(FirstTimeTourComponent);
@@ -55,6 +57,21 @@ describe('FirstTimeTourComponent', () => {
 
   it('renders nothing when the tour is not running', () => {
     expect(q('.ftt-overlay')).toBeNull();
+  });
+
+  it('transit shows a bare light veil: backdrop only, no card, no panels', () => {
+    step$.next('profileFreedom');
+    transit$.next(true);
+    fixture.detectChanges();
+    expect(q('.ftt-backdrop')).not.toBeNull();
+    expect(q('.ftt-backdrop--dark')).toBeNull();
+    expect(q('.ftt-card')).toBeNull();
+    expect(q('.ftt-panel')).toBeNull();
+
+    transit$.next(false);
+    step$.next('chatStory');
+    fixture.detectChanges();
+    expect(q('.ftt-card')).not.toBeNull();
   });
 
   it('explain step: full backdrop, label, Next and Skip', () => {

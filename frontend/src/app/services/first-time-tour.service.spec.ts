@@ -119,10 +119,11 @@ describe('FirstTimeTourService', () => {
     flushMicrotasks(); // pop() resolves; the beat on tab3 begins
 
     // pop() returns to the CACHED TabsPage by its own URL; navigateBack('/tabs/chat')
-    // would build a second TabsPage. The overlay stays hidden for the whole transit.
+    // would build a second TabsPage. A dim veil (transit) covers the whole ride.
     expect(pop).toHaveBeenCalled();
     expect(navigateBack).not.toHaveBeenCalled();
-    expect(svc.isSuspended).toBeTrue();
+    expect(svc.isSuspended).toBeFalse();
+    expect(svc.isInTransit).toBeTrue();
     expect(svc.currentStep).toBe('profileFreedom');
     expect(requestTab).not.toHaveBeenCalledWith('chat');
 
@@ -134,6 +135,7 @@ describe('FirstTimeTourService', () => {
     tick(TAB_SETTLE_POLL_MS);
     expect(svc.currentStep).toBe('chatStory');
     expect(svc.isSuspended).toBeFalse();
+    expect(svc.isInTransit).toBeFalse();
   }));
 
   it('freedomSheetClosed falls back to a route when there is nothing to pop', fakeAsync(() => {
@@ -151,6 +153,7 @@ describe('FirstTimeTourService', () => {
     // No transit staging on the fallback: the step shows as soon as the route lands.
     expect(svc.currentStep).toBe('chatStory');
     expect(svc.isSuspended).toBeFalse();
+    expect(svc.isInTransit).toBeFalse();
   }));
 
   it('complete during the transit cancels it', fakeAsync(() => {
@@ -166,6 +169,7 @@ describe('FirstTimeTourService', () => {
     tick(TAB3_BEAT_MS + TAB_SETTLE_POLL_MS * 51);
     expect(requestTab).not.toHaveBeenCalledWith('chat');
     expect(svc.currentStep).toBeNull();
+    expect(svc.isInTransit).toBeFalse();
   }));
 
   it('freedomSheetClosed does not advance other steps', async () => {

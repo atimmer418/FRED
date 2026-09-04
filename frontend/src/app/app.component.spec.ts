@@ -58,6 +58,7 @@ const portfolioStoreStub = {
 const firstTimeTourStub = {
   step$: new BehaviorSubject(null).asObservable(),
   suspended$: new BehaviorSubject(false).asObservable(),
+  transit$: new BehaviorSubject(false).asObservable(),
 };
 
 // ---------------------------------------------------------------------------

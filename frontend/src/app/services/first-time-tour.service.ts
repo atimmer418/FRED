@@ -138,8 +138,8 @@ export class FirstTimeTourService {
    * Called by my-profile after the Freedom sheet dismisses (any role).
    * The return to chat is staged so the user can follow it: pop back so tab3
    * visibly lands, rest a beat, swipe the pager to chat, and only show the
-   * story-chip step once that slide has settled. The overlay stays suspended
-   * for the whole transit. pop() reuses the cached TabsPage by its own URL
+   * story-chip step once that slide has settled. A dim transit veil covers
+   * the whole ride. pop() reuses the cached TabsPage by its own URL
    * (a router navigation to /tabs/chat would create a second TabsPage, see
    * TabActivationService).
    */

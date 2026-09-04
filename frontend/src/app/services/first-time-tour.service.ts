@@ -17,6 +17,13 @@ export const TOUR_STORAGE_KEY = 'hasSeenFirstTimeTour';
 /** Flip to true to run the tour on every tab1 load (dev only, never commit true). */
 const FORCE_FIRST_TIME_TOUR = false;
 
+/** Pause on tab3 after popping back from my-profile, before the pager swipes to chat. */
+export const TAB3_BEAT_MS = 900;
+/** Poll cadence while waiting for the pager's chat slide to settle. */
+export const TAB_SETTLE_POLL_MS = 50;
+/** Cap on the settle wait (about 2.5s); the story step then shows regardless. */
+export const TAB_SETTLE_MAX_POLLS = 50;
+
 @Injectable({
   providedIn: 'root'
 })
@@ -29,6 +36,9 @@ export class FirstTimeTourService {
   private suspendedSubject = new BehaviorSubject<boolean>(false);
   /** True while the overlay should be hidden without changing step (Freedom sheet open). */
   readonly suspended$ = this.suspendedSubject.asObservable();
+
+  /** Pending timer for the tab3 beat / settle poll while returning to chat. */
+  private transitTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private router: Router,
@@ -112,26 +122,62 @@ export class FirstTimeTourService {
     this.suspendedSubject.next(false);
   }
 
-  /** Called by my-profile after the Freedom sheet dismisses (any role). */
+  /**
+   * Called by my-profile after the Freedom sheet dismisses (any role).
+   * The return to chat is staged so the user can follow it: pop back so tab3
+   * visibly lands, rest a beat, swipe the pager to chat, and only show the
+   * story-chip step once that slide has settled. The overlay stays suspended
+   * for the whole transit. pop() reuses the cached TabsPage by its own URL
+   * (a router navigation to /tabs/chat would create a second TabsPage, see
+   * TabActivationService).
+   */
   freedomSheetClosed(): void {
-    // Always clear a suspend, even off-step, so the overlay can never stay hidden.
-    this.suspendedSubject.next(false);
-    if (this.currentStep !== 'profileFreedom') return;
-    this.stepSubject.next('chatStory');
-    // pop() returns to the cached TabsPage by its own URL (a router navigation
-    // to /tabs/chat would create a second TabsPage, see TabActivationService),
-    // then the pager is moved to chat once that navigation has settled.
+    if (this.currentStep !== 'profileFreedom') {
+      // Off-step a suspend must still lift, or the overlay stays hidden for good.
+      this.suspendedSubject.next(false);
+      return;
+    }
+    this.suspendedSubject.next(true);
     this.navCtrl.pop()
       .then(popped => {
-        if (popped) {
-          this.tabActivation.requestTab('chat');
-        } else {
-          // Nothing to pop (deep link straight into my-profile): fall back to a route.
-          return this.router.navigateByUrl('/tabs/chat').then(() => undefined);
+        if (!popped) {
+          // Nothing to pop (deep link straight into my-profile): fall back to a
+          // route and show the step right away.
+          return this.router.navigateByUrl('/tabs/chat').then(() => this.showChatStory());
         }
+        this.transitTimer = setTimeout(() => {
+          this.transitTimer = null;
+          this.tabActivation.requestTab('chat');
+          this.awaitTabSettle('chat');
+        }, TAB3_BEAT_MS);
         return undefined;
       })
-      .catch(err => console.warn('[tour] return to chat failed', err));
+      .catch(err => {
+        console.warn('[tour] return to chat failed', err);
+        this.showChatStory();
+      });
+  }
+
+  /** Poll the pager's settle signal, then reveal the story step (capped, never hangs). */
+  private awaitTabSettle(tab: string): void {
+    let polls = 0;
+    const tick = () => {
+      this.transitTimer = null;
+      if (this.tabActivation.activeTab() === tab || polls >= TAB_SETTLE_MAX_POLLS) {
+        this.showChatStory();
+        return;
+      }
+      polls++;
+      this.transitTimer = setTimeout(tick, TAB_SETTLE_POLL_MS);
+    };
+    tick();
+  }
+
+  private showChatStory(): void {
+    // A skip/complete during the transit wins; do not resurrect the tour.
+    if (this.currentStep !== 'profileFreedom') return;
+    this.suspendedSubject.next(false);
+    this.stepSubject.next('chatStory');
   }
 
   /** Called by ai-chat when the story chip is tapped. */
@@ -145,6 +191,10 @@ export class FirstTimeTourService {
   }
 
   complete(): void {
+    if (this.transitTimer) {
+      clearTimeout(this.transitTimer);
+      this.transitTimer = null;
+    }
     localStorage.setItem(TOUR_STORAGE_KEY, 'true');
     this.suspendedSubject.next(false);
     this.stepSubject.next(null);

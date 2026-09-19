@@ -22,6 +22,8 @@ import com.investingapp.backend.dto.RegistrationFinishRequest;
 import com.investingapp.backend.dto.RegistrationFinishResponse; // <-- IMPORT YOUR DTO
 import com.investingapp.backend.dto.RegistrationStartRequest;
 import com.investingapp.backend.dto.RegistrationStartResponse;
+import com.investingapp.backend.security.DevToolsKeyValidator;
+import com.investingapp.backend.service.SimulatedAttestationService;
 import com.investingapp.backend.service.WebAuthnService;
 import com.yubico.webauthn.data.PublicKeyCredentialCreationOptions;
 import com.yubico.webauthn.data.PublicKeyCredentialRequestOptions;
@@ -51,7 +53,6 @@ public class WebAuthnController {
     // ObjectMapper for JSON serialization - injected from Spring configuration
     private final ObjectMapper objectMapper;
 
-    // these 3 injections are needed for simulating passkey registration
     @Autowired
     private UserRepository userRepository; // Your user repo interface
 
@@ -60,6 +61,13 @@ public class WebAuthnController {
 
     @Autowired
     private JwtUtils jwtUtils; // Your JWT utility/service class
+
+    /**
+     * Null outside the local/dev/test/ci profiles, where the bean is not registered at all. A null
+     * here is what makes SIMULATED_ATTESTATION impossible in prod.
+     */
+    @Autowired(required = false)
+    private SimulatedAttestationService simulatedAttestationService;
 
     @Autowired
     public WebAuthnController(WebAuthnService webAuthnService,
@@ -144,7 +152,8 @@ public class WebAuthnController {
 
     @PostMapping("/register/finish")
     public ResponseEntity<RegistrationFinishResponse> finishRegistration(
-            @Valid @RequestBody RegistrationFinishRequest finishRequest) {
+            @Valid @RequestBody RegistrationFinishRequest finishRequest,
+            HttpServletRequest httpRequest) {
         logger.info("Received passkey registration finish request for email: {}", finishRequest.getEmail());
         String email = finishRequest.getEmail();
 
@@ -152,33 +161,22 @@ public class WebAuthnController {
         String attestationObject = credential.path("response").path("attestationObject").asText();
 
         if ("SIMULATED_ATTESTATION".equals(attestationObject)) {
-            logger.warn("SIMULATED passkey registration used for email: {}", email);
+            // Dev tool: the service bean only exists in the local/dev/test/ci profiles, and it also
+            // requires the dev-tools key. Anywhere else this is a plain rejection.
+            RegistrationFinishResponse simulated = (simulatedAttestationService == null)
+                    ? null
+                    : simulatedAttestationService.register(
+                            email, httpRequest.getHeader(DevToolsKeyValidator.HEADER));
 
-            User user = userRepository.findByEmail(email).orElse(null);
-            if (user == null) {
-                user = new User(email); // Make sure constructor and fields fit your model
-                
-                // Create and associate UserProgress
-                UserProgress userProgress = new UserProgress();
-                user.setUserProgress(userProgress);
-                
-                userRepository.save(user);
+            if (simulated == null) {
+                logger.warn("Rejected SIMULATED_ATTESTATION registration for email: {}", email);
+                return ResponseEntity.badRequest().body(new RegistrationFinishResponse(
+                        false,
+                        "Simulated registration is not available.",
+                        null, null, email));
             }
 
-            UserDetails userDetails = userDetailsService.loadUserByUsername(email);
-            Authentication authentication = new UsernamePasswordAuthenticationToken(
-                    userDetails, null, userDetails.getAuthorities());
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            String nsSim = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
-            String jwt = jwtUtils.generateJwtToken(authentication, nsSim);
-
-            return ResponseEntity.ok(new RegistrationFinishResponse(
-                    true,
-                    "Simulated registration success.",
-                    jwt,
-                    user.getId(),
-                    user.getEmail()));
+            return ResponseEntity.ok(simulated);
         }
 
         PublicKeyCredentialCreationOptions options = challengeCache.getIfPresent(email);

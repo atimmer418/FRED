@@ -29,6 +29,12 @@ export class PasskeyService {
     const deviceName = await this.deviceIdService.getDeviceName();
     headers = headers.set('X-Device-Name', deviceName);
     
+    // Dev-tools key, only non-empty in local and CI builds. The backend needs it for the
+    // simulated-attestation bypass; it is ignored on every real passkey call.
+    if (environment.devToolsKey) {
+      headers = headers.set('X-Dev-Tools-Key', environment.devToolsKey);
+    }
+
     // Add JWT token if available
     const token = JwtTokenUtils.getValidJwtToken();
     if (token) {

@@ -5,5 +5,7 @@ export const environment = {
   production: false,
   local: true,
   backendApiUrl: 'http://localhost:8080/api',
-  rpId: 'localhost'
+  rpId: 'localhost',
+  // Must match app.dev-tools.key in application-ci.properties.
+  devToolsKey: 'ci-local-dev-tools'
 };

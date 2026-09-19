@@ -6,7 +6,10 @@ export const environment = {
   production: false, // It's a test build, not a full production build
   local: true,
   backendApiUrl: 'https://local.fredvested.com/api',
-  rpId: 'local.fredvested.com' // Your test frontend/app origin hostname
+  rpId: 'local.fredvested.com', // Your test frontend/app origin hostname
+  // Dev tools (?devPage dev auth, simulated passkey). Throwaway value: the local backend
+  // sets the same one. Deployed builds leave this empty, which disables dev tooling.
+  devToolsKey: 'ci-local-dev-tools'
 };
 
 /*

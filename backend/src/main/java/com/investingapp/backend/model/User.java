@@ -34,6 +34,14 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * Opaque, stable identifier for this user outside our own database (analytics identity).
+     * Never the sequential id and never the email: one leaks volume, the other is PII the user can
+     * change. Assigned on insert and never updated.
+     */
+    @Column(name = "public_id", nullable = false, unique = true, updatable = false, length = 36)
+    private String publicId;
+
     // @NotBlank(message = "First name cannot be blank")
     @Size(max = 50)
     private String firstName; // Optional if you only want email initially
@@ -298,6 +306,17 @@ public class User {
 
     @UpdateTimestamp // Automatically set by Hibernate on update
     private LocalDateTime updateDate;
+
+    /**
+     * Every row gets a public_id, whichever path created it. The column is NOT NULL, so a missing
+     * value fails the insert rather than producing a user with no analytics identity.
+     */
+    @PrePersist
+    private void assignPublicId() {
+        if (this.publicId == null || this.publicId.isBlank()) {
+            this.publicId = java.util.UUID.randomUUID().toString();
+        }
+    }
 
     public User(String email) { // Simplified constructor for passkey registration
         this.email = email;

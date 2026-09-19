@@ -208,7 +208,8 @@ public class WebAuthnService {
                     "Passkey registration successful. User logged in.",
                     jwt,
                     user.getId(),
-                    user.getEmail()
+                    user.getEmail(),
+                    user.getPublicId()
             );
 
         } catch (RegistrationFailedException | IOException e) {
@@ -381,7 +382,8 @@ public class WebAuthnService {
                     "Passkey authentication successful",
                     jwt,
                     user.getId(),
-                    user.getEmail()
+                    user.getEmail(),
+                    user.getPublicId()
                 );
                 
             } else {
@@ -407,13 +409,21 @@ public class WebAuthnService {
         private String jwtToken;
         private Long userId;
         private String email;
+        /** Opaque analytics identity; null on failure responses. */
+        private String publicId;
         
         public AuthenticationFinishResponse(boolean success, String message, String jwtToken, Long userId, String email) {
+            this(success, message, jwtToken, userId, email, null);
+        }
+
+        public AuthenticationFinishResponse(boolean success, String message, String jwtToken, Long userId,
+                String email, String publicId) {
             this.success = success;
             this.message = message;
             this.jwtToken = jwtToken;
             this.userId = userId;
             this.email = email;
+            this.publicId = publicId;
         }
         
         // Getters
@@ -422,5 +432,6 @@ public class WebAuthnService {
         public String getJwtToken() { return jwtToken; }
         public Long getUserId() { return userId; }
         public String getEmail() { return email; }
+        public String getPublicId() { return publicId; }
     }
 }

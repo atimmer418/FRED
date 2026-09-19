@@ -16,6 +16,7 @@ public class UserDetailsImpl implements UserDetails {
     private static final long serialVersionUID = 1L;
 
     private Long id;
+    private String publicId; // Opaque analytics identity
     private String email; // Username will be email
 
     @JsonIgnore // Don't send password back in API responses if this object is serialized
@@ -36,9 +37,20 @@ public class UserDetailsImpl implements UserDetails {
 
     public UserDetailsImpl(Long id, String email,
             Collection<? extends GrantedAuthority> authorities) {
+        this(id, null, email, authorities);
+    }
+
+    public UserDetailsImpl(Long id, String publicId, String email,
+            Collection<? extends GrantedAuthority> authorities) {
         this.id = id;
+        this.publicId = publicId;
         this.email = email;
         this.authorities = authorities;
+    }
+
+    /** Opaque analytics identity; carried here so JwtUtils can stamp it into the token. */
+    public String getPublicId() {
+        return publicId;
     }
 
     public static UserDetailsImpl build(User user) {
@@ -52,6 +64,7 @@ public class UserDetailsImpl implements UserDetails {
 
         return new UserDetailsImpl(
                 user.getId(),
+                user.getPublicId(),
                 user.getEmail(),
                 authorities);
     }

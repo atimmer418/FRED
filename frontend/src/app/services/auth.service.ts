@@ -745,8 +745,12 @@ export class AuthService {
       userHandle: userHandle || null
     };
 
+    // The backend only registers /api/dev/** in local/dev/test/ci, and requires this header there.
+    // Builds pointed at a deployed backend ship an empty key, so dev auth simply 404s.
+    const headers = this.getAuthHeaders().set('X-Dev-Tools-Key', environment.devToolsKey ?? '');
+
     return this.http.post<AuthResponse>(`${BACKEND_API_URL}/dev/authenticate-as-user`, payload, {
-      headers: this.getAuthHeaders()
+      headers
     }).pipe(
       catchError(error => {
         console.error('[AuthService] Dev auth failed:', error?.status, error?.message);

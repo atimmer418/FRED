@@ -380,6 +380,34 @@ Add a per-user localStorage snapshot of the portfolio view-model so even a slow 
 10. Versioned key `v1` + `peekSnapshot` field-validation, with the "bump `v1` when `PortfolioDashboardData` shape changes" rule documented next to the key. `ng build` (plain or `--configuration dev`) / lint / existing specs pass; no new debt.
 
 
+## FRED-218 — Stop returning the decrypted Plaid access token to the client
+**Severity: HIGH — must fix before production or before any real user.**
+`GET /api/plaid/primary-bank-account` (PlaidController.java:156-184) decrypts `users.plaid_access_token` and returns it in the response body. The app really calls it (change-bank-account.page.ts:84, plaid.service.ts:72), so the raw Plaid access token reaches the device on a normal flow. `GET /api/plaid/user-data` and `GET /api/plaid/access-token` do the same and have no callers. A Plaid access token grants read access to the linked bank account. Fix: stop returning the token at all (send only the display fields the UI needs) and delete the two unused endpoints. Also relevant to analytics: any network capture, logging or session replay must never record these responses. Found during the analytics Phase 0 discovery, 2026-09-16.
+
+## FRED-219 — Deliver the recovery code, and rate-limit recovery verification
+**Severity: HIGH — must fix before production or before any real user.**
+`RecoveryController.java:52-56` prints the account-recovery OTP and the user's email to stdout with `System.out.println` in EVERY profile, prod included. It never goes through EmailService, so no real user can complete account recovery today, and any log drain (Railway, or Sentry once it is added) would capture live OTPs in plaintext. Separately, `POST /api/auth/recovery/verify` (permitAll via `/api/auth/**`) has no attempt limit or lockout on the 6-digit code, so it is brute-forceable: 10^6 space, no throttle. Fix: route the OTP through EmailService (real provider work is tracked separately), scrub it from logs, and add attempt limiting plus lockout on verify. Found during the analytics Phase 0 discovery, 2026-09-16.
+
+## FRED-220 — Remove committed secrets from application-prod.properties and rotate them
+**Severity: HIGH — must fix before production or before any real user.**
+`backend/src/main/resources/application-prod.properties` is tracked in git and contains literal values for the datasource password, `jwt.secret`, and the Plaid client id/secret. Anything in git history stays there, so these must be treated as exposed: move every value to environment variables and ROTATE the credentials before a production environment exists. The file also looks stale (it points at `localhost:3306/investing_dev` and an ngrok RP id, and nothing activates the prod profile today), so deleting it may be the cleaner fix. Note `application-ci.properties` also carries a literal `jwt.secret`; it is CI-only and throwaway, but should move to an environment variable in the same pass. Found during the analytics Phase 0 discovery, 2026-09-16.
+
+## FRED-221 — Stop storing the full SSN in a plaintext localStorage KYC draft
+**Severity: MEDIUM — must fix before production or before any real user.**
+`kyc-verification.component.ts:247` writes the whole step-1 form to localStorage under `fred_kyc_step1_<userId>`, unencrypted. That includes `taxId` (the full SSN), date of birth, full name, address and phone. It is only cleared after a SUCCESSFUL create-account in onboarding (:474): a failed submit, a back navigation, an app kill, edit-mode submit, or logout all leave it in place indefinitely. Options: exclude `taxId`/DOB from the draft, hold it in memory or sessionStorage, or clear it on submit (success or failure), on logout and on edit-mode exit. Worth a look alongside whether the draft feature is needed at all. Found during the analytics Phase 0 discovery, 2026-09-16.
+
+## FRED-222 — Re-poll partially filled and expired orders so executions cannot get stuck
+**Severity: MEDIUM.**
+`InvestmentExecutionService.checkExecutionTradingStatus` only re-checks trades in `SUBMITTED` status. A trade that goes `PARTIALLY_FILLED` is never polled again, and an `expired` day order is not handled at all, so the parent execution sits in `TRADING_INITIATED` forever with no completion and no failure. Related: when any placement fails, the execution is marked `TRADING_FAILED` immediately and the sibling trades that DID submit never get their fills recorded. Fix: keep polling `PARTIALLY_FILLED`, handle `expired`, and finish recording siblings. Until this is fixed, `order_filled` analytics will undercount, which the analytics completion review notes as a known gap. Found during the analytics Phase 0 discovery, 2026-09-16.
+
+## FRED-223 — Add idempotency to the money paths (orders, ACH transfers, schedulers)
+**Severity: MEDIUM.**
+Nothing on the money paths is idempotent: buy orders carry no `client_order_id` (except in the TLH code), the ACH transfer POST carries no idempotency key, there is no unique constraint on `investment_executions` or `investment_trades`, and there is no scheduler lock (no ShedLock), so the jobs assume a single instance. A retry, a double tap, or a second backend instance can duplicate a real transfer or order. The 23:59 batch also runs every user inside one transaction, so a late failure can lose the `alpaca_transfer_id` stamps after the ACH pulls already went out. Fix: deterministic `client_order_id` and transfer idempotency keys, unique constraints, and a distributed lock before running more than one instance. Found during the analytics Phase 0 discovery, 2026-09-16.
+
+## FRED-224 — Add a real sign-out, and make close-account clear the session properly
+**Severity: LOW.**
+There is no user-facing sign-out anywhere in the app: `tab3.onLogout()` is a `console.log` stub and no template matches 'log out' or 'sign out'. The only session clears are AppLock's `forceRecovery`, the cold-start clear, and close-account, which calls `localStorage.clear()` and `sessionStorage.clear()` (sell-withdraw.page.ts:511-513) WITHOUT calling `AuthService.logout()`, so `isLoggedIn$` stays true in memory and `fred_device_id` is wiped. Fix: add a sign-out control and route both paths through `logout()`. Analytics note: `analytics.reset()` must be called on every session clear, and it has to run BEFORE `localStorage.clear()` or the reset is lost. Found during the analytics Phase 0 discovery, 2026-09-16.
+
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._
 

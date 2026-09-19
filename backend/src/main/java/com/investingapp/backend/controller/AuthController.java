@@ -167,10 +167,7 @@ public class AuthController {
         // Carry the ns hint forward from the incoming token (zero DB cost).
         String oldToken = jwtUtils.parseJwt(request);
         String ns = (oldToken != null) ? jwtUtils.getNextStepFromJwtToken(oldToken) : null;
-        String newToken = (ns != null) ? jwtUtils.generateTokenFromUsername(username, ns)
-                                       : jwtUtils.generateTokenFromUsername(username);
-        
-        // Look up user to include id and email in response
+        // Look up the user first: the refreshed token carries the pid (analytics identity) claim.
         User user = userService.getUserByEmail(username);
         if (user == null) {
             logger.error("Token refresh failed: user not found for email {}", username);
@@ -178,12 +175,15 @@ public class AuthController {
                     .body(new MessageResponse("User not found"));
         }
 
+        String newToken = jwtUtils.generateTokenFromUsername(username, ns, user.getPublicId());
+
         logger.info("JWT token refreshed for user: {}", username);
         
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "jwtToken", newToken,
                 "id", user.getId(),
+                "publicId", user.getPublicId(),
                 "email", user.getEmail()
         ));
     }

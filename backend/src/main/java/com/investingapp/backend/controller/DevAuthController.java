@@ -3,6 +3,7 @@ package com.investingapp.backend.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.investingapp.backend.model.User;
@@ -19,11 +20,18 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 /**
  * 🧪 DEVELOPMENT ONLY: Controller for simulating login as existing users
- * This allows developers to quickly test the app by logging in as any user from the database
+ * This allows developers to quickly test the app by logging in as any user from the database.
+ *
+ * <p>Registered only in the local/dev/test/ci profiles, so these endpoints do not exist at all in
+ * prod. Every request also needs the {@code X-Dev-Tools-Key} header (see
+ * {@link com.investingapp.backend.security.DevToolsKeyFilter}), because api-dev is reachable from
+ * the public internet. {@link com.investingapp.backend.config.DevToolsProdGuard} refuses to start
+ * the application if this controller is ever registered under the prod profile.
  */
 @RestController
 @RequestMapping("/api/dev")
 @CrossOrigin(origins = "*")
+@Profile({"local", "dev", "test", "ci"})
 public class DevAuthController {
     
     private static final Logger logger = LoggerFactory.getLogger(DevAuthController.class);

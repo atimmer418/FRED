@@ -90,7 +90,7 @@ public class SecurityConfig {
         }
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Device-ID", "X-Device-Name", "Accept", "Origin"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Device-ID", "X-Device-Name", "Accept", "Origin", "X-Dev-Tools-Key"));
         configuration.setAllowCredentials(true);
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -115,8 +115,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/plaid/exchange_public_token_anonymous").permitAll()
                 .requestMatchers("/api/passkey/**").permitAll()
                 .requestMatchers("/api/user/should-prompt-reauth").permitAll() // Allow checking reauth status without authentication
-                .requestMatchers("/api/user/subscription/webhook").permitAll() // RevenueCat webhook — auth via RevenueCat-Webhook-Authorization header
-                .requestMatchers("/api/dev/**").permitAll() // 🧪 DEV ONLY: Allow dev endpoints without authentication
+                .requestMatchers("/api/dev/**").permitAll() // 🧪 DEV ONLY: registered only in local/dev/test/ci, and DevToolsKeyFilter requires X-Dev-Tools-Key
                 .requestMatchers("/hello").permitAll()
                 .anyRequest().authenticated()
             )

@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
+import com.investingapp.backend.security.services.UserDetailsImpl;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -65,6 +66,14 @@ public class JwtUtils {
      * @param nextStep  optional "ns" next-step hint; null to omit
      */
     private String buildToken(String subject, Long sessionId, String nextStep) {
+        return buildToken(subject, sessionId, nextStep, null);
+    }
+
+    /**
+     * @param publicId opaque analytics identity ("pid" claim); null to omit. The client reads it on
+     *                 cold start so it can identify the user without an extra round trip.
+     */
+    private String buildToken(String subject, Long sessionId, String nextStep, String publicId) {
         String jwtId = UUID.randomUUID().toString();
         Date issuedAt = new Date();
         Date expiration = new Date(issuedAt.getTime() + jwtExpirationMs);
@@ -82,6 +91,9 @@ public class JwtUtils {
         if (nextStep != null && !nextStep.isEmpty()) {
             builder.claim("ns", nextStep);
         }
+        if (publicId != null && !publicId.isEmpty()) {
+            builder.claim("pid", publicId);
+        }
 
         return builder.signWith(key, SignatureAlgorithm.HS256).compact();
     }
@@ -92,7 +104,7 @@ public class JwtUtils {
         logger.info("JwtUtils generateJwtToken - Using key object: {}", System.identityHashCode(this.key));
         logger.info("JwtUtils generateJwtToken - for user: {}", userPrincipal.getUsername());
 
-        return buildToken(userPrincipal.getUsername(), null, null);
+        return buildToken(userPrincipal.getUsername(), null, null, publicIdOf(userPrincipal));
     }
 
     public String generateJwtToken(Authentication authentication, String nextStep) {
@@ -100,13 +112,13 @@ public class JwtUtils {
 
         logger.info("JwtUtils generateJwtToken(ns) - for user: {}, ns: {}", userPrincipal.getUsername(), nextStep);
 
-        return buildToken(userPrincipal.getUsername(), null, nextStep);
+        return buildToken(userPrincipal.getUsername(), null, nextStep, publicIdOf(userPrincipal));
     }
 
     public String generateJwtToken(Authentication authentication, Long sessionId) {
         UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
 
-        return buildToken(userPrincipal.getUsername(), sessionId, null);
+        return buildToken(userPrincipal.getUsername(), sessionId, null, publicIdOf(userPrincipal));
     }
 
     public String generateJwtToken(Authentication authentication, Long sessionId, String nextStep) {
@@ -114,7 +126,7 @@ public class JwtUtils {
 
         logger.info("JwtUtils generateJwtToken(sessionId, ns) - for user: {}, ns: {}", userPrincipal.getUsername(), nextStep);
 
-        return buildToken(userPrincipal.getUsername(), sessionId, nextStep);
+        return buildToken(userPrincipal.getUsername(), sessionId, nextStep, publicIdOf(userPrincipal));
     }
 
     public Long getSessionIdFromJwtToken(String token) {
@@ -135,6 +147,27 @@ public class JwtUtils {
     public String generateTokenFromUsername(String username, String nextStep) {
         logger.info("JwtUtils generateTokenFromUsername(ns) - for user: {}, ns: {}", username, nextStep);
         return buildToken(username, null, nextStep);
+    }
+
+    /** Used where there is no Authentication principal to read the public id from (refresh, email change). */
+    public String generateTokenFromUsername(String username, String nextStep, String publicId) {
+        logger.info("JwtUtils generateTokenFromUsername(ns,pid) - for user: {}, ns: {}", username, nextStep);
+        return buildToken(username, null, nextStep, publicId);
+    }
+
+    /** Opaque analytics identity, or null on an older token issued before the claim existed. */
+    public String getPublicIdFromJwtToken(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
+            return claims.get("pid", String.class);
+        } catch (Exception e) {
+            logger.error("Could not extract pid from token: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String publicIdOf(UserDetails userPrincipal) {
+        return (userPrincipal instanceof UserDetailsImpl impl) ? impl.getPublicId() : null;
     }
 
     public String getUserNameFromJwtToken(String token) {

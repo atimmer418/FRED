@@ -93,7 +93,7 @@ public class RecoveryController {
 
         // Issue token — include next-step hint so cold-start navigation can optimise
         String nsRecovery = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
-        String token = jwtUtils.generateJwtTokenFromUsername(user.getEmail(), nsRecovery);
+        String token = jwtUtils.generateJwtTokenFromUsername(user.getEmail(), nsRecovery, user.getPublicId());
 
         return ResponseEntity.ok(new RecoveryResponse(true, "Recovery successful. Please register a new passkey.", token));
     }

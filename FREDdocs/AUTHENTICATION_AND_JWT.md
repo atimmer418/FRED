@@ -25,10 +25,16 @@ Usernameless (discoverable) passkeys — the user does not type their email to l
 ### Dev Authentication (Development Only)
 ```
 POST /api/dev/authenticate-as-user
+Header: X-Dev-Tools-Key: <app.dev-tools.key / DEV_TOOLS_KEY>
 Body: { "email": "user@example.com" }
 → Returns: { success, jwtToken, id, email }
 ```
-Quick login for testing. Not available in production.
+Quick login for testing. The endpoint is registered only in the `local`, `dev`, `test` and `ci`
+profiles, so it does not exist in production, and the app refuses to start if it ever is registered
+there. Without a matching `X-Dev-Tools-Key` the response is **404 with an empty body** (not 401), so
+the endpoint does not advertise itself. The same key gates simulated passkey attestation.
+
+In the browser, pass it once as `?devKey=...` alongside `?devPage=...`; it is remembered per device.
 
 ---
 
@@ -156,7 +162,7 @@ Since there are no passwords, recovery uses **Biometric Identity Verification** 
 ```
 /api/auth/**                         — login, register, refresh
 /api/passkey/**                      — passkey start/finish (used by lock screen)
-/api/dev/**                          — dev-only auth endpoints
+/api/dev/**                          — dev-only, and additionally profile-gated + X-Dev-Tools-Key gated
 /api/user/should-prompt-reauth       — smart re-auth check
 /api/plaid/create_link_token_anonymous
 /api/plaid/exchange_public_token_anonymous

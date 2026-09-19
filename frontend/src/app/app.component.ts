@@ -15,6 +15,7 @@ import { JwtTokenUtils } from './utils/jwt-token.utils';
 import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourComponent } from './components/first-time-tour/first-time-tour.component';
 import { environment } from '../environments/environment';
+import { captureDevToolsKeyFromUrl } from './utils/dev-tools-key.utils';
 import { combineLatest, debounceTime, distinctUntilChanged, filter, Subject, throttleTime } from 'rxjs';
 import { addIcons } from 'ionicons';
 import { lockClosedOutline, fingerPrintOutline } from 'ionicons/icons';
@@ -143,7 +144,11 @@ export class AppComponent implements OnInit {
 
     // DEV ONLY: ?devPage=/some-route logs in as the default dev user and then navigates
     // directly to the specified page (bypasses navigateBasedOnProgress).
-    // e.g. http://localhost:8100?devPage=/survey-initial
+    // e.g. http://localhost:8100?devPage=/survey-initial&devKey=<the backend's DEV_TOOLS_KEY>
+    // The key is only needed once per device: it is remembered after the first load.
+    if (!environment.production) {
+      captureDevToolsKeyFromUrl(urlParams);
+    }
     const devPage = !environment.production ? urlParams.get('devPage') : null;
     if (devPage) {
       this.simulateUserLoginToPage('facebook@gmail.com', devPage);

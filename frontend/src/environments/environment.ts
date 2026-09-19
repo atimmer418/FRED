@@ -7,9 +7,10 @@ export const environment = {
   local: true,
   backendApiUrl: 'https://local.fredvested.com/api',
   rpId: 'local.fredvested.com', // Your test frontend/app origin hostname
-  // Dev tools (?devPage dev auth, simulated passkey). Throwaway value: the local backend
-  // sets the same one. Deployed builds leave this empty, which disables dev tooling.
-  devToolsKey: 'ci-local-dev-tools'
+  // Empty on purpose. local.fredvested.com is a public hostname whenever the tunnel is up, so a
+  // key committed here would be no lock at all. Pass it once as ?devKey=... (see
+  // utils/dev-tools-key.utils.ts); only the CI build, which targets localhost, carries a literal.
+  devToolsKey: ''
 };
 
 /*

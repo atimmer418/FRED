@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -33,6 +34,14 @@ public class DevToolsKeyFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
+
+        // A CORS preflight never carries custom headers, so checking the key here would 404 the
+        // OPTIONS and the browser would never send the real request. Let it through to the CORS
+        // filter; the actual request that follows is still key-checked.
+        if (CorsUtils.isPreFlightRequest(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         if (!keyValidator.matches(request.getHeader(DevToolsKeyValidator.HEADER))) {
             logger.warn("Dev-tools request rejected (missing or wrong {}): {} {}",

@@ -83,6 +83,39 @@ class DevToolsKeyFilterTest {
     }
 
     @Test
+    @DisplayName("a CORS preflight passes through: it cannot carry the key, and 404ing it would break every browser caller")
+    void preflightIsNotKeyChecked() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/dev/authenticate-as-user");
+        request.setRequestURI("/api/dev/authenticate-as-user");
+        request.addHeader("Origin", "http://localhost:4200");
+        request.addHeader("Access-Control-Request-Method", "POST");
+        request.addHeader("Access-Control-Request-Headers", "content-type,x-dev-tools-key");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        new DevToolsKeyFilter(new DevToolsKeyValidator(KEY)).doFilter(request, response, chain);
+
+        assertThat(response.getStatus())
+                .as("preflight must reach the CORS filter, not be 404ed")
+                .isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(chain.getRequest()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a plain OPTIONS that is not a preflight is still key-checked")
+    void nonPreflightOptionsStillChecked() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/dev/authenticate-as-user");
+        request.setRequestURI("/api/dev/authenticate-as-user");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        new DevToolsKeyFilter(new DevToolsKeyValidator(KEY)).doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
+        assertThat(chain.getRequest()).isNull();
+    }
+
+    @Test
     @DisplayName("validator rejects null, blank and near-miss keys")
     void validatorRejectsBadInput() {
         DevToolsKeyValidator validator = new DevToolsKeyValidator(KEY);

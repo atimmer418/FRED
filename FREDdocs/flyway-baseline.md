@@ -17,25 +17,53 @@ behind.
 | Piece | Where |
 |---|---|
 | `V1__baseline.sql` | The schema exactly as Hibernate generated it from the entities at `1c9c44c` (24 tables, 11 foreign keys) |
-| `V2__user_public_id.sql` | Adds `users.public_id` (UUID), backfills existing rows, then makes it `NOT NULL` + unique |
+| `V2__user_public_id.sql` | Adds `users.public_id` (UUID v4), backfills existing rows, adds the unique key |
+| `V3__catch_up_pre_flyway_schemas.sql` | Creates what a pre-Flyway database is missing: the two TLH tables and `users.tlh_enabled` / `tlh_enrolled_at`. Guarded, so it is a no-op where V1 ran |
 | `spring.flyway.baseline-on-migrate=true`, `baseline-version=1` | In `application.properties`, so it applies to every profile |
 
 ## How an existing database is handled
 
 Nothing manual is needed. On the first boot after this change:
 
-- **An empty database** (CI, a fresh laptop) runs `V1` and then `V2`.
+- **An empty database** (CI, a fresh laptop) runs `V1`, `V2` and `V3` in order.
 - **A database that already has tables** (your local `investing_dev`, Railway dev) is *stamped* at
-  version 1 instead of running `V1` against it, then `V2` runs. That is what `baseline-on-migrate`
-  does, and it is the in-place baseline.
+  version 1 instead of running `V1` against it, then `V2` and `V3` run. That is what
+  `baseline-on-migrate` does, and it is the in-place baseline.
 
-Both paths were verified before this shipped:
+### Why V3 exists
 
-1. Fresh empty schema: `V1` + `V2` applied, `validate` passed, app started.
-2. A copy of the existing local dev schema, with rows in `users`: baselined at 1, `V2` applied, every
-   existing row got a distinct `public_id`, `validate` passed, app started.
+Stamping instead of running V1 has a catch: anything V1 contains that the target database lacks is
+never created, and `validate` then refuses to start the app. That is the real situation on Railway
+dev, which runs `develop @ 7c0d5e8` (2026-07-15) and whose schema was built by `ddl-auto` from those
+entities, so it predates the TLH work.
 
-The copy was thrown away afterwards; `investing_dev` itself was never modified.
+The gap was measured rather than guessed: the 7c0d5e8 entities were booted against a scratch
+database and the resulting schema compared column by column with what these migrations build. The
+difference was exactly two tables (`tlh_cycle_runs`, `tlh_user_states`) and two columns
+(`users.tlh_enabled`, `users.tlh_enrolled_at`). V3 adds those, guarded by `information_schema`
+checks so it does nothing on a database that already ran V1.
+
+### Verified before this shipped
+
+1. **Fresh empty schema:** V1 + V2 + V3 applied, `validate` passed, app started.
+2. **A copy of the current local dev schema**, with rows in `users`: baselined at 1, later migrations
+   applied, every existing row got a distinct `public_id`, `validate` passed, app started.
+3. **A rebuild of what Railway dev actually runs** (7c0d5e8 entities, 22 tables, with user rows):
+   baselined at 1, V2 and V3 applied, `validate` passed, app started, and the backfill produced
+   distinct v4 ids. This is the closest available rehearsal of the next api-dev deploy.
+
+Every scratch database was dropped afterwards; `investing_dev` itself was never modified.
+
+### Two follow-ups this leaves open
+
+- **`public_id` is still NULLable in the database.** The entity treats it as required and every
+  insert path sets it, but making the column `NOT NULL` in the same release that teaches the app to
+  populate it would break inserts from the old container during a rolling deploy. A later migration
+  should tighten it once this code is live everywhere.
+- **A failed migration needs a manual repair.** MySQL has no transactional DDL, so if a migration
+  fails halfway, Flyway records it as failed and every later boot refuses to start until
+  `flyway repair` runs (or the failed row is deleted from `flyway_schema_history`). This is not
+  hypothetical: V3 failed once during development on a quoting bug and had to be repaired.
 
 ## Rules from here on
 

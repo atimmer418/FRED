@@ -3,6 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, BehaviorSubject, Subject, tap, catchError, of, lastValueFrom, timeout, retry, timer, throwError, finalize, shareReplay, defer, switchMap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { resolveDevToolsKey } from '../utils/dev-tools-key.utils';
 import { DeviceIdService } from './device-id.service';
 import { KeychainSyncService } from './keychain-sync.service';
 import { NativePasskeyService } from './native-passkey.service';
@@ -747,7 +748,7 @@ export class AuthService {
 
     // The backend only registers /api/dev/** in local/dev/test/ci, and requires this header there.
     // Builds pointed at a deployed backend ship an empty key, so dev auth simply 404s.
-    const headers = this.getAuthHeaders().set('X-Dev-Tools-Key', environment.devToolsKey ?? '');
+    const headers = this.getAuthHeaders().set('X-Dev-Tools-Key', resolveDevToolsKey());
 
     return this.http.post<AuthResponse>(`${BACKEND_API_URL}/dev/authenticate-as-user`, payload, {
       headers

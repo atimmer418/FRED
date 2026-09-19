@@ -38,8 +38,14 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 | Method | Endpoint | Description | Auth | Request Body | Response |
 |--------|----------|-------------|------|-------------|----------|
-| `POST` | `/api/dev/authenticate-as-user` | Authenticate as any user | No | `{ email }` | `{ jwtToken, id, email }` |
-| `GET` | `/api/dev/list-users` | List all users | No | None | User list |
+| `POST` | `/api/dev/authenticate-as-user` | Authenticate as any user | `X-Dev-Tools-Key` header | `{ email }` | `{ jwtToken, id, email }` |
+| `GET` | `/api/dev/list-users` | List all users | `X-Dev-Tools-Key` header | None | User list |
+
+> **These exist only in the `local`, `dev`, `test` and `ci` profiles** and are not registered at all
+> in prod. Every request needs `X-Dev-Tools-Key`, matching `app.dev-tools.key` (env var
+> `DEV_TOOLS_KEY`) on the backend. A missing or wrong key returns **404 with an empty body**, the
+> same as a route that does not exist, so an unexpected 404 here usually means a missing header
+> rather than a broken deployment. The backend logs the rejection.
 
 ---
 

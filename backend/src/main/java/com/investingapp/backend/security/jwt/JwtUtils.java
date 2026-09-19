@@ -249,6 +249,12 @@ public class JwtUtils {
         return buildToken(username, null, null);
     }
 
+    /** Used where there is no Authentication principal (account recovery). */
+    public String generateJwtTokenFromUsername(String username, String nextStep, String publicId) {
+        logger.info("JwtUtils generateJwtTokenFromUsername(ns,pid) - for user: {}, ns: {}", username, nextStep);
+        return buildToken(username, null, nextStep, publicId);
+    }
+
     public String generateJwtTokenFromUsername(String username, String nextStep) {
         logger.info("JwtUtils generateJwtTokenFromUsername(ns) - for user: {}, ns: {}", username, nextStep);
         return buildToken(username, null, nextStep);

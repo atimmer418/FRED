@@ -7,6 +7,7 @@ import { RegistrationFinishRequest } from '../models/passkey/registration-finish
 import { RegistrationFinishResponse } from '../models/passkey/registration-finish-response.model';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { resolveDevToolsKey } from '../utils/dev-tools-key.utils';
 import { DeviceIdService } from './device-id.service';
 
 const BACKEND_API_URL = environment.backendApiUrl;
@@ -29,10 +30,11 @@ export class PasskeyService {
     const deviceName = await this.deviceIdService.getDeviceName();
     headers = headers.set('X-Device-Name', deviceName);
     
-    // Dev-tools key, only non-empty in local and CI builds. The backend needs it for the
-    // simulated-attestation bypass; it is ignored on every real passkey call.
-    if (environment.devToolsKey) {
-      headers = headers.set('X-Dev-Tools-Key', environment.devToolsKey);
+    // Dev-tools key, set only in CI builds or after ?devKey= on a dev device. The backend needs it
+    // for the simulated-attestation bypass; it is ignored on every real passkey call.
+    const devToolsKey = resolveDevToolsKey();
+    if (devToolsKey) {
+      headers = headers.set('X-Dev-Tools-Key', devToolsKey);
     }
 
     // Add JWT token if available

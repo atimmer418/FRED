@@ -1,0 +1,366 @@
+// Freedom Plan detail sheet content — the ion-modal shell
+// (ion-modal.mc-bottom-sheet-modal in global.scss) provides the white
+// rounded-top chrome; this file styles the content inside it.
+
+:host {
+  display: block;
+}
+
+.fd-body {
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px));
+  font-family: 'Manrope', sans-serif;
+}
+
+.fd-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 16px;
+}
+
+h3 {
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0 0 5px;
+}
+
+.fd-sub {
+  font-size: 12.5px;
+  color: #6b7280;
+  font-weight: 500;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+// ── Hero ─────────────────────────────────────────────────────────────────────
+.fd-hero {
+  background: linear-gradient(160deg, #1e60e3, #0e3a96);
+  border-radius: 20px;
+  padding: 22px 20px 18px;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 14px 30px -12px rgba(22, 48, 155, 0.55);
+}
+
+.fd-hero-year {
+  font-size: 46px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+
+  &--empty { opacity: 0.5; }
+}
+
+.fd-hero-meta {
+  margin-top: 7px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+
+  .fd-dot { margin: 0 6px; opacity: 0.55; }
+}
+
+.fd-hero-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+  margin-top: 16px;
+
+  i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: #fff;
+  }
+}
+
+.fd-hero-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+// ── Section labels ───────────────────────────────────────────────────────────
+.fd-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+  margin: 18px 0 8px;
+}
+
+.fd-reset {
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: #2563eb;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+// ── Plan tiles (mirrors the fp-tile pattern) ────────────────────────────────
+.fd-tiles {
+  display: flex;
+  gap: 9px;
+}
+
+.fd-tile {
+  flex: 1;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 11px 12px;
+}
+
+.fd-tile-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+  display: block;
+}
+
+.fd-tile-edit {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.fd-pre,
+.fd-suf {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9aa6ba;
+}
+.fd-suf { font-size: 11px; }
+
+.fd-tile-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
+
+  &::placeholder { color: #cbd5e1; font-weight: 600; }
+}
+
+// ── Insights ─────────────────────────────────────────────────────────────────
+.fd-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fd-insight {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 11px 13px;
+}
+
+.fd-insight-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #eef4ff;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 18px; }
+}
+
+.fd-insight-text {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6b7280;
+  line-height: 1.5;
+
+  strong { color: #0f172a; font-weight: 800; }
+}
+
+// ── Assumptions ──────────────────────────────────────────────────────────────
+.fd-assume {
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 4px 13px;
+}
+
+.fd-assume-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+
+  & + & { border-top: 1px solid #eef1f6; }
+}
+
+.fd-assume-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.fd-assume-sub {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #9aa6ba;
+  margin-top: 1px;
+}
+
+// Return-scenario chips (mirrors the rb-chips segmented pattern)
+.fd-assume-row--stacked {
+  display: block;
+
+  .fd-assume-name { margin-bottom: 8px; }
+}
+
+.fd-scenario-chips {
+  display: flex;
+  background: #eef1f6;
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+
+  button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    border-radius: 10px;
+    padding: 8px 0;
+    font-family: 'Manrope', sans-serif;
+    font-size: 9.5px;
+    font-weight: 800;
+    color: #6b7280;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &.on {
+      background: #fff;
+      color: #2563eb;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
+    }
+  }
+}
+
+.fd-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  button {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: #eef4ff;
+    color: #2563eb;
+    font-size: 17px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &:active { transform: scale(0.92); }
+  }
+}
+
+.fd-fixed-val {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  padding-right: 6px;
+}
+
+.fd-stepper-val {
+  min-width: 48px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.fd-note {
+  font-size: 10px;
+  font-weight: 500;
+  color: #b3bccb;
+  margin: 10px 2px 0;
+  line-height: 1.5;
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+.fd-cta {
+  display: block;
+  width: 100%;
+  height: 50px;
+  margin-top: 18px;
+  border: none;
+  border-radius: 13px;
+  cursor: pointer;
+  background: #111827;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14.5px;
+  font-weight: 800;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.85; }
+
+  &[disabled] {
+    background: #cbd5e1;
+    cursor: default;
+
+    &:active { opacity: 1; }
+  }
+}
+
+.fd-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 0;
+  text-align: center;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}

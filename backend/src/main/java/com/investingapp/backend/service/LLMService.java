@@ -96,7 +96,7 @@ public class LLMService {
                 if (anthropicClient == null) {
                     if (anthropicApiKey == null || anthropicApiKey.isBlank()) {
                         throw new IllegalStateException(
-                                "ANTHROPIC_API_KEY is not set — required for FRED chat (Claude)");
+                                "ANTHROPIC_API_KEY is not set; it is required for FRED chat (Claude)");
                     }
                     anthropicClient = AnthropicOkHttpClient.builder()
                             .apiKey(anthropicApiKey)
@@ -296,7 +296,7 @@ public class LLMService {
                     // the visible answer with an SSE error.
                     if (round > 0 && textStreamed[0]) {
                         logger.error("Tool-loop round {} failed after text streamed — closing gracefully", round, e);
-                        emit.accept("\n\n*…I hit a snag finishing that thought — ask again and I'll pick it up.*");
+                        emit.accept("\n\n*…I hit a snag finishing that thought. Ask again and I'll pick it up.*");
                         return;
                     }
                     throw e;
@@ -310,7 +310,7 @@ public class LLMService {
                     // Out of rounds with data requests still pending — never end
                     // silently mid-thought (and don't waste the tool executions).
                     logger.warn("Chat tool loop exhausted {} rounds still requesting tools", MAX_TOOL_ROUNDS);
-                    emit.accept("\n\n*…that took more digging than I have room for — ask me to continue and I'll finish the thought.*");
+                    emit.accept("\n\n*…that took more digging than I have room for. Ask me to continue and I'll finish the thought.*");
                     break;
                 }
 
@@ -367,12 +367,12 @@ public class LLMService {
             // finish the stream in-character so the turn persists and completes.
             logger.warn("Claude declined to answer (stop_reason: refusal)");
             emit.accept((textStreamed[0] ? "\n\n" : "")
-                    + "*That one's outside what I can help with — let's keep it to your investing journey.*");
+                    + "*That one's outside what I can help with. Let's keep it to your investing journey.*");
             return;
         }
         if (finalStop != null && StopReason.MAX_TOKENS.equals(finalStop)) {
             logger.warn("Streamed chat response truncated at max_tokens ({})", CHAT_MAX_TOKENS);
-            emit.accept("\n\n*…I ran out of room — ask me to continue and I'll pick up from there.*");
+            emit.accept("\n\n*…I ran out of room. Ask me to continue and I'll pick up from there.*");
         }
     }
 

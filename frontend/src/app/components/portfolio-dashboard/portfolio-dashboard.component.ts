@@ -5,13 +5,14 @@ import { PortfolioService, PortfolioDashboardData, Position, PerformanceData, Po
 import { PortfolioStoreService, PortfolioBundle, PortfolioSnapshot } from '../../services/portfolio-store.service';
 import { LoadingController, ModalController } from '@ionic/angular/standalone';
 import { ToastService } from '../../services/toast.service';
-import { AuthService } from '../../services/auth.service';
+import { AuthService, UserProgress } from '../../services/auth.service';
 import { MfuPresenterService } from '../../services/mfu-presenter.service';
 import { Router } from '@angular/router';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
 import { TabBarScrollDirective } from '../../directives/tab-bar-scroll.directive';
 import { PortfolioChartComponent, PortfolioDataPoint } from '../portfolio-chart/portfolio-chart.component';
 import { PositionDetailSheetComponent } from '../position-detail-sheet/position-detail-sheet.component';
+import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import {
   IonHeader, IonToolbar, IonTitle, IonButton, IonIcon, IonContent,
   IonRefresher, IonRefresherContent,
@@ -83,7 +84,23 @@ export class PortfolioDashboardComponent implements OnInit, OnDestroy {
 
   private destroy$ = new Subject<void>();
 
+  /**
+   * Latest userProgress emission — kept current by the subscription in ngOnInit so the
+   * freedom label recomputes the instant a my-profile save re-emits userProgress$
+   * (saveChanges → loadUserProgress → userProgress$), with no extra HTTP.
+   */
+  private latestProgress: UserProgress | null = null;
+
   ngOnInit() {
+    // Reactive freedom label: recompute whenever progress changes (e.g. the user saves a
+    // new retirement income on my-profile) — not just when a portfolio bundle loads.
+    this.authService.userProgress$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((progress) => {
+        this.latestProgress = progress;
+        this.updateFreedomLabel();
+      });
+
     // Phase 2: paint the last-known snapshot instantly if we have one. On a SLOW network the cover
     // cap fires and reveals these last-known numbers (+ an "Updating…" marker) instead of the
     // spinner. On a FAST network the cover keeps holding for FRESH data (see dataIsFresh /
@@ -207,10 +224,9 @@ export class PortfolioDashboardComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Calculate financial freedom label
-    if (this.dashboard && this.dashboard.summary.equity > 0) {
-      this.updateFreedomLabel(this.dashboard.summary.equity);
-    }
+    // Recalculate the financial freedom label (synchronous — runs before the
+    // persistSnapshot below so the snapshot always captures the current label).
+    this.updateFreedomLabel();
 
     // Check if the Monthly Freedom Update should be shown — only on the FIRST real apply, so a silent
     // revalidate after a snapshot hydrate doesn't re-pop the modal. The presenter primes the shared
@@ -500,54 +516,80 @@ export class PortfolioDashboardComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Calculate and update the financial freedom label based on equity and retirement income.
+   * Recompute the financial-freedom runway label from current equity + latest progress.
    *
    * Formula: totalDays = equity / (retirementIncome / 365)
    *
    * This shows the cumulative runway — how many days, months, or years the user's
    * current equity could sustain their desired retirement lifestyle (based on their
-   * retirementIncome goal, treated as annual spending).
+   * retirementIncome goal, treated as annual spending). Copy names the income basis
+   * explicitly — "20 years of $10k/mo (est.)" — so it's clear the estimate is relative
+   * to the user's desired retirement income.
    *
    * This is the lifetime total of the same metric used in the Monthly Freedom Update (MFU),
    * where "days bought back" represents how much closer the user moved toward their
-   * desired retirement lifestyle during a specific period. Here, the badge reflects the
-   * full picture: every day of freedom the user has accumulated to date.
+   * desired retirement lifestyle during a specific period.
    *
    * Display thresholds:
-   *   1–99 days  → "X days of financial freedom"
-   *   100+ days  → "X months of financial freedom" (up to 23 months)
-   *   24+ months → "X years of financial freedom"
+   *   1–99 days  → "X days of $Yk/mo (est.)"
+   *   100+ days  → "X months of $Yk/mo (est.)" (up to 23 months)
+   *   24+ months → "X years of $Yk/mo (est.)"
+   *
+   * Synchronous on purpose: applyBundle() persists freedomLabel into the snapshot right
+   * after calling this, and the userProgress$ subscription (ngOnInit) re-runs it the
+   * moment a my-profile save re-emits progress — so the label updates immediately,
+   * with no extra HTTP.
    */
-  private updateFreedomLabel(equity: number): void {
-    this.authService.getUserProgress().subscribe({
-      next: (progress) => {
-        const annualIncome = progress.retirementIncome || 60000;
-        const dailyExpenses = annualIncome / 365;
-        if (dailyExpenses <= 0) {
-          this.freedomLabel = '';
-          this.cdr.detectChanges();
-          return;
-        }
-        const totalDays = Math.floor(equity / dailyExpenses);
-        if (totalDays < 1) {
-          this.freedomLabel = '';
-        } else if (totalDays <= 99) {
-          this.freedomLabel = `${totalDays} day${totalDays !== 1 ? 's' : ''} of financial freedom (est.)`;
-        } else {
-          const totalMonths = Math.floor(totalDays / 30);
-          if (totalMonths <= 23) {
-            this.freedomLabel = `${totalMonths} month${totalMonths !== 1 ? 's' : ''} of financial freedom (est.)`;
-          } else {
-            const years = Math.floor(totalMonths / 12);
-            this.freedomLabel = `${years} year${years !== 1 ? 's' : ''} of financial freedom (est.)`;
-          }
-        }
-        this.cdr.detectChanges();
-      },
-      error: () => {
-        this.freedomLabel = '';
-      }
-    });
+  private updateFreedomLabel(): void {
+    const next = this.computeFreedomLabel();
+    if (next !== this.freedomLabel) {
+      this.freedomLabel = next;
+      this.cdr.detectChanges();
+    }
+  }
+
+  private computeFreedomLabel(): string {
+    // No dashboard yet (snapshot may be showing) → keep whatever label is visible;
+    // clearing here would blink the snapshot label out until the bundle arrives.
+    if (!this.dashboard) return this.freedomLabel;
+    const equity = this.dashboard.summary?.equity ?? 0;
+    // Progress not emitted yet → keep whatever is showing (snapshot label) rather than
+    // computing against a default income the copy would then wrongly display.
+    if (this.latestProgress === null) return this.freedomLabel;
+    // A localStorage-fallback emission (transient /user/progress failure) carries no
+    // retirementIncome post-onboarding — keep the current label rather than fabricating
+    // a "$5k/mo" default in copy that now names the income. DB-sourced progress falls
+    // through to the standard default.
+    if (this.latestProgress._source === 'localStorageFallback' && !this.latestProgress.retirementIncome) {
+      return this.freedomLabel;
+    }
+
+    const annualIncome = this.latestProgress.retirementIncome || 60000;
+    const dailyExpenses = annualIncome / 365;
+    if (equity <= 0 || dailyExpenses <= 0) return '';
+
+    const perMonth = this.formatMonthlyIncome(annualIncome);
+    const totalDays = Math.floor(equity / dailyExpenses);
+    if (totalDays < 1) return '';
+    if (totalDays <= 99) {
+      return `worth ${totalDays} day${totalDays !== 1 ? 's' : ''} of ${perMonth} (est.)`;
+    }
+    const totalMonths = Math.floor(totalDays / 30);
+    if (totalMonths <= 23) {
+      return `worth ${totalMonths} month${totalMonths !== 1 ? 's' : ''} of ${perMonth} (est.)`;
+    }
+    const years = Math.floor(totalMonths / 12);
+    return `worth ${years} year${years !== 1 ? 's' : ''} of ${perMonth} (est.)`;
+  }
+
+  /** "$10k/mo" for round thousands, "$5.5k/mo" otherwise, "$800/mo" under $1k. */
+  private formatMonthlyIncome(annualIncome: number): string {
+    const monthly = annualIncome / 12;
+    if (monthly >= 1000) {
+      const k = Math.round((monthly / 1000) * 10) / 10;
+      return `$${Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)}k/mo`;
+    }
+    return `$${Math.round(monthly)}/mo`;
   }
 
   onTabChange(event: any) {
@@ -636,7 +678,7 @@ export class PortfolioDashboardComponent implements OnInit, OnDestroy {
     const first = new Date(this.chartData[0].date + (this.chartData[0].date.includes('T') ? '' : 'T00:00:00Z'));
     const last = new Date(this.chartData[this.chartData.length - 1].date + (this.chartData[this.chartData.length - 1].date.includes('T') ? '' : 'T00:00:00Z'));
     const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' };
-    return first.toLocaleDateString('en-US', opts) + ' – ' + last.toLocaleDateString('en-US', opts);
+    return first.toLocaleDateString('en-US', opts) + ' to ' + last.toLocaleDateString('en-US', opts);
   }
 
   /** Receive scrub state emitted by portfolio-chart. */
@@ -684,7 +726,7 @@ export class PortfolioDashboardComponent implements OnInit, OnDestroy {
       const modal = await this.modalController.create({
         component: PositionDetailSheetComponent,
         componentProps: { position },
-        cssClass: 'mc-bottom-sheet-modal',
+        ...BOTTOM_SHEET_MODAL_OPTS,
         backdropDismiss: true
       });
       await modal.present();

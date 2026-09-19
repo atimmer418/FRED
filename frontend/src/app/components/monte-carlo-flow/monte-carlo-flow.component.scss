@@ -122,6 +122,21 @@
   .material-symbols-outlined { font-size: 19px; }
 }
 
+// Results title, hoisted into the top bar beside the info + close buttons.
+.flow-top.on-results {
+  // The dots and back arrow are dead on results; give the row to the title.
+  .flow-back,
+  .flow-dots { display: none; }
+}
+
+.flow-top-title {
+  margin: 0;
+  min-width: 0;
+  white-space: nowrap;
+  // Clear the absolutely positioned info button parked next to the X.
+  padding-right: 56px;
+}
+
 // ─── Full-screen step panels ─────────────────────────────────────────────────
 
 .fscreen {
@@ -150,7 +165,9 @@
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.55);
+  white-space: pre-line; // honour \n in resultsEyebrow
   flex-shrink: 0;
+  margin-top: 4px;
 }
 
 .fs-h1 {
@@ -167,7 +184,7 @@
   font-size: 13.5px;
   color: rgba(255, 255, 255, 0.65);
   font-weight: 500;
-  margin: 8px 0 0;
+  margin: 8px 0 8px;
   line-height: 1.5;
   flex-shrink: 0;
 }
@@ -472,13 +489,33 @@
 
 .results-fscreen {
   overflow: hidden;
+  // The title sits in the top bar here, so the panel starts 18px higher
+  // than the other steps (124px vs 142px on a 62px inset).
+  padding-top: calc(env(safe-area-inset-top, 0px) + 62px);
+  // No bottom padding: the action row floats, so the scroll area runs to the
+  // screen edge and cards fade out under the buttons instead of being clipped
+  // by a band of empty gradient. results-scroll owns the clearance instead.
+  padding-bottom: 0;
 }
 
 .results-scroll {
   flex: 1;
   overflow-y: auto;
   margin: 0 -26px;
-  padding: 0 26px 8px;
+  // Clear the floating row: its 8px bottom offset + 46px height + 18px of air.
+  // The fade still spans the full clearance; the padding stops 24px short of
+  // it, so the last card sits that much closer to the buttons.
+  --actions-clearance: calc(env(safe-area-inset-bottom, 0px) + 72px);
+  padding: 0 26px calc(var(--actions-clearance) - 24px);
+
+  // Content dissolves as it passes behind the buttons, rather than hitting a
+  // hard clip. -webkit- prefix is required in WKWebView.
+  -webkit-mask-image: linear-gradient(to bottom,
+                      #000 calc(100% - var(--actions-clearance)),
+                      rgba(0, 0, 0, 0) 100%);
+          mask-image: linear-gradient(to bottom,
+                      #000 calc(100% - var(--actions-clearance)),
+                      rgba(0, 0, 0, 0) 100%);
   scrollbar-width: none;
   min-height: 0;
 
@@ -490,7 +527,7 @@
   display: flex;
   flex-direction: column;
   gap: 9px;
-  margin-top: 20px;
+  margin-top: 6px;
 }
 
 .sd-card {
@@ -598,7 +635,13 @@
   margin-bottom: 8px;
 }
 
+
 .pp-title {
+  // Whole title row (label + badge) rides above the non-Pro veil, crisp;
+  // taps fall through to the veil, which opens the upgrade nudge.
+  position: relative;
+  z-index: 6;
+  pointer-events: none;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.18em;
@@ -610,6 +653,11 @@
 }
 
 .pp-badge {
+  // Rides above the non-Pro veil (z-index 5) so the tier being sold stays
+  // crisp; taps fall through to the veil, which opens the upgrade nudge.
+  position: relative;
+  z-index: 6;
+  pointer-events: none;
   background: linear-gradient(135deg, #fbbf24, #f59e0b);
   color: #3d2c00;
   font-size: 8.5px;
@@ -696,7 +744,9 @@
     background: transparent;
     color: rgba(255, 255, 255, 0.55);
     font-family: 'Manrope', sans-serif;
-    font-size: 11px;
+    // 9px + nowrap: "Conservative (8%)" must hold a single line per chip.
+    font-size: 9px;
+    white-space: nowrap;
     font-weight: 800;
     height: 30px;
     border-radius: 8px;
@@ -741,6 +791,25 @@
 }
 
 // Plus-tier veil over Pro panel
+// Non-Pro teaser: the outcome sentence stays crisp above the veil, with the
+// values themselves blurred. pointer-events:none lets taps fall through to
+// the veil, which opens the upgrade nudge.
+.estimate-line.teaser {
+  position: relative;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.est-txt strong.blur-val {
+  // Not filter: blur() — WKWebView ignores filter on inline boxes, so the
+  // values rendered crisp on device. Transparent text + glow reads as blur
+  // and renders everywhere.
+  color: transparent;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .pro-veil {
   position: absolute;
   inset: 0;
@@ -777,17 +846,31 @@
 .results-actions {
   display: flex;
   gap: 10px;
-  flex-shrink: 0;
-  margin-top: 18px;
+  // Floats over the card list like the tab bar: the row itself paints nothing,
+  // so cards scroll through the gap between and around the buttons, while the
+  // buttons stay fully opaque. results-scroll pads its bottom to match.
+  position: absolute;
+  left: 26px;
+  right: 26px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) - 8px);
+  z-index: 5;
+
+  // Shorter than the 54px CTA on the input steps: the results panel needs the
+  // vertical room for the cards.
+  .ghost-btn,
+  .done-btn { height: 46px; }
 }
 
 .ghost-btn {
-  // Same footprint as the Done button (.fs-cta): equal flex + 54px height
+  // Same footprint as the Done button (.fs-cta): equal flex + matching height
+  // (54px by default, overridden to 46px inside .results-actions)
   flex: 1;
   height: 54px;
   border-radius: 13px;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.08);
+  // Opaque, sampled from the host gradient at this height: cards pass BEHIND
+  // the button, so any alpha here would let them read through.
+  background: #1a4fbe;
   color: #fff;
   font-family: 'Manrope', sans-serif;
   font-size: 13.5px;
@@ -801,7 +884,7 @@
 
   .material-symbols-outlined { font-size: 18px; }
 
-  &:active { background: rgba(255, 255, 255, 0.16); }
+  &:active { background: #2a5fce; }
 }
 
 .done-btn {

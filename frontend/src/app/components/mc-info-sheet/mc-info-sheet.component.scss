@@ -7,7 +7,7 @@
 }
 
 .sheet-body {
-  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px));
   font-family: 'Manrope', sans-serif;
 
   h3 {

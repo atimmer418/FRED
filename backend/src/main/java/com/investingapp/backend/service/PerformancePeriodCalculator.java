@@ -14,8 +14,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Pure utility for computing performance period rows (1W, 1M, 3M, YTD) from
- * portfolio history. No Spring dependencies — exercisable with plain JUnit 5.
+ * Pure utility for computing performance period rows (1W, 1M, 3M, 6M, YTD, 1Y)
+ * from portfolio history. No Spring dependencies — exercisable with plain JUnit 5.
  *
  * <p>Return methodology:
  * <ul>
@@ -44,7 +44,8 @@ public final class PerformancePeriodCalculator {
     private PerformancePeriodCalculator() {}
 
     /**
-     * Compute period rows for 1W, 1M, 3M, and YTD windows, in that order.
+     * Compute period rows for 1W, 1M, 3M, 6M, YTD, and 1Y windows, in that order
+     * (the chart's marker set plus 1W and YTD; "All" is the separate Total row).
      * Windows older than the earliest history point are omitted (not zero-filled).
      *
      * @param dates     ISO-8601 date strings in ascending chronological order
@@ -66,12 +67,14 @@ public final class PerformancePeriodCalculator {
             return rows;
         }
 
-        String[] periodLabels   = { "1W",                    "1M",                     "3M",                     "YTD" };
+        String[] periodLabels   = { "1W", "1M", "3M", "6M", "YTD", "1Y" };
         LocalDate[] windowStarts = {
             today.minusWeeks(1),
             today.minusMonths(1),
             today.minusMonths(3),
-            LocalDate.of(today.getYear(), 1, 1)
+            today.minusMonths(6),
+            LocalDate.of(today.getYear(), 1, 1),
+            today.minusYears(1)
         };
 
         for (int i = 0; i < periodLabels.length; i++) {

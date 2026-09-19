@@ -64,7 +64,8 @@ public class InvestmentExecutionService {
     @Autowired
     private EncryptionService encryptionService;
 
-
+    @Autowired
+    private WashSaleGuardService washSaleGuardService;
 
     /**
      * Check if markets are currently open (US Eastern Time)
@@ -95,6 +96,22 @@ public class InvestmentExecutionService {
     public void processInvestmentExecutionImmediately(InvestmentExecution execution) {
         logger.info("Processing lump sum investment execution {} immediately for user {}",
                 execution.getId(), execution.getUser().getEmail());
+
+        // TLH wash-sale guard, REQUEST time: an explicit stock buy inside an
+        // active window is rejected here — before any money is pulled — with a
+        // dated, user-comprehensible message. Once money is already funded the
+        // buy is allowed instead (see initiateTradingForExecution) because the
+        // IRS disallows the loss, not the trade.
+        if ("stock".equals(execution.getInvestmentType()) && execution.getTargetSymbol() != null) {
+            WashSaleWindow window = washSaleGuardService.blockingWindow(
+                    execution.getUser().getId(), execution.getTargetSymbol(),
+                    LocalDate.now(MARKET_TIMEZONE));
+            if (window != null) {
+                throw new IllegalArgumentException("Buying " + execution.getTargetSymbol()
+                        + " right now would undo the tax savings from your recent tax-loss harvest. "
+                        + "You can buy it again after " + window.getEndDate().plusDays(1) + ".");
+            }
+        }
 
         try {
             // Check if this is a buying power execution
@@ -701,6 +718,16 @@ public class InvestmentExecutionService {
                 return;
             }
 
+            // TLH: a wash-sale window can appear between request and funding.
+            // The user's explicit, already-funded order is honored — nightly
+            // reconciliation applies the §1091 disallowance accounting.
+            WashSaleWindow lumpSumWindow = washSaleGuardService.blockingWindow(
+                    user.getId(), targetSymbol, LocalDate.now(MARKET_TIMEZONE));
+            if (lumpSumWindow != null) {
+                logger.warn("TLH_ALERT user lump-sum buy of {} inside wash window (until {}) for user {} — "
+                        + "disallowance will reconcile", targetSymbol, lumpSumWindow.getEndDate(), user.getId());
+            }
+
             try {
                 // Create single trade for the target stock
                 InvestmentTrade trade = new InvestmentTrade(execution, targetSymbol, execution.getAmount());
@@ -751,14 +778,33 @@ public class InvestmentExecutionService {
                     continue;
                 }
 
+                // TLH wash-sale guard: a slice of a harvested symbol is
+                // redirected to its replacement (asset-class exposure and
+                // dollar deployment preserved) or skipped to cash, per config.
+                // PortfolioItem weights are never mutated.
+                String buySymbol = symbol;
+                WashSaleGuardService.GuardDecision guardDecision = washSaleGuardService.checkBuy(
+                        user.getId(), symbol, WashSaleGuardService.TradeSource.SCHEDULED_BUY,
+                        LocalDate.now(MARKET_TIMEZONE));
+                if (guardDecision.action() == WashSaleGuardService.GuardAction.SKIP) {
+                    logger.info("TLH wash-sale window active for {} — slice rests as cash (user {})",
+                            symbol, user.getId());
+                    continue;
+                }
+                if (guardDecision.action() == WashSaleGuardService.GuardAction.REDIRECT) {
+                    logger.info("TLH wash-sale window active for {} — slice redirected to {} (user {})",
+                            symbol, guardDecision.redirectSymbol(), user.getId());
+                    buySymbol = guardDecision.redirectSymbol();
+                }
+
                 try {
-                    // Create trade record
-                    InvestmentTrade trade = new InvestmentTrade(execution, symbol, amount);
+                    // Create trade record (records what is actually bought)
+                    InvestmentTrade trade = new InvestmentTrade(execution, buySymbol, amount);
                     trade = tradeRepository.save(trade);
 
                     // Place order with Alpaca (handling fractional vs whole shares)
                     AlpacaService.AlpacaOrderResponse orderResponse = placeOrderWithFractionalCheck(
-                            encryptionService.decrypt(execution.getAlpacaAccountId()), symbol, amount);
+                            encryptionService.decrypt(execution.getAlpacaAccountId()), buySymbol, amount);
 
                     if (orderResponse.isSuccess()) {
                         trade.setAlpacaOrderId(orderResponse.id);
@@ -767,7 +813,7 @@ public class InvestmentExecutionService {
                         tradeRepository.save(trade);
 
                         logger.info("Successfully placed order {} for symbol {} with amount {}",
-                                orderResponse.id, symbol, amount);
+                                orderResponse.id, buySymbol, amount);
                     } else {
                         trade.setStatus(InvestmentTrade.TradeStatus.FAILED);
                         trade.setErrorMessage(orderResponse.errorMessage);
@@ -775,11 +821,11 @@ public class InvestmentExecutionService {
                         tradeRepository.save(trade);
 
                         hasFailures = true;
-                        logger.error("Failed to place order for symbol {}: {}", symbol, orderResponse.errorMessage);
+                        logger.error("Failed to place order for symbol {}: {}", buySymbol, orderResponse.errorMessage);
                     }
 
                 } catch (Exception e) {
-                    logger.error("Error placing trade for symbol {} in execution {}", symbol, execution.getId(), e);
+                    logger.error("Error placing trade for symbol {} in execution {}", buySymbol, execution.getId(), e);
                     hasFailures = true;
                 }
             }

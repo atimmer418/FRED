@@ -272,3 +272,80 @@ describe('AiChatPage first-time tour story chip', () => {
     expect(tour.storyChipTapped).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Action outcome records (the ✅/⚠️ messages the backend persists after an
+ * executed action, and the local 🚫 cancel note) must render INSIDE the action
+ * card, never as their own chat bubble — and on reload they must rehydrate the
+ * card's resolved state so a resolved proposal can never come back tappable.
+ */
+describe('AiChatPage action outcome records', () => {
+  let chat: ReturnType<typeof makeChatServiceMock>;
+
+  beforeEach(() => {
+    chat = makeChatServiceMock();
+    configure(chat);
+  });
+
+  const proposalContent = 'Here you go:\n```action\n'
+    + '{"action": "pause_investing", "params": {}, "summary": "Pauses automatic investing"}\n```';
+
+  function pageWithMessages(contents: Array<{ role: 'user' | 'assistant'; content: string }>) {
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.messages = contents.map(m => ({ ...m, timestamp: new Date() }));
+    return c;
+  }
+
+  it('hides an outcome record that follows an action proposal', () => {
+    const c = pageWithMessages([
+      { role: 'user', content: 'pause my investing' },
+      { role: 'assistant', content: proposalContent },
+      { role: 'assistant', content: '✅ Done. Automatic investing is paused.' },
+    ]);
+
+    expect(c.isHiddenActionOutcome(2)).toBeTrue();
+    expect(c.isHiddenActionOutcome(1)).toBeFalse(); // the proposal itself renders
+    expect(c.isHiddenActionOutcome(0)).toBeFalse();
+  });
+
+  it('does not hide a ✅-looking message with no action proposal before it', () => {
+    const c = pageWithMessages([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: '✅ Done. Automatic investing is paused.' },
+    ]);
+
+    expect(c.isHiddenActionOutcome(1)).toBeFalse();
+  });
+
+  it('rehydrates the card state from a persisted outcome record on reload', () => {
+    const c = pageWithMessages([
+      { role: 'assistant', content: proposalContent },
+      { role: 'assistant', content: '✅ Done. Automatic investing is paused.' },
+    ]);
+
+    const seg = c.segments(c.messages[0]).find(s => s.kind === 'action') as any;
+    expect(seg.state).toBe('done');
+    expect(seg.resultMessage).toBe('Done. Automatic investing is paused.');
+    // Resolved + not latest → the reloaded card can never execute again
+    expect(c.isActionable(c.messages[0])).toBeFalse();
+  });
+
+  it('rehydrates a cancelled card from the local 🚫 note', () => {
+    const c = pageWithMessages([
+      { role: 'assistant', content: proposalContent },
+      { role: 'assistant', content: '🚫 Cancelled. Nothing was changed.' },
+    ]);
+
+    const seg = c.segments(c.messages[0]).find(s => s.kind === 'action') as any;
+    expect(seg.state).toBe('cancelled');
+  });
+
+  it('leaves a card idle when no outcome record follows it', () => {
+    const c = pageWithMessages([
+      { role: 'assistant', content: proposalContent },
+    ]);
+
+    const seg = c.segments(c.messages[0]).find(s => s.kind === 'action') as any;
+    expect(seg.state).toBe('idle');
+  });
+});

@@ -511,7 +511,11 @@ public class UserController {
             }
             if (profileUpdate.containsKey("selectedTier")) {
                 Object val = profileUpdate.get("selectedTier");
-                if (val instanceof String) {
+                if (val == null) {
+                    // Explicit null clears the subscription (no key = leave untouched).
+                    user.setSelectedTier(null);
+                    changed = true;
+                } else if (val instanceof String) {
                     String tier = (String) val;
                     user.setSelectedTier(tier);
                     if (tier != null && user.getSubscriptionStartedAt() == null) {

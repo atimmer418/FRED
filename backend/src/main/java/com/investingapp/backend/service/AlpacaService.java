@@ -62,6 +62,12 @@ public class AlpacaService {
             }
         };
 
+        // Bounded timeouts so a hung Alpaca call can never black-hole a
+        // scheduler pool thread (TLH pollers share the pool with the
+        // funding/trading crons).
+        requestFactory.setConnectTimeout(5000);
+        requestFactory.setReadTimeout(30000);
+
         this.restTemplate.setRequestFactory(requestFactory);
 
         // Create WebClient for PATCH requests (better PATCH support)
@@ -360,6 +366,43 @@ public class AlpacaService {
         return false; // Default to false if check fails
     }
 
+    /** Asset vetting in one call — TLH replacement candidates must be active and tradable. */
+    public AssetInfo getAssetInfo(String symbol) {
+        try {
+            String url = alpacaBaseUrl + "/assets/" + symbol;
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            if (response.getStatusCode() == HttpStatus.OK) {
+                JsonNode asset = objectMapper.readTree(response.getBody());
+                return new AssetInfo(true,
+                        "active".equalsIgnoreCase(asset.path("status").asText("")),
+                        asset.path("tradable").asBoolean(false),
+                        asset.path("fractionable").asBoolean(false));
+            }
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            return new AssetInfo(false, false, false, false);
+        } catch (Exception e) {
+            logger.error("Error fetching asset info for {}: {}", symbol, e.getMessage());
+        }
+        return new AssetInfo(false, false, false, false);
+    }
+
+    /** Minimal asset facts for TLH vetting. */
+    public static class AssetInfo {
+        public final boolean exists;
+        public final boolean active;
+        public final boolean tradable;
+        public final boolean fractionable;
+
+        public AssetInfo(boolean exists, boolean active, boolean tradable, boolean fractionable) {
+            this.exists = exists;
+            this.active = active;
+            this.tradable = tradable;
+            this.fractionable = fractionable;
+        }
+    }
+
     /**
      * Place a market buy order with quantity (shares)
      */
@@ -466,6 +509,412 @@ public class AlpacaService {
             logger.error("Error checking order status for order {}", orderId, e);
             return new AlpacaOrderResponse(orderId, null, "ERROR", null, null,
                     BigDecimal.ZERO, null, null, e.getMessage());
+        }
+    }
+
+    // ==================== Tax Loss Harvesting order support ====================
+
+    /**
+     * Null-guarded parse of an Alpaca order JSON into AlpacaOrderResponse,
+     * including filled_qty / filled_avg_price / filled_at. The existing
+     * placeSellOrderByPercentage parser hardcodes filledQuantity=0 — TLH
+     * paths must never reuse it.
+     */
+    private AlpacaOrderResponse parseOrderJson(JsonNode order, String fallbackSymbol) {
+        return new AlpacaOrderResponse(
+                textOrNull(order, "id"),
+                order.hasNonNull("symbol") ? order.get("symbol").asText() : fallbackSymbol,
+                textOrNull(order, "status"),
+                decimalOrNull(order, "qty"),
+                decimalOrNull(order, "notional"),
+                decimalOrNull(order, "filled_qty") == null ? BigDecimal.ZERO : decimalOrNull(order, "filled_qty"),
+                decimalOrNull(order, "filled_avg_price"),
+                textOrNull(order, "submitted_at"),
+                textOrNull(order, "filled_at"),
+                null);
+    }
+
+    private String textOrNull(JsonNode node, String field) {
+        return node.hasNonNull(field) && !"null".equals(node.get(field).asText())
+                ? node.get(field).asText() : null;
+    }
+
+    private BigDecimal decimalOrNull(JsonNode node, String field) {
+        try {
+            String raw = textOrNull(node, field);
+            return raw == null ? null : new BigDecimal(raw);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Place a market sell for an exact quantity with an idempotency
+     * client_order_id (persisted by the caller BEFORE this call — Alpaca
+     * rejects duplicate client_order_ids, making double-submission impossible).
+     */
+    public AlpacaOrderResponse placeSellOrderWithQuantity(String accountId, String symbol,
+            BigDecimal qty, String clientOrderId) {
+        try {
+            String url = alpacaBaseUrl + "/trading/accounts/" + accountId + "/orders";
+
+            Map<String, Object> request = new HashMap<>();
+            request.put("symbol", symbol);
+            request.put("qty", qty.stripTrailingZeros().toPlainString());
+            request.put("side", "sell");
+            request.put("type", "market");
+            request.put("time_in_force", "day");
+            request.put("client_order_id", clientOrderId);
+
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
+
+            logger.info("[TLH] Placing sell order for account {} — {} x{} (client_order_id {})",
+                    accountId, symbol, qty, clientOrderId);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+
+            if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
+                return parseOrderJson(objectMapper.readTree(response.getBody()), symbol);
+            }
+            return new AlpacaOrderResponse(null, symbol, "FAILED", null, null, BigDecimal.ZERO, null,
+                    null, "HTTP " + response.getStatusCode() + ": " + response.getBody());
+        } catch (Exception e) {
+            logger.error("[TLH] Error placing sell order for account {} symbol {}", accountId, symbol, e);
+            return new AlpacaOrderResponse(null, symbol, "ERROR", null, null, BigDecimal.ZERO, null,
+                    null, e.getMessage());
+        }
+    }
+
+    /** Notional market buy carrying an idempotency client_order_id. */
+    public AlpacaOrderResponse placeBuyOrderWithClientId(String accountId, String symbol,
+            BigDecimal notionalAmount, String clientOrderId) {
+        try {
+            String url = alpacaBaseUrl + "/trading/accounts/" + accountId + "/orders";
+
+            Map<String, Object> request = new HashMap<>();
+            request.put("symbol", symbol);
+            request.put("notional", notionalAmount.setScale(2, RoundingMode.DOWN).toPlainString());
+            request.put("side", "buy");
+            request.put("type", "market");
+            request.put("time_in_force", "day");
+            request.put("client_order_id", clientOrderId);
+
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
+
+            logger.info("[TLH] Placing buy order for account {} — {} ${} (client_order_id {})",
+                    accountId, symbol, notionalAmount, clientOrderId);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+
+            if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
+                return parseOrderJson(objectMapper.readTree(response.getBody()), symbol);
+            }
+            return new AlpacaOrderResponse(null, symbol, "FAILED", null, null, BigDecimal.ZERO, null,
+                    null, "HTTP " + response.getStatusCode() + ": " + response.getBody());
+        } catch (Exception e) {
+            logger.error("[TLH] Error placing buy order for account {} symbol {}", accountId, symbol, e);
+            return new AlpacaOrderResponse(null, symbol, "ERROR", null, null, BigDecimal.ZERO, null,
+                    null, e.getMessage());
+        }
+    }
+
+    /** Whole-share market buy carrying an idempotency client_order_id. */
+    public AlpacaOrderResponse placeBuyOrderWithQuantityAndClientId(String accountId, String symbol,
+            BigDecimal qty, String clientOrderId) {
+        try {
+            String url = alpacaBaseUrl + "/trading/accounts/" + accountId + "/orders";
+
+            Map<String, Object> request = new HashMap<>();
+            request.put("symbol", symbol);
+            request.put("qty", qty.stripTrailingZeros().toPlainString());
+            request.put("side", "buy");
+            request.put("type", "market");
+            request.put("time_in_force", "day");
+            request.put("client_order_id", clientOrderId);
+
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
+
+            logger.info("[TLH] Placing whole-share buy for account {} — {} x{} (client_order_id {})",
+                    accountId, symbol, qty, clientOrderId);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+
+            if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
+                return parseOrderJson(objectMapper.readTree(response.getBody()), symbol);
+            }
+            return new AlpacaOrderResponse(null, symbol, "FAILED", null, null, BigDecimal.ZERO, null,
+                    null, "HTTP " + response.getStatusCode() + ": " + response.getBody());
+        } catch (Exception e) {
+            logger.error("[TLH] Error placing whole-share buy for account {} symbol {}", accountId, symbol, e);
+            return new AlpacaOrderResponse(null, symbol, "ERROR", null, null, BigDecimal.ZERO, null,
+                    null, e.getMessage());
+        }
+    }
+
+    /**
+     * Crash-recovery lookup: find an order by the client_order_id we persisted
+     * before submitting. Callers MUST distinguish confirmed-absent (safe to
+     * fail the harvest) from lookup-failed (leave state for the poller).
+     * Primary route is orders:by_client_order_id; falls back to listing
+     * recent orders and matching client-side if the route is unavailable.
+     */
+    public OrderLookupResult getOrderByClientOrderId(String accountId, String clientOrderId) {
+        try {
+            String url = alpacaBaseUrl + "/trading/accounts/" + accountId
+                    + "/orders:by_client_order_id?client_order_id=" + clientOrderId;
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            if (response.getStatusCode() == HttpStatus.OK) {
+                JsonNode order = objectMapper.readTree(response.getBody());
+                if (order.hasNonNull("id")) {
+                    return OrderLookupResult.found(parseOrderJson(order, null));
+                }
+                return lookupByListing(accountId, clientOrderId);
+            }
+            return lookupByListing(accountId, clientOrderId);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            // Route exists but no such order — still verify via listing before
+            // declaring absence, since a 404 can also mean the route is unsupported.
+            return lookupByListing(accountId, clientOrderId);
+        } catch (Exception e) {
+            logger.warn("[TLH] by_client_order_id lookup errored for {}: {}", clientOrderId, e.getMessage());
+            return lookupByListing(accountId, clientOrderId);
+        }
+    }
+
+    private OrderLookupResult lookupByListing(String accountId, String clientOrderId) {
+        try {
+            String url = alpacaBaseUrl + "/trading/accounts/" + accountId + "/orders?status=all&limit=100";
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            if (response.getStatusCode() != HttpStatus.OK) {
+                return OrderLookupResult.lookupFailed("HTTP " + response.getStatusCode());
+            }
+            JsonNode orders = objectMapper.readTree(response.getBody());
+            if (!orders.isArray()) {
+                return OrderLookupResult.lookupFailed("Unexpected orders payload");
+            }
+            for (JsonNode order : orders) {
+                if (order.hasNonNull("client_order_id")
+                        && clientOrderId.equals(order.get("client_order_id").asText())) {
+                    return OrderLookupResult.found(parseOrderJson(order, null));
+                }
+            }
+            return OrderLookupResult.confirmedAbsent();
+        } catch (Exception e) {
+            logger.warn("[TLH] Order listing lookup failed for {}: {}", clientOrderId, e.getMessage());
+            return OrderLookupResult.lookupFailed(e.getMessage());
+        }
+    }
+
+    /** Open orders for one symbol — the post-claim race check before a harvest sell. */
+    public List<Map<String, String>> getOpenOrders(String accountId, String symbol) {
+        List<Map<String, String>> result = new ArrayList<>();
+        String url = alpacaBaseUrl + "/trading/accounts/" + accountId
+                + "/orders?status=open&limit=50&symbols=" + symbol;
+        HttpHeaders headers = createAuthHeaders();
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+        try {
+            if (response.getStatusCode() == HttpStatus.OK) {
+                JsonNode orders = objectMapper.readTree(response.getBody());
+                if (orders.isArray()) {
+                    for (JsonNode order : orders) {
+                        Map<String, String> row = new HashMap<>();
+                        row.put("id", textOrNull(order, "id"));
+                        row.put("side", textOrNull(order, "side"));
+                        row.put("symbol", textOrNull(order, "symbol"));
+                        result.add(row);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Propagate as unchecked so callers treat "can't verify" as a race
+            // (fail closed), never as "no open orders".
+            throw new IllegalStateException("Open-orders parse failed: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /** Cancel an order; already-terminal responses are swallowed. */
+    public void cancelOrder(String accountId, String orderId) {
+        try {
+            String url = alpacaBaseUrl + "/trading/accounts/" + accountId + "/orders/" + orderId;
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            restTemplate.exchange(url, HttpMethod.DELETE, entity, String.class);
+            logger.info("[TLH] Cancel requested for order {}", orderId);
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND
+                    || e.getStatusCode() == HttpStatus.UNPROCESSABLE_ENTITY) {
+                logger.info("[TLH] Order {} already terminal on cancel ({})", orderId, e.getStatusCode());
+            } else {
+                logger.error("[TLH] Cancel failed for order {}: {}", orderId, e.getMessage());
+            }
+        } catch (Exception e) {
+            logger.error("[TLH] Cancel failed for order {}: {}", orderId, e.getMessage());
+        }
+    }
+
+    /**
+     * Market clock — true only when Alpaca confirms the market is open.
+     * ANY error returns false: TLH fails closed rather than queueing a market
+     * order overnight (holidays, half-days, outages).
+     */
+    public boolean getMarketClock() {
+        try {
+            String url = alpacaBaseUrl + "/clock";
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            if (response.getStatusCode() == HttpStatus.OK) {
+                JsonNode clock = objectMapper.readTree(response.getBody());
+                return clock.hasNonNull("is_open") && clock.get("is_open").asBoolean(false);
+            }
+            logger.warn("[TLH] Clock check non-OK: {}", response.getStatusCode());
+            return false;
+        } catch (Exception e) {
+            logger.warn("[TLH] Clock check failed (failing closed): {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * One page of FILL activities (buys AND sells, all sources — scheduler,
+     * DRIP, user manual, TLH). The ledger's authoritative feed. Caller pages
+     * to exhaustion across ticks via the returned page token.
+     */
+    public FillActivityPage getFillActivities(String accountId, String after, String pageToken, int maxPages) {
+        List<FillActivity> activities = new ArrayList<>();
+        String nextToken = pageToken;
+        boolean exhausted = false;
+        try {
+            HttpHeaders headers = createAuthHeaders();
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+            for (int page = 0; page < Math.max(1, maxPages); page++) {
+                StringBuilder urlBuilder = new StringBuilder(alpacaBaseUrl)
+                        .append("/accounts/activities/FILL")
+                        .append("?account_id=").append(accountId)
+                        .append("&direction=asc")
+                        .append("&page_size=100");
+                if (after != null && !after.isBlank()) {
+                    urlBuilder.append("&after=").append(after);
+                }
+                if (nextToken != null && !nextToken.isBlank()) {
+                    urlBuilder.append("&page_token=").append(nextToken);
+                }
+
+                ResponseEntity<String> response = restTemplate.exchange(
+                        urlBuilder.toString(), HttpMethod.GET, entity, String.class);
+                if (response.getStatusCode() != HttpStatus.OK) {
+                    logger.error("[TLH] Fill-activity fetch failed: {} {}",
+                            response.getStatusCode(), response.getBody());
+                    throw new IllegalStateException("Fill-activity fetch failed: " + response.getStatusCode());
+                }
+
+                JsonNode activityArray = objectMapper.readTree(response.getBody());
+                if (!activityArray.isArray() || activityArray.size() == 0) {
+                    exhausted = true;
+                    break;
+                }
+                for (JsonNode activity : activityArray) {
+                    FillActivity fill = new FillActivity(
+                            textOrNull(activity, "id"),
+                            textOrNull(activity, "order_id"),
+                            textOrNull(activity, "side"),
+                            textOrNull(activity, "symbol"),
+                            decimalOrNull(activity, "qty"),
+                            decimalOrNull(activity, "price"),
+                            textOrNull(activity, "transaction_time"),
+                            decimalOrNull(activity, "cum_qty"),
+                            textOrNull(activity, "type"));
+                    if (fill.id != null && fill.symbol != null && fill.qty != null && fill.price != null) {
+                        activities.add(fill);
+                    }
+                }
+                if (activityArray.size() < 100) {
+                    exhausted = true;
+                    nextToken = null;
+                    break;
+                }
+                nextToken = activityArray.get(activityArray.size() - 1).get("id").asText();
+            }
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("[TLH] Error fetching fill activities for account {}: {}", accountId, e.getMessage());
+            throw new IllegalStateException("Fill-activity fetch failed: " + e.getMessage(), e);
+        }
+        return new FillActivityPage(activities, nextToken, exhausted);
+    }
+
+    /** One FILL activity row (partial fills appear as separate activities). */
+    public static class FillActivity {
+        public final String id;               // activity id — ledger dedup key
+        public final String orderId;
+        public final String side;             // "buy" | "sell" | "sell_short"
+        public final String symbol;
+        public final BigDecimal qty;          // this fill's quantity
+        public final BigDecimal price;        // per-share fill price
+        public final String transactionTime;  // RFC3339
+        public final BigDecimal cumQty;
+        public final String fillType;         // "fill" | "partial_fill"
+
+        public FillActivity(String id, String orderId, String side, String symbol, BigDecimal qty,
+                BigDecimal price, String transactionTime, BigDecimal cumQty, String fillType) {
+            this.id = id;
+            this.orderId = orderId;
+            this.side = side;
+            this.symbol = symbol;
+            this.qty = qty;
+            this.price = price;
+            this.transactionTime = transactionTime;
+            this.cumQty = cumQty;
+            this.fillType = fillType;
+        }
+    }
+
+    /** A page of fill activities plus the cursor to continue from. */
+    public static class FillActivityPage {
+        public final List<FillActivity> activities;
+        public final String nextPageToken; // null when exhausted
+        public final boolean exhausted;
+
+        public FillActivityPage(List<FillActivity> activities, String nextPageToken, boolean exhausted) {
+            this.activities = activities;
+            this.nextPageToken = nextPageToken;
+            this.exhausted = exhausted;
+        }
+    }
+
+    /** Adopt-or-fail lookup outcome — absence and lookup failure are NOT the same. */
+    public static class OrderLookupResult {
+        public final AlpacaOrderResponse order;   // non-null only when found
+        public final boolean confirmedAbsent;
+        public final boolean lookupFailed;
+        public final String error;
+
+        private OrderLookupResult(AlpacaOrderResponse order, boolean confirmedAbsent,
+                boolean lookupFailed, String error) {
+            this.order = order;
+            this.confirmedAbsent = confirmedAbsent;
+            this.lookupFailed = lookupFailed;
+            this.error = error;
+        }
+
+        public static OrderLookupResult found(AlpacaOrderResponse order) {
+            return new OrderLookupResult(order, false, false, null);
+        }
+
+        public static OrderLookupResult confirmedAbsent() {
+            return new OrderLookupResult(null, true, false, null);
+        }
+
+        public static OrderLookupResult lookupFailed(String error) {
+            return new OrderLookupResult(null, false, true, error);
         }
     }
 
@@ -579,11 +1028,19 @@ public class AlpacaService {
         public final BigDecimal filledQuantity;
         public final BigDecimal filledAvgPrice;
         public final String submittedAt;
+        public final String filledAt; // RFC3339 from Alpaca; null until filled
         public final String errorMessage;
 
         public AlpacaOrderResponse(String id, String symbol, String status, BigDecimal quantity,
                 BigDecimal notionalAmount, BigDecimal filledQuantity,
                 BigDecimal filledAvgPrice, String submittedAt, String errorMessage) {
+            this(id, symbol, status, quantity, notionalAmount, filledQuantity, filledAvgPrice,
+                    submittedAt, null, errorMessage);
+        }
+
+        public AlpacaOrderResponse(String id, String symbol, String status, BigDecimal quantity,
+                BigDecimal notionalAmount, BigDecimal filledQuantity,
+                BigDecimal filledAvgPrice, String submittedAt, String filledAt, String errorMessage) {
             this.id = id;
             this.symbol = symbol;
             this.status = status;
@@ -592,6 +1049,7 @@ public class AlpacaService {
             this.filledQuantity = filledQuantity;
             this.filledAvgPrice = filledAvgPrice;
             this.submittedAt = submittedAt;
+            this.filledAt = filledAt;
             this.errorMessage = errorMessage;
         }
 

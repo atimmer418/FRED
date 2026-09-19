@@ -42,11 +42,15 @@ function makeAuthMock() {
 describe('TabsPage pager', () => {
   let scrollSvc: jasmine.SpyObj<TabBarScrollService>;
 
-  function build() {
+  function build(outlet?: Partial<IonRouterOutlet>) {
     scrollSvc = jasmine.createSpyObj('TabBarScrollService', ['reset', 'setHoldFull']);
     TestBed.configureTestingModule({
       imports: [TabsPage, RouterTestingModule],
-      providers: [],
+      providers: [
+        // TabsPage's outlet injection is @Optional — tests without a stub pin the
+        // null-outlet path.
+        ...(outlet ? [{ provide: IonRouterOutlet, useValue: outlet }] : []),
+      ],
     })
       .overrideComponent(TabsPage, {
         remove: { imports: [Tab1Page, Tab2Page, AiChatPage, Tab3Page] },
@@ -59,6 +63,10 @@ describe('TabsPage pager', () => {
     return fixture;
   }
 
+  function swiperEvent(activeIndex: number): Event {
+    return { target: { swiper: { activeIndex } } } as unknown as Event;
+  }
+
   it('defaults to tab1 with initialIndex 0', () => {
     const c = build().componentInstance;
     c.ngOnInit();
@@ -66,7 +74,11 @@ describe('TabsPage pager', () => {
     expect(c.initialIndex).toBe(0);
   });
 
-  it('onSlideChange updates activeTab, URL, activation and hold-full for chat', () => {
+  // The slide-change moment is the start of the settle animation. Only the
+  // tab-bar indicator may react there — URL sync and tab activation (HTTP
+  // refreshes, menu state) are deferred to the settle END so they never run
+  // change detection or network work while the pager is still animating.
+  it('onSlideChange updates the active tab immediately and defers everything else', () => {
     const fixture = build();
     const c = fixture.componentInstance;
     c.ngOnInit();
@@ -75,12 +87,59 @@ describe('TabsPage pager', () => {
     const replaceSpy = spyOn(location, 'replaceState');
     const setActiveSpy = spyOn(activation, 'setActive');
 
-    c.onSlideChange({ target: { swiper: { activeIndex: 2 } } } as unknown as Event);
+    c.onSlideChange(swiperEvent(2));
 
     expect(c.activeTab()).toBe('chat');
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(setActiveSpy).not.toHaveBeenCalled();
+  });
+
+  it('onTransitionEnd commits URL, activation and hold-full for chat on settle', () => {
+    const fixture = build();
+    const c = fixture.componentInstance;
+    c.ngOnInit();
+    const location = TestBed.inject(Location);
+    const activation = TestBed.inject(TabActivationService);
+    const replaceSpy = spyOn(location, 'replaceState');
+    const setActiveSpy = spyOn(activation, 'setActive');
+
+    c.onSlideChange(swiperEvent(2));
+    c.onTransitionEnd(swiperEvent(2));
+
     expect(replaceSpy).toHaveBeenCalledWith('/tabs/chat');
     expect(setActiveSpy).toHaveBeenCalledWith('chat');
     expect(scrollSvc.setHoldFull).toHaveBeenCalledWith(true);
+  });
+
+  // Ionic's edge-swipe-back pops to the URL recorded on the stack's RouteView,
+  // which is stamped once at view creation and is NOT refreshed by
+  // location.replaceState. Without a re-stamp on slide settle, a swipe to tab3
+  // followed by push + edge-swipe-back pops to the cold-start tab (tab1).
+  it('onTransitionEnd re-stamps the Ionic stack view URL for swipe-back', () => {
+    const view = { url: '/tabs/tab1' } as IonRouterOutlet['activatedView'];
+    const c = build({ activatedView: view }).componentInstance;
+    c.ngOnInit();
+
+    c.onTransitionEnd(swiperEvent(3));
+
+    expect(view!.url).toBe('/tabs/tab3');
+  });
+
+  // A snap-back (released before the halfway point) settles on the tab we were
+  // already on; the settle-end handler must not re-fire URL sync or activation.
+  it('onTransitionEnd ignores settles on the already-settled tab', () => {
+    const fixture = build();
+    const c = fixture.componentInstance;
+    c.ngOnInit();
+    const location = TestBed.inject(Location);
+    const activation = TestBed.inject(TabActivationService);
+    const replaceSpy = spyOn(location, 'replaceState');
+    const setActiveSpy = spyOn(activation, 'setActive');
+
+    c.onTransitionEnd(swiperEvent(0));
+
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(setActiveSpy).not.toHaveBeenCalled();
   });
 
   it('selectTab moves the swiper to the tab index', () => {

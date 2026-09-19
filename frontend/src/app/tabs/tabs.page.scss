@@ -8,13 +8,12 @@ swiper-container.tabs-swiper {
   height: 100%;
 }
 
-// #3.1 — give the pager's snap/settle the same curve as the floating tab bar's
-// indicator (the "clean" tab-button animation): 250ms cubic-bezier(0.4,0,0.2,1).
-// Swiper drives transition-duration inline on the wrapper; this sets the curve.
+// Settle curve: pure deceleration (easeOutCubic), no overshoot. The settle
+// DURATION is velocity-matched per swipe in tabs.page.ts (applyVelocitySettle);
+// that math assumes this curve's initial slope of y1/x1 = 3 — change one,
+// change both (see swipe-settle.utils.ts).
 swiper-container.tabs-swiper::part(wrapper) {
-  transition-timing-function: cubic-bezier(0.11, 0.44, 0.75, 1.05);
-  // transition-timing-function: cubic-bezier(0.7, 0, 0.8, 1);
-  // transition-timing-function: cubic-bezier(0.4, 0.4, 0.8, 1);
+  transition-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 swiper-slide {
@@ -26,6 +25,14 @@ swiper-slide {
   position: relative;
   height: 100%;
   overflow: hidden;
+
+  // Paint/layout containment: all four heavy tabs are mounted at once, so this
+  // walls each slide off — a repaint inside one (chat bubble, portfolio chart,
+  // tab2 gradients) can't invalidate the layout/paint of its siblings during
+  // the drag. `layout paint` only — NOT `size` (slides size from height:100%),
+  // and it creates no GPU layer, so no blurred text and no WebKit caret risk on
+  // the chat input.
+  contain: layout paint;
 }
 
 // tab1/tab2 are bare ion-content pages; a positioned, sized host is enough.

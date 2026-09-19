@@ -314,6 +314,18 @@ public class InvestmentController {
                             "queued", true));
                 }
 
+            } catch (IllegalArgumentException rejectedException) {
+                // Request rejected before any money moved (e.g. TLH wash-sale
+                // window on an explicit stock buy) — a 400 with the reason
+                execution.setStatus(InvestmentExecution.ExecutionStatus.FAILED);
+                execution.setErrorMessage(rejectedException.getMessage());
+                executionRepository.save(execution);
+
+                return ResponseEntity.badRequest()
+                        .body(Map.of(
+                                "success", false,
+                                "message", rejectedException.getMessage(),
+                                "executionId", execution.getId()));
             } catch (Exception processingException) {
                 // If processing fails, update execution status and inform user
                 execution.setStatus(InvestmentExecution.ExecutionStatus.FAILED);

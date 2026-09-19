@@ -4,6 +4,8 @@ import { IonApp, IonRouterOutlet } from '@ionic/angular/standalone';
 import { CommonModule } from '@angular/common';
 import { Platform } from '@ionic/angular/standalone';
 import { SplashScreen } from '@capacitor/splash-screen';
+import { Keyboard } from '@capacitor/keyboard';
+import { Capacitor } from '@capacitor/core';
 import { register } from 'swiper/element/bundle';
 import { AuthService, UserProgress } from './services/auth.service';
 import { AppLockService } from './services/app-lock.service';
@@ -109,6 +111,21 @@ export class AppComponent implements OnInit {
         }, 300);
       }
     });
+
+    // WKWebView keyboard-displacement restore (native only). With
+    // Keyboard.resize:'none', iOS scrolls the webview's NATIVE scroll view to
+    // reveal a focused input inside fixed-position surfaces (bottom sheets).
+    // If the input is torn down while the keyboard is up (saving a sheet
+    // form), that offset is never restored — the page renders normally but
+    // every tap hit-tests against displaced coordinates, so the whole screen
+    // reads as frozen. Snap the scroll offset back on every keyboard hide.
+    if (Capacitor.isNativePlatform()) {
+      Keyboard.addListener('keyboardDidHide', () => {
+        window.scrollTo(0, 0);
+        const scroller = document.scrollingElement as HTMLElement | null;
+        if (scroller) scroller.scrollTop = 0;
+      });
+    }
 
     // Skip navigation logic for testing (add ?testing=true to URL)
     const urlParams = new URLSearchParams(window.location.search);

@@ -24,10 +24,14 @@ const DYNAMIC_ICONS = [
   'event_repeat', 'play_arrow', 'event_available', 'trending_up', 'sell', 'undo',
   'trending_down', 'psychology', 'all_inclusive', 'query_stats', 'history',
   'sentiment_satisfied', 'shield',
+  // monthly-freedom-update milestone card + change stat: milestoneIcon()/changeDirection() return these from TS
+  'military_tech', 'arrow_downward',
   // retirement-planning (FRED-207): scenarioIcon() history-card icons
   'south_east', 'north_east',
   // tab3 settings rows (FRED-211): icon names live in TS data, not detectable by HTML scan
   'pie_chart', 'credit_card', 'verified_user', 'description', 'group', 'help', 'mail', 'menu_book',
+  // sell-withdraw (FRED-212): icon names live in TS data, not detectable by HTML scan
+  'radio_button_checked', 'radio_button_unchecked', 'account_balance_wallet', 'account_balance',
   // my-profile goal icons (FRED-216): returned from TS as GoalIcon string literals
   'home', 'health_and_safety', 'flag', 'energy_savings_leaf', 'savings', 'school', 'directions_car',
   // my-profile UI icons (FRED-216): camera badge + add-goal button

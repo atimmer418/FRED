@@ -63,7 +63,7 @@ export class RecoveryPage implements OnInit {
       const response = await this.recoveryService.initiateRecovery(this.email);
       if (response.success) {
         this.step = 'otp';
-        this.toastService.showToast('Recovery code sent — check your email.');
+        this.toastService.showToast('Recovery code sent. Check your email.');
       } else {
         this.toastService.showToast(response.message || 'Failed to initiate recovery.');
       }

@@ -497,7 +497,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
       const streak = this.currentInvestment.monthlyStreak;
       const alert = await this.alertController.create({
         header: 'Pause Investments?',
-        message: `This will reset your ${streak}-month investing streak to 0. Investing less is better than investing nothing — consider reducing your amount instead.`,
+        message: `This will reset your ${streak}-month investing streak to 0. Investing less is better than investing nothing. Consider reducing your amount instead.`,
         buttons: [
           {
             text: 'Cancel',

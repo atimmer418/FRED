@@ -1,0 +1,109 @@
+<div class="fd-body">
+  <div class="fd-handle"></div>
+  <h3>Freedom Plan</h3>
+  <p class="fd-sub">Your path to work-optional. Adjust the plan and watch the date move.</p>
+
+  <!-- Hero: the date, front and center -->
+  <div class="fd-hero">
+    <div class="fd-hero-year" *ngIf="freedomYear() as year; else fdHeroEmpty">{{ year }}</div>
+    <ng-template #fdHeroEmpty><div class="fd-hero-year fd-hero-year--empty">—</div></ng-template>
+    <div class="fd-hero-meta">
+      <span *ngIf="freedomAge() as age">Age {{ age }}</span>
+      <span class="fd-dot" *ngIf="freedomAge() !== null && timeAwayLabel() !== null">·</span>
+      <span *ngIf="timeAwayLabel() as away">{{ away }}</span>
+      <span *ngIf="freedomYear() === null">Set your plan below to see your freedom date</span>
+    </div>
+    <div class="fd-hero-bar"><i [style.width.%]="progressPct()"></i></div>
+    <div class="fd-hero-labels">
+      <span>Now {{ equity | currency:'USD':'symbol':'1.0-0' }}</span>
+      <span>{{ progressPct() }}% there</span>
+      <span>Goal {{ portfolioGoal() | currency:'USD':'symbol':'1.0-0' }}</span>
+    </div>
+  </div>
+
+  <!-- Editable plan -->
+  <p class="fd-zone">Your plan</p>
+  <div class="fd-tiles">
+    <div class="fd-tile">
+      <span class="fd-tile-label">Income goal</span>
+      <div class="fd-tile-edit">
+        <span class="fd-pre">$</span>
+        <input
+          type="text"
+          inputmode="numeric"
+          class="fd-tile-input"
+          [value]="incomeSig() || ''"
+          (input)="onIncomeInput($event)"
+          placeholder="5,000"
+        />
+        <span class="fd-suf">/mo</span>
+      </div>
+    </div>
+    <div class="fd-tile">
+      <span class="fd-tile-label">Investing</span>
+      <div class="fd-tile-edit">
+        <span class="fd-pre">$</span>
+        <input
+          type="text"
+          inputmode="numeric"
+          class="fd-tile-input"
+          [value]="investSig() || ''"
+          (input)="onInvestInput($event)"
+          placeholder="500"
+        />
+        <span class="fd-suf">/mo</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Insights -->
+  <p class="fd-zone">Insights</p>
+  <div class="fd-insights">
+    <div class="fd-insight" *ngIf="plus100Months() as sooner">
+      <div class="fd-insight-icon"><span class="material-symbols-outlined">trending_up</span></div>
+      <div class="fd-insight-text">
+        <strong>+$100/mo</strong> would bring your freedom date
+        <strong>≈ {{ sooner }} {{ sooner === 1 ? 'month' : 'months' }} closer</strong>
+      </div>
+    </div>
+    <div class="fd-insight" *ngIf="portfolioGoal() > 0">
+      <div class="fd-insight-icon"><span class="material-symbols-outlined">account_balance</span></div>
+      <div class="fd-insight-text">
+        A <strong>{{ portfolioGoal() | currency:'USD':'symbol':'1.0-0' }}</strong> portfolio pays you
+        <strong>{{ incomeSig() | currency:'USD':'symbol':'1.0-0' }}/mo</strong> at a
+        {{ pct(withdrawalRate()) }}% withdrawal rate
+      </div>
+    </div>
+  </div>
+
+  <!-- Assumptions -->
+  <p class="fd-zone">
+    Assumptions
+    <button class="fd-reset" *ngIf="!isDefaultRates()" (click)="resetRates()" type="button">
+      Reset to standard
+    </button>
+  </p>
+  <div class="fd-assume">
+    <div class="fd-assume-row fd-assume-row--stacked">
+      <div class="fd-assume-name">
+        Avg annual return
+        <span class="fd-assume-sub">what your portfolio grows by</span>
+      </div>
+      <div class="fd-scenario-chips">
+        <button
+          *ngFor="let s of RETURN_SCENARIOS"
+          [class.on]="annualReturn() === s.rate"
+          (click)="selectReturn(s.rate)"
+          type="button"
+        >{{ s.label }}</button>
+      </div>
+    </div>
+  </div>
+  <p class="fd-note">
+    Withdrawals follow the industry-standard 4% rule.
+    Past performance is not indicative of future results.
+  </p>
+
+  <button class="fd-cta" (click)="save()" [disabled]="!canSave()" type="button">Save plan</button>
+  <button class="fd-cancel" (click)="close()" type="button">Cancel</button>
+</div>

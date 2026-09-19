@@ -363,8 +363,8 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
         this.dripEnabled = response.dripEnabled;
         this.showToast(
           response.dripEnabled
-            ? 'DRIP enabled — dividends will be reinvested automatically.'
-            : 'DRIP disabled — dividends will stay as cash.',
+            ? 'DRIP enabled. Dividends will be reinvested automatically.'
+            : 'DRIP disabled. Dividends will stay as cash.',
           'success'
         );
         this.dripToggling = false;

@@ -586,14 +586,14 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
 
     switch (frequency.value) {
       case 'WEEKLY':
-        return `${monthDay} — recurring every week on ${dayName}`;
+        return `${monthDay}: recurring every week on ${dayName}`;
       case 'BIWEEKLY':
-        return `${monthDay} — recurring every 2 weeks on ${dayName}`;
+        return `${monthDay}: recurring every 2 weeks on ${dayName}`;
       case 'SEMI_MONTHLY':
-        return `${monthDay} — recurring every month on the 1st and 15th`;
+        return `${monthDay}: recurring every month on the 1st and 15th`;
       case 'MONTHLY':
         const monthlyDay = startDate.getDate();
-        return `${monthDay} — recurring every month on the ${monthlyDay}${this.getOrdinalSuffix(monthlyDay)}`;
+        return `${monthDay}: recurring every month on the ${monthlyDay}${this.getOrdinalSuffix(monthlyDay)}`;
       default:
         return '';
     }

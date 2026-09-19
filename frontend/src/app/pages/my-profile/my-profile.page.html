@@ -5,8 +5,8 @@
         <span class="material-symbols-outlined">arrow_back_ios_new</span>
       </button>
       <h2 class="header-title">My Profile</h2>
-      <button *ngIf="isDirty" (click)="saveChanges()" class="hero-action-btn">Save</button>
-      <div *ngIf="!isDirty" class="back-btn-spacer"></div>
+      <button *ngIf="isDirty()" (click)="saveChanges()" class="hero-action-btn">Save</button>
+      <div *ngIf="!isDirty()" class="back-btn-spacer"></div>
     </div>
   </div>
 </ion-header>
@@ -37,118 +37,11 @@
         <ion-avatar class="user-avatar">
           <img [src]="avatarSrc" alt="User Avatar" />
         </ion-avatar>
-        <div class="camera-badge">
-          <span class="material-symbols-outlined">photo_camera</span>
-        </div>
       </div>
       <div class="id-name">{{ userName }}</div>
       <div class="percentile-pill" *ngIf="statusPercentile !== null">
         <span class="material-symbols-outlined pill-icon">trending_up</span>
         <span>Ahead of {{ statusPercentile }}% of investors</span>
-      </div>
-    </div>
-
-    <!-- ── Freedom Plan (simplified) ────────────────────────────────────────── -->
-    <p class="zone-label">Freedom Plan</p>
-    <div class="zone-card">
-      <!-- Editable tiles -->
-      <div class="fp-tiles">
-        <div class="fp-tile">
-          <span class="fp-tile-label">Income goal</span>
-          <div class="fp-tile-edit">
-            <span class="fp-tile-pre">$</span>
-            <input
-              type="number"
-              class="fp-tile-input"
-              [(ngModel)]="retirementIncomeGoal"
-              (ngModelChange)="onIncomeChange()"
-              placeholder="5,000"
-              maxlength="5"
-            />
-            <span class="fp-tile-suf">/mo</span>
-          </div>
-        </div>
-        <div class="fp-tile">
-          <span class="fp-tile-label">Investing</span>
-          <div class="fp-tile-edit">
-            <span class="fp-tile-pre">$</span>
-            <input
-              type="number"
-              class="fp-tile-input"
-              [(ngModel)]="monthlyInvestGoal"
-              (ngModelChange)="onInvestChange()"
-              placeholder="500"
-              maxlength="5"
-            />
-            <span class="fp-tile-suf">/mo</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Projection row -->
-      <div class="fp-projection">
-        <div class="fp-year-bubble">
-          <span class="fp-year" *ngIf="freedomYear">{{ freedomYear }}</span>
-          <span class="fp-year" *ngIf="!freedomYear">—</span>
-          <span class="fp-year-label">Freedom</span>
-        </div>
-        <div class="fp-line">
-          A <strong>{{ portfolioGoal | currency:'USD':'symbol':'1.0-0' }}</strong> portfolio covers
-          <strong>{{ retirementIncomeGoal | currency:'USD':'symbol':'1.0-0' }}/mo</strong> —
-          at <strong>{{ monthlyInvestGoal | currency:'USD':'symbol':'1.0-0' }}/mo</strong>
-          you're free around
-          <strong *ngIf="freedomYear">{{ freedomYear }}, age {{ freedomStats.stats().freedomAge }}</strong>
-          <span *ngIf="!freedomYear">your freedom date will appear once your plan is set up.</span>
-        </div>
-      </div>
-
-      <!-- Progress bar -->
-      <div class="fp-progress">
-        <div class="fp-bar">
-          <i [style.width.%]="progressPercentage * 100"></i>
-        </div>
-        <div class="fp-progress-labels">
-          <span>Now: {{ currentPortfolioValue | currency:'USD':'symbol':'1.0-0' }}</span>
-          <span>Goal: {{ portfolioGoal | currency:'USD':'symbol':'1.0-0' }}</span>
-        </div>
-      </div>
-
-      <p class="fp-note">Assumes a 10% avg annual return and a 4% withdrawal rate. Past performance is not indicative of future results.</p>
-    </div>
-
-    <!-- ── Portfolio Rebalancing ─────────────────────────────────────────────── -->
-    <p class="zone-label">
-      Portfolio Rebalancing
-      <span class="lockchip" *ngIf="isPiggy">
-        <span class="material-symbols-outlined">lock</span>Plus
-      </span>
-    </p>
-    <div class="zone-card">
-      <div class="rb-row">
-        <div class="rb-icon">
-          <span class="material-symbols-outlined">balance</span>
-        </div>
-        <div class="rb-text">
-          <strong>FRED keeps your portfolio on target.</strong>
-          When your allocation drifts, FRED automatically realigns it — no trade approvals needed.
-        </div>
-      </div>
-
-      <div class="rb-chips" [class.locked]="isPiggy">
-        <button
-          *ngFor="let s of rebalanceSchedules"
-          [class.on]="selectedSchedule === s"
-          (click)="selectSchedule(s)"
-          type="button"
-        >{{ s }}</button>
-      </div>
-
-      <div class="rb-next" *ngIf="isPlusOrPro">
-        <span class="material-symbols-outlined">event_available</span>
-        Next rebalance: {{ nextRebalanceDate }}
-      </div>
-      <div class="rb-default-note" *ngIf="isPiggy">
-        On Piggy, FRED uses the default quarterly schedule. Upgrade to choose your own.
       </div>
     </div>
 
@@ -158,10 +51,11 @@
       <span class="lockchip" *ngIf="isPiggy">
         <span class="material-symbols-outlined">lock</span>Plus
       </span>
+      <span class="zone-label-hint" *ngIf="isPlusOrPro">Tap for details</span>
     </p>
     <div class="zone-card goals-card">
-      <!-- Freedom Date row (always first) -->
-      <div class="goal-row" data-tour="freedom-row">
+      <!-- Freedom Date row (always first) — opens the Freedom detail sheet -->
+      <div class="goal-row" data-tour="freedom-row" (click)="openFreedomSheet()">
         <div class="goal-tile goal-tile--freedom">
           <span class="material-symbols-outlined">savings</span>
         </div>
@@ -172,7 +66,7 @@
           </div>
           <div class="goal-sub">{{ freedomGoalSub }}</div>
           <div class="goal-bar">
-            <i class="goal-bar-fill ok" [style.width.%]="progressPercentage * 100"></i>
+            <i class="goal-bar-fill ok" [style.width.%]="progressPercentage() * 100"></i>
           </div>
         </div>
         <div class="goal-right">
@@ -183,19 +77,19 @@
       <!-- User-added goals (Plus/Pro only — behind veil on Piggy) -->
       <ng-container *ngIf="isPlusOrPro">
         <div
-          *ngFor="let proj of goalProjections"
+          *ngFor="let proj of goalProjections; trackBy: trackGoal"
           class="goal-row"
+          [class.goal-done]="proj.goal.completed"
           (click)="openAddGoalSheet(proj.goal)"
-          (contextmenu)="onGoalLongPress(proj.goal); $event.preventDefault()"
         >
           <div class="goal-tile">
-            <span class="material-symbols-outlined">{{ proj.goal.icon }}</span>
+            <span class="material-symbols-outlined">{{ proj.goal.completed ? 'check_circle' : proj.goal.icon }}</span>
           </div>
           <div class="goal-mid">
             <div class="goal-name ellipsis">{{ proj.goal.name }}</div>
             <div class="goal-sub">
               {{ proj.goal.targetAmount | currency:'USD':'symbol':'1.0-0' }} by {{ proj.goal.targetYear }} ·
-              {{ proj.goal.monthlyOutsideFRED | currency:'USD':'symbol':'1.0-0' }}/mo outside FRED
+              ≈{{ proj.monthlyEquivalent | currency:'USD':'symbol':'1.0-0' }}/mo outside FRED
             </div>
             <div class="goal-bar">
               <i
@@ -208,7 +102,8 @@
           </div>
           <div class="goal-right">
             <div class="goal-proj" [class.ok]="proj.onTrack" [class.late]="!proj.onTrack">
-              {{ proj.onTrack ? 'On track' : 'Projected' }} · {{ proj.projectedLabel }}
+              <ng-container *ngIf="proj.goal.completed; else activeProj">Done</ng-container>
+              <ng-template #activeProj>{{ proj.onTrack ? 'On track' : 'Projected' }} · {{ proj.projectedLabel }}</ng-template>
             </div>
           </div>
         </div>
@@ -220,14 +115,14 @@
 
       <!-- Compliance disclaimer -->
       <p class="goals-disclaimer" *ngIf="isPlusOrPro">
-        FRED invests only toward your Freedom Date. Other goals are projections built from amounts you contribute outside FRED — FRED never holds or moves those funds.
+        FRED invests only toward your Freedom Date. Other goals are projections built from amounts you contribute outside FRED. FRED never holds or moves those funds.
       </p>
 
       <!-- Frosted veil for Piggy — entire area tappable -->
       <div class="goals-veil" *ngIf="isPiggy" (click)="openGoalsVeilNudge()">
         <span class="material-symbols-outlined">lock</span>
         <div class="gv-title">Track more than one goal with Piggy Plus</div>
-        <div class="gv-sub">House, college, emergency fund — projected side by side</div>
+        <div class="gv-sub">House, college, emergency fund. Projected side by side.</div>
       </div>
     </div>
 
@@ -250,7 +145,7 @@
             <div class="tlh-headline">
               You could save <span class="tlh-amt">{{ tlhEstimateDisplay }}</span> in taxes
             </div>
-            <div class="tlh-sub">Rule-based harvesting on your portfolio's ETFs — VTI · VXUS · VBR</div>
+            <div class="tlh-sub">Rule-based harvesting on your portfolio's ETFs: VTI · VXUS · VBR</div>
             <button class="tlh-cta-btn" (click)="openTlhProNudge()" type="button">
               Want to save this money?
             </button>
@@ -260,9 +155,45 @@
             <div class="tlh-headline">
               Saved this year: <span class="tlh-amt green">$0.00</span>
             </div>
-            <div class="tlh-sub">Rule-based harvesting on your portfolio's ETFs — VTI · VXUS · VBR</div>
+            <div class="tlh-sub">Rule-based harvesting on your portfolio's ETFs: VTI · VXUS · VBR</div>
           </ng-container>
         </div>
+      </div>
+    </div>
+
+    <!-- ── Portfolio Rebalancing ─────────────────────────────────────────────── -->
+    <p class="zone-label">
+      Portfolio Rebalancing
+      <span class="lockchip" *ngIf="isPiggy">
+        <span class="material-symbols-outlined">lock</span>Plus
+      </span>
+    </p>
+    <div class="zone-card">
+      <div class="rb-row">
+        <div class="rb-icon">
+          <span class="material-symbols-outlined">balance</span>
+        </div>
+        <div class="rb-text">
+          <strong>FRED keeps your portfolio on target.</strong>
+          When your allocation drifts, FRED automatically realigns it. No trade approvals are needed.
+        </div>
+      </div>
+
+      <div class="rb-chips" [class.locked]="isPiggy">
+        <button
+          *ngFor="let s of rebalanceSchedules"
+          [class.on]="selectedSchedule === s"
+          (click)="selectSchedule(s)"
+          type="button"
+        >{{ s }}</button>
+      </div>
+
+      <div class="rb-next" *ngIf="isPlusOrPro">
+        <span class="material-symbols-outlined">event_available</span>
+        Next rebalance: {{ nextRebalanceDate }}
+      </div>
+      <div class="rb-default-note" *ngIf="isPiggy">
+        On Piggy, FRED uses the default quarterly schedule. Upgrade to choose your own.
       </div>
     </div>
 

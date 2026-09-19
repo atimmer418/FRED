@@ -1,11 +1,12 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, BehaviorSubject, Subject, tap, catchError, of, lastValueFrom, timeout, retry, timer, throwError, finalize, shareReplay, defer } from 'rxjs';
+import { Observable, BehaviorSubject, Subject, tap, catchError, of, lastValueFrom, timeout, retry, timer, throwError, finalize, shareReplay, defer, switchMap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
 import { DeviceIdService } from './device-id.service';
 import { KeychainSyncService } from './keychain-sync.service';
 import { NativePasskeyService } from './native-passkey.service';
+import { ACTIVE_MOCK_SUBSCRIPTION_TIER, tierMockProfilePatch } from './dev/tier-mock';
 
 const BACKEND_API_URL = environment.backendApiUrl;
 
@@ -190,14 +191,41 @@ export class AuthService {
     return !JwtTokenUtils.isJwtExpired();
   }
 
+  /** DEV ONLY: true once dev/tier-mock.ts has written its tier to the server this launch. */
+  private tierMockSynced = false;
+
+  /**
+   * DEV ONLY: write the dev/tier-mock.ts tier to the user row, once per app launch. Emits
+   * (with null) whether or not the write succeeded so the progress read always proceeds.
+   * Gated on environment.local like the portfolio/MFU mocks; the toggle is null under karma,
+   * so specs see exactly one GET and no PUT.
+   */
+  private syncTierMock(): Observable<null> {
+    const tier = environment.local ? ACTIVE_MOCK_SUBSCRIPTION_TIER : null;
+    if (!tier || this.tierMockSynced) return of(null);
+    return this.http.put(`${BACKEND_API_URL}/user/profile`, tierMockProfilePatch(tier),
+      { headers: this.getAuthHeaders() }).pipe(
+      tap(() => {
+        this.tierMockSynced = true;
+        console.info(`[tier-mock] Wrote selectedTier=${tier} to the server for this launch.`);
+      }),
+      catchError((err) => {
+        console.warn('[tier-mock] Could not write the mocked tier; progress will show the real one.', err);
+        return of(null);
+      }),
+      switchMap(() => of(null))
+    );
+  }
+
   getUserProgress(): Observable<UserProgress> {
     if (this.progressInFlight$) {
       return this.progressInFlight$;
     }
-    const obs: Observable<UserProgress> = this.http.get<UserProgress>(
-      `${BACKEND_API_URL}/user/progress`,
-      { headers: this.getAuthHeaders() }
-    ).pipe(
+    const obs: Observable<UserProgress> = this.syncTierMock().pipe(
+      switchMap(() => this.http.get<UserProgress>(
+        `${BACKEND_API_URL}/user/progress`,
+        { headers: this.getAuthHeaders() }
+      )),
       finalize(() => {
         if (this.progressInFlight$ === obs) {
           this.progressInFlight$ = null;

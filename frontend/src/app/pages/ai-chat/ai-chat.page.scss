@@ -369,13 +369,16 @@ ion-menu {
 /* Quick-reply chips — model-suggested next messages, latest reply only */
 .quick-replies {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
 }
 
+/* Every chip spans the full row so the stack reads as one tidy column,
+   even when the labels vary a lot in length */
 .quick-reply {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: stretch;
   background: #ffffff;
   border: 1.5px solid rgba(37, 99, 235, 0.35);
@@ -383,6 +386,8 @@ ion-menu {
   overflow: hidden;
 
   .quick-reply-text {
+    flex: 1;
+    text-align: center;
     padding: 7px 4px 7px 14px;
     background: transparent;
     border: none;
@@ -503,6 +508,22 @@ ion-menu {
     width: 100%;
     max-width: 420px;
     margin-top: 32px;
+  }
+
+  /* Keyboard open on the empty state: cascade the suggestion cards up and away
+     so a mid-lift tap can never land on one — just greeting + pig remain */
+  .suggestion-card {
+    transition: opacity 180ms ease, transform 220ms ease;
+  }
+
+  &.kb-hidden .suggestion-card {
+    opacity: 0;
+    transform: translateY(-16px);
+    pointer-events: none;
+
+    &:nth-child(1) { transition-delay: 80ms; }
+    &:nth-child(2) { transition-delay: 40ms; }
+    &:nth-child(3) { transition-delay: 0ms; }
   }
 
   .suggestion-card {

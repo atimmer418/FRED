@@ -1,7 +1,7 @@
 <div class="gs-body">
   <div class="gs-handle"></div>
   <h3>{{ isEditing ? 'Edit goal' : 'Add a goal' }}</h3>
-  <p class="gs-sub">Tracked as a projection from your inputs — FRED never touches these funds.</p>
+  <p class="gs-sub">Tracked as a projection from your inputs. FRED never touches these funds.</p>
 
   <!-- Goal name -->
   <div class="gs-field">
@@ -62,24 +62,53 @@
     </div>
   </div>
 
-  <!-- Monthly saving outside FRED -->
+  <!-- Starting value -->
   <div class="gs-field">
-    <label class="gs-label">Saving monthly (outside FRED)</label>
+    <label class="gs-label">Starting value (already saved)</label>
     <div class="gs-input-wrap">
       <span class="gs-prefix">$</span>
       <input
         class="gs-input with-prefix"
         type="number"
-        [(ngModel)]="monthlyOutsideFRED"
-        [placeholder]="placeholders.monthly"
+        [(ngModel)]="startingValue"
+        placeholder="0"
         min="0"
       />
     </div>
-    <div class="gs-error" *ngIf="monthlyError">{{ monthlyError }}</div>
+    <div class="gs-error" *ngIf="startingError">{{ startingError }}</div>
+  </div>
+
+  <!-- Per-paycheck saving outside FRED -->
+  <div class="gs-field">
+    <label class="gs-label">Saving per paycheck (outside FRED)</label>
+    <div class="gs-input-wrap">
+      <span class="gs-prefix">$</span>
+      <input
+        class="gs-input with-prefix"
+        type="number"
+        [(ngModel)]="perPaycheckOutsideFRED"
+        [placeholder]="placeholders.perPaycheck"
+        min="0"
+      />
+    </div>
+    <div class="gs-hint" *ngIf="monthlyEstimate > 0">
+      ≈ {{ monthlyEstimate | currency:'USD':'symbol':'1.0-0' }}/mo on your {{ frequencyLabel }} pay schedule
+    </div>
+    <div class="gs-error" *ngIf="perPaycheckError">{{ perPaycheckError }}</div>
   </div>
 
   <button class="gs-cta" (click)="save()" type="button">
     {{ isEditing ? 'Save changes' : 'Track this goal' }}
   </button>
+  <ng-container *ngIf="isEditing">
+    <button class="gs-complete" (click)="markCompleted()" type="button">
+      <span class="material-symbols-outlined">check_circle</span>
+      {{ editGoal?.completed ? 'Mark as not completed' : 'Mark as completed' }}
+    </button>
+    <button class="gs-remove" (click)="remove()" type="button">
+      <span class="material-symbols-outlined">delete</span>
+      Remove goal
+    </button>
+  </ng-container>
   <button class="gs-cancel" (click)="close()" type="button">Cancel</button>
 </div>

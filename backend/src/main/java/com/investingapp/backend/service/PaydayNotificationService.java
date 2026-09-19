@@ -37,7 +37,7 @@ public class PaydayNotificationService {
             String amount = String.format("$%.0f", schedule.getInvestmentAmount());
             emailService.sendEmail(user.getEmail(),
                 "Your investment hits tomorrow",
-                String.format("Your paycheck hits tomorrow. FRED will auto-invest %s — your Freedom Date moves closer.", amount));
+                String.format("Your paycheck hits tomorrow. FRED will auto-invest %s. Your Freedom Date moves closer.", amount));
             sendPushIfTokenPresent(user, "Investment tomorrow",
                 String.format("FRED will auto-invest %s tomorrow. Your Freedom Date moves closer.", amount));
         }

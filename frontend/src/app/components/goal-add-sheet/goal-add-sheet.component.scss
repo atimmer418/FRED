@@ -7,7 +7,7 @@
 }
 
 .gs-body {
-  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px));
   font-family: 'Manrope', sans-serif;
 }
 
@@ -99,6 +99,13 @@ h3 {
   margin-top: 4px;
 }
 
+.gs-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2563eb;
+  margin-top: 5px;
+}
+
 .gs-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -154,6 +161,53 @@ h3 {
   font-size: 14.5px;
   font-weight: 800;
   -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.85; }
+}
+
+.gs-complete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 46px;
+  margin-top: 10px;
+  border: 1.5px solid #16a34a;
+  border-radius: 13px;
+  background: #f0fdf4;
+  color: #16a34a;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .material-symbols-outlined { font-size: 19px; }
+
+  &:active { opacity: 0.85; }
+}
+
+// Mirrors .gs-complete — same outlined-pill anatomy, destructive palette.
+.gs-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 46px;
+  margin-top: 10px;
+  border: 1.5px solid #dc2626;
+  border-radius: 13px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .material-symbols-outlined { font-size: 19px; }
 
   &:active { opacity: 0.85; }
 }

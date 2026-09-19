@@ -13,14 +13,18 @@
 
   <!-- Content when loaded -->
   <ng-container *ngIf="data && !loading && !error">
-    <!-- Header -->
-    <div class="mfu-header">
-      <div class="mfu-header__spacer"></div>
-      <h1 class="mfu-header__title">FRED's Monthly<br/>Freedom Update</h1>
-      <button class="mfu-header__close" *ngIf="canDismiss" (click)="dismiss()">
+    <!-- Branded hero (Concept 1): compact gradient band with the live equity pig + FRED wordmark -->
+    <div class="mfu-hero">
+      <button class="mfu-hero__close" (click)="dismiss()">
         <span class="material-symbols-outlined">close</span>
       </button>
-      <div class="mfu-header__close mfu-header__close--locked" *ngIf="!canDismiss"></div>
+      <div class="mfu-hero__avatar">
+        <img [src]="milestoneEquityPigSrc" alt="">
+      </div>
+      <div class="mfu-hero__text">
+        <div class="mfu-hero__wordmark">FRED</div>
+        <p class="mfu-hero__title">{{ heroSubtitle }}</p>
+      </div>
     </div>
 
     <!-- Content -->
@@ -40,10 +44,10 @@
       <!-- Milestone Card (single combined) -->
       <div class="mfu-milestone" *ngIf="data.milestones && data.milestones.length > 0">
         <div class="mfu-milestone__card">
-          <div class="mfu-milestone__icon-wrapper" *ngIf="data.milestones[0].type === 'DEFAULT'">
+          <div class="mfu-milestone__icon-wrapper" *ngIf="!showMilestonePig">
             <span class="material-symbols-outlined">{{ milestoneIcon }}</span>
           </div>
-          <img *ngIf="data.milestones[0].type !== 'DEFAULT'" [src]="milestoneEquityPigSrc" class="mfu-milestone__pig-img" alt="">
+          <img *ngIf="showMilestonePig" [src]="milestoneEquityPigSrc" class="mfu-milestone__pig-img" alt="">
           <div class="mfu-milestone__text">
             <p class="mfu-milestone__title">{{ data.milestones[0].label }}</p>
             <p class="mfu-milestone__subtitle">{{ data.milestones[0].subtitle }}</p>
@@ -51,8 +55,8 @@
         </div>
       </div>
 
-      <!-- Bought Back Section -->
-      <div class="mfu-bought-back">
+      <!-- Bought Back Section (hidden once the freedom year is reached — the Retire card leads instead) -->
+      <div class="mfu-bought-back" *ngIf="!isFreedomYearReached">
         <div class="mfu-bought-back__header">
           <span class="material-symbols-outlined mfu-bought-back__icon">hourglass_empty</span>
           <h2 class="mfu-bought-back__title">{{ freedomMessage }}</h2>
@@ -79,8 +83,8 @@
         </div>
       </div>
 
-      <!-- Freedom Tracker -->
-      <div class="mfu-tracker">
+      <!-- Freedom Tracker (redundant once the freedom year is reached — the Retire card takes its place) -->
+      <div class="mfu-tracker" *ngIf="!isFreedomYearReached">
         <span class="material-symbols-outlined mfu-tracker__icon">rocket_launch</span>
         <div class="mfu-tracker__text">
           <p class="mfu-tracker__title">
@@ -120,8 +124,38 @@
         <p class="mfu-quarterly-review__closing">You're further ahead today than you were a year ago.</p>
       </div>
 
-      <!-- Best Next Move CTA (hidden on quarterly review months) -->
-      <div class="mfu-cta" *ngIf="!data.showQuarterlyCompare">
+      <!-- Retire "sky card" (FRED-217) — replaces the invest-more CTA once the freedom year arrives -->
+      <div class="mfu-retire" *ngIf="!data.showQuarterlyCompare && isFreedomYearReached">
+        <div class="mfu-retire__sky">
+          <div class="mfu-retire__confetti" aria-hidden="true">
+            <i style="left:12%;top:14%;background:#fbc926;transform:rotate(18deg)"></i>
+            <i style="left:30%;top:30%;background:#ff6b9d;transform:rotate(-22deg)"></i>
+            <i style="left:52%;top:10%;background:#5ad1a5;transform:rotate(40deg)"></i>
+            <i style="left:70%;top:26%;background:#ffffff;transform:rotate(-12deg)"></i>
+            <i style="left:84%;top:16%;background:#fbc926;transform:rotate(28deg)"></i>
+            <i style="left:90%;top:42%;background:#ff6b9d;transform:rotate(10deg)"></i>
+            <i style="left:16%;top:52%;background:#7fd1ff;transform:rotate(-30deg)"></i>
+            <i style="left:56%;top:46%;background:#fbc926;transform:rotate(52deg)"></i>
+            <i style="left:36%;top:60%;background:#ffffff;transform:rotate(20deg)"></i>
+          </div>
+          <img src="assets/images/whenPiggybanksFly.png" alt="" class="mfu-retire__pig">
+        </div>
+        <div class="mfu-retire__body">
+          <div class="mfu-retire__eyebrow">
+            <span class="material-symbols-outlined mfu-retire__eyebrow-icon">celebration</span>
+            Financial Freedom
+          </div>
+          <p class="mfu-retire__title">You've reached your Freedom Date.</p>
+          <p class="mfu-retire__line">Your portfolio is now ready to support the retirement income you set.</p>
+          <button class="mfu-retire__btn" (click)="exploreRetirement()">
+            Explore retirement strategies
+            <span class="material-symbols-outlined mfu-retire__btn-arrow">arrow_forward</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Best Next Move CTA (hidden on quarterly review months and once the freedom year is reached) -->
+      <div class="mfu-cta" *ngIf="!data.showQuarterlyCompare && !isFreedomYearReached">
         <div class="mfu-cta__glow"></div>
         <div class="mfu-cta__content">
           <div class="mfu-cta__header">

@@ -15,6 +15,10 @@
 
 .blue-hero-header .header-title {
   color: #ffffff;
+  // Pin the settings-shell weight: the component's own .header-title rule
+  // compiles after the partial at equal specificity, so without this the
+  // onboarding header weight silently applies to edit mode too.
+  font-weight: 800;
 }
 
 // --- Force light mode regardless of system theme ---
@@ -74,7 +78,7 @@ ion-toolbar {
 .header-title {
   font-family: 'Manrope', sans-serif;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.015em;
   text-align: center;
   flex: 1;
@@ -160,7 +164,7 @@ ion-content::part(scroll) {
   }
 
   &.done {
-    background: #10b981;
+    background: #16a34a; // family success green (was emerald #10b981)
   }
 }
 

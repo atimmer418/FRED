@@ -29,6 +29,8 @@ import { Keyboard } from '@capacitor/keyboard';
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
 import { ChatChartComponent, ChatChartConfig } from './chat-chart.component';
 import { ChatActionCardComponent, ChatActionProposal, ActionCardState } from './chat-action-card.component';
+import { PinService } from '../../services/pin.service';
+import { ToastService } from '../../services/toast.service';
 
 /** A rendered slice of an assistant message: markdown, chart, quick replies, or an action proposal */
 export type MessageSegment =
@@ -110,7 +112,9 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     private cdr: ChangeDetectorRef,
     private menuCtrl: MenuController,
     private tourService: FirstTimeTourService,
-    private tabActivation: TabActivationService
+    private tabActivation: TabActivationService,
+    private pinService: PinService,
+    private toastService: ToastService
   ) {
     addIcons({ arrowUp, menuOutline, addOutline, refreshOutline, sparklesOutline, trendingUpOutline, chatbubbleEllipsesOutline, pencilOutline });
 
@@ -165,17 +169,32 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     // synchronously (fetch only if cold) so they never pop in on entry.
     this.primeSuggestions();
 
-    // Chat data now loads on first activation (see onChatActiveChange), not on
-    // mount — so eager pager mounting does not fire these on app entry.
+    // Preload chat data shortly after app init (idle-deferred so tab1's cold
+    // start keeps priority) — by the time anyone swipes into chat, sessions,
+    // history, and suggestions are already rendered. First activation still
+    // loads immediately if it beats the timer (see onChatActiveChange).
+    setTimeout(() => {
+      if (!this.chatLoaded) {
+        this.chatLoaded = true;
+        this.loadSessions();
+        this.syncBackendHistory();
+        this.loadDailySuggestions();
+      }
+    }, 2500);
 
     // Native-only (plugin never fires on web — same pattern as KeyboardAvoidDirective)
     this.kbShow = Keyboard.addListener('keyboardWillShow', info => {
       this.keyboardOffset = info.keyboardHeight;
+      this.kbHidePending = false;
       this.cdr.detectChanges();
-      this.scrollToBottom();
+      // Wait for the keyboard animation + the scroll-area padding (from
+      // appKeyboardAvoid) to land — an immediate scroll targets stale geometry
+      // and leaves the view stranded above the bottom
+      setTimeout(() => this.scrollToBottom(), 350);
     });
     this.kbHide = Keyboard.addListener('keyboardWillHide', () => {
       this.keyboardOffset = 0;
+      this.kbHidePending = false;
       this.cdr.detectChanges();
     });
   }
@@ -464,6 +483,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
 
   sendMessage() {
     if (!this.newMessage.trim()) return;
+    if (this.actionInFlight) return;
 
     const userMsg = this.newMessage.trim();
     const userMsgIndex = this.messages.length;
@@ -578,14 +598,11 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   scrollToBottom() {
     if (!this.content) return;
 
-    setTimeout(() => {
-      const anchor = document.getElementById('scroll-anchor');
-      if (anchor) {
-        anchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      } else {
-        this.content.scrollToBottom(300);
-      }
-    }, 100);
+    // Must stay ion-content's own API: scrollIntoView() on the anchor scrolls
+    // EVERY scrollable ancestor, and this page lives inside the tabs Swiper —
+    // preload-time scrolls were horizontally dragging the pager onto the chat
+    // slide behind Swiper's back (tab bar still on tab1).
+    setTimeout(() => this.content.scrollToBottom(300), 100);
   }
 
   // Auto-scroll textarea to bottom when typing
@@ -624,8 +641,65 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     }
 
     const segments = this.parseSegments(msg.content ?? '', streaming);
+    // A recache (more tokens arrived, streaming flag flipped) creates brand-new
+    // segment objects — carry action-card state over so an executing/resolved
+    // card can never silently reset to a tappable 'idle'.
+    if (cached) {
+      for (let i = 0; i < segments.length; i++) {
+        const next = segments[i];
+        const prev = cached.segments[i];
+        if (next?.kind === 'action' && prev?.kind === 'action' && prev.state !== 'idle') {
+          next.state = prev.state;
+          next.resultMessage = prev.resultMessage;
+        }
+      }
+    }
+    // Rehydrate a resolved card from the persisted outcome record that follows
+    // it — in-memory card state dies on reload, and without this the card would
+    // come back looking untouched while its outcome rendered as a stray bubble.
+    const outcome = this.followingOutcome(msg);
+    if (outcome) {
+      for (const seg of segments) {
+        if (seg.kind === 'action' && seg.state === 'idle') {
+          seg.state = outcome.state;
+          seg.resultMessage = outcome.message;
+        }
+      }
+    }
     this.segmentCache.set(msg, { content: msg.content, streaming, segments });
     return segments;
+  }
+
+  /** ✅/⚠️ records the backend persists after an executed action, plus the 🚫
+   *  cancel note this page appends locally. They exist for model context and
+   *  reload safety — the card displays the outcome, not a chat bubble. */
+  private static readonly OUTCOME_PREFIXES: ReadonlyArray<{ prefix: string; state: ActionCardState }> = [
+    { prefix: '✅ ', state: 'done' },
+    { prefix: '⚠️ ', state: 'failed' },
+    { prefix: '🚫 ', state: 'cancelled' },
+  ];
+
+  private parseOutcome(content: string | undefined): { state: ActionCardState; message: string } | null {
+    if (!content) return null;
+    const match = AiChatPage.OUTCOME_PREFIXES.find(p => content.startsWith(p.prefix));
+    return match ? { state: match.state, message: content.slice(match.prefix.length) } : null;
+  }
+
+  private followingOutcome(msg: ChatMessage): { state: ActionCardState; message: string } | null {
+    const next = this.messages[this.messages.indexOf(msg) + 1];
+    return next?.role === 'assistant' ? this.parseOutcome(next.content) : null;
+  }
+
+  /** An outcome record renders inside the action card that precedes it — hide
+   *  its own bubble so the result never shows twice. */
+  isHiddenActionOutcome(index: number): boolean {
+    const msg = this.messages[index];
+    const prev = this.messages[index - 1];
+    return !!msg && !!prev
+      && msg.role === 'assistant'
+      && prev.role === 'assistant'
+      && this.parseOutcome(msg.content) !== null
+      && (prev.content ?? '').includes('```action');
   }
 
   trackSegment(index: number, seg: MessageSegment): string {
@@ -732,26 +806,64 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /** Confirm tap on an action card — the ONLY path that executes a FRED proposal. */
-  confirmAction(seg: MessageSegment) {
-    if (seg.kind !== 'action' || seg.state !== 'idle') return;
+  /** One action at a time — also freezes the composer while a change executes */
+  actionInFlight = false;
+
+  /** Cards may be tapped only on the newest, fully-delivered message */
+  isActionable(msg: ChatMessage): boolean {
+    return this.isLatestMessage(msg) && !this.isLoading
+      && msg !== this.activeStreamMsg && !this.actionInFlight;
+  }
+
+  /** Confirm tap on an action card — the ONLY path that executes a FRED proposal. */
+  async confirmAction(msg: ChatMessage, seg: MessageSegment) {
+    if (seg.kind !== 'action' || seg.state !== 'idle' || !this.isActionable(msg)) return;
+
+    // Step-up auth parity: the in-app flows PIN-gate these same mutations
+    try {
+      const hasPin = await this.pinService.hasPin();
+      if (hasPin) {
+        const verified = await this.pinService.promptPin('verify');
+        if (!verified) {
+          this.toastService.showToast('Authentication required to make this change.', 'warning');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('[Chat] PIN step-up failed:', e);
+      return;
+    }
+
+    this.actionInFlight = true;
     seg.state = 'executing';
     this.cdr.detectChanges();
 
     const sessionId = this.currentSession?.id || 'default-session';
     this.chatService.confirmAction(seg.proposal.action, seg.proposal.params, sessionId).subscribe({
       next: (res) => {
+        this.actionInFlight = false;
         seg.state = res.success ? 'done' : 'failed';
         seg.resultMessage = res.message;
-        // Mirror the outcome into the conversation (the backend persisted the
-        // same text server-side, so history and model context stay consistent)
-        this.addMessage({ role: 'assistant', content: res.message, timestamp: new Date() });
+        // Persist the outcome as a hidden system record (same ✅/⚠️ prefix the
+        // backend stores server-side): it demotes the proposal from "latest" so
+        // a reload can't resurrect a tappable card, and on reload it rehydrates
+        // the card state instead of rendering a duplicate bubble.
+        this.addMessage({
+          role: 'assistant',
+          content: (res.success ? '✅ ' : '⚠️ ') + res.message,
+          timestamp: new Date(),
+        });
         this.cdr.detectChanges();
         this.scrollToBottom();
       },
       error: (err) => {
         console.error('[Chat] Action confirm failed:', err);
+        this.actionInFlight = false;
         seg.state = 'failed';
-        seg.resultMessage = "Couldn't reach the server — nothing was changed.";
+        // Honest uncertainty: the request may have executed before the
+        // connection dropped — FRED can verify with its read tools
+        seg.resultMessage = 'I lost the connection mid-change, so I can\'t tell if it went through. '
+          + 'Ask me "did that change go through?" and I\'ll check your schedule.';
         this.cdr.detectChanges();
       },
     });
@@ -760,7 +872,36 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   cancelAction(seg: MessageSegment) {
     if (seg.kind !== 'action' || seg.state !== 'idle') return;
     seg.state = 'cancelled';
+    // Append a hidden note so the proposal is no longer the latest message —
+    // without this, a reload would resurrect the cancelled card as tappable
+    this.addMessage({ role: 'assistant', content: '🚫 Cancelled. Nothing was changed.', timestamp: new Date() });
     this.cdr.detectChanges();
+  }
+
+  /** While the keyboard is open, the tabs Swiper must never see a pointerdown
+   *  from this page: Swiper's onTouchStart blurs the focused composer textarea
+   *  on ANY touch that isn't on the textarea itself (its focusableElements
+   *  check), which is what collapsed the keyboard on every scroll and made the
+   *  send button miss. Stopping propagation at the page root keeps scrolling,
+   *  taps, and focus fully native — and pauses horizontal tab-swiping only
+   *  while typing, which is what we want anyway. */
+  onPagePointerDown(event: PointerEvent) {
+    if (this.keyboardOffset > 0) event.stopPropagation();
+  }
+
+  /** Snapchat-style dismissal — the ONLY way scrolling closes the keyboard:
+   *  the finger has to drag down past the midpoint of the keyboard itself
+   *  (touches keep reporting coordinates over the keyboard area mid-gesture).
+   *  Short scroll flicks in the conversation never cross that line. */
+  private kbHidePending = false;
+
+  onPageTouchMove(event: TouchEvent) {
+    if (this.keyboardOffset <= 0 || this.kbHidePending) return;
+    const y = event.touches[0]?.clientY;
+    if (y !== undefined && y > window.innerHeight - this.keyboardOffset / 2) {
+      this.kbHidePending = true;
+      Keyboard.hide().catch(() => { /* web no-op */ });
+    }
   }
 
   /** Pencil tap: load the chip text into the composer for editing, with the

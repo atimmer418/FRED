@@ -12,7 +12,8 @@ import {
 /**
  * Near-mean RNG: always returns 0.9999.
  * Box-Muller maps this to z ≈ +0.014, giving every path a slightly-positive
- * return (≈ 8.4% blended). All accumulation paths grow; all withdrawal paths
+ * return (≈ +10% for the 100%-stocks showdown portfolio). All accumulation
+ * paths grow; all withdrawal paths
  * succeed at reasonable spend levels.
  */
 const NEAR_MEAN_RNG = () => 0.9999;
@@ -71,9 +72,9 @@ describe('MonteCarloService', () => {
       expect(e.inflation).toBeCloseTo(0.025);
     });
 
-    it('aggressive: stocks 11.5%/16vol, bonds 4.5%/4.5vol, inflation 2.5%', () => {
+    it('aggressive (Optimistic): stocks 12%/16vol, bonds 4.5%/4.5vol, inflation 2.5%', () => {
       const a = SCENARIO_ASSUMPTIONS.aggressive;
-      expect(a.stockReturn).toBeCloseTo(0.115);
+      expect(a.stockReturn).toBeCloseTo(0.12);
       expect(a.stockVol).toBeCloseTo(0.16);
       expect(a.bondReturn).toBeCloseTo(0.045);
       expect(a.bondVol).toBeCloseTo(0.045);
@@ -155,9 +156,9 @@ describe('MonteCarloService', () => {
     });
 
     it('zero monthlyContribution with yearsToRetirement > 0 still grows via returns alone', () => {
-      // With NEAR_MEAN_RNG (constant ~8.4% return), $3k/mo withdrawal from $300k
+      // With NEAR_MEAN_RNG (constant ~10% return, 100% stocks), $3k/mo withdrawal from $300k
       // depletes the portfolio in ~21 years → ytr=0 gives 0% success.
-      // After 10 years of accumulation at 8.4%, the portfolio grows to ~$672k,
+      // After 10 years of accumulation at ~10%, the portfolio grows past $750k,
       // which then sustains the same $3k/mo comfortably → 100% success.
       const r0 = service.runShowdown(mkParams({
         portfolioValue: 300_000,
@@ -262,12 +263,12 @@ describe('MonteCarloService', () => {
     });
 
     it('different RNG functions can produce different results for the same params', () => {
-      // () => 0.9999: z ≈ +0.014 → blended return ≈ +8.4%/yr.
-      // $500k portfolio growing at 8.4% with only $2k/mo ($24k/yr) withdrawal → always succeeds.
+      // () => 0.9999: z ≈ +0.014 → stock return ≈ +10%/yr.
+      // $500k portfolio growing at ~10% with only $2k/mo ($24k/yr) withdrawal → always succeeds.
       service.setRng(() => 0.9999);
       const rHigh = service.runShowdown(mkParams({ portfolioValue: 500_000, monthlySpend: 2_000 }));
 
-      // () => 0.5: cos(π) = -1 → z ≈ -1.18 → blended return ≈ -8.4%/yr.
+      // () => 0.5: cos(π) = -1 → z ≈ -1.18 → stock return well negative every year.
       // Portfolio shrinks every year AND withdrawals grow → rapidly depleted → always fails.
       service.setRng(() => 0.5);
       const rLow = service.runShowdown(mkParams({ portfolioValue: 500_000, monthlySpend: 2_000 }));

@@ -16,6 +16,7 @@ import { AuthService, UserProgress } from './auth.service';
 import { AlpacaService } from './alpaca.service';
 import { PortfolioStoreService } from './portfolio-store.service';
 import { InvestmentFrequencyUtils } from '../utils/investment-frequency.utils';
+import { RateAssumptionsService } from './rate-assumptions.service';
 
 /** Shape of the three computed stat-strip values. */
 export interface FreedomStats {
@@ -38,11 +39,12 @@ const SNAPSHOT_KEY_PREFIX = 'fred.statStrip.v1.';
 @Injectable({ providedIn: 'root' })
 export class FreedomStatsService {
 
-  // Assumed annual return for the live freedom-year projection.
-  // Mirrors MonthlyFreedomUpdateService.ASSUMED_ANNUAL_RETURN on the backend so
-  // the header matches what the Monthly Freedom Update would compute.
-  private readonly ASSUMED_ANNUAL_RETURN = 0.10;
-  private readonly SAFE_WITHDRAWAL_RATE = 0.04;
+  // Projection rates come from RateAssumptionsService (user-adjustable;
+  // defaults mirror MonthlyFreedomUpdateService.ASSUMED_ANNUAL_RETURN / 4% SWR
+  // on the backend so at-default numbers match what the Monthly Freedom Update
+  // computes). Read as signals inside computeds so rate edits re-derive
+  // everything live.
+  private readonly rates = inject(RateAssumptionsService);
   private readonly DEFAULT_TARGET = 1_500_000;
 
   // --- Injected services ---
@@ -90,9 +92,31 @@ export class FreedomStatsService {
   /** The three computed stat-strip display values. */
   readonly stats: Signal<FreedomStats>;
 
+  /**
+   * Monthly investing GOAL the user saves on my-profile (survey/profile
+   * monthlyInvestment). This is the number that drives the freedom date.
+   */
+  readonly monthlyTargetInvestment: Signal<number>;
+
+  /**
+   * Monthly equivalent of the ACTUAL investment schedule (0 = no schedule
+   * or not yet fetched). Tracked for display; does not drive the freedom
+   * date unless no goal is saved.
+   */
+  readonly monthlyActualInvestment: Signal<number>;
+
+  /** Desired retirement income, annual dollars (null until progress loads). */
+  readonly retirementIncomeAnnual: Signal<number | null>;
+
   constructor() {
     // Bridge userProgress$ into signal space.
     this.userProgress = toSignal(this.authService.userProgress$, { initialValue: null });
+
+    // Unified freedom-store fields — single source of truth for the plan
+    // numbers shared by tab3, MFU, and my-profile.
+    this.monthlyTargetInvestment = computed(() => this.userProgress()?.monthlyInvestment ?? 0);
+    this.monthlyActualInvestment = computed(() => this.scheduleMonthly() ?? 0);
+    this.retirementIncomeAnnual = computed(() => this.userProgress()?.retirementIncome ?? null);
 
     // Loading gate: still loading when any fetch hasn't completed and
     // there is no snapshot to show in the meantime.
@@ -124,11 +148,14 @@ export class FreedomStatsService {
 
       const retirementIncomeAnnual: number | null = progress?.retirementIncome ?? null;
 
-      // Contribution — the ACTUAL investment schedule (monthly equivalent),
-      // falling back to the survey intent when no schedule exists yet.
-      // Mirrors the MFU, which reads the latest schedule (even when paused).
+      // Contribution — the SAVED monthly investing goal (profile/survey
+      // monthlyInvestment), falling back to the actual schedule's monthly
+      // equivalent when no goal is set. Flipped 2026-08-01 (was
+      // schedule-else-survey) so my-profile saves always propagate to the
+      // freedom date. Mirrors MonthlyFreedomUpdateService (backend) — keep
+      // the two in lockstep.
       const surveyMonthly: number = progress?.monthlyInvestment ?? 0;
-      const monthlyContribution: number = scheduleMonthly > 0 ? scheduleMonthly : surveyMonthly;
+      const monthlyContribution: number = surveyMonthly > 0 ? surveyMonthly : scheduleMonthly;
 
       // FI target — income-based 4% rule, $1.5M default.
       // UNIFIED with the Monthly Freedom Update by design: both sides compute
@@ -136,7 +163,7 @@ export class FreedomStatsService {
       // .resolveTargetPortfolio). Keep the two implementations in lockstep.
       const targetPortfolio: number =
         (retirementIncomeAnnual != null && retirementIncomeAnnual > 0)
-          ? retirementIncomeAnnual / this.SAFE_WITHDRAWAL_RATE
+          ? retirementIncomeAnnual / this.rates.withdrawalRate()
           : this.DEFAULT_TARGET;
 
       const currentEquity = equity ?? 0;
@@ -339,7 +366,7 @@ export class FreedomStatsService {
     if (currentEquity >= targetPortfolio) return 0;
     if (currentEquity <= 0 && monthlyContribution <= 0) return 600;
 
-    const r = this.ASSUMED_ANNUAL_RETURN / 12;
+    const r = this.rates.annualReturn() / 12;
     const PV = currentEquity;
     const FV = targetPortfolio;
     const PMT = monthlyContribution;

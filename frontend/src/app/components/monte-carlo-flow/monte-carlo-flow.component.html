@@ -2,7 +2,7 @@
 <div class="flow-host">
 
   <!-- ── Top navigation bar ─────────────────────────────────────────────── -->
-  <div class="flow-top">
+  <div class="flow-top" [class.on-results]="isStep('results')">
     <button class="flow-back"
             [class.show]="canGoBack && isInputStep()"
             (click)="goBack()"
@@ -16,6 +16,9 @@
             class="dot"
             [class.on]="idx === currentStepIndex"></span>
     </div>
+
+    <!-- Results title rides the top bar, in place of the dots -->
+    <h1 class="fs-h1 flow-top-title" *ngIf="isStep('results')">The showdown.</h1>
 
     <button class="flow-x"
             (click)="closeFlow()"
@@ -36,7 +39,7 @@
   <div class="fscreen" [class.on]="isStep('portfolio')">
     <div class="fs-eyebrow">Your starting point</div>
     <h1 class="fs-h1">What are you<br>starting with?</h1>
-    <p class="fs-sub">Your invested portfolio on day one of retirement.</p>
+    <p class="fs-sub">Your invested portfolio today. It keeps growing until your retirement date.</p>
 
     <div class="fs-center">
       <!-- Big dollar readout -->
@@ -81,7 +84,7 @@
   <div class="fscreen" [class.on]="isStep('outside')">
     <div class="fs-eyebrow">Outside accounts</div>
     <h1 class="fs-h1">Count everything<br>you've built.</h1>
-    <p class="fs-sub">Balances you hold outside FRED — added to your starting portfolio.</p>
+    <p class="fs-sub">Balances you hold outside FRED, added to your starting portfolio.</p>
 
     <div class="fs-center">
       <div class="glass-field">
@@ -188,8 +191,7 @@
   <!-- ── STEP: Results ─────────────────────────────────────────────────── -->
   <div class="fscreen results-fscreen" [class.on]="isStep('results')">
     <div class="fs-eyebrow">{{ resultsEyebrow }}</div>
-    <h1 class="fs-h1">The showdown.</h1>
-    <p class="fs-sub">Five ways to withdraw — here's what held across 1,000 markets.</p>
+    <p class="fs-sub">Five ways to withdraw.<br>Here's what held across 1,000 markets.</p>
 
     <!-- Capture zone for share screenshot -->
     <div class="results-scroll flow-results-capture">
@@ -227,8 +229,8 @@
         <!-- Monthly contribution stepper -->
         <div class="stepper-row">
           <div class="stepper-lab">
-            <div class="sl-1">Monthly contribution</div>
-            <div class="sl-2">Until you retire</div>
+            <div class="sl-1">Contribution until retirement</div>
+            <div class="sl-2">What if I invest more each month?</div>
           </div>
           <div class="stepper">
             <button (click)="stepContrib(-100)" [disabled]="!isPro">−</button>
@@ -241,12 +243,27 @@
         <div class="stepper-row">
           <div class="stepper-lab">
             <div class="sl-1">{{ retireDisplayLabel }}</div>
-            <div class="sl-2">{{ retireDisplaySub }}</div>
+            <div class="sl-2">What if I work longer?</div>
           </div>
           <div class="stepper">
             <button (click)="stepRetirement(-1)" [disabled]="!isPro">−</button>
             <span class="st-val">{{ retireAge }}</span>
             <button (click)="stepRetirement(1)" [disabled]="!isPro">+</button>
+          </div>
+        </div>
+
+        <!-- Merged outcome line: your spend at its odds, and the 90% spend.
+             "of simulated markets" said once; the second clause inherits it.
+             Non-Pro: the sentence rides ABOVE the veil as a teaser with every
+             value blurred (the 90%-confidence spend is never solved for
+             non-Pro, so it renders a masked placeholder under the blur). -->
+        <div class="estimate-line" [class.teaser]="!isPro">
+          <span class="material-symbols-outlined">workspace_premium</span>
+          <div class="est-txt">
+            This plan supports <strong [class.blur-val]="!isPro">{{ fmt$(monthlySpend()) }}/mo</strong> in
+            <strong [class.blur-val]="!isPro">{{ successFor('traditional') | number:'1.0-0' }}%</strong> of simulated markets,
+            and <strong [class.blur-val]="!isPro">~{{ isPro ? fmt$(maxMonthlySpend()) : '$••••' }}/mo</strong> in
+            <strong [class.blur-val]="!isPro">90%</strong>.
           </div>
         </div>
 
@@ -257,14 +274,6 @@
                   (click)="isPro ? flipScenario(s.key) : openNudge()">
             {{ s.label }}
           </button>
-        </div>
-
-        <!-- Withdrawal estimate (Pro) -->
-        <div class="estimate-line">
-          <span class="material-symbols-outlined">workspace_premium</span>
-          <div class="est-txt">
-            This plan supports <strong>~{{ fmt$(maxMonthlySpend()) }}/mo</strong> at 90% confidence.
-          </div>
         </div>
 
         <!-- Plus-tier veil (locks pro features for Plus users) -->
@@ -287,27 +296,6 @@
     </div>
   </div>
 
-  <!-- ── Assumptions bottom sheet ─────────────────────────────────────── -->
-  <div class="sheet-backdrop" [class.on]="assumpSheetOpen()" (click)="closeAssumptions()"></div>
-  <div class="mc-sheet" [class.on]="assumpSheetOpen()">
-    <div class="sheet-handle"></div>
-    <h3>Market assumptions</h3>
-    <p class="s-sub">Every simulation draws yearly returns from these distributions, calibrated to S&amp;P 500 and Bloomberg bond data, 1926–2024.</p>
-    <div class="assump-table">
-      <div class="assump-row head">
-        <span>Scenario</span><span>Stocks</span><span>Bonds</span><span>Inflation</span>
-      </div>
-      <div class="assump-row"><span>Conservative</span><span>8% · 20% vol</span><span>3.5% · 5.5%</span><span>2.5%</span></div>
-      <div class="assump-row"><span>Expected</span><span>10% · 18% vol</span><span>4% · 5%</span><span>2.5%</span></div>
-      <div class="assump-row"><span>Aggressive</span><span>11.5% · 16% vol</span><span>4.5% · 4.5%</span><span>2.5%</span></div>
-    </div>
-    <p class="method-p"><strong>How it works.</strong> Each run generates 1,000 independent market paths for a 70/30 stock-bond portfolio. Your withdrawal rises 2.5% each year with inflation. A strategy "holds" in a path if money never runs out over your full horizon — its success rate is the share of the 1,000 paths that held.</p>
-    <div class="disclaimer">
-      <span class="material-symbols-outlined">info</span>
-      <span>Simulations are educational estimates based on historical data — not guarantees or investment advice. Future markets can behave unlike the past.</span>
-    </div>
-  </div>
-
   <!-- ── Pro upgrade nudge sheet ─────────────────────────────────────── -->
   <div class="sheet-backdrop" [class.on]="nudgeSheetOpen()" (click)="closeNudge()"></div>
   <div class="mc-sheet" [class.on]="nudgeSheetOpen()">
@@ -316,7 +304,7 @@
       <span class="material-symbols-outlined">query_stats</span>
     </div>
     <h3 class="nudge-title">Go deeper with Piggy Pro</h3>
-    <p class="s-sub nudge-sub">Run conservative and aggressive scenarios, adjust contributions and retirement age on the fly, and see monthly withdrawal estimates in retirement.</p>
+    <p class="s-sub nudge-sub">Run conservative and optimistic scenarios, adjust contributions and retirement age on the fly, and see monthly withdrawal estimates in retirement.</p>
     <button class="nudge-cta" (click)="upgradeClicked()">Upgrade to Pro</button>
     <button class="nudge-later" (click)="closeNudge()">Maybe later</button>
   </div>

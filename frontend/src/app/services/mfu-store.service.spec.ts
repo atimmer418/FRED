@@ -24,7 +24,8 @@ describe('MfuStoreService', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('userId', 'u1');
-    mfuSpy = jasmine.createSpyObj('MonthlyFreedomUpdateService', ['checkShouldShow', 'generateUpdate', 'commitSeen']);
+    mfuSpy = jasmine.createSpyObj('MonthlyFreedomUpdateService', ['checkShouldShow', 'generateUpdate', 'commitSeen', 'isMockActive']);
+    mfuSpy.isMockActive.and.returnValue(false);
     loggedIn$ = new BehaviorSubject<boolean>(true);
     TestBed.configureTestingModule({
       providers: [
@@ -106,6 +107,19 @@ describe('MfuStoreService', () => {
   it('does not persist a snapshot without periodStart', () => {
     service.persistSnapshot(data({ generatedForMonth: '2026-07' }));
     expect(service.peekSnapshot()).toBeNull();
+  });
+
+  it('DEV mock active: persistSnapshot writes nothing (a mocked recap must never hydrate later)', () => {
+    mfuSpy.isMockActive.and.returnValue(true);
+    service.persistSnapshot(data({ periodStart: '2026-08-01', generatedForMonth: '2026-09' }));
+    expect(localStorage.getItem('fred.mfu.v1.u1')).toBeNull();
+  });
+
+  it('DEV mock active: peekSnapshot ignores a real snapshot stored earlier', () => {
+    service.persistSnapshot(data({ periodStart: '2026-06-01', generatedForMonth: '2026-07' }));
+    mfuSpy.isMockActive.and.returnValue(true);
+    expect(service.peekSnapshot()).toBeNull();
+    expect(localStorage.getItem('fred.mfu.v1.u1')).not.toBeNull(); // left in place for when the mock is off
   });
 
   it('loadReopen$ fetches with reopen=true and persists the snapshot', () => {

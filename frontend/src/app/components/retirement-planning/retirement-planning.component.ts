@@ -21,6 +21,8 @@ import { McInfoSheetComponent } from '../mc-info-sheet/mc-info-sheet.component';
 import { StrategyDeckComponent, EDU_CARD_DEFS } from '../strategy-deck/strategy-deck.component';
 import { DrawdownDeckComponent } from '../drawdown-deck/drawdown-deck.component';
 import { buildFade } from '../../utils/modal-fade.utils';
+import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { RetirementSectionService } from '../../services/retirement-section.service';
 
 
 @Component({
@@ -95,7 +97,7 @@ export class RetirementPlanningComponent implements OnInit {
 
     if (role === 'stress-test') {
       this.setSelectedSection('simulator');
-      this.toastService.showToast('Simulator ready — tap the piggy', 'medium', 2400);
+      this.toastService.showToast('Simulator ready. Tap the piggy', 'medium', 2400);
     } else if (role === 'drawdown') {
       await this.openDrawdownDeck();
     } else if (role === 'upgrade') {
@@ -135,7 +137,7 @@ export class RetirementPlanningComponent implements OnInit {
     if (role === 'stress-test') {
       this.includeOutsideAccts = true;
       this.setSelectedSection('simulator');
-      this.toastService.showToast('Simulator ready — tap the piggy', 'medium', 2400);
+      this.toastService.showToast('Simulator ready. Tap the piggy', 'medium', 2400);
     }
   }
 
@@ -147,9 +149,9 @@ export class RetirementPlanningComponent implements OnInit {
 
   /** Scenario options shown in the chip row. */
   readonly SCENARIOS: { key: ScenarioType; label: string }[] = [
-    { key: 'conservative', label: 'Conservative' },
-    { key: 'expected',     label: 'Expected'     },
-    { key: 'aggressive',   label: 'Aggressive'   },
+    { key: 'conservative', label: 'Conservative (8%)' },
+    { key: 'expected',     label: 'Moderate (10%)'    },
+    { key: 'aggressive',   label: 'Optimistic (12%)'  },
   ];
 
   // ── Double-present guard ──────────────────────────────────────────────────────
@@ -169,6 +171,7 @@ export class RetirementPlanningComponent implements OnInit {
     private historyService: SimulationHistoryService,
     private modalController: ModalController,
     private toastService: ToastService,
+    private retirementSection: RetirementSectionService,
   ) {
     addIcons({ diceOutline, schoolOutline });
   }
@@ -179,6 +182,8 @@ export class RetirementPlanningComponent implements OnInit {
     this.authService.userProgress$.subscribe(progress => {
       this.currentTier = progress?.selectedTier ?? null;
     });
+    // Deep-link requests (e.g. the MFU Retire card, FRED-217) switch the visible section.
+    this.retirementSection.request$.subscribe(section => this.setSelectedSection(section));
     this.loadHistory();
   }
 
@@ -237,7 +242,7 @@ export class RetirementPlanningComponent implements OnInit {
     const modal = await this.modalController.create({
       component: McInfoSheetComponent,
       componentProps: { mode: 'assumptions' },
-      cssClass: 'mc-bottom-sheet-modal',
+      ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
   }
@@ -246,7 +251,7 @@ export class RetirementPlanningComponent implements OnInit {
     const modal = await this.modalController.create({
       component: McInfoSheetComponent,
       componentProps: { mode: 'nudge' },
-      cssClass: 'mc-bottom-sheet-modal',
+      ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
     const { role } = await modal.onDidDismiss();

@@ -764,6 +764,10 @@ ion-modal.mc-bottom-sheet-modal {
   --max-width: 100%;
   --height: auto;
   --max-height: 85vh;
+  /* Top corners only. 4-value shorthand is valid here: these are plain modals
+     (border-radius: var(--border-radius) on .modal-wrapper), NOT Ionic sheet
+     mode — sheet mode applied the var via border-start-start/end-radius
+     longhands where a 4-value list is invalid. */
   --border-radius: 24px 24px 0 0;
   --background: #ffffff;
   --box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.12);
@@ -778,7 +782,21 @@ ion-modal.mc-bottom-sheet-modal .ion-page {
   display: block;
   contain: content;
   overflow-y: auto;
+  /* Keep overscroll out of the drag-dismiss gesture: no rubber-banding of the
+     sheet's own scroller, no chaining to the page behind the backdrop. */
+  overscroll-behavior-y: contain;
   max-height: 85vh;
+}
+
+/* Tall variant (Freedom detail sheet): nearly full-screen so the content fits
+   without scrolling — a backdrop sliver stays for sheet feel + drag-dismiss.
+   Still auto-height: shorter content keeps a shorter sheet. */
+ion-modal.mc-bottom-sheet-tall {
+  --max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px);
+}
+
+ion-modal.mc-bottom-sheet-tall .ion-page {
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px);
 }
 
 /* Monthly Freedom Update modal - blurred backdrop
@@ -786,7 +804,10 @@ ion-modal.mc-bottom-sheet-modal .ion-page {
 ion-modal.monthly-freedom-update-modal {
   --background: transparent;
   --box-shadow: none;
-  --backdrop-opacity: 0;
+  // Ionic owns the backdrop opacity (1 at rest) so its enter/leave animations can fade it — and with
+  // it the blur — smoothly. Do NOT force ::part(backdrop) opacity with !important: an !important
+  // author rule outranks the Web Animations origin, which pins the fade and makes the blur snap out.
+  --backdrop-opacity: 1;
   --width: 100%;
   --height: 100%;
   --max-width: 100%;
@@ -798,7 +819,6 @@ ion-modal.monthly-freedom-update-modal {
 
   &::part(backdrop) {
     background: rgba(0, 0, 0, 0.3);
-    opacity: 1 !important;
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
   }

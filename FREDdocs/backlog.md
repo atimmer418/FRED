@@ -6,14 +6,8 @@
 # ✅ READY — Most Suitable for Next Work
 _No status marker. These are the candidates the ITPM routine should pick from first._
 
-## LPFRED-184 — Update LP calculator to net-income yield model
-Update the landing page calculator so it calculates based on a net income per month (instead of yearly pre-tax salary). Logic: multiply desired monthly net income by 12 → divide by 0.04 (4% tax-exempt yield) to get target portfolio value. Then use 10% annual growth with compound interest and DRIP to calculate how long it takes to reach that value given the user's monthly investable income.
-
 ## FRED-187 — Investigate Plaid paycheck-triggered investment flow
 check on if its possible to trigger an investment when the user's paycheck is seen via Plaid
-
-## FRED-189 — Fix bank account subtype always showing Checking
-Backend `GET /api/plaid/primary-bank-account` returns the field `accountSubtype` (lowercase t) at `PlaidController.java:177`. The frontend `change-bank-account.page.ts` stores the raw response (`this.currentBankAccount = response`, line 85), then `formatAccountDisplay()` reads `this.currentBankAccount.accountSubType` (capital T, line 232) — always undefined, so the displayed subtype always falls back to 'Checking' regardless of the user's real account type (Savings, etc.). Fix: read `accountSubtype` (lowercase t) at `change-bank-account.page.ts:232` to match the backend; `plaid.service.ts:80-82` already reads it correctly. Pre-existing, user-facing; related to FRED-124.
 
 ## FRED-191 — Measure and optimize app loading performance
 use network waterfall and core web vitals to measure loading time for app and then optimize initial loading time and other timings that could be optimized
@@ -28,55 +22,6 @@ Baseline the app's cold-load performance — network waterfall + Core Web Vitals
 4. Same-method re-measurement shows a measurable reduction (no specific time target required).
 5. `npx tsc --noEmit` exits 0 and `ng build` succeeds within budgets.
 6. Before/after numbers written up.
-
-## FRED-195 — Equity-range pig avatar for profile & MFU
-in the directory PersonalTypeshit/FRED Logo, there are 5 pig directories with ranges each containing an svg. these svgs (the non-blackandwhiteversion) should be copied to an assets directory on the frontend of FRED, the ranges should be the range of the user's total equity, so when the user's total equity is within that range, the profile picture in the my profile link from tab 3 should display that svg and same with the actual profile picture within the my profile page. also, the mfu achievement that displays in the mfu should show this svg as well when that respective new bottom range of total equity has been achieved
-
-### Summary
-Copy the 5 non-B&W pig SVGs (one per total-equity range: $0–1k, $1k–10k, $10k–100k, $100k–1m, $1m+) from `PersonalTypeshit/FRED Logo/FREDpig$*` (a sibling of the FRED repo — `PersonalTypeshit` contains both `FRED` and `FRED Logo`) into `frontend/src/assets/images/`, then drive three avatars off the user's total-equity range: the profile picture on tab3's "My Profile" link, the avatar on the My Profile page, and the pig in the MFU achievement. The two profile avatars use the user's LIVE total equity (`summary.equity`); the MFU achievement reflects the equity tier achieved in that MFU. The new 5-range art fully replaces the existing `pig-level-1..6.svg` set (old files deleted), mapping the backend `equityLevel` levels 5 & 6 → the single $1m+ pig. Done when each of the three spots shows the SVG matching the right equity range.
-
-### Acceptance Criteria
-1. The 5 non-B&W pig SVGs (`pig$*.svg`, not `blackandwhiteversion.svg`) are copied from `PersonalTypeshit/FRED Logo/FREDpig$*/` (sibling of the FRED repo) into `frontend/src/assets/images/` with URL-safe filenames (source names contain `$`/`+` and must be sanitized); the range→file mapping is documented.
-2. A single shared helper maps a total-equity value → one of the 5 range SVGs ($0–1k, $1k–10k, $10k–100k, $100k–1m, $1m+). Backend `equityLevel` L5 & L6 both map to the $1m+ pig. No duplicated threshold logic across the three spots.
-3. The tab3 "My Profile" link avatar (`tab3.page.html`, currently a hardcoded Ionic placeholder) shows the pig SVG for the user's LIVE total-equity range (`summary.equity`).
-4. The My Profile page avatar shows the same range pig driven by LIVE total equity (`summary.equity`), replacing the old `pig-level-${level}.svg` that read the stale MFU `equityLevel`.
-5. The MFU achievement shows the range pig for the equity tier achieved in that MFU (MFU-derived), replacing `pig-level-${validLevel}.svg`, when a non-DEFAULT milestone is achieved.
-6. The two profile avatars are consistent for the same user (both off live equity); zero/null/empty equity falls back to the $0–1k pig — no broken `<img>`.
-7. The old `pig-level-1..6.svg` assets are deleted entirely (full replacement); frontend compiles cleanly with no broken image references and no remaining references to the old files.
-
-Decisions (Andy): profile avatars use LIVE equity; old pig-level art fully replaced; L5 & L6 → $1m+ (5 ranges only). Est. 1-3hr, [code].
-
-## FRED-201 — Keep loading screen up during cold-start reauth nav
-add story for painting the loading screen while navigation is happening instead of just showing an all blank white screen after a cold start with reauth. the loading screen should stay until the page underneath it is ready to appear and then it should disappear. this only happens on cold starts and after a reauth so that workflow should be the only one adjusted/modified to receive this fix
-
-### Summary
-On a cold start that requires reauth, after the passkey ceremony succeeds the app shows an all-blank white screen during navigation instead of the loading cover. Keep the existing loading cover (the `coin-drop` Lottie over white — `#app-resume-cover` in `index.html`) painted continuously through the cold-start → reauth → navigate sequence, and only hide it once the destination page underneath has actually rendered. Scope is strictly the cold-start + reauth workflow.
-
-### Acceptance Criteria
-1. Cold start (app fully terminated, not a resume) with reauth required (JWT expired and/or App Lock on) → after passkey success, no all-blank white screen during navigation; the loading cover (coin-drop Lottie over white) stays painted.
-2. The loading cover remains continuously visible from native-splash hide → passkey reauth → route navigation, with no intermediate white frame.
-3. The cover is hidden only after the destination routed view has actually painted beneath it — "page ready" detection is strengthened beyond `preloadAssetsForRoute`'s font/image preload + rAF (e.g. await the routed component's view being present/stable in the DOM) so the cover never hides over a blank view.
-4. Scope limited to cold-start + reauth only: the background-resume path, the normal cold-start-without-reauth path, and the dev `?devPage=` path keep their current cover timing (no regressions).
-5. Safety nets intact: the 12s `hideAllCovers()` watchdog in `ngOnInit`, the 20s `index.html` backstop, and `forceRecovery()` still force-hide the cover so a user is never permanently trapped behind it.
-6. Clean single handoff: no new white flash, no double-hide, no cover flicker at the cover→page transition.
-7. `npx tsc --noEmit` exits 0; verified on a local Capacitor iOS build (or 430×932 webview) by reproducing the cold-start + reauth flow and confirming a seamless cover-to-page handoff.
-
-## FRED-205 — Preload tab1 portfolio — hold splash for fresh data
-Eliminate the "Loading your portfolio…" spinner at tab1 first paint for onboarded users. Root cause: `waitForRoutePainted()` (app.component.ts:337-352) lifts the launch cover when `ion-content` has layout, NOT when portfolio data arrives, so the cover reveals the spinner while the 3 sequential portfolio GETs are still in flight. Phase 1 (tournament-selected, approved plan): (1) new `providedIn:'root'` `PortfolioStoreService` — in-memory single-flight cache, `prime()` (token-gated, fire-and-forget), `load$()`, and a `forkJoin` bundle (dashboard fatal; performance + history optional via catchError; timeout 10s) that parallelizes the 3 calls; (2) call `prime()` at app.component.ts:419 inside `tryOptimisticNav()`'s `hint==='complete'` block, before `navigateByUrl('/tabs/tab1')` — covers cold launch + passkey re-auth; (3) gate the tab1 cover-hide on portfolio data being painted (bounded by the existing ~2s safety cap; tab1 route only); (4) rewire `portfolio-dashboard.component.ts` `loadPortfolioData()` to consume `store.load$()` via an extracted `applyBundle()` that preserves the perf-sync money-math (lines 176-220) and history→chart→freedom→MFU ordering VERBATIM. No backend change. Result: fresh data at first paint, no stale, no spinner on normal networks; slow-network cap falls back to today's spinner (interim, removed by FRED-206). Top risk: perf-sync extraction must be verbatim. Plan: .claude/plans/we-want-to-add-ancient-cook.md. Effort S–M.
-
-### Summary
-Fetch tab1's portfolio data at app launch and hold the launch cover until it's painted, so an onboarded user sees their real portfolio at first paint with no "Loading your portfolio…" spinner. A new single-flight `PortfolioStoreService` parallelizes the three portfolio calls (`forkJoin`) and is primed from `tryOptimisticNav()`; the tab1 cover-hide waits (bounded by the existing ~2s cap) for the data before lifting, falling back to today's spinner only on slow networks. Frontend-only; no backend change; dollar figures unchanged.
-
-### Acceptance Criteria
-1. A `PortfolioStoreService` (`@Injectable({ providedIn: 'root' })`) exists at `frontend/src/app/services/portfolio-store.service.ts` exposing `prime()`, `load$(period, force)`, and `whenSettled(period, capMs)`, backed by an in-memory single-flight cache (60s TTL, keyed by `userId`) that returns the in-flight observable rather than issuing a second request.
-2. The three portfolio GETs execute in parallel via `forkJoin` (not three sequential `await`s): dashboard is fatal; performance and history are optional (`catchError`); the bundle is bounded by `timeout(10_000)`.
-3. `prime()` is invoked at `app.component.ts:419` inside `tryOptimisticNav()`'s `hint==='complete'` block, before `navigateByUrl('/tabs/tab1')`. It is a no-op with no JWT or a fresh cache, and cannot fire when the user is not routing to tab1 (existing gates preserved).
-4. On a normal network, cold-launching (and passkey re-auth) as a fully-onboarded user shows tab1's real portfolio — equity, chart, freedom badge — at first paint with **no** "Loading your portfolio…" spinner; the launch cover holds until the data is painted, then lifts onto it. Verified on a local Capacitor iOS build (or 430×932 webview).
-5. The tab1 cover-gate is bounded by the existing ~2s safety cap and branches only on `/tabs/tab1`; no other route's cover timing changes; the cover never hangs (slow network → cap → today's spinner; backend down → existing error card + "Try Again").
-6. `prime()` plus the component's own `load$()` produce exactly **one** set of the three GETs (single-flight join), not two — verified in the network panel; parallel, not serial.
-7. Dollar figures unchanged: `applyBundle()` preserves the perf-sync math (`portfolio-dashboard.component.ts:176-220`) and the history→chart→freedom→MFU ordering verbatim — the cover-revealed first frame and a subsequent pull-to-refresh show identical equity, total/period return, chart series, and freedom badge for the same account.
-8. Pull-to-refresh still works (`load$(force:true)`, `isRefreshing` spinner, `event.target.complete()`); no auth-race/navigation regression on cold launch, background/resume, locked vs unlocked (Face ID), or dev login.
-9. `ng build` (plain or `--configuration dev` — NOT `development`) passes AOT; lint clean; existing `portfolio-dashboard` / `tab1` specs pass; no new dead code or TODOs.
 
 ## FRED-207 — ✓ Refactor Monte Carlo simulator into fullscreen premium flow
 Full refactor of the tab2 simulator section (everything from the "Monte Carlo Retirement Simulator" heading down inside ion-content; header/tab-switcher and Education tab untouched). Replace the card-based UI with a premium fintech simulation experience — new all-blue-gradient FRED sub-theme, screens fading smoothly one after the other.
@@ -151,24 +96,6 @@ Restyle tab1 into tab2's design grammar while leaving the data pipeline byte-ide
 12. **Scope guards.** No backend changes; no auth/tier logic touched; tab2 files untouched; chart library choice is the builder's (restyle Chart.js config or hand-rolled SVG) as long as the prototype visuals + scrub behavior are matched.
 13. **Quality gates.** `ng build` AOT passes (plain or `--configuration dev`, NEVER "development"); lint clean on touched files; any pre-existing green targeted specs for touched components still pass (never run the full suite); Manrope/palette/force-light per style guide; `prefers-reduced-motion` degrades flip, bar, and expand animations; old table/segment/hero SCSS pruned (unrelated legacy dead styles may stay); no TODOs.
 
-## FRED-210 — Emit 1W/1M/3M/YTD performance periods from backend
-The FRED-209 analytics card collapses to Daily + All Time with a "Tap to show more" expander for the middle periods — but `/api/portfolio/performance` (PortfolioDashboardController.getPerformanceMetrics) only ever emits "Today" and "Total", so `getMiddlePerformancePeriods()` is always empty and the expander never renders in production. Add 1W, 1M, 3M, and YTD period rows computed from the same portfolio-history data the chart uses, so the approved expander comes alive with zero frontend changes.
-
-### Summary
-Extend the backend performance endpoint to also return 1W/1M/3M/YTD rows (same shape and simple-return methodology as the existing Today/Total rows, window starts resolved from the chart's history source with closest-prior-point fallback), omitting windows older than the account and degrading to today's exact behavior when history is unavailable. Done = the FRED-209 "Tap to show more" expander renders live with animated bars, zero frontend changes, plain-JUnit coverage of the window math.
-
-### Acceptance Criteria
-1. **New periods.** `/api/portfolio/performance` returns rows for `1W`, `1M`, `3M`, and `YTD` between "Today" and "Total", each with the exact same field shape as existing rows (`period`, `startValue`, `endValue`, `totalReturn`, `totalReturnPercent`).
-2. **Methodology consistency.** Each window's `startValue` is the account equity at (or the closest available point before) the window start, sourced from the SAME portfolio-history data the chart consumes (null-skipping parser preserved); `endValue` = current equity consistent with the Total row; `totalReturn = endValue − startValue`; `totalReturnPercent = totalReturn / startValue × 100` guarding division by zero. No new return model.
-3. **Account-age handling.** Windows older than the account's earliest history point are OMITTED (not zero-filled); builder documents the YTD clamp rule for young accounts.
-4. **Ordering.** Response order: Today, 1W, 1M, 3M, YTD, Total.
-5. **Degradation.** History failure/empty → endpoint returns Today + Total exactly as today; a failed window logs and skips, never 500s.
-6. **Controller stays thin.** Window computation in PortfolioDashboardService per layering conventions.
-7. **Tests.** Plain JUnit 5 (no Spring context/DB): window-start resolution, percent math with zero-start guard, YTD clamp, empty-history degradation; run via `./gradlew test --tests <FullyQualifiedClass>`.
-8. **Frontend proof (no frontend changes).** Tab1 analytics now shows "Tap to show more" live; expanding reveals 1W/1M/3M/YTD with animated bars.
-9. **Quality gates.** Backend compiles; other endpoints' responses unchanged; SLF4J logging on skip paths; no TODOs.
-
-
 ## FRED-211 — Remodel tab3 into the family design language (Variant A)
 Tab3 keeps its identity (pig avatar, FRED wordmark, freedom strip, sheet-over-blue) but joins the tab1/tab2 design family: the header becomes the family gradient with the freedom strip as glass tiles, list rows get icon tiles + Manrope typography with zone-label section headers, and scrolling is confined to the white sheet — the header and strip stay pinned. KEEP VERBATIM: the current profile pic (pigAvatarSrc image + badge) and the FRED wordmark styling (Montserrat Black Italic treatment incl. mfu-active behavior).
 Approved interactive prototype (Variant A with pinned header): ITPM/agent-memory/FRED-211-prototype.html — the B variant in its toggle is reference-only, not in scope.
@@ -234,39 +161,6 @@ Build one shared settings-shell (family gradient header, white Manrope-800 18px 
 7. **Visual proof.** Headless screenshots per converted page (top + scrolled) as fred214-<page>.png, consistent with tab3.
 8. **Quality gates.** AOT build (dev config) zero new warnings; lint; subset-icons re-run if new ligatures; no TODOs/dead styles.
 
-
-## FRED-215 — Extend settings-shell to change-email + KYC edit mode
-The two surfaces FRED-214 skipped now get the shell so the settings flows are style-consistent one level deep: /change-email (pushed from security-settings) converts fully; kyc-verification converts ONLY in editMode (the `?edit=true` path from security-settings) — its onboarding appearance must remain pixel-identical. Includes the fade-to-flat shell seam fix automatically.
-
-### Summary
-Convert change-email.page fully and kyc-verification.component conditionally (editMode only) to the shared settings-shell, with onboarding KYC proven unchanged, keyboard avoidance genuinely engaging on both form pages, and the seam-correct header inherited from the fixed partial.
-
-### Acceptance Criteria
-1. change-email adopts the shell (shell-content/shell-inner + appKeyboardAvoid); logic/back untouched.
-2. KYC editMode-only shell: `editMode===true` → shell presentation; onboarding mode renders EXACTLY as today (screenshot + diff proof).
-3. Keyboard avoidance engages on both (IonContent-hosted scroller, no silent no-op).
-4. Seam correctness inherited (fade-to-flat bottom edge meets #0e3a96 strip, verified visually).
-5. Behavior preservation: KYC prefill/SSN-lock/steps, change-email flow, guards untouched; minimal .ts (conditional classing only).
-6. Gates: AOT build (dev), lint, fred215-*.png screenshots incl. onboarding-unchanged proof, no TODOs.
-
-
-## FRED-216 — My Profile refactor: simplified plan, rebalancing, goals, TLH
-Rebuild my-profile per the approved prototype (ITPM/agent-memory/FRED-216-prototype.html): keep + restyle the enlarged pig hero, percentile pill, and referral card; simplify Freedom Plan to two editable tiles + gradient year-bubble + one projection sentence + progress (absorbing the Freedom Timeline card); ADD Portfolio Rebalancing (Piggy locked default w/ note; Plus+ quarterly/semi-annual/annual chips), Multi-Goal Tracking (Plus+, projection-only, add-goal sheet, FRED-invests badge on Freedom Date), concise Tax Loss Harvesting (non-Pro: estimate + "Want to save this money?" → Pro nudge; Pro: saved-to-date; Coming-soon). Piggy tapping Goals prompts the tab2-style Plus upgrade sheet. v1 persistence (rebalance pref + goals) = per-user localStorage. All existing flows preserved (photo, referrals, offers, banner).
-
-### Summary
-Rebuild my-profile content to the approved prototype with tier-gated Rebalancing/Goals/TLH, tab2-style upgrade nudges on gated taps (extended mc-info-sheet with configurable copy), simplified plan rendered from existing computed values (no new math model), a per-user localStorage goals/preferences service (versioned, corrupt-tolerant), DYNAMIC_ICONS + subset for TS-bound icons, and byte-preserved existing flows.
-
-### Acceptance Criteria
-1. **Identity hero.** ~104px avatar + camera badge wired to the existing photo flow; name + percentile pill (existing bindings); action-required banner preserved.
-2. **Freedom Plan simplified.** Editable tiles bound to existing retirementIncomeGoal/monthlyInvestGoal + handlers; year-bubble/sentence/progress/footnote from EXISTING computed values; replaces both old plan + timeline cards; edits live-update.
-3. **Referrals restyled, behavior identical** (segments, code/share, redeem incl. states, reward banner, upgrade-offers card).
-4. **Rebalancing.** Explainer + chips; Piggy locked w/ default note + PLUS chip + nudge on tap; Plus+ selectable, per-user localStorage persistence (documented v1), Next-rebalance line per schedule.
-5. **Goals (Plus+).** Freedom Date row first (plan values + FRED-INVESTS badge); added goals with projection-only math (on-track/late), add-goal root-level sheet, per-user persistence, edit/delete affordance; compliance disclaimer verbatim.
-6. **Piggy gating on Goals:** veil + any gated tap presents the tab2-style Plus upgrade sheet; CTA → existing upgrade path.
-7. **TLH concise.** Coming-soon pill; non-Pro: documented estimate + "Want to save this money?" → Pro sheet; Pro: saved-to-date placeholder framed by coming-soon; VTI · VXUS · VBR sub. One card.
-8. **Nudge sheets** via root-level ModalController (extended mc-info-sheet; tab2 defaults byte-preserved).
-9. **Tier reactivity** from userProgress.selectedTier without reload.
-10. **Gates.** AOT build (dev), lint, DYNAMIC_ICONS + subset (no ligature text), keyboard on tiles/sheet inputs, per-tier screenshots, versioned/corrupt-tolerant storage, reduced-motion, no TODOs/dead styles.
 
 \n# 💤 SLEEPING — Backlog (not yet started)
 _Queued but not prioritized. Promote to READY (remove the 💤) when ripe._
@@ -387,34 +281,8 @@ update fred pre generated questions to be more specifically about rag chunks, bo
 ## FRED-152 — 💤 Build Android variant of FRED app
 make android variant
 
-## LPFRED-153 — 💤 Add emailer to FRED landing page
-add emailer
-
-## LPFRED-154 — 💤 Update landing page wording for RIA status
-update wording of main page and ToS and PP to reflect soon-to-be RIA status
-
-## LPFRED-155 — 💤 Update landing page default calculation values
-update default calculations to show an age of 49 to be retired; 22, $1k/mo
-
-## LPFRED-156 — 💤 Update landing page comparison chart
-update comparison chart
-
-## LPFRED-157 — 💤 Claude landing page audit using Hormozi strategies
-have claude ingest the ultimate landing page, give our landing page a rating and asking where to improve
-
-Alex Hormozi's Landing Page Strategy for 2026 (https://www.youtube.com/watch?v=zA0B-VwOPn4)
-4 Proven Steps to Build a MILLION DOLLAR Landing Page (https://www.youtube.com/watch?v=KneaEGicMZ4)
-Brutally Honest Landing Page Advice from Alex Hormozi (https://www.youtube.com/watch?v=Qgtq-xxA00I)
-The NEW Way Of Landing Pages in 2026 (https://www.youtube.com/watch?v=1gvPLQzrbmM)
-
-## LPFRED-158 — 💤 Optimize landing pages for maximum conversions
-landing pages need to be optimized for maximum conversions
-
 ## LPFRED-159 — 💤 Adjust landing page comparison table for accuracy
 landing page comparison table needs to be adjusted
-
-## LPFRED-160 — 💤 Change Desired Freedom Income to retirement framing
-change Desired Freedom Income text to Desired Retirement Income
 
 ## LPFRED-161 — 💤 Build three subscription pricing tiers for launch
 BUILD A PRODUCT THAT IS GOOD, REFINE THE LANDING PAGE TO REFLECT THE PRODUCT BETTER, MAKE TWO TIERS ON TOP OF CURRENT
@@ -1102,3 +970,183 @@ On a cold start (most visible when reauth keeps the cover up), the loading cover
 4. Fallback safety preserved: if the Lottie fails to load (404 / parse error / no render event), the static fallback stays visible — it is removed only on a confirmed first render.
 5. No change to the cover show/hide lifecycle (`showAppCover`/`hideAllCovers`, the 20s `index.html` backstop, `_fredCoverAnim.play()` on resume) beyond the fallback-hide timing.
 6. Verified on a cold start (app fully terminated) with reauth required, on a local Capacitor iOS build (or 430×932 webview): no white flash during the static→Lottie transition.
+
+## LPFRED-153 — ✓ Add emailer to FRED landing page
+add emailer
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-154 — ✓ Update landing page wording for RIA status
+update wording of main page and ToS and PP to reflect soon-to-be RIA status
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-155 — ✓ Update landing page default calculation values
+update default calculations to show an age of 49 to be retired; 22, $1k/mo
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-156 — ✓ Update landing page comparison chart
+update comparison chart
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-157 — ✓ Claude landing page audit using Hormozi strategies
+have claude ingest the ultimate landing page, give our landing page a rating and asking where to improve
+
+Alex Hormozi's Landing Page Strategy for 2026 (https://www.youtube.com/watch?v=zA0B-VwOPn4)
+4 Proven Steps to Build a MILLION DOLLAR Landing Page (https://www.youtube.com/watch?v=KneaEGicMZ4)
+Brutally Honest Landing Page Advice from Alex Hormozi (https://www.youtube.com/watch?v=Qgtq-xxA00I)
+The NEW Way Of Landing Pages in 2026 (https://www.youtube.com/watch?v=1gvPLQzrbmM)
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-158 — ✓ Optimize landing pages for maximum conversions
+landing pages need to be optimized for maximum conversions
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-160 — ✓ Change Desired Freedom Income to retirement framing
+change Desired Freedom Income text to Desired Retirement Income
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## LPFRED-184 — ✓ Update LP calculator to net-income yield model
+Update the landing page calculator so it calculates based on a net income per month (instead of yearly pre-tax salary). Logic: multiply desired monthly net income by 12 → divide by 0.04 (4% tax-exempt yield) to get target portfolio value. Then use 10% annual growth with compound interest and DRIP to calculate how long it takes to reach that value given the user's monthly investable income.
+
+**OBE (Overcome By Events) — 2026-08-29.** Marked OBE per Andy.
+
+## FRED-189 — ✓ Fix bank account subtype always showing Checking
+Backend `GET /api/plaid/primary-bank-account` returns the field `accountSubtype` (lowercase t) at `PlaidController.java:177`. The frontend `change-bank-account.page.ts` stores the raw response (`this.currentBankAccount = response`, line 85), then `formatAccountDisplay()` reads `this.currentBankAccount.accountSubType` (capital T, line 232) — always undefined, so the displayed subtype always falls back to 'Checking' regardless of the user's real account type (Savings, etc.). Fix: read `accountSubtype` (lowercase t) at `change-bank-account.page.ts:232` to match the backend; `plaid.service.ts:80-82` already reads it correctly. Pre-existing, user-facing; related to FRED-124.
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-195 — ✓ Equity-range pig avatar for profile & MFU
+in the directory PersonalTypeshit/FRED Logo, there are 5 pig directories with ranges each containing an svg. these svgs (the non-blackandwhiteversion) should be copied to an assets directory on the frontend of FRED, the ranges should be the range of the user's total equity, so when the user's total equity is within that range, the profile picture in the my profile link from tab 3 should display that svg and same with the actual profile picture within the my profile page. also, the mfu achievement that displays in the mfu should show this svg as well when that respective new bottom range of total equity has been achieved
+
+### Summary
+Copy the 5 non-B&W pig SVGs (one per total-equity range: $0–1k, $1k–10k, $10k–100k, $100k–1m, $1m+) from `PersonalTypeshit/FRED Logo/FREDpig$*` (a sibling of the FRED repo — `PersonalTypeshit` contains both `FRED` and `FRED Logo`) into `frontend/src/assets/images/`, then drive three avatars off the user's total-equity range: the profile picture on tab3's "My Profile" link, the avatar on the My Profile page, and the pig in the MFU achievement. The two profile avatars use the user's LIVE total equity (`summary.equity`); the MFU achievement reflects the equity tier achieved in that MFU. The new 5-range art fully replaces the existing `pig-level-1..6.svg` set (old files deleted), mapping the backend `equityLevel` levels 5 & 6 → the single $1m+ pig. Done when each of the three spots shows the SVG matching the right equity range.
+
+### Acceptance Criteria
+1. The 5 non-B&W pig SVGs (`pig$*.svg`, not `blackandwhiteversion.svg`) are copied from `PersonalTypeshit/FRED Logo/FREDpig$*/` (sibling of the FRED repo) into `frontend/src/assets/images/` with URL-safe filenames (source names contain `$`/`+` and must be sanitized); the range→file mapping is documented.
+2. A single shared helper maps a total-equity value → one of the 5 range SVGs ($0–1k, $1k–10k, $10k–100k, $100k–1m, $1m+). Backend `equityLevel` L5 & L6 both map to the $1m+ pig. No duplicated threshold logic across the three spots.
+3. The tab3 "My Profile" link avatar (`tab3.page.html`, currently a hardcoded Ionic placeholder) shows the pig SVG for the user's LIVE total-equity range (`summary.equity`).
+4. The My Profile page avatar shows the same range pig driven by LIVE total equity (`summary.equity`), replacing the old `pig-level-${level}.svg` that read the stale MFU `equityLevel`.
+5. The MFU achievement shows the range pig for the equity tier achieved in that MFU (MFU-derived), replacing `pig-level-${validLevel}.svg`, when a non-DEFAULT milestone is achieved.
+6. The two profile avatars are consistent for the same user (both off live equity); zero/null/empty equity falls back to the $0–1k pig — no broken `<img>`.
+7. The old `pig-level-1..6.svg` assets are deleted entirely (full replacement); frontend compiles cleanly with no broken image references and no remaining references to the old files.
+
+Decisions (Andy): profile avatars use LIVE equity; old pig-level art fully replaced; L5 & L6 → $1m+ (5 ranges only). Est. 1-3hr, [code].
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-201 — ✓ Keep loading screen up during cold-start reauth nav
+add story for painting the loading screen while navigation is happening instead of just showing an all blank white screen after a cold start with reauth. the loading screen should stay until the page underneath it is ready to appear and then it should disappear. this only happens on cold starts and after a reauth so that workflow should be the only one adjusted/modified to receive this fix
+
+### Summary
+On a cold start that requires reauth, after the passkey ceremony succeeds the app shows an all-blank white screen during navigation instead of the loading cover. Keep the existing loading cover (the `coin-drop` Lottie over white — `#app-resume-cover` in `index.html`) painted continuously through the cold-start → reauth → navigate sequence, and only hide it once the destination page underneath has actually rendered. Scope is strictly the cold-start + reauth workflow.
+
+### Acceptance Criteria
+1. Cold start (app fully terminated, not a resume) with reauth required (JWT expired and/or App Lock on) → after passkey success, no all-blank white screen during navigation; the loading cover (coin-drop Lottie over white) stays painted.
+2. The loading cover remains continuously visible from native-splash hide → passkey reauth → route navigation, with no intermediate white frame.
+3. The cover is hidden only after the destination routed view has actually painted beneath it — "page ready" detection is strengthened beyond `preloadAssetsForRoute`'s font/image preload + rAF (e.g. await the routed component's view being present/stable in the DOM) so the cover never hides over a blank view.
+4. Scope limited to cold-start + reauth only: the background-resume path, the normal cold-start-without-reauth path, and the dev `?devPage=` path keep their current cover timing (no regressions).
+5. Safety nets intact: the 12s `hideAllCovers()` watchdog in `ngOnInit`, the 20s `index.html` backstop, and `forceRecovery()` still force-hide the cover so a user is never permanently trapped behind it.
+6. Clean single handoff: no new white flash, no double-hide, no cover flicker at the cover→page transition.
+7. `npx tsc --noEmit` exits 0; verified on a local Capacitor iOS build (or 430×932 webview) by reproducing the cold-start + reauth flow and confirming a seamless cover-to-page handoff.
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-205 — ✓ Preload tab1 portfolio — hold splash for fresh data
+Eliminate the "Loading your portfolio…" spinner at tab1 first paint for onboarded users. Root cause: `waitForRoutePainted()` (app.component.ts:337-352) lifts the launch cover when `ion-content` has layout, NOT when portfolio data arrives, so the cover reveals the spinner while the 3 sequential portfolio GETs are still in flight. Phase 1 (tournament-selected, approved plan): (1) new `providedIn:'root'` `PortfolioStoreService` — in-memory single-flight cache, `prime()` (token-gated, fire-and-forget), `load$()`, and a `forkJoin` bundle (dashboard fatal; performance + history optional via catchError; timeout 10s) that parallelizes the 3 calls; (2) call `prime()` at app.component.ts:419 inside `tryOptimisticNav()`'s `hint==='complete'` block, before `navigateByUrl('/tabs/tab1')` — covers cold launch + passkey re-auth; (3) gate the tab1 cover-hide on portfolio data being painted (bounded by the existing ~2s safety cap; tab1 route only); (4) rewire `portfolio-dashboard.component.ts` `loadPortfolioData()` to consume `store.load$()` via an extracted `applyBundle()` that preserves the perf-sync money-math (lines 176-220) and history→chart→freedom→MFU ordering VERBATIM. No backend change. Result: fresh data at first paint, no stale, no spinner on normal networks; slow-network cap falls back to today's spinner (interim, removed by FRED-206). Top risk: perf-sync extraction must be verbatim. Plan: .claude/plans/we-want-to-add-ancient-cook.md. Effort S–M.
+
+### Summary
+Fetch tab1's portfolio data at app launch and hold the launch cover until it's painted, so an onboarded user sees their real portfolio at first paint with no "Loading your portfolio…" spinner. A new single-flight `PortfolioStoreService` parallelizes the three portfolio calls (`forkJoin`) and is primed from `tryOptimisticNav()`; the tab1 cover-hide waits (bounded by the existing ~2s cap) for the data before lifting, falling back to today's spinner only on slow networks. Frontend-only; no backend change; dollar figures unchanged.
+
+### Acceptance Criteria
+1. A `PortfolioStoreService` (`@Injectable({ providedIn: 'root' })`) exists at `frontend/src/app/services/portfolio-store.service.ts` exposing `prime()`, `load$(period, force)`, and `whenSettled(period, capMs)`, backed by an in-memory single-flight cache (60s TTL, keyed by `userId`) that returns the in-flight observable rather than issuing a second request.
+2. The three portfolio GETs execute in parallel via `forkJoin` (not three sequential `await`s): dashboard is fatal; performance and history are optional (`catchError`); the bundle is bounded by `timeout(10_000)`.
+3. `prime()` is invoked at `app.component.ts:419` inside `tryOptimisticNav()`'s `hint==='complete'` block, before `navigateByUrl('/tabs/tab1')`. It is a no-op with no JWT or a fresh cache, and cannot fire when the user is not routing to tab1 (existing gates preserved).
+4. On a normal network, cold-launching (and passkey re-auth) as a fully-onboarded user shows tab1's real portfolio — equity, chart, freedom badge — at first paint with **no** "Loading your portfolio…" spinner; the launch cover holds until the data is painted, then lifts onto it. Verified on a local Capacitor iOS build (or 430×932 webview).
+5. The tab1 cover-gate is bounded by the existing ~2s safety cap and branches only on `/tabs/tab1`; no other route's cover timing changes; the cover never hangs (slow network → cap → today's spinner; backend down → existing error card + "Try Again").
+6. `prime()` plus the component's own `load$()` produce exactly **one** set of the three GETs (single-flight join), not two — verified in the network panel; parallel, not serial.
+7. Dollar figures unchanged: `applyBundle()` preserves the perf-sync math (`portfolio-dashboard.component.ts:176-220`) and the history→chart→freedom→MFU ordering verbatim — the cover-revealed first frame and a subsequent pull-to-refresh show identical equity, total/period return, chart series, and freedom badge for the same account.
+8. Pull-to-refresh still works (`load$(force:true)`, `isRefreshing` spinner, `event.target.complete()`); no auth-race/navigation regression on cold launch, background/resume, locked vs unlocked (Face ID), or dev login.
+9. `ng build` (plain or `--configuration dev` — NOT `development`) passes AOT; lint clean; existing `portfolio-dashboard` / `tab1` specs pass; no new dead code or TODOs.
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-210 — ✓ Emit 1W/1M/3M/YTD performance periods from backend
+The FRED-209 analytics card collapses to Daily + All Time with a "Tap to show more" expander for the middle periods — but `/api/portfolio/performance` (PortfolioDashboardController.getPerformanceMetrics) only ever emits "Today" and "Total", so `getMiddlePerformancePeriods()` is always empty and the expander never renders in production. Add 1W, 1M, 3M, and YTD period rows computed from the same portfolio-history data the chart uses, so the approved expander comes alive with zero frontend changes.
+
+### Summary
+Extend the backend performance endpoint to also return 1W/1M/3M/YTD rows (same shape and simple-return methodology as the existing Today/Total rows, window starts resolved from the chart's history source with closest-prior-point fallback), omitting windows older than the account and degrading to today's exact behavior when history is unavailable. Done = the FRED-209 "Tap to show more" expander renders live with animated bars, zero frontend changes, plain-JUnit coverage of the window math.
+
+### Acceptance Criteria
+1. **New periods.** `/api/portfolio/performance` returns rows for `1W`, `1M`, `3M`, and `YTD` between "Today" and "Total", each with the exact same field shape as existing rows (`period`, `startValue`, `endValue`, `totalReturn`, `totalReturnPercent`).
+2. **Methodology consistency.** Each window's `startValue` is the account equity at (or the closest available point before) the window start, sourced from the SAME portfolio-history data the chart consumes (null-skipping parser preserved); `endValue` = current equity consistent with the Total row; `totalReturn = endValue − startValue`; `totalReturnPercent = totalReturn / startValue × 100` guarding division by zero. No new return model.
+3. **Account-age handling.** Windows older than the account's earliest history point are OMITTED (not zero-filled); builder documents the YTD clamp rule for young accounts.
+4. **Ordering.** Response order: Today, 1W, 1M, 3M, YTD, Total.
+5. **Degradation.** History failure/empty → endpoint returns Today + Total exactly as today; a failed window logs and skips, never 500s.
+6. **Controller stays thin.** Window computation in PortfolioDashboardService per layering conventions.
+7. **Tests.** Plain JUnit 5 (no Spring context/DB): window-start resolution, percent math with zero-start guard, YTD clamp, empty-history degradation; run via `./gradlew test --tests <FullyQualifiedClass>`.
+8. **Frontend proof (no frontend changes).** Tab1 analytics now shows "Tap to show more" live; expanding reveals 1W/1M/3M/YTD with animated bars.
+9. **Quality gates.** Backend compiles; other endpoints' responses unchanged; SLF4J logging on skip paths; no TODOs.
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-215 — ✓ Extend settings-shell to change-email + KYC edit mode
+The two surfaces FRED-214 skipped now get the shell so the settings flows are style-consistent one level deep: /change-email (pushed from security-settings) converts fully; kyc-verification converts ONLY in editMode (the `?edit=true` path from security-settings) — its onboarding appearance must remain pixel-identical. Includes the fade-to-flat shell seam fix automatically.
+
+### Summary
+Convert change-email.page fully and kyc-verification.component conditionally (editMode only) to the shared settings-shell, with onboarding KYC proven unchanged, keyboard avoidance genuinely engaging on both form pages, and the seam-correct header inherited from the fixed partial.
+
+### Acceptance Criteria
+1. change-email adopts the shell (shell-content/shell-inner + appKeyboardAvoid); logic/back untouched.
+2. KYC editMode-only shell: `editMode===true` → shell presentation; onboarding mode renders EXACTLY as today (screenshot + diff proof).
+3. Keyboard avoidance engages on both (IonContent-hosted scroller, no silent no-op).
+4. Seam correctness inherited (fade-to-flat bottom edge meets #0e3a96 strip, verified visually).
+5. Behavior preservation: KYC prefill/SSN-lock/steps, change-email flow, guards untouched; minimal .ts (conditional classing only).
+6. Gates: AOT build (dev), lint, fred215-*.png screenshots incl. onboarding-unchanged proof, no TODOs.
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-216 — ✓ My Profile refactor: simplified plan, rebalancing, goals, TLH
+Rebuild my-profile per the approved prototype (ITPM/agent-memory/FRED-216-prototype.html): keep + restyle the enlarged pig hero, percentile pill, and referral card; simplify Freedom Plan to two editable tiles + gradient year-bubble + one projection sentence + progress (absorbing the Freedom Timeline card); ADD Portfolio Rebalancing (Piggy locked default w/ note; Plus+ quarterly/semi-annual/annual chips), Multi-Goal Tracking (Plus+, projection-only, add-goal sheet, FRED-invests badge on Freedom Date), concise Tax Loss Harvesting (non-Pro: estimate + "Want to save this money?" → Pro nudge; Pro: saved-to-date; Coming-soon). Piggy tapping Goals prompts the tab2-style Plus upgrade sheet. v1 persistence (rebalance pref + goals) = per-user localStorage. All existing flows preserved (photo, referrals, offers, banner).
+
+### Summary
+Rebuild my-profile content to the approved prototype with tier-gated Rebalancing/Goals/TLH, tab2-style upgrade nudges on gated taps (extended mc-info-sheet with configurable copy), simplified plan rendered from existing computed values (no new math model), a per-user localStorage goals/preferences service (versioned, corrupt-tolerant), DYNAMIC_ICONS + subset for TS-bound icons, and byte-preserved existing flows.
+
+### Acceptance Criteria
+1. **Identity hero.** ~104px avatar + camera badge wired to the existing photo flow; name + percentile pill (existing bindings); action-required banner preserved.
+2. **Freedom Plan simplified.** Editable tiles bound to existing retirementIncomeGoal/monthlyInvestGoal + handlers; year-bubble/sentence/progress/footnote from EXISTING computed values; replaces both old plan + timeline cards; edits live-update.
+3. **Referrals restyled, behavior identical** (segments, code/share, redeem incl. states, reward banner, upgrade-offers card).
+4. **Rebalancing.** Explainer + chips; Piggy locked w/ default note + PLUS chip + nudge on tap; Plus+ selectable, per-user localStorage persistence (documented v1), Next-rebalance line per schedule.
+5. **Goals (Plus+).** Freedom Date row first (plan values + FRED-INVESTS badge); added goals with projection-only math (on-track/late), add-goal root-level sheet, per-user persistence, edit/delete affordance; compliance disclaimer verbatim.
+6. **Piggy gating on Goals:** veil + any gated tap presents the tab2-style Plus upgrade sheet; CTA → existing upgrade path.
+7. **TLH concise.** Coming-soon pill; non-Pro: documented estimate + "Want to save this money?" → Pro sheet; Pro: saved-to-date placeholder framed by coming-soon; VTI · VXUS · VBR sub. One card.
+8. **Nudge sheets** via root-level ModalController (extended mc-info-sheet; tab2 defaults byte-preserved).
+9. **Tier reactivity** from userProgress.selectedTier without reload.
+10. **Gates.** AOT build (dev), lint, DYNAMIC_ICONS + subset (no ligature text), keyboard on tiles/sheet inputs, per-tier screenshots, versioned/corrupt-tolerant storage, reduced-motion, no TODOs/dead styles.
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.
+
+## FRED-217 — ✓ Retire button in MFU when freedom date is this year
+Add a "Retire" button to the Monthly Freedom Update instead of the "What if you invested more" option when the freedom date is the current year.
+
+### Summary
+When the user's projected freedom year has arrived, the Monthly Freedom Update should stop pitching a contribution increase. Replace the "What If You Invested More?" CTA with a "Retire" CTA that celebrates reaching the freedom date. Done means the swap is driven off `projectedFreedomYear` vs the current year, with the existing CTA untouched for every future year.
+
+### Acceptance Criteria
+1. When `data.projectedFreedomYear === new Date().getFullYear()`, the MFU renders a "Retire" CTA in place of the "What If You Invested More?" CTA. The boost title, description, `Update Contribution` button, and the contribution disclaimer are not rendered at all in this state.
+2. When `projectedFreedomYear` is any future year, the existing "What If You Invested More?" CTA renders exactly as it does today, with no visual or copy change.
+3. The retire branch is a pure display swap: it does not change `commitMfuSeen` timing, dismissal, swipe-to-dismiss, or the `requestReviewIfFirstMFU()` path.
+4. The quarterly-review gate still wins. On `showQuarterlyCompare` months neither CTA renders, in the freedom year or otherwise.
+5. Edge values do not produce a false positive: `projectedFreedomYear` of `0`, `null`, or `undefined` falls through to the existing behavior, never to the Retire CTA.
+6. A past year (`projectedFreedomYear < currentYear`) also shows the Retire CTA, not the contribution pitch.
+7. Copy is calm and specific in FRED's voice, no em dashes, and reuses the existing `.mfu-cta` structure and design-system tokens rather than a new ad-hoc card. Icon comes from `material-symbols-outlined`.
+8. Specs cover both branches (freedom year reached / not reached) plus the null/zero guard; `ng build` (plain or `--configuration dev`), lint, and the existing MFU specs pass with no new debt.
+
+**Open question:** what the Retire button does on tap is undecided (celebration-only dismiss vs. a withdrawal/drawdown flow vs. routing to the tab2 Monte Carlo simulator). Decide before implementation; anything beyond celebration-only grows scope and should be split out. Full ticket: `FREDdocs/.stories/FRED-217.md`
+
+**OBE (Overcome By Events) — 2026-09-11.** Marked OBE per Andy.

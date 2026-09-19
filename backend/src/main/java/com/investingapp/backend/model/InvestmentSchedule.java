@@ -348,16 +348,16 @@ public class InvestmentSchedule {
         String dayName = dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
 
         return switch (frequency.toUpperCase()) {
-            case "WEEKLY" -> String.format("%s — recurring every week on %s",
+            case "WEEKLY" -> String.format("%s, recurring every week on %s",
                     startDate.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")), dayName);
-            case "BIWEEKLY" -> String.format("%s — recurring every 2 weeks on %s",
+            case "BIWEEKLY" -> String.format("%s, recurring every 2 weeks on %s",
                     startDate.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")), dayName);
             case "SEMI_MONTHLY" -> {
                 // Semi-monthly is typically 1st and 15th
-                yield String.format("%s — recurring every month on the 1st and 15th",
+                yield String.format("%s, recurring every month on the 1st and 15th",
                         startDate.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")));
             }
-            case "MONTHLY" -> String.format("%s — recurring every month on the %s",
+            case "MONTHLY" -> String.format("%s, recurring every month on the %s",
                     startDate.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")),
                     getOrdinalNumber(startDate.getDayOfMonth()));
             default -> "Custom schedule";

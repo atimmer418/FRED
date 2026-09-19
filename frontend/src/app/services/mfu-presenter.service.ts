@@ -6,6 +6,8 @@ import { MonthlyFreedomUpdateComponent } from '../components/monthly-freedom-upd
 import { MonthlyFreedomUpdateData } from './monthly-freedom-update.service';
 import { MfuStoreService, MfuAutoSession } from './mfu-store.service';
 import { AppLockService } from './app-lock.service';
+import { TabActivationService } from './tab-activation.service';
+import { RetirementSectionService } from './retirement-section.service';
 
 /**
  * Single owner of Monthly Freedom Update modal presentation. Both the dashboard (tab1) and tab3 call
@@ -18,7 +20,9 @@ export class MfuPresenterService {
     private modalController: ModalController,
     private appLockService: AppLockService,
     private router: Router,
-    private mfuStore: MfuStoreService
+    private mfuStore: MfuStoreService,
+    private tabActivation: TabActivationService,
+    private retirementSection: RetirementSectionService
   ) {}
 
   /**
@@ -98,6 +102,10 @@ export class MfuPresenterService {
     if (data?.action === 'updateContribution') {
       const suggestedAmount = (data.currentAmount || 0) + (data.boostAmount || 50);
       this.router.navigate(['/recurring-investments'], { queryParams: { suggestedAmount } });
+    } else if (data?.action === 'exploreRetirement') {
+      // FRED-217 Retire card: slide the pager to tab2 and open its Education section.
+      this.tabActivation.requestTab('tab2');
+      this.retirementSection.requestSection('education');
     }
   }
 }

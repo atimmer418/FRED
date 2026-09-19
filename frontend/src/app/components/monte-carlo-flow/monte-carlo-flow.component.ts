@@ -16,6 +16,9 @@ import { PortfolioService } from '../../services/portfolio.service';
 import { AuthService } from '../../services/auth.service';
 import { AlpacaService } from '../../services/alpaca.service';
 import { ToastService } from '../../services/toast.service';
+import { FreedomStatsService } from '../../services/freedom-stats.service';
+import { McInfoSheetComponent } from '../mc-info-sheet/mc-info-sheet.component';
+import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 
 // ─── Flow step machine type ──────────────────────────────────────────────────
 
@@ -24,7 +27,7 @@ export type FlowStep = 'portfolio' | 'outside' | 'spend' | 'duration' | 'calc' |
 // ─── Ordered strategy definitions ────────────────────────────────────────────
 
 export const STRATEGY_DEFS = [
-  { key: 'traditional',         name: 'Yield-Based Income',  tag: 'Live off dividends and interest — never panic-sell' },
+  { key: 'traditional',         name: 'Yield-Based Income',  tag: 'Live off dividends and interest, never panic-sell' },
   { key: 'dynamic-guardrails',  name: 'Dynamic Guardrails', tag: 'Spend more in good years, less in bad' },
   { key: 'sbloc',               name: 'SBLOC',              tag: 'Borrow through downturns, never sell low' },
   { key: 'annuity-growth',      name: 'Annuity + Growth',   tag: 'Guarantee essentials, grow the rest' },
@@ -180,12 +183,12 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
           this.syncPortfolioSlider();
           this.toastService.showToast('Live portfolio value applied', 'success', 2000);
         } else {
-          this.toastService.showToast('No holdings found — enter a value manually', 'medium', 2500);
+          this.toastService.showToast('No holdings found. Enter a value manually', 'medium', 2500);
         }
         this.portfolioFetching.set(false);
       },
       error: () => {
-        this.toastService.showToast('Could not fetch portfolio — enter a value manually', 'medium', 2500);
+        this.toastService.showToast('Could not fetch portfolio. Enter a value manually', 'medium', 2500);
         this.portfolioFetching.set(false);
       }
     });
@@ -244,10 +247,13 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
   get durationHint(): string {
     const by = this.birthYear();
     const yrs = this.yearsToLast();
+    // Withdrawals begin AFTER the seeded accumulation phase, so the ages
+    // must anchor to the retirement date, not today.
+    const ytr = this.yearsToRetirement();
     if (by > 0) {
       const currentYear = new Date().getFullYear();
-      const currentAge = currentYear - by;
-      return `A ${currentAge}-year-old retiree planning to age ${currentAge + yrs}`;
+      const retireAge = (currentYear - by) + ytr;
+      return `Retiring at ${retireAge}, planning to age ${retireAge + yrs}`;
     }
     return `${yrs} years of retirement income`;
   }
@@ -367,6 +373,26 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
       );
     }
     this.cdr.detectChanges();
+    this._pulsePanelOutcomes();
+  }
+
+  /**
+   * Micro-feedback after a live re-run: pulse the numbers that just changed
+   * so each stepper tap visibly lands. WAAPI, not CSS transitions — the
+   * global reduced-motion rule zeroes those.
+   */
+  private _pulsePanelOutcomes(): void {
+    const host = this.el.nativeElement;
+    for (const sel of ['.est-txt']) {
+      (host.querySelector(sel) as HTMLElement | null)?.animate(
+        [
+          { transform: 'scale(1)' },
+          { transform: 'scale(1.018)' },
+          { transform: 'scale(1)' },
+        ],
+        { duration: 220, easing: 'ease-out' }
+      );
+    }
   }
 
   // ─── Pro panel ────────────────────────────────────────────────────────────
@@ -427,9 +453,14 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   get resultsEyebrow(): string {
     const sc = this.scenario();
-    const label = sc.charAt(0).toUpperCase() + sc.slice(1);
+    // Display names diverge from the internal keys (expected → Moderate etc.).
+    const label = this.SCENARIOS.find(s => s.key === sc)?.label ?? sc;
     const pv = this.portfolioValue() + (this.includeOutside ? this.k401Balance() + this.rothBalance() : 0);
-    return `${label} · ${this.fmtShort(pv)} · ${this.fmt$(this.monthlySpend())}/mo · ${this.yearsToLast()} yrs`;
+    // Disclose the accumulation phase for ALL tiers — the levers that control
+    // it sit behind the Pro veil, but the base run always includes it.
+    const ytr = this.yearsToRetirement();
+    const retire = ytr > 0 ? (ytr == 1 ? 'retire in 1 yr\n' : `retire in ${ytr} yrs\n`) : '';
+    return `${retire}${label} · ${this.fmtShort(pv)} · ${this.fmt$(this.monthlySpend())}/mo · ${this.yearsToLast()} yrs`;
   }
 
   // ─── History ──────────────────────────────────────────────────────────────
@@ -486,11 +517,23 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   // ─── Assumptions sheet ───────────────────────────────────────────────────
 
-  assumpSheetOpen = signal(false);
   nudgeSheetOpen = signal(false);
 
-  openAssumptions(): void { this.assumpSheetOpen.set(true); }
-  closeAssumptions(): void { this.assumpSheetOpen.set(false); }
+  /**
+   * Market assumptions — the standard McInfoSheetComponent bottom sheet
+   * (drag-to-dismiss via SheetDragDismissDirective, same as every other
+   * sheet), stacked above this fullscreen modal. Replaced a hand-rolled
+   * inline slide-up that could only be closed by tapping (2026-09-14),
+   * which also kept a duplicate copy of the assumptions content.
+   */
+  async openAssumptions(): Promise<void> {
+    const modal = await this.modalController.create({
+      component: McInfoSheetComponent,
+      componentProps: { mode: 'assumptions' },
+      ...BOTTOM_SHEET_MODAL_OPTS,
+    });
+    await modal.present();
+  }
 
   openNudge(): void { this.nudgeSheetOpen.set(true); }
   closeNudge(): void { this.nudgeSheetOpen.set(false); }
@@ -515,13 +558,13 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
       const { Share } = await import('@capacitor/share') as any;
       await Share.share({
         title: 'My FRED Retirement Projection',
-        text: `My retirement plan — ${this.yearsToLast()} years, ${this.fmt$(this.monthlySpend())}/mo.`,
+        text: `My retirement plan: ${this.yearsToLast()} years, ${this.fmt$(this.monthlySpend())}/mo.`,
         url: dataUrl,
         dialogTitle: 'Share your projection',
       });
     } catch (err) {
       console.error('[MCFlow] Share failed:', err);
-      this.toastService.showToast('Unable to share — please try again.', 'danger');
+      this.toastService.showToast('Unable to share. Please try again.', 'danger');
     }
   }
 
@@ -552,6 +595,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     private modalController: ModalController,
     private cdr: ChangeDetectorRef,
     private el: ElementRef<HTMLElement>,
+    private freedomStats: FreedomStatsService,
   ) {}
 
   ngOnInit(): void {
@@ -559,11 +603,28 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     this.buildStepOrder();
     this._setupKeyboardAvoid();
 
-    // Pre-fill monthlyContrib from userProgress
+    // Pre-fill monthlyContrib with the SAME goal-first, schedule-fallback
+    // resolution that computes the freedom date (freedom-stats.service) — the
+    // seeded retirement year and the seeded contribution must describe the
+    // same plan, or the base run simulates reaching the freedom date with a
+    // contribution the date never assumed.
     this.authService.userProgress$.pipe(takeUntil(this.destroy$)).subscribe(progress => {
-      const contrib = progress?.monthlyInvestment ?? 0;
-      this.monthlyContrib.set(contrib);
+      const goal = progress?.monthlyInvestment ?? 0;
+      this.monthlyContrib.set(
+        goal > 0 ? goal : Math.round(this.freedomStats.monthlyActualInvestment()));
     });
+
+    // Seed retirement timing from the live freedom date, so the panel opens
+    // describing THIS user's plan instead of "retiring now with $0/mo". Also
+    // makes the base showdown include the real accumulation phase. History
+    // re-runs keep their saved inputs.
+    if (!this.historyEntry) {
+      const fy = parseInt(this.freedomStats.stats().freedomYear, 10);
+      const yrs = fy - new Date().getFullYear();
+      if (!isNaN(fy) && yrs > 0) {
+        this.yearsToRetirement.set(Math.min(40, yrs));
+      }
+    }
 
     // Fetch birth year for retirement-age display
     this._fetchBirthYear();
@@ -782,9 +843,9 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
   // ─── Template helpers ─────────────────────────────────────────────────────
 
   readonly SCENARIOS: { key: ScenarioType; label: string }[] = [
-    { key: 'conservative', label: 'Conservative' },
-    { key: 'expected',     label: 'Expected' },
-    { key: 'aggressive',   label: 'Aggressive' },
+    { key: 'conservative', label: 'Conservative (8%)' },
+    { key: 'expected',     label: 'Moderate (10%)' },
+    { key: 'aggressive',   label: 'Optimistic (12%)' },
   ];
 
   isStep(step: FlowStep): boolean {

@@ -54,7 +54,7 @@ ion-toolbar {
 .header-title {
   font-family: 'Manrope', sans-serif;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.015em;
   text-align: center;
   flex: 1;
@@ -181,10 +181,17 @@ ion-content::part(scroll) {
   padding-right: 28px; // prevent title overlapping the checkmark
 }
 
+// Family icon tile (matches tab3 .srow-tile: 36px square, #eef4ff, radius 10)
 .card-icon {
-  font-size: 18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #eef4ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
   color: var(--results-primary);
-  font-variation-settings: 'FILL' 1;
   flex-shrink: 0;
 }
 

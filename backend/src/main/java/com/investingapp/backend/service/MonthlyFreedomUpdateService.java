@@ -291,9 +291,10 @@ public class MonthlyFreedomUpdateService {
         int freedomYear = calculateFreedomYear(currentEquity, monthlyContribution, new BigDecimal(targetPortfolio));
         dto.setProjectedFreedomYear(freedomYear);
 
-        // --- Best Next Action (boost amount based on mfuCount cycle) ---
-        int mfuCycle = (mfuCountVal != null ? mfuCountVal : 0) % 3;
-        BigDecimal boostAmount = (mfuCycle == 1) ? TWENTY_FIVE_DOLLARS : FIFTY_DOLLARS;
+        // --- Best Next Action (boost = a percentage of the member's OWN recurring amount) ---
+        int mfuCountForCycle = (mfuCountVal != null ? mfuCountVal : 0);
+        int mfuCycle = mfuCountForCycle % 3;
+        BigDecimal boostAmount = calculateBoostAmount(investmentAmount, mfuCountForCycle);
         dto.setBestNextMoveBoostAmount(boostAmount);
         BigDecimal boostedMonthly = monthlyContribution.add(calculateMonthlyEquivalent(boostAmount, frequency));
         int boostedFreedomYear = calculateFreedomYear(currentEquity, boostedMonthly, new BigDecimal(targetPortfolio));
@@ -809,18 +810,20 @@ public class MonthlyFreedomUpdateService {
     }
 
     /**
-     * Resolve the projection contribution — the actual schedule's monthly
-     * equivalent, falling back to the survey monthlyInvestment when no
-     * schedule exists yet. Mirrors FreedomStatsService (frontend):
-     * scheduleMonthly > 0 ? scheduleMonthly : surveyMonthly.
+     * Resolve the projection contribution — the user's SAVED monthly investing
+     * goal (profile/survey monthlyInvestment), falling back to the actual
+     * schedule's monthly equivalent when no goal is set. Flipped 2026-08-01
+     * (was schedule-else-survey) so my-profile saves always propagate to the
+     * freedom date. Mirrors FreedomStatsService (frontend):
+     * surveyMonthly > 0 ? surveyMonthly : scheduleMonthly.
      */
     BigDecimal resolveMonthlyContribution(BigDecimal scheduleMonthlyEquivalent, User user) {
-        if (scheduleMonthlyEquivalent != null && scheduleMonthlyEquivalent.compareTo(BigDecimal.ZERO) > 0) {
-            return scheduleMonthlyEquivalent;
-        }
         Double surveyMonthly = user.getMonthlyInvestment();
         if (surveyMonthly != null && surveyMonthly > 0) {
             return BigDecimal.valueOf(surveyMonthly);
+        }
+        if (scheduleMonthlyEquivalent != null && scheduleMonthlyEquivalent.compareTo(BigDecimal.ZERO) > 0) {
+            return scheduleMonthlyEquivalent;
         }
         return BigDecimal.ZERO;
     }
@@ -920,6 +923,27 @@ public class MonthlyFreedomUpdateService {
             default:
                 return amount;
         }
+    }
+
+    /**
+     * Dynamic "invest more" boost: a percentage of the member's OWN recurring amount so the pitch
+     * scales with them instead of a flat $50/$25 for everyone. Cycle 0 (mfuCount % 3 == 0) suggests
+     * +20%, cycle 1 suggests +10% (the two cycles that show the CTA; cycle 2 is the quarterly card).
+     * Rounded to the nearest $10, and never below the old flat floor ($50 on cycle 0, $25 on cycle 1)
+     * so a small or zero contributor still gets a nudge worth acting on. {@code currentAmount} is the
+     * member's per-schedule-period amount, matching how the CTA is displayed ("$X/{frequency}").
+     */
+    BigDecimal calculateBoostAmount(BigDecimal currentAmount, int mfuCount) {
+        int cycle = ((mfuCount % 3) + 3) % 3; // guard a stray negative mfuCount
+        BigDecimal percent = (cycle == 0) ? new BigDecimal("0.20") : new BigDecimal("0.10");
+        BigDecimal floor = (cycle == 0) ? FIFTY_DOLLARS : TWENTY_FIVE_DOLLARS;
+        BigDecimal base = (currentAmount == null) ? BigDecimal.ZERO : currentAmount;
+
+        // Nearest $10: divide by 10, round to a whole number (HALF_UP), multiply back.
+        BigDecimal roundedToTen = base.multiply(percent)
+                .divide(BigDecimal.TEN, 0, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.TEN);
+        return roundedToTen.max(floor);
     }
 
     /**

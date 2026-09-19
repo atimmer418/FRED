@@ -232,6 +232,14 @@ public class User {
     @Column(name = "private_beta", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
     private Boolean privateBeta = false;
 
+    // Tax Loss Harvesting (Piggy Pro) — explicit opt-in on top of tier;
+    // tier alone never triggers selling
+    @Column(name = "tlh_enabled", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private Boolean tlhEnabled = false;
+
+    @Column(name = "tlh_enrolled_at")
+    private LocalDateTime tlhEnrolledAt;
+
     @Column(name = "subscription_start_date", nullable = true)
     private java.time.LocalDate subscriptionStartDate;
 

@@ -21,6 +21,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
 
     Optional<ChatMessage> findTopBySessionIdOrderByCreatedAtDesc(String sessionId);
 
+    Optional<ChatMessage> findTopBySessionIdAndRoleOrderByCreatedAtAsc(String sessionId, String role);
+
     // If query method name is too long or unsupported without explicit limit in
     // some versions:
     // @Query(...) or use Pageable

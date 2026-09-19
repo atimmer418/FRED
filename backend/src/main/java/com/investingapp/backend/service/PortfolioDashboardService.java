@@ -290,7 +290,7 @@ public class PortfolioDashboardService {
     }
 
     /**
-     * Compute 1W/1M/3M/YTD performance period rows for the given user.
+     * Compute 1W/1M/3M/6M/YTD/1Y performance period rows for the given user.
      *
      * <p>Fetches one year of portfolio history (to cover all four windows including
      * YTD) and delegates window math to {@link PerformancePeriodCalculator}.
@@ -299,7 +299,7 @@ public class PortfolioDashboardService {
      *
      * @param user      The authenticated user with an Alpaca account
      * @param endValue  Current portfolio equity (same value used by the Total row)
-     * @return          Ordered period rows for 1W/1M/3M/YTD; omits any window
+     * @return          Ordered period rows for 1W/1M/3M/6M/YTD/1Y; omits any window
      *                  older than the account's earliest history point
      */
     public List<Map<String, Object>> computePerformancePeriodRows(User user, BigDecimal endValue) {

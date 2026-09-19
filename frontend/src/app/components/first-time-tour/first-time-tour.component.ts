@@ -18,7 +18,7 @@ const TOUR_STEPS: TourStepDef[] = [
   { step: 'tab2', kind: 'explain', label: 'Your retirement options and analyses live here.' },
   { step: 'tab3Avatar', kind: 'gated', label: 'Your settings live here. Tap your pig to open your profile.', targetSelector: '[data-tour="profile-avatar"]' },
   { step: 'profileFreedom', kind: 'gated', label: 'This is your Freedom Plan. Tap it to see how you get there.', targetSelector: '[data-tour="freedom-row"]' },
-  { step: 'chatStory', kind: 'gated', label: 'Ask FRED anything here. Start with this one.', targetSelector: '[data-tour="story-chip"]' },
+  { step: 'chatStory', kind: 'gated', label: 'That\'s it. You can ask FRED anything here, either about the app or investing and retirement. Start with this one.', targetSelector: '[data-tour="story-chip"]' },
 ];
 
 /** Poll cadence while waiting for a gated target to appear. */

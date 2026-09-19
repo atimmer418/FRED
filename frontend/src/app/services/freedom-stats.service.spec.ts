@@ -591,8 +591,8 @@ describe('FreedomStatsService — FRED-200', () => {
 
   describe('unified contribution source', () => {
 
-    it('uses the actual schedule monthly-equivalent when a schedule exists', fakeAsync(() => {
-      // weekly $100 → ×4.33 = $433/mo
+    it('prefers the saved Investing goal over the actual schedule (2026-08-01 flip)', fakeAsync(() => {
+      // weekly $100 → ×4.33 = $433/mo schedule, but the saved goal is $500/mo.
       configureTestBed(makeAuthServiceMock(userProgressStub,
         of({ investmentAmount: 100, frequency: 'WEEKLY', isPaused: false })));
       const svc = getService();
@@ -600,21 +600,32 @@ describe('FreedomStatsService — FRED-200', () => {
 
       expect(svc.scheduleMonthly()).toBe(433);
       expect(svc.isLoading()).toBeFalse();
-      // Discriminates the contribution SOURCE: equity $50k · $433/mo · target $1.5M
-      // → 328.08 months → 28 years. If the projection regressed to the survey's
-      // $500/mo it would read 27 years — so this assertion fails on regression.
-      expect(svc.stats().freedomYear).toBe(String(new Date().getFullYear() + 28));
+      // Discriminates the contribution SOURCE: goal $500/mo · equity $50k ·
+      // target $1.5M → 319.56 months → 27 years. If the projection regressed
+      // to the schedule's $433/mo it would read 28 years — fails on regression.
+      expect(svc.stats().freedomYear).toBe(String(new Date().getFullYear() + 27));
     }));
 
-    it('falls back to the survey monthlyInvestment when no schedule exists', fakeAsync(() => {
+    it('uses the saved goal when no schedule exists', fakeAsync(() => {
       configureTestBed(makeAuthServiceMock(userProgressStub, of(null)));
       const svc = getService();
       tick(0);
 
       expect(svc.scheduleMonthly()).toBe(0);
-      // survey $500/mo · equity $50k · target $1.5M → 319.56 months → 27 years
+      // goal $500/mo · equity $50k · target $1.5M → 319.56 months → 27 years
       const expectedYear = String(new Date().getFullYear() + 27);
       expect(svc.stats().freedomYear).toBe(expectedYear);
+    }));
+
+    it('falls back to the schedule monthly-equivalent when no goal is saved', fakeAsync(() => {
+      const progressNoGoal = { ...userProgressStub, monthlyInvestment: undefined } as any;
+      configureTestBed(makeAuthServiceMock(progressNoGoal,
+        of({ investmentAmount: 100, frequency: 'WEEKLY', isPaused: false })));
+      const svc = getService();
+      tick(0);
+
+      // schedule $433/mo · equity $50k · target $1.5M → 328.08 months → 28 years
+      expect(svc.stats().freedomYear).toBe(String(new Date().getFullYear() + 28));
     }));
 
     it('falls back to the survey value and resolves the gate when the schedule fetch errors', fakeAsync(() => {

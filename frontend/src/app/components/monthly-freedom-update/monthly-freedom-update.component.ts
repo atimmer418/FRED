@@ -27,9 +27,8 @@ export class MonthlyFreedomUpdateComponent implements OnInit, OnDestroy {
   loading = true;
   error: string | null = null;
 
-  // 5-second dismiss lock
-  canDismiss = false;
-  private dismissTimer: any;
+  // The close button is available immediately (no view lock).
+  canDismiss = true;
 
   // "Seen" is committed exactly once at data-ready (non-reopen); this guards against a double fire.
   private committed = false;
@@ -44,16 +43,6 @@ export class MonthlyFreedomUpdateComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
-    if (this.isReopen) {
-      this.canDismiss = true;
-    } else {
-      // Start 5-second lock timer
-      this.canDismiss = false;
-      this.dismissTimer = setTimeout(() => {
-        this.canDismiss = true;
-      }, 5000);
-    }
-
     if (this.isReopen) {
       if (this.preloaded) {
         // Instant paint from the localStorage snapshot; live fields are revalidated below.
@@ -74,9 +63,6 @@ export class MonthlyFreedomUpdateComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    if (this.dismissTimer) {
-      clearTimeout(this.dismissTimer);
-    }
     this.reopenSub?.unsubscribe();
   }
 
@@ -230,14 +216,58 @@ export class MonthlyFreedomUpdateComponent implements OnInit, OnDestroy {
     return "Markets dip. Your system didn't.";
   }
 
+  /**
+   * Down-month body paragraphs. A member who opens the update every month should not reread the exact
+   * same reassurance, so we rotate through this pool. House voice: calm, plain, no em dashes.
+   */
+  static readonly DOWN_DESCRIPTIONS: Array<(period: string) => string> = [
+    (p) => `From <b>${p}</b>, FRED helped you stay on course. Market swings are normal and recover with time.`,
+    (p) => `From <b>${p}</b>, FRED kept investing right on schedule. Down months are when steady habits do their quiet work.`,
+    (p) => `Prices dipped over <b>${p}</b>, but your plan held steady. Consistency is what carries you through.`,
+    (p) => `<b>${p}</b> got bumpy, and that's okay. FRED kept buying like the market was on a 10% discount.`,
+    (p) => `Markets wobbled through <b>${p}</b>. Staying invested is exactly how a downturn turns into progress.`,
+    (p) => `Over <b>${p}</b>, FRED held the line for you. Dips pass, and the habit is what compounds.`,
+  ];
+
+  /**
+   * Up-month body paragraphs. Every variant keeps the "days bought back" stat; only the framing
+   * around it changes so the good-news line stays fresh too.
+   */
+  static readonly UP_DESCRIPTIONS: Array<(period: string, days: number) => string> = [
+    (p, d) => `From <b>${p}</b>, FRED helped move you about <b>${d} days</b> ahead of a typical 59.5 retirement age.`,
+    (p, d) => `Good spree. Over <b>${p}</b>, FRED pulled your freedom date about <b>${d} days</b> closer.`,
+    (p, d) => `<b>${p}</b> moved you forward: roughly <b>${d} days</b> off the wait for financial freedom.`,
+    (p, d) => `FRED bought back about <b>${d} days</b> over <b>${p}</b>. That's time back in your temporal wallet.`,
+  ];
+
+  /**
+   * Deterministic per-MFU variant index, seeded off mfuCount so the copy rotates month to month yet
+   * stays put across the many getter calls a change-detection pass makes (and when a month is
+   * reopened). Falls back to a stable hash of the month when mfuCount is not present.
+   */
+  private variantIndex(poolSize: number): number {
+    const count = this.data?.mfuCount;
+    const seed = (typeof count === 'number' && Number.isFinite(count) && count >= 0)
+      ? count
+      : this.hashSeed(this.data?.generatedForMonth || this.data?.periodEnd || '');
+    return seed % poolSize;
+  }
+
+  private hashSeed(s: string): number {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h;
+  }
+
   get freedomDescriptionHtml(): string {
     if (!this.data) return '';
+    const period = this.data.periodLabel;
     if (this.data.daysBoughtBack > 0) {
-      const days = this.data.daysBoughtBack;
-      const userAge = this.data.age || 35;
-      return `From <b>${this.data.periodLabel}</b>, FRED helped move you about <b>${days} days</b> ahead a typical 59.5 retirement age.`;
+      const pool = MonthlyFreedomUpdateComponent.UP_DESCRIPTIONS;
+      return pool[this.variantIndex(pool.length)](period, this.data.daysBoughtBack);
     }
-    return `From <b>${this.data.periodLabel}</b>, FRED helped you stay on course. Market swings are normal - they recover with time.`;
+    const pool = MonthlyFreedomUpdateComponent.DOWN_DESCRIPTIONS;
+    return pool[this.variantIndex(pool.length)](period);
   }
 
   get milestoneIcon(): string {
@@ -247,6 +277,47 @@ export class MonthlyFreedomUpdateComponent implements OnInit, OnDestroy {
 
   get milestoneEquityPigSrc(): string {
     return EquityPigUtils.pigSrcFromLevel(this.data?.equityLevel);
+  }
+
+  private static readonly MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  /** Month abbreviation from an ISO date (YYYY-MM-DD), read off the string to avoid a Date() timezone shift. */
+  private monthAbbrev(iso: string | undefined): string {
+    if (!iso || iso.length < 7) return '';
+    const m = parseInt(iso.slice(5, 7), 10);
+    return m >= 1 && m <= 12 ? MonthlyFreedomUpdateComponent.MONTHS[m - 1] : '';
+  }
+
+  /**
+   * Branded hero subtitle: "Monthly Freedom Update · Aug" for a single month, or a range like
+   * "Monthly Freedom Update · Jun–Aug" when the update spans multiple months — a member returning
+   * after a gap, since the period runs first-of-last-logged-month → end-of-last-month. Derived from
+   * periodStart/periodEnd (NOT the "MMM d to MMM d" periodLabel), so a multi-month span can never be
+   * silently mislabeled as just its start month.
+   */
+  get heroSubtitle(): string {
+    const start = this.monthAbbrev(this.data?.periodStart);
+    const end = this.monthAbbrev(this.data?.periodEnd);
+    if (!start && !end) return 'Monthly Freedom Update';
+    const sameMonth = (this.data?.periodStart || '').slice(0, 7) === (this.data?.periodEnd || '').slice(0, 7);
+    const span = sameMonth || !start ? (end || start)
+               : !end ? start
+               : `${start}–${end}`;
+    return `Monthly Freedom Update · ${span}`;
+  }
+
+  /** Equity milestone keys that sit INSIDE a pig range ($50k/$250k/$500k): no new pig unlocks there. */
+  private static readonly NON_BOUNDARY_EQUITY_KEYS = ['EQUITY_50K', 'EQUITY_250K', 'EQUITY_500K'];
+
+  /**
+   * Pig art is reserved for milestones that unlock a NEW pig range ($1k/$10k/$100k/$1M end-equity
+   * tiers). A card whose equity milestone is $50k/$250k/$500k keeps the default milestone icon
+   * (military_tech), and the DEFAULT "no milestones" card keeps its smiley (see milestoneIcon).
+   */
+  get showMilestonePig(): boolean {
+    const type = this.data?.milestones?.[0]?.type;
+    if (!type || type === 'DEFAULT') return false;
+    return !type.split(',').some(key => MonthlyFreedomUpdateComponent.NON_BOUNDARY_EQUITY_KEYS.includes(key));
   }
 
   /**
@@ -266,6 +337,23 @@ export class MonthlyFreedomUpdateComponent implements OnInit, OnDestroy {
   get changeClass(): string {
     if (!this.data) return '';
     return this.computedChange >= 0 ? 'mfu-stat__value--positive' : 'mfu-stat__value--negative';
+  }
+
+  /**
+   * FRED-217: the member's projected freedom year has arrived. True once projectedFreedomYear is a
+   * real year at or before the current one (a past year means they're over target). A missing/0/null
+   * value is a not-yet-computed projection, never a false celebration, so it falls through to the
+   * "What If You Invested More?" CTA.
+   */
+  get isFreedomYearReached(): boolean {
+    const year = this.data?.projectedFreedomYear;
+    if (!year || year <= 0) return false;
+    return year <= new Date().getFullYear();
+  }
+
+  /** Retire CTA tap: dismiss with an action so the presenter opens the tab2 Education section. */
+  exploreRetirement() {
+    this.modalController.dismiss({ action: 'exploreRetirement' });
   }
 
   get bestNextMoveTitle(): string {

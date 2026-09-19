@@ -55,9 +55,20 @@ ion-header {
     .user-avatar {
       width: 52px;
       height: 52px;
-      border: 2.5px solid rgba(255, 255, 255, .85);
-      background: white;
-      box-shadow: 0 6px 16px -4px rgba(8, 28, 78, .5);
+      // Match the MFU hero pig avatar: a white padding ring + a subtle translucent
+      // outer ring (via box-shadow, so ion-avatar's overflow can't clip it) instead of
+      // the old flat #e8eef9 border, so it reads as a polished avatar, not a flat disc.
+      background: #ffffff;
+      padding: 2px;
+      box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.5),
+        0 6px 16px -4px rgba(8, 28, 78, 0.5);
+
+      img {
+        border-radius: 50%;
+        object-fit: cover;
+        object-position: 50% 42%; // focus the crop on the pig, like the MFU hero
+      }
     }
 
     .profile-badge {

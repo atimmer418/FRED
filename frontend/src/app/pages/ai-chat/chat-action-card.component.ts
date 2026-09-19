@@ -59,7 +59,7 @@ export type ActionCardState = 'idle' | 'executing' | 'done' | 'failed' | 'cancel
           <span>{{ resultMessage }}</span>
         </div>
 
-        <p class="action-status" *ngSwitchCase="'cancelled'">Cancelled — nothing was changed.</p>
+        <p class="action-status" *ngSwitchCase="'cancelled'">Cancelled. Nothing was changed.</p>
       </div>
     </div>
   `,
@@ -213,7 +213,7 @@ export class ChatActionCardComponent {
           : 'Updates your investment amount';
       }
       case 'pause_investing':
-        return 'Pauses automatic investing — this resets your investing streak to 0';
+        return 'Pauses automatic investing. This resets your investing streak to 0';
       case 'resume_investing':
         return 'Resumes automatic investing on your existing schedule';
       default:

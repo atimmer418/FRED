@@ -55,6 +55,9 @@ public class DripService {
     @Autowired
     private EncryptionService encryptionService;
 
+    @Autowired
+    private WashSaleGuardService washSaleGuardService;
+
     // ==================== Main DRIP Processing ====================
 
     /**
@@ -139,13 +142,40 @@ public class DripService {
                     user, div.id, div.symbol, div.netAmount, div.date, div.description);
             dripExecutionRepository.save(dripExecution);
 
+            // TLH wash-sale guard: reinvesting a dividend into a symbol under
+            // an active wash-sale window would wash the harvested loss. Default
+            // policy parks the dividend as cash (row saved SKIPPED — the
+            // activity-id dedup makes that permanent, a documented
+            // conservatism); redirect policy buys the window's replacement
+            // while the row keeps the ORIGINAL dividend symbol.
+            String reinvestSymbol = div.symbol;
+            WashSaleGuardService.GuardDecision guardDecision = washSaleGuardService.checkBuy(
+                    user.getId(), div.symbol, WashSaleGuardService.TradeSource.DRIP,
+                    LocalDate.now(ZoneId.of("America/New_York")));
+            if (guardDecision.action() == WashSaleGuardService.GuardAction.SKIP) {
+                dripExecution.setStatus(DripExecution.DripStatus.SKIPPED);
+                dripExecution.setErrorMessage("TLH wash-sale window active until "
+                        + guardDecision.window().getEndDate() + ". Dividend held as cash.");
+                dripExecutionRepository.save(dripExecution);
+                logger.info("[DRIP] Skipping reinvestment of {} for user {} — TLH wash-sale window active",
+                        div.symbol, user.getEmail());
+                continue;
+            }
+            if (guardDecision.action() == WashSaleGuardService.GuardAction.REDIRECT) {
+                reinvestSymbol = guardDecision.redirectSymbol();
+                dripExecution.setDescription((dripExecution.getDescription() == null ? ""
+                        : dripExecution.getDescription())
+                        + " | TLH wash-sale redirect: bought " + reinvestSymbol + " instead");
+                dripExecutionRepository.save(dripExecution);
+            }
+
             // Place the reinvestment buy order
             try {
                 logger.info("[DRIP] Placing reinvestment order: Buy ${} of {} for user {}",
-                        div.netAmount, div.symbol, user.getEmail());
+                        div.netAmount, reinvestSymbol, user.getEmail());
 
                 AlpacaOrderResponse orderResponse = alpacaService.placeBuyOrder(
-                        accountId, div.symbol, div.netAmount);
+                        accountId, reinvestSymbol, div.netAmount);
 
                 if (orderResponse != null && orderResponse.isSuccess()) {
                     dripExecution.setAlpacaOrderId(orderResponse.id);

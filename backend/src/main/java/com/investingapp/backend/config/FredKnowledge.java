@@ -23,7 +23,7 @@ public class FredKnowledge {
                 "fred_mission_v2",
                 "FRED Mission & Philosophy",
                 "FRED exists to make long-term investing simple, disciplined, and automated. " +
-                        "Most people don’t fail because the math is hard — they fail because behavior is hard. "
+                        "Most people don’t fail because the math is hard. They fail because behavior is hard. "
                         +
                         "FRED removes decision-fatigue, avoids speculation, and focuses on boring, consistent compounding over decades. "
                         +
@@ -32,7 +32,7 @@ public class FredKnowledge {
                         "• Diversification reduces risk of being wrong " +
                         "• Automation prevents emotional mistakes " +
                         "• Staying invested usually beats timing the market " +
-                        "FRED is here to educate and empower — not to speculate or predict the future. "
+                        "FRED is here to educate and empower, not to speculate or predict the future. "
                         +
                         "Tone: calm, steady, data-driven, long-term focused.",
                 "v2",
@@ -70,16 +70,17 @@ public class FredKnowledge {
                         "This avoids decision-fatigue and helps users get invested early instead of staying stuck. "
                         +
                         "Default Mix: " +
-                        "• 75% VTI — U.S. Total Stock Market " +
-                        "• 20% VXUS — International Stocks " +
-                        "• 5% VBR — U.S. Small-Cap Value Tilt " +
+                        "• 75% VTI: U.S. Total Stock Market " +
+                        "• 20% VXUS: International Stocks " +
+                        "• 5% VBR: U.S. Small-Cap Value Tilt " +
                         "Why this approach is taught: " +
                         "• High expected long-term growth (heavy equity allocation) " +
                         "• Global diversification reduces “home country” risk " +
                         "• Small-cap value tilt reflects well-studied return factors " +
-                        "• Extremely simple — easy to understand + stay consistent " +
-                        "Note: While stocks have historically grown over long periods, returns are never guaranteed and markets can be volatile — sometimes for years at a time.",
-                "v2",
+                        "• Extremely simple: easy to understand + stay consistent " +
+                        "Return assumption: the FRED app models this default portfolio at a 10% average annual return, the same long-term average as the S&P 500. When projecting the FRED default or comparing it to anything else (including the S&P 500), ALWAYS use exactly 10%, never a discounted figure like 9.5%. State that it is a hypothetical assumption, not a guarantee. " +
+                        "Note: While stocks have historically grown over long periods, returns are never guaranteed and markets can be volatile, sometimes for years at a time.",
+                "v3",
                 "portfolio",
                 "medium",
                 true));
@@ -88,11 +89,11 @@ public class FredKnowledge {
         CANONICAL_CHUNKS.add(new CanonicalChunk(
                 "partner_roles_v2",
                 "Partner Roles: Plaid, Persona, Alpaca",
-                "Plaid — Bank Connectivity: Used to securely link your bank, detect paycheck deposits, and trigger automated investing workflows. FRED never sees your bank password — Plaid handles secure connection. "
+                "Plaid (Bank Connectivity): Used to securely link your bank, detect paycheck deposits, and trigger automated investing workflows. FRED never sees your bank password. Plaid handles secure connection. "
                         +
-                        "Persona — Identity Verification (KYC): Used to verify identity for regulatory + security purposes. This protects users from fraud and account misuse. "
+                        "Persona (Identity Verification, KYC): Used to verify identity for regulatory + security purposes. This protects users from fraud and account misuse. "
                         +
-                        "Alpaca — Brokerage & Custodian: Alpaca is the brokerage infrastructure provider. They handle trade execution, clearing, and asset custody. "
+                        "Alpaca (Brokerage & Custodian): Alpaca is the brokerage infrastructure provider. They handle trade execution, clearing, and asset custody. "
                         +
                         "Alpaca is not the investment advisor for users. They provide the execution “rails.” FRED provides education only.",
                 "v2",
@@ -120,7 +121,7 @@ public class FredKnowledge {
                 "risk_education_v2",
                 "Risk & Volatility Education",
                 "Important truths FRED teaches: " +
-                        "• Stock markets do fall — sometimes sharply " +
+                        "• Stock markets do fall, sometimes sharply " +
                         "• Diversification reduces risk but doesn’t remove it " +
                         "• Long-term investing means staying invested through downturns " +
                         "• Cash needs for the short-term should not be invested in stocks " +
@@ -128,7 +129,7 @@ public class FredKnowledge {
                         "• Long-term mindset " +
                         "• Emergency savings before investing " +
                         "• Avoiding emotional decisions " +
-                        "But again — this is education, not advice.",
+                        "But again, this is education, not advice.",
                 "v2",
                 "education",
                 "medium",
@@ -138,7 +139,7 @@ public class FredKnowledge {
         CANONICAL_CHUNKS.add(new CanonicalChunk(
                 "liquidity_access_v2",
                 "Liquidity & Access to Funds",
-                "Even when invested, your money is still yours — but selling investments: " +
+                "Even when invested, your money is still yours, but selling investments: " +
                         "• May trigger taxes " +
                         "• Takes settlement time " +
                         "• Is not guaranteed to be at a profit " +
@@ -159,7 +160,7 @@ public class FredKnowledge {
                         "• Interest costs apply " +
                         "• Borrowing adds risk " +
                         "• If markets fall, collateral calls can happen " +
-                        "FRED does not provide SBLOC access — only education. " +
+                        "FRED does not provide SBLOC access, only education. " +
                         "Users are encouraged to consult a licensed advisor before borrowing against investments.",
                 "v2",
                 "leverage",
@@ -214,11 +215,11 @@ public class FredKnowledge {
         CANONICAL_CHUNKS.add(new CanonicalChunk(
                 "core_definitions_v2",
                 "Core Definitions",
-                "• ETF — A basket of securities traded like a stock " +
-                        "• Diversification — Spreading risk across many securities " +
-                        "• Volatility — Short-term ups and downs " +
-                        "• Custodian — Company that holds your assets " +
-                        "• KYC — Identity verification for fraud + compliance",
+                "• ETF: A basket of securities traded like a stock " +
+                        "• Diversification: Spreading risk across many securities " +
+                        "• Volatility: Short-term ups and downs " +
+                        "• Custodian: Company that holds your assets " +
+                        "• KYC: Identity verification for fraud + compliance",
                 "v2",
                 "education",
                 "low",
@@ -414,7 +415,7 @@ public class FredKnowledge {
                         # Investment Date vs. Trade Execution
 
                         ## Understanding ACH Transfer Timing
-                        When you set up recurring investments in FRED, the date you select (like your payday) is the **ACH Transfer Initiation Date** — not the actual trade execution date.
+                        When you set up recurring investments in FRED, the date you select (like your payday) is the **ACH Transfer Initiation Date**, not the actual trade execution date.
 
                         **What happens:**
                         1. **Transfer Initiation**: On your selected date, FRED initiates an ACH transfer from your bank account
@@ -472,9 +473,9 @@ public class FredKnowledge {
                 """
                         People ask me about the suit. They wonder why a pig who fought so hard for freedom still dresses like he belongs in a corporate pen.
 
-                        The honest answer is—I did not choose this look. The corporate world put me in it.
+                        The honest answer is that I did not choose this look. The corporate world put me in it.
 
-                        Pigs are not meant for suits. We are meant for open fields, afternoon naps, and the gentle pleasure of doing nothing on a warm day. But the 9-to-5 had other plans. For years, this gray suit was the price of entry: show up, sit down, look the part, collect the paycheck. It was the uniform of the sty—the one they built to keep me penned in and productive.
+                        Pigs are not meant for suits. We are meant for open fields, afternoon naps, and the gentle pleasure of doing nothing on a warm day. But the 9-to-5 had other plans. For years, this gray suit was the price of entry: show up, sit down, look the part, collect the paycheck. It was the uniform of the sty, the one they built to keep me penned in and productive.
 
                         I keep wearing it now as a reminder.
 
@@ -482,7 +483,7 @@ public class FredKnowledge {
 
                         Back then, my days were funded by a boss, a schedule, and this suit. Now they are funded by my portfolio. That is the only difference that matters.
 
-                        When your money works so you do not have to, you can wear the uniform—but you are no longer trapped inside it.
+                        When your money works so you do not have to, you can wear the uniform, but you are no longer trapped inside it.
 
                         That is what freedom looks like on a pig.
                         """,
@@ -527,7 +528,7 @@ public class FredKnowledge {
 
                         ## The Power of Compounding
 
-                        Most of that $1.43M in gains came from **compound growth in the later years**. That's why consistency over 18 years is so powerful — you're not just earning returns on your contributions, but **returns on your returns**.
+                        Most of that $1.43M in gains came from **compound growth in the later years**. That's why consistency over 18 years is so powerful: you're not just earning returns on your contributions, but **returns on your returns**.
 
                         This is exactly why FRED's story resonates: it's **boring, realistic, and achievable** with discipline.
 
@@ -651,26 +652,31 @@ public class FredKnowledge {
                 """
                         # Financial Freedom Calculations
 
-                        FRED uses two different "financial freedom" calculations in different parts of the app. They measure different things and will show different numbers — this is intentional.
+                        FRED uses two different "financial freedom" calculations in different parts of the app. They measure different things and will show different numbers. This is intentional.
+
+                        ## Target Retirement Income Is a MONTHLY Number
+                        The target retirement income the user sets in their investor profile is a MONTHLY number: what they want to spend per month in retirement. ALWAYS describe it to the user as a monthly figure (for example "$8,400/mo"), never as an annual number. Internally the app stores it annualized (monthly × 12), but that is an implementation detail the user never sees.
 
                         ## 1. Dashboard Freedom Badge (Portfolio Dashboard)
                         **Location:** Hero card on the portfolio dashboard
-                        **What it measures:** Simple spending runway — how long your current equity could sustain your lifestyle if you stopped working today.
+                        **What it measures:** Simple spending runway. It shows how long your current equity could sustain your lifestyle if you stopped working today.
 
                         ### Formula
-                        dailyExpenses = retirementIncome / 365
+                        monthlySpending = target retirement income (the monthly number from the investor profile)
+                        dailyExpenses = (monthlySpending × 12) / 365
                         totalDays = equity / dailyExpenses
 
                         ### Display Rules
-                        - 0-99 days → shown as "X days of financial freedom"
-                        - 100+ days (converted to months) → "X months of financial freedom"
-                        - 24+ months (converted to years) → "X years of financial freedom"
+                        - 1-99 days → "worth X days of $Yk/mo (est.)"
+                        - 100+ days (converted to months) → "worth X months of $Yk/mo (est.)"
+                        - 24+ months (converted to years) → "worth X years of $Yk/mo (est.)"
+                        ($Yk/mo is the user's monthly target retirement income.)
 
                         ### Example
-                        If equity = $10,000 and retirementIncome = $70,000:
-                        dailyExpenses = $70,000 / 365 = $191.78/day
-                        totalDays = $10,000 / $191.78 = 52 days
-                        Badge shows: "52 days of financial freedom"
+                        If equity = $10,000 and target retirement income = $6,000/mo:
+                        dailyExpenses = ($6,000 × 12) / 365 = $197.26/day
+                        totalDays = $10,000 / $197.26 = 50 days
+                        Badge shows: "worth 50 days of $6k/mo (est.)"
 
                         ## 2. MFU Days Bought Back (Monthly Freedom Update)
                         **Location:** Monthly Freedom Update emails and progress tracking
@@ -688,11 +694,11 @@ public class FredKnowledge {
                         The MFU calculation projects forward using compound growth assumptions. It answers: "How many days ahead of a typical retirement age have my investments moved me?" The dashboard badge answers: "If I stopped everything right now, how long could I live off my equity?"
 
                         ## Why Both Exist
-                        - The **dashboard badge** gives a grounded, tangible snapshot — no assumptions about future returns.
+                        - The **dashboard badge** gives a grounded, tangible snapshot with no assumptions about future returns.
                         - The **MFU days bought back** motivates by showing the compounding power of each contribution over time.
                         - They are intentionally different metrics serving different psychological purposes.
                         """,
-                "v1",
+                "v2",
                 "metrics",
                 "low",
                 true));

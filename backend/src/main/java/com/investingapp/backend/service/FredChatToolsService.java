@@ -97,7 +97,7 @@ public class FredChatToolsService {
                     .description("Get the user's investing setup: age, monthly investment target, pay "
                             + "frequency, time horizon, and risk tolerance. Use for questions about whether "
                             + "their setup/habits fit their goals. NOTE: the app's Freedom tab computes the "
-                            + "official freedom estimate — do not compute a competing freedom date.")
+                            + "official freedom estimate. Do not compute a competing freedom date.")
                     .inputSchema(Tool.InputSchema.builder()
                             .properties(Tool.InputSchema.Properties.builder().build())
                             .build())
@@ -119,7 +119,7 @@ public class FredChatToolsService {
             // Deliberately ambiguous: don't coach the model into telling a
             // fully-onboarded user their account isn't set up when Alpaca hiccuped.
             return "{\"available\": false, \"reason\": \"Couldn't fetch this data right now. It may be "
-                    + "a temporary issue worth retrying later — or, if the user hasn't finished setting "
+                    + "a temporary issue worth retrying later. Or, if the user hasn't finished setting "
                     + "up their investment account, that could be why.\"}";
         }
     }
@@ -153,7 +153,7 @@ public class FredChatToolsService {
             // don't present that as a real (empty) portfolio history.
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("available", false);
-            out.put("reason", "No history data came back — the account may be new, "
+            out.put("reason", "No history data came back. The account may be new, "
                     + "or the data is temporarily unavailable.");
             return MAPPER.writeValueAsString(out);
         }

@@ -25,7 +25,8 @@
   </ion-content>
 </ion-menu>
 
-<div class="ion-page" id="main-content">
+<div class="ion-page" id="main-content" (pointerdown)="onPagePointerDown($event)"
+  (touchmove)="onPageTouchMove($event)">
   <ion-header class="ion-no-border">
     <ion-toolbar>
       <ion-title>Ask FRED</ion-title>
@@ -42,6 +43,7 @@
       <div *ngFor="let msg of messages; let i = index" class="message-wrapper"
         [class.user-message]="msg.role === 'user'" [class.assistant-message]="msg.role === 'assistant'"
         [class.failed-message]="msg.failed" [class.empty-message]="msg.role === 'assistant' && !msg.content"
+        [style.display]="isHiddenActionOutcome(i) ? 'none' : null"
         [id]="'chat-message-' + i">
 
         <div class="avatar" *ngIf="msg.role === 'assistant'">
@@ -61,8 +63,8 @@
               <app-chat-chart *ngIf="seg.kind === 'chart'" [config]="seg.config"></app-chat-chart>
               <app-chat-action-card *ngIf="seg.kind === 'action'"
                 [proposal]="seg.proposal" [state]="seg.state" [resultMessage]="seg.resultMessage"
-                [actionable]="isLatestMessage(msg) && !isLoading"
-                (confirmed)="confirmAction(seg)" (cancelled)="cancelAction(seg)">
+                [actionable]="isActionable(msg)"
+                (confirmed)="confirmAction(msg, seg)" (cancelled)="cancelAction(seg)">
               </app-chat-action-card>
               <div *ngIf="seg.kind === 'suggestions' && isLatestMessage(msg) && !isLoading" class="quick-replies">
                 <div class="quick-reply" *ngFor="let option of seg.options">
@@ -83,7 +85,7 @@
 
       </div>
 
-      <div *ngIf="isEmptyState" class="empty-state">
+      <div *ngIf="isEmptyState" class="empty-state" [class.kb-hidden]="keyboardOffset > 0">
         <img src="assets/images/pig-range-4.svg" class="empty-hero" alt="FRED piggy bank" />
         <h1 class="empty-greeting">{{ timeGreeting }}</h1>
         <p class="empty-subtitle">What are we doing today?</p>
@@ -114,7 +116,11 @@
         <ion-textarea [(ngModel)]="newMessage" placeholder="Message FRED..." autoGrow="true" rows="1"
           (keydown.enter)="$event.preventDefault(); sendMessage()" (ionInput)="onTextareaInput($event)">
         </ion-textarea>
-        <ion-button shape="round" (click)="sendMessage()" [disabled]="!newMessage.trim() || isLoading"
+        <!-- pointerdown preventDefault keeps the textarea focused: without it a
+             tap first blurs -> keyboard collapses -> layout shifts -> the click
+             lands on nothing (or on whatever moved underneath) -->
+        <ion-button shape="round" (pointerdown)="$event.preventDefault()" (click)="sendMessage()"
+          [disabled]="!newMessage.trim() || isLoading || actionInFlight"
           class="send-button">
           <ion-icon name="arrow-up" slot="icon-only"></ion-icon>
         </ion-button>

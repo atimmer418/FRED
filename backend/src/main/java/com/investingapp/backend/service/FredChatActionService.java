@@ -81,7 +81,7 @@ public class FredChatActionService {
         if (window.incrementAndGet() > MAX_ACTIONS_PER_MINUTE) {
             audit(user, sessionId, safeAction, paramsJson, "REJECTED", "Rate limited");
             return new ActionResult(false,
-                    "Let's slow down — that's a lot of changes at once. Try again in a minute.");
+                    "Let's slow down. That's a lot of changes at once. Try again in a minute.");
         }
 
         // Intent-first audit: if the intent row can't be written, don't act.
@@ -107,12 +107,12 @@ public class FredChatActionService {
         } catch (IllegalStateException e) {
             logger.warn("Chat action {} blocked for user {}: {}", action, user.getId(), e.getMessage());
             result = new ActionResult(false, e.getMessage() != null && e.getMessage().contains("ACCOUNT_NOT_ACTIVE")
-                    ? "Your account isn't fully active yet — finish the remaining setup steps in the app first."
-                    : "That change isn't possible right now — nothing was changed.");
+                    ? "Your account isn't fully active yet. Finish the remaining setup steps in the app first."
+                    : "That change isn't possible right now. Nothing was changed.");
         } catch (Exception e) {
             logger.error("Chat action {} failed for user {}", action, user.getId(), e);
             result = new ActionResult(false,
-                    "Something went wrong executing that — nothing was changed. Try again in a bit.");
+                    "Something went wrong executing that. Nothing was changed. Try again in a bit.");
         }
 
         try {
@@ -134,19 +134,19 @@ public class FredChatActionService {
     private ActionResult updateInvestmentAmount(User user, JsonNode params) {
         JsonNode amountNode = params != null ? params.get("amountPerRun") : null;
         if (amountNode == null || !amountNode.isNumber()) {
-            return new ActionResult(false, "I couldn't read the new amount — nothing was changed.");
+            return new ActionResult(false, "I couldn't read the new amount. Nothing was changed.");
         }
         BigDecimal amount = amountNode.decimalValue().setScale(2, RoundingMode.HALF_UP);
         if (amount.compareTo(minAmount) < 0 || amount.compareTo(maxAmount) > 0) {
             return new ActionResult(false, String.format(
-                    "That amount is outside the allowed range ($%s–$%s) — nothing was changed.",
+                    "That amount is outside the allowed range ($%s to $%s). Nothing was changed.",
                     minAmount.toPlainString(), maxAmount.toPlainString()));
         }
 
         Optional<InvestmentSchedule> current = scheduleService.getCurrentSchedule(user);
         if (current.isEmpty()) {
             return new ActionResult(false,
-                    "There's no investing schedule set up yet — create one in the Invest tab first.");
+                    "There's no investing schedule set up yet. Create one in the Invest tab first.");
         }
 
         InvestmentSchedule schedule = current.get();
@@ -155,7 +155,7 @@ public class FredChatActionService {
                 user, schedule.getId(), amount, schedule.getFrequency());
 
         return new ActionResult(true, String.format(
-                "Done — your %s investment is now $%s per run (was $%s). Monthly pace: about $%s.",
+                "Done. Your %s investment is now $%s per run (was $%s). Monthly pace: about $%s.",
                 updated.getFrequency() != null ? updated.getFrequency().toLowerCase() : "recurring",
                 money(amount), money(before), money(updated.getMonthlyAmount())));
     }
@@ -171,11 +171,11 @@ public class FredChatActionService {
             return new ActionResult(false, "There's no investing schedule to pause.");
         }
         if (Boolean.TRUE.equals(current.get().getIsPaused())) {
-            return new ActionResult(false, "Your investing is already paused — nothing to change.");
+            return new ActionResult(false, "Your investing is already paused, so there's nothing to change.");
         }
         scheduleService.pauseSchedule(user, current.get().getId());
         return new ActionResult(true,
-                "Done — automatic investing is paused. Resume any time; the mud will wait.");
+                "Done. Automatic investing is paused. Resume any time; the mud will wait.");
     }
 
     private ActionResult resumeInvesting(User user) {
@@ -184,7 +184,7 @@ public class FredChatActionService {
             return new ActionResult(false, "There's no investing schedule to resume.");
         }
         if (!Boolean.TRUE.equals(current.get().getIsPaused())) {
-            return new ActionResult(false, "Your investing is already active — nothing to change.");
+            return new ActionResult(false, "Your investing is already active, so there's nothing to change.");
         }
         InvestmentSchedule resumed = scheduleService.resumeSchedule(user, current.get().getId());
         // A long pause can leave nextInvestmentDate in the past — the scheduler
@@ -193,7 +193,7 @@ public class FredChatActionService {
         if (resumed.getNextInvestmentDate() != null && !resumed.getNextInvestmentDate().isBefore(LocalDate.now())) {
             nextRun = resumed.getNextInvestmentDate().toString();
         }
-        return new ActionResult(true, "Done — automatic investing is back on. Next run: " + nextRun + ".");
+        return new ActionResult(true, "Done. Automatic investing is back on. Next run: " + nextRun + ".");
     }
 
     /** Terminal-state audit for requests rejected before an intent row exists. */

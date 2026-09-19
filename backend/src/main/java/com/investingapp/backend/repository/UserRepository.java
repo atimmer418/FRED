@@ -64,6 +64,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Paid-tier members eligible for the Monthly Market Breakdown email
     List<User> findBySelectedTierIn(java.util.Collection<String> tiers);
 
+    // Piggy Pro members who explicitly opted into Tax Loss Harvesting —
+    // tier AND enrollment enforced in the query itself (scheduler gating idiom)
+    List<User> findBySelectedTierInAndTlhEnabledTrue(java.util.Collection<String> tiers);
+
     // Load a user row under a pessimistic write-lock (SELECT ... FOR UPDATE) so concurrent Monthly
     // Freedom Update "seen" commits (double-tap, two tabs, two devices) serialize on the row and the
     // advances-only guard in MonthlyFreedomUpdateService.commitMfuSeen can enforce exactly-once

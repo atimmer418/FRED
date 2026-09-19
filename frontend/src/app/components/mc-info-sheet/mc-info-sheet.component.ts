@@ -1,6 +1,7 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalController } from '@ionic/angular/standalone';
+import { SheetDragDismissDirective } from '../../directives/sheet-drag-dismiss.directive';
 
 /**
  * Bottom-sheet content for the Monte Carlo landing, presented via
@@ -28,6 +29,11 @@ import { ModalController } from '@ionic/angular/standalone';
   styleUrls: ['./mc-info-sheet.component.scss'],
   standalone: true,
   imports: [CommonModule],
+  // This root is the sheet's scroller (global.scss .ion-page override).
+  // SheetDragDismissDirective provides drag-to-dismiss and defers to
+  // scrolling (drag arms only at scrollTop 0).
+  host: { class: 'ion-content-scroll-host' },
+  hostDirectives: [SheetDragDismissDirective],
 })
 export class McInfoSheetComponent {
   @Input() mode: 'assumptions' | 'nudge' = 'assumptions';

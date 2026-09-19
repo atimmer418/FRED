@@ -147,7 +147,7 @@ public class DailyQuestionService {
             return Arrays.asList(
                     "Why is compound interest called the 8th wonder of the world?",
                     "Show me a graph of how $200 a month grows over 25 years",
-                    "Look at my investing setup — what's one thing I could improve?");
+                    "Look at my investing setup. What's one thing I could improve?");
         }
     }
 
@@ -171,10 +171,10 @@ public class DailyQuestionService {
                     "You write suggestion chips for FRED, a financial education chat for novice investors. "
                             + "Generate exactly 2 suggestions, written from the user's perspective:\n"
                             + "1. A short, intriguing beginner question about one of these concepts: " + concepts + ".\n"
-                            + "2. A request for a VISUAL — phrased like 'Show me a graph of ...' or 'Chart the difference between ...', "
+                            + "2. A request for a VISUAL, phrased like 'Show me a graph of ...' or 'Chart the difference between ...', "
                             + "with concrete numbers (monthly amounts, years) about growth, compounding, or a comparison. "
-                            + "Do NOT specify a return rate in the question — FRED applies the app's standard 10% average annual return by default.\n"
-                            + "Keep each under 90 characters. Output ONLY the 2 suggestions separated by a pipe (|). No numbering, no intro."));
+                            + "Do NOT specify a return rate in the question; FRED applies the app's standard 10% average annual return by default.\n"
+                            + "Keep each under 90 characters. Never use an em dash in a suggestion. Output ONLY the 2 suggestions separated by a pipe (|). No numbering, no intro."));
 
             messages.add(new ChatMessage("user", "Generate the 2 suggestions for " + date));
 
@@ -207,7 +207,7 @@ public class DailyQuestionService {
                 "Chart my portfolio over the last 3 months",
                 "Help me bump up my monthly investment a little",
                 "Am I on track for my time horizon? Be honest.",
-                "I need to pause my investing for a bit — can you set that up?",
+                "I need to pause my investing for a bit. Can you set that up?",
                 "Review my investing schedule and suggest one change");
         return pool.get((int) (date.toEpochDay() % pool.size()));
     }

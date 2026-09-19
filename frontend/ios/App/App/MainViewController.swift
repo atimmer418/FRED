@@ -16,6 +16,10 @@ class MainViewController: CAPBridgeViewController {
         bridge?.webView?.isOpaque = false
         bridge?.webView?.backgroundColor = .white
         bridge?.webView?.scrollView.backgroundColor = .white
+        // Chat UX: scrolling the conversation must NOT dismiss the keyboard.
+        // Dismissal is handled in-app: a drag that travels down past half the
+        // keyboard's height (Snapchat-style) calls Keyboard.hide().
+        bridge?.webView?.scrollView.keyboardDismissMode = .none
     }
 
     override func viewDidLoad() {

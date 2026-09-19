@@ -38,4 +38,11 @@ public interface InvestmentTradeRepository extends JpaRepository<InvestmentTrade
      * Find pending trades for execution
      */
     List<InvestmentTrade> findByInvestmentExecutionIdAndStatus(Long executionId, TradeStatus status);
+
+    /**
+     * TLH in-flight-buy veto: recent open buy trades for a symbol. Time-bounded
+     * so stale SUBMITTED rows can't permanently veto a harvest.
+     */
+    List<InvestmentTrade> findByUserIdAndSymbolAndStatusInAndCreatedAtAfter(
+            Long userId, String symbol, java.util.Collection<TradeStatus> statuses, LocalDateTime after);
 }

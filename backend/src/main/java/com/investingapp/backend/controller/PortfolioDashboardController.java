@@ -205,7 +205,7 @@ public class PortfolioDashboardController {
             }
             performanceMetrics.add(dailyPerf);
 
-            // Middle period rows: 1W, 1M, 3M, YTD — windows older than the account are omitted
+            // Middle period rows: 1W, 1M, 3M, 6M, YTD, 1Y — windows older than the account are omitted
             BigDecimal currentEquity = dashboardData.summary.portfolioValue;
             List<Map<String, Object>> periodRows =
                     portfolioDashboardService.computePerformancePeriodRows(user, currentEquity);

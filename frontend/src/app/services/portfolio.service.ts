@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
+import { ACTIVE_MOCK_TIER, MockTier, mockDashboard, mockHistory, mockPerformance } from './dev/portfolio-mock';
 
 // Portfolio Dashboard Types
 export interface AccountSummary {
@@ -77,6 +78,17 @@ export class PortfolioService {
 
   constructor(private http: HttpClient) { }
 
+  /**
+   * DEV ONLY: the active mock portfolio tier, or null for real data.
+   * Gated on environment.local — NOT just !production — because the deployed dev/test
+   * builds also have production:false but read live Alpaca; only the local dev loop
+   * (environment.ts / ci) has local:true. ACTIVE_MOCK_TIER itself is additionally
+   * forced null under karma (see portfolio-mock.ts) so unit tests always hit HTTP.
+   */
+  private activeTier(): MockTier | null {
+    return environment.local ? ACTIVE_MOCK_TIER : null;
+  }
+
   private getAuthHeaders(): HttpHeaders {
     const token = localStorage.getItem('jwtToken');
     return new HttpHeaders({
@@ -89,6 +101,8 @@ export class PortfolioService {
    * Get comprehensive portfolio dashboard data
    */
   getPortfolioDashboard(): Observable<PortfolioDashboardData> {
+    const tier = this.activeTier();
+    if (tier) return of(mockDashboard(tier));
     return this.http.get<PortfolioDashboardData>(`${this.apiUrl}/dashboard`, {
       headers: this.getAuthHeaders()
     });
@@ -98,6 +112,8 @@ export class PortfolioService {
    * Get portfolio history data for charting
    */
   getPortfolioHistory(period: string = 'ALL'): Observable<PortfolioHistory> {
+    const tier = this.activeTier();
+    if (tier) return of(mockHistory(tier, period));
     return this.http.get<any>(`${this.apiUrl}/history`, {
       headers: this.getAuthHeaders(),
       params: { period }
@@ -137,6 +153,8 @@ export class PortfolioService {
    * Get portfolio performance analytics
    */
   getPerformance(): Observable<PerformanceData[]> {
+    const tier = this.activeTier();
+    if (tier) return of(mockPerformance(tier));
     return this.http.get<PerformanceData[]>(`${this.apiUrl}/performance`, {
       headers: this.getAuthHeaders()
     });

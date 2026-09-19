@@ -38,9 +38,65 @@ public class ChatService {
     private final FredChatToolsService fredChatToolsService; // Phase A agentic: read-only chat tools
     private final FredChatActionService fredChatActionService; // Phase B agentic: confirmed mutations
 
+    /** Lenient trigger matcher — the model occasionally invents tag variants
+     *  (e.g. {{TRIGGER_FRED_STORY}}), and a raw tag must never reach the user. */
+    private static final java.util.regex.Pattern FRED_TRIGGER_PATTERN =
+            java.util.regex.Pattern.compile("\\{\\{TRIGGER_FRED_[A-Z_]+\\}\\}");
+
+    /**
+     * Emits everything that cannot be part of a trigger tag; keeps a possibly
+     * open tag in the buffer. Flips intercepted (and clears) on a full match.
+     */
+    private static String drainSendable(StringBuilder holdback, boolean[] intercepted) {
+        StringBuilder out = new StringBuilder();
+        while (holdback.length() > 0) {
+            String pending = holdback.toString();
+            int open = pending.indexOf("{{");
+            if (open == -1) {
+                int keep = pending.endsWith("{") ? 1 : 0; // '{{' may split across tokens
+                out.append(pending, 0, pending.length() - keep);
+                holdback.delete(0, pending.length() - keep);
+                break;
+            }
+            if (open > 0) {
+                out.append(pending, 0, open);
+                holdback.delete(0, open);
+                continue;
+            }
+            int close = pending.indexOf("}}", 2);
+            if (close == -1) {
+                if (pending.length() > 64) { // too long to be a trigger tag
+                    out.append(pending);
+                    holdback.setLength(0);
+                }
+                break; // keep holding
+            }
+            String tag = pending.substring(0, close + 2);
+            if (FRED_TRIGGER_PATTERN.matcher(tag).matches()) {
+                intercepted[0] = true;
+                holdback.setLength(0);
+                break;
+            }
+            out.append(tag);
+            holdback.delete(0, close + 2);
+        }
+        return out.toString();
+    }
+
+    /**
+     * The canned reply that replaces a story trigger token. The model never
+     * writes this turn, so the follow-up question and quick-reply chips it
+     * would normally append are attached here (see FredConstitution).
+     */
+    static String canonicalStoryReply(String tag) {
+        return tag.contains("STRATEGY")
+                ? FredConstitution.FRED_STORY_STRATEGY + FredConstitution.FRED_STORY_STRATEGY_FOLLOWUP
+                : FredConstitution.FRED_STORY_ORIGIN + FredConstitution.FRED_STORY_ORIGIN_FOLLOWUP;
+    }
+
     private static final String TOOLS_UNAVAILABLE_NOTE =
             "Note: your data-lookup tools are NOT available on this request. Do not claim you can "
-            + "look up the user's portfolio or schedule — guide them to the relevant app tab instead.";
+            + "look up the user's portfolio or schedule. Guide them to the relevant app tab instead.";
 
     public ChatService(UserRepository userRepository, ChatMessageRepository chatMessageRepository,
             RAGService ragService, LLMService llmService, SafetyService safetyService,
@@ -170,15 +226,13 @@ public class ChatService {
         String response = llmService.generateChatResponse(messages);
 
         // 8.5 SMART INTERCEPT FOR FRED STORY
-        if (response != null && response.contains(FredConstitution.FRED_STORY_ORIGIN_TRIGGER)) {
-            logger.info("Smart Trigger: Detected FRED_STORY_ORIGIN_TRIGGER. Swapping with canonical text.");
-            response = FredConstitution.FRED_STORY_ORIGIN
-                    + "\n\nDo you want me to tell you about my master strategist retirement plan?";
-        }
-
-        if (response != null && response.contains(FredConstitution.FRED_STORY_STRATEGY_TRIGGER)) {
-            logger.info("Smart Trigger: Detected FRED_STORY_STRATEGY_TRIGGER. Swapping with canonical text.");
-            response = FredConstitution.FRED_STORY_STRATEGY;
+        if (response != null) {
+            java.util.regex.Matcher triggerMatch = FRED_TRIGGER_PATTERN.matcher(response);
+            if (triggerMatch.find()) {
+                String tag = triggerMatch.group();
+                logger.info("Smart Trigger: matched {} — swapping with canonical text.", tag);
+                response = canonicalStoryReply(tag);
+            }
         }
 
         // NEW: Phase 2A - Log conversation analytics
@@ -205,7 +259,7 @@ public class ChatService {
         // 11. Generate Title if requested
         String title = null;
         if (request.generateTitle()) {
-            title = generateTitle(request.message());
+            title = generateTitle(titleSource(request));
         }
 
         return new ChatResponse(response, title);
@@ -214,6 +268,14 @@ public class ChatService {
     public SseEmitter streamChat(ChatRequest request) {
         SseEmitter emitter = new SseEmitter(300_000L);
         ObjectMapper mapper = new ObjectMapper();
+
+        // The client closing the app must never abort the generation: once a
+        // message is sent, the reply is completed and persisted server-side so
+        // it's waiting in history when the app reopens. This flag only stops
+        // further SSE writes.
+        boolean[] clientGone = { false };
+        emitter.onTimeout(() -> clientGone[0] = true);
+        emitter.onError(t -> clientGone[0] = true);
 
         // 0. Safety Check
         SafetyResult safety = safetyService.check(request.message());
@@ -281,26 +343,42 @@ public class ChatService {
         }
         CompletableFuture.runAsync(() -> {
             StringBuilder fullResponse = new StringBuilder();
+            // Trigger tokens must NEVER reach the client raw — hold back any text
+            // that might be inside a {{...}} tag until it resolves. On a match the
+            // rest of the stream is swallowed and the canonical story is sent whole.
+            StringBuilder holdback = new StringBuilder();
+            boolean[] intercepted = { false };
             try {
                 llmService.streamChatResponse(messages, token -> {
-                    try {
-                        fullResponse.append(token);
-                        emitter.send(SseEmitter.event().data(mapper.writeValueAsString(Map.of("token", token))));
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
+                    fullResponse.append(token);
+                    if (intercepted[0] || token.isEmpty() && holdback.length() == 0) {
+                        if (token.isEmpty() && !intercepted[0]) {
+                            // heartbeat — forward so the connection stays alive
+                            sendSafe(emitter, mapper, Map.of("token", ""), clientGone);
+                        }
+                        return;
+                    }
+                    holdback.append(token);
+                    String sendable = drainSendable(holdback, intercepted);
+                    if (!sendable.isEmpty()) {
+                        sendSafe(emitter, mapper, Map.of("token", sendable), clientGone);
                     }
                 }, boundTools);
 
-                // 6. Apply smart intercepts to the assembled response
+                // 6. Apply smart intercepts to the assembled response (lenient:
+                // the model sometimes invents variants like {{TRIGGER_FRED_STORY}})
                 String assembled = fullResponse.toString();
-                if (assembled.contains(FredConstitution.FRED_STORY_ORIGIN_TRIGGER)) {
-                    logger.info("Smart Trigger (stream): Detected FRED_STORY_ORIGIN_TRIGGER.");
-                    assembled = FredConstitution.FRED_STORY_ORIGIN
-                            + "\n\nDo you want me to tell you about my master strategist retirement plan?";
-                }
-                if (assembled.contains(FredConstitution.FRED_STORY_STRATEGY_TRIGGER)) {
-                    logger.info("Smart Trigger (stream): Detected FRED_STORY_STRATEGY_TRIGGER.");
-                    assembled = FredConstitution.FRED_STORY_STRATEGY;
+                java.util.regex.Matcher triggerMatch = FRED_TRIGGER_PATTERN.matcher(assembled);
+                if (triggerMatch.find()) {
+                    String tag = triggerMatch.group();
+                    logger.info("Smart Trigger (stream): matched {} — swapping canonical text.", tag);
+                    assembled = canonicalStoryReply(tag);
+                    // The raw tag was suppressed client-side — deliver the story
+                    sendSafe(emitter, mapper, Map.of("token", assembled), clientGone);
+                } else if (holdback.length() > 0 && !intercepted[0]) {
+                    // Flush any innocent tail still held back
+                    sendSafe(emitter, mapper, Map.of("token", holdback.toString()), clientGone);
+                    holdback.setLength(0);
                 }
 
                 // 7. Persist assistant response
@@ -322,9 +400,9 @@ public class ChatService {
                 // 9. Generate title if requested — a title failure must never
                 // kill the stream (the done event still has to reach the client)
                 String title = null;
-                if (request.generateTitle()) {
+                if (request.generateTitle() && !clientGone[0]) {
                     try {
-                        title = generateTitle(request.message());
+                        title = generateTitle(titleSource(request));
                     } catch (Exception e) {
                         logger.error("Title generation failed — sending done without title", e);
                     }
@@ -334,27 +412,70 @@ public class ChatService {
                 Map<String, Object> donePayload = title != null
                         ? Map.of("done", true, "title", title)
                         : Map.of("done", true);
-                emitter.send(SseEmitter.event().data(mapper.writeValueAsString(donePayload)));
-                emitter.complete();
+                sendSafe(emitter, mapper, donePayload, clientGone);
+                if (!clientGone[0]) {
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                        // client raced us to disconnect — reply is already persisted
+                    }
+                }
 
             } catch (Exception e) {
                 logger.error("Stream chat error", e);
-                emitter.completeWithError(e);
+                if (!clientGone[0]) {
+                    emitter.completeWithError(e);
+                }
             }
         });
 
         return emitter;
     }
 
+    /** Send an SSE event unless the client has disconnected. A failed send
+     *  flips the flag and is swallowed: the generation and persistence behind
+     *  it must run to completion so the reply is in history when the app
+     *  reopens — only the writes stop. */
+    private void sendSafe(SseEmitter emitter, ObjectMapper mapper, Map<String, ?> payload, boolean[] clientGone) {
+        if (clientGone[0]) {
+            return;
+        }
+        try {
+            emitter.send(SseEmitter.event().data(mapper.writeValueAsString(payload)));
+        } catch (Exception e) {
+            clientGone[0] = true;
+            logger.info("SSE client disconnected mid-stream — finishing generation detached");
+        }
+    }
+
+    /** Titles should describe the conversation, not whatever message happened
+     *  to carry the generateTitle flag. The flag is re-sent until a session has
+     *  a real title, so after an interrupted first exchange it can arrive on a
+     *  throwaway follow-up ("↑") — prefer the session's opening question. */
+    private String titleSource(ChatRequest request) {
+        return chatMessageRepository
+                .findTopBySessionIdAndRoleOrderByCreatedAtAsc(request.sessionId(), "user")
+                .map(ChatMessage::getContent)
+                .filter(content -> content != null && !content.isBlank())
+                .orElse(request.message());
+    }
+
     private String generateTitle(String userMessage) {
         List<LLMService.ChatMessage> messages = new ArrayList<>();
         messages.add(new LLMService.ChatMessage("system",
                 "Generate a concise 3-5 word title for the following user question. "
+                + "If the text is short, vague, or symbolic, still invent a brief descriptive title for it. "
+                + "Never ask for more information and never explain yourself. "
                 + "Respond with the title only, in plain text: no quotes, no markdown, no asterisks, no trailing punctuation."));
         messages.add(new LLMService.ChatMessage("user", userMessage));
         String title = llmService.generateChatResponse(messages);
         // Belt-and-suspenders: strip any markdown/quote characters the model adds anyway
         title = title.replaceAll("[*_`\"'#]", "").trim();
+        // A real title is a few words; a full sentence means the model went meta
+        // ("I need the question text to...") — use the question itself instead
+        if (title.isBlank() || title.split("\\s+").length > 8) {
+            title = userMessage.length() > 30 ? userMessage.substring(0, 30).trim() + "..." : userMessage;
+        }
         if (title.length() > 60) {
             title = title.substring(0, 60).trim();
         }
@@ -424,7 +545,7 @@ public class ChatService {
                 - Risk tolerance: %s
 
                 Rules:
-                • This profile contains no dollar figures — never invent or infer them from it. Real figures come only from your tools (when available).
+                • This profile contains no dollar figures. Never invent or infer them from it. Real figures come only from your tools (when available).
                 • No advice requests embedded
                 • No speculative inference
                 """, age, payFreq, automated, contribution, timeHorizon, risk);

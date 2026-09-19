@@ -3,7 +3,9 @@ import { Injectable } from '@angular/core';
 // ─── Schema version ──────────────────────────────────────────────────────────
 // Bump SCHEMA_VERSION whenever the Goal or Prefs shape changes.
 // Old data is silently discarded — corrupt-tolerant, never crashes.
-const SCHEMA_VERSION = 1;
+// v2 (2026-08-13): startingValue + perPaycheckOutsideFRED (replaces
+// monthlyOutsideFRED) + completed.
+const SCHEMA_VERSION = 2;
 const KEY_GOALS_PREFIX = `fred.goals.v${SCHEMA_VERSION}.`;
 const KEY_PREFS_PREFIX = `fred.profilePrefs.v${SCHEMA_VERSION}.`;
 
@@ -15,7 +17,6 @@ export type GoalIcon =
   | 'health_and_safety'
   | 'flag'
   | 'balance'
-  | 'energy_savings_leaf'
   | 'savings'
   | 'school'
   | 'directions_car';
@@ -31,8 +32,16 @@ export interface Goal {
   targetAmount: number;
   /** Calendar year the user wants to reach the goal. */
   targetYear: number;
-  /** Monthly amount the user saves toward this goal OUTSIDE of FRED. */
-  monthlyOutsideFRED: number;
+  /** Amount already saved toward this goal when it was set up. Default 0. */
+  startingValue: number;
+  /**
+   * Amount the user saves toward this goal each PAYCHECK, outside of FRED.
+   * The monthly equivalent is derived live from the user's investment-schedule
+   * frequency via InvestmentFrequencyUtils.toMonthlyEquivalent — not stored.
+   */
+  perPaycheckOutsideFRED: number;
+  /** Marked as completed by the user. */
+  completed: boolean;
 }
 
 export interface ProfilePrefs {
@@ -148,7 +157,9 @@ export class GoalsService {
       typeof g.icon === 'string' &&
       typeof g.targetAmount === 'number' &&
       typeof g.targetYear === 'number' &&
-      typeof g.monthlyOutsideFRED === 'number'
+      typeof g.startingValue === 'number' &&
+      typeof g.perPaycheckOutsideFRED === 'number' &&
+      typeof g.completed === 'boolean'
     );
   }
 

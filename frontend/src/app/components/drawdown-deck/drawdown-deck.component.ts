@@ -27,17 +27,17 @@ interface DrawdownBucket {
 export const DRAWDOWN_BUCKETS: DrawdownBucket[] = [
   {
     title: 'Taxable first',
-    body: 'Your FRED account. Withdrawals here are taxed at capital-gains rates — often 0–15%, the lowest rates you’ll ever pay — while your tax-advantaged accounts keep compounding untouched.',
+    body: 'Your FRED account. Withdrawals here are taxed at capital-gains rates (often 0-15%, the lowest rates you’ll ever pay), while your tax-advantaged accounts keep compounding untouched.',
     balanceKey: 'fred',
   },
   {
     title: 'Tax-deferred second',
-    body: 'Traditional 401(k) and IRA. Every dollar out is ordinary income, so spreading withdrawals across your middle retirement years keeps you in lower brackets — and softens the required withdrawals that start at 73.',
+    body: 'Traditional 401(k) and IRA. Every dollar out is ordinary income, so spreading withdrawals across your middle retirement years keeps you in lower brackets, and softens the required withdrawals that start at 73.',
     balanceKey: 'k401',
   },
   {
     title: 'Roth last',
-    body: 'Tax-free growth is the most valuable dollar you own. The longer it compounds untouched, the more you keep — and it’s the cleanest account to pass on.',
+    body: 'Tax-free growth is the most valuable dollar you own. The longer it compounds untouched, the more you keep, and it’s the cleanest account to pass on.',
     balanceKey: 'roth',
   },
 ];

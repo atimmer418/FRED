@@ -4,4 +4,29 @@
     "@ionic/angular"
   ],
   "java.configuration.updateBuildConfiguration": "interactive",
+
+  // --- Stop the "Gradle for Java" (vscjava.vscode-gradle) task scanner from choking on
+  //     Capacitor plugins ---
+  // FRED is iOS-only: there is no android/ app project, so each Capacitor plugin's
+  // node_modules/@capacitor/*/android/build.gradle can't resolve project(':capacitor-android')
+  // and fails with "Project with path ':capacitor-android' could not be found in root project
+  // 'android'". The extension discovers those build.gradle files with workspace.findFiles(),
+  // which honors files.exclude — so hiding node_modules stops the scan at its source.
+  // backend/ (a real Gradle root, rootProject 'backend') is NOT under node_modules, so it is
+  // still discovered and fully works in this same window.
+  // Note: this hides node_modules from the Explorer tree only; TypeScript/Angular module
+  // resolution, npm, and builds are unaffected.
+  "files.exclude": {
+    "**/node_modules": true
+  },
+
+  // redhat.java's own importer already skips node_modules by default; listed explicitly as
+  // defense, plus .claude so nested git worktrees there are never imported as Java projects.
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/.metadata/**",
+    "**/archetype-resources/**",
+    "**/META-INF/maven/**",
+    "**/.claude/**"
+  ]
 }

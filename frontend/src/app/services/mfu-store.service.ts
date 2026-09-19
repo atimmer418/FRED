@@ -145,6 +145,7 @@ export class MfuStoreService {
 
   /** Synchronous read of the persisted reopen snapshot for the CURRENT user, or null. */
   peekSnapshot(): MonthlyFreedomUpdateData | null {
+    if (this.mfuService.isMockActive()) return null; // DEV mock: never hydrate from a stored recap
     const userId = this.uid();
     if (!userId) return null;
     try {
@@ -158,6 +159,7 @@ export class MfuStoreService {
   }
 
   persistSnapshot(data: MonthlyFreedomUpdateData): void {
+    if (this.mfuService.isMockActive()) return; // DEV mock: a mocked recap must never outlive the toggle
     const userId = this.uid();
     if (!userId || !data || !data.periodStart) return;
     const snap: MfuSnapshot = { userId, savedAt: Date.now(), data };

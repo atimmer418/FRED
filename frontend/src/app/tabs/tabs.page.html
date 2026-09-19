@@ -1,10 +1,11 @@
+<!-- init="false": params + event hooks are assigned and initialize() is called
+     from TabsPage.initSwiper, outside the Angular zone — see that method. -->
 <swiper-container
   #swiper
   class="tabs-swiper"
-  [attr.initial-slide]="initialIndex"
-  slides-per-view="1"
-  speed="250"
+  init="false"
   (swiperslidechange)="onSlideChange($event)"
+  (swipertransitionend)="onTransitionEnd($event)"
 >
   <swiper-slide><app-tab1></app-tab1></swiper-slide>
   <swiper-slide><app-tab2></app-tab2></swiper-slide>

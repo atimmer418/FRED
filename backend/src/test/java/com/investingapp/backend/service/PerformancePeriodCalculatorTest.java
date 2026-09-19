@@ -134,12 +134,14 @@ class PerformancePeriodCalculatorTest {
         assertNotNull(findPeriod("1W", rows), "1W should be present");
         assertNotNull(findPeriod("1M", rows), "1M should be present");
         assertNull(findPeriod("3M", rows),    "3M window (Apr 6) predates history — must be omitted");
+        assertNull(findPeriod("6M", rows),    "6M window (Jan 6) predates history — must be omitted");
         assertNull(findPeriod("YTD", rows),   "YTD window (Jan 1) predates history — must be omitted");
+        assertNull(findPeriod("1Y", rows),    "1Y window (Jul 2025) predates history — must be omitted");
     }
 
     @Test
-    void responseOrderIsOneW_OneM_ThreeM_YTD() {
-        // History goes back to 2025 so all 4 windows are resolvable
+    void responseOrderIsOneW_OneM_ThreeM_SixM_YTD_OneY() {
+        // History goes back past July 2025 so all 6 windows are resolvable
         List<String> dates = Arrays.asList(
                 "2025-07-01", "2026-01-01", "2026-04-01", "2026-06-06", "2026-06-29");
         List<BigDecimal> values = Arrays.asList(
@@ -149,11 +151,32 @@ class PerformancePeriodCalculatorTest {
         List<Map<String, Object>> rows = PerformancePeriodCalculator.computePeriods(
                 dates, values, bd("110"), today);
 
-        assertEquals(4, rows.size(), "All four period rows should be present");
+        assertEquals(6, rows.size(), "All six period rows should be present");
         assertEquals("1W",  rows.get(0).get("period"));
         assertEquals("1M",  rows.get(1).get("period"));
         assertEquals("3M",  rows.get(2).get("period"));
-        assertEquals("YTD", rows.get(3).get("period"));
+        assertEquals("6M",  rows.get(3).get("period"));
+        assertEquals("YTD", rows.get(4).get("period"));
+        assertEquals("1Y",  rows.get(5).get("period"));
+    }
+
+    @Test
+    void sixMonthPresentButOneYearOmittedForMidAgeAccount() {
+        // Account opened Dec 1, 2025 (~7 months before "today"): the 6M window
+        // (Jan 6) resolves via the closest-prior point, but 1Y (Jul 2025) predates
+        // all history and must be omitted.
+        List<String>     dates  = Arrays.asList("2025-12-01", "2026-03-01", "2026-07-01");
+        List<BigDecimal> values = Arrays.asList(bd("100"), bd("108"), bd("118"));
+        LocalDate today = LocalDate.of(2026, 7, 6);
+
+        List<Map<String, Object>> rows = PerformancePeriodCalculator.computePeriods(
+                dates, values, bd("120"), today);
+
+        Map<String, Object> sixM = findPeriod("6M", rows);
+        assertNotNull(sixM, "6M should be present for a ~7-month-old account");
+        assertEquals(bd("100"), sixM.get("startValue"),
+                "6M start (Jan 6) resolves to closest prior point (Dec 1)");
+        assertNull(findPeriod("1Y", rows), "1Y predates all history — must be omitted");
     }
 
     @Test

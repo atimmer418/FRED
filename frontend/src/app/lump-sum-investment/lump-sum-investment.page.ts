@@ -328,7 +328,7 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
         console.log('Initiating ACATS transfer:', transferData);
         const transferResponse = await this.investmentService.initiateAcatsTransfer(transferData).toPromise() as AcatsTransferResponse;
 
-        this.toastService.showToast(`Transfer submitted — ref: ${transferResponse.transferId}`, 'success', 3000);
+        this.toastService.showToast(`Transfer submitted, ref: ${transferResponse.transferId}`, 'success', 3000);
         
         // Reset form after successful transfer initiation
         setTimeout(() => {

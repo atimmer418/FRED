@@ -43,18 +43,25 @@ export interface ScenarioAssumptions {
 
 /**
  * Named assumption constants for the three market scenarios.
- * Expected matches the legacy STOCK_RETURN/BOND_RETURN defaults exactly so
- * a scenario-agnostic run produces identical output.
  *
- * Conservative : stocks 8% / 20 vol   bonds 3.5% / 5.5 vol
- * Expected     : stocks 10% / 18 vol  bonds 4%   / 5 vol
- * Aggressive   : stocks 11.5% / 16 vol bonds 4.5% / 4.5 vol
+ * The showdown simulates the FRED portfolio: 100% stocks (VTI · VXUS · VBR),
+ * so only stockReturn/stockVol drive returns (2026-09-12; previously a 70/30
+ * stock/bond blend). Bond fields remain for the legacy runSimulation API.
+ *
+ * Internal keys are stable storage identifiers; UI labels map as
+ * conservative → "Conservative (8%)", expected → "Moderate (10%)",
+ * aggressive → "Optimistic (12%)". The expected stock return matches the
+ * RateAssumptionsService default (10%) so Moderate = the app standard.
+ *
+ * Conservative : stocks 8% / 20 vol
+ * Moderate     : stocks 10% / 18 vol
+ * Optimistic   : stocks 12% / 16 vol
  * Inflation 2.5% for all scenarios.
  */
 export const SCENARIO_ASSUMPTIONS: Record<ScenarioType, ScenarioAssumptions> = {
-  conservative: { stockReturn: 0.08,  stockVol: 0.20, bondReturn: 0.035, bondVol: 0.055, inflation: 0.025 },
-  expected:     { stockReturn: 0.10,  stockVol: 0.18, bondReturn: 0.04,  bondVol: 0.05,  inflation: 0.025 },
-  aggressive:   { stockReturn: 0.115, stockVol: 0.16, bondReturn: 0.045, bondVol: 0.045, inflation: 0.025 },
+  conservative: { stockReturn: 0.08, stockVol: 0.20, bondReturn: 0.035, bondVol: 0.055, inflation: 0.025 },
+  expected:     { stockReturn: 0.10, stockVol: 0.18, bondReturn: 0.04,  bondVol: 0.05,  inflation: 0.025 },
+  aggressive:   { stockReturn: 0.12, stockVol: 0.16, bondReturn: 0.045, bondVol: 0.045, inflation: 0.025 },
 };
 
 /**
@@ -213,12 +220,15 @@ export class MonteCarloService {
   // SCENARIO HELPERS (FRED-207 internal)
   // =========================================================================
 
-  /** Draw a blended 70/30 stock-bond annual return from the given scenario. */
+  /**
+   * Draw an annual return for the FRED portfolio (100% stocks: VTI · VXUS ·
+   * VBR) from the given scenario. Switched from a 70/30 stock/bond blend
+   * 2026-09-12 so simulations model what users actually hold: higher mean
+   * return with the higher volatility priced in by the simulation itself.
+   */
   private _scenarioReturn(scenario: ScenarioType): number {
     const a = SCENARIO_ASSUMPTIONS[scenario];
-    const stock = this._normalRandom(a.stockReturn, a.stockVol);
-    const bond  = this._normalRandom(a.bondReturn,  a.bondVol);
-    return 0.7 * stock + 0.3 * bond;
+    return this._normalRandom(a.stockReturn, a.stockVol);
   }
 
   /**
@@ -238,6 +248,18 @@ export class MonteCarloService {
     return Math.max(v, 0);
   }
 
+  /**
+   * A spend entered in today's dollars must be inflation-adjusted to the
+   * start of the withdrawal phase: with an accumulation phase of N years,
+   * today's $4,000/mo of spending power costs (1+inflation)^N as many nominal
+   * dollars on day one of retirement. Without this, seeded/stepped
+   * yearsToRetirement overstated success (review-confirmed 2026-09-12).
+   */
+  private _retirementStartSpend(params: ShowdownParams): number {
+    const inf = SCENARIO_ASSUMPTIONS[params.scenario].inflation;
+    return params.monthlySpend * 12 * Math.pow(1 + inf, params.yearsToRetirement);
+  }
+
   /** Resolve the per-path starting withdrawal-phase portfolio value. */
   private _phaseStart(params: ShowdownParams): number {
     return this._accumulate(
@@ -253,7 +275,7 @@ export class MonteCarloService {
   // =========================================================================
 
   private _sd_traditional(params: ShowdownParams): number {
-    const annual = params.monthlySpend * 12;
+    const annual = this._retirementStartSpend(params);
     const sc = params.scenario;
     const inf = SCENARIO_ASSUMPTIONS[sc].inflation;
     let ok = 0;
@@ -273,7 +295,7 @@ export class MonteCarloService {
   }
 
   private _sd_sbloc(params: ShowdownParams): number {
-    const annual = params.monthlySpend * 12;
+    const annual = this._retirementStartSpend(params);
     const sc = params.scenario;
     const inf = SCENARIO_ASSUMPTIONS[sc].inflation;
     const ir = 0.055;
@@ -307,7 +329,7 @@ export class MonteCarloService {
   }
 
   private _sd_annuityGrowth(params: ShowdownParams): number {
-    const annual = params.monthlySpend * 12;
+    const annual = this._retirementStartSpend(params);
     const sc = params.scenario;
     const inf = SCENARIO_ASSUMPTIONS[sc].inflation;
     let ok = 0;
@@ -356,7 +378,7 @@ export class MonteCarloService {
   }
 
   private _sd_fullAnnuity(params: ShowdownParams): number {
-    const annual = params.monthlySpend * 12;
+    const annual = this._retirementStartSpend(params);
     // With accumulation, the annuity income is stochastic (depends on grown value)
     if (params.yearsToRetirement > 0) {
       let ok = 0;

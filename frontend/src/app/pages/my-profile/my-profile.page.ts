@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, Signal, computed, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -23,6 +23,10 @@ import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils
 import { GoalsService, Goal, GoalIcon, RebalanceSchedule } from '../../services/goals.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalAddSheetComponent } from '../../components/goal-add-sheet/goal-add-sheet.component';
+import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { RateAssumptionsService, DEFAULT_ANNUAL_RETURN, DEFAULT_WITHDRAWAL_RATE } from '../../services/rate-assumptions.service';
+import { monthsToTarget } from '../../utils/freedom-projection.utils';
+import { FreedomDetailSheetComponent, FreedomSheetResult } from '../../components/freedom-detail-sheet/freedom-detail-sheet.component';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
 
 /** Computed projection for a single user-added goal. */
@@ -31,6 +35,8 @@ export interface GoalProjection {
   onTrack: boolean;
   projectedLabel: string;
   progressPct: number;
+  /** Per-paycheck saving converted with the user's pay frequency. */
+  monthlyEquivalent: number;
 }
 
 /** Rebalance schedule options shown as chips. */
@@ -99,20 +105,38 @@ export class MyProfilePage implements OnInit, OnDestroy {
   userName: string = 'Investor';
   userEmail: string = '';
 
-  // ── Freedom Plan inputs (editable) ────────────────────────────────────────
-  monthlyInvestGoal: number = 2500;
-  retirementIncomeGoal: number = 5000; // Monthly display; stored annually
+  // ── Freedom Plan state (signals) ──────────────────────────────────────────
+  // Signals, not plain fields, deliberately: signal writes schedule change
+  // detection through the hybrid scheduler even when an event listener runs
+  // outside the Angular zone (WKWebView keystrokes were intermittently not
+  // flushing plain-field updates on device — 2026-08-03).
+  // 0 = not yet seeded (empty tiles). Never default to fabricated amounts:
+  // the tiles render before the first /user/progress emission, and Save's
+  // truthy guard must be able to tell "unseeded" from a real value.
+  readonly monthlyInvestGoal = signal(0);
+  readonly retirementIncomeGoal = signal(0); // Monthly display; stored annually
+  readonly currentPortfolioValue = signal(0);
 
-  // ── Computed plan values ───────────────────────────────────────────────────
+  // ── Derived plan values ────────────────────────────────────────────────────
   currentScheduledInvestment: number = 0;
   investmentFrequencyText: string = '';
-  portfolioGoal: number = 0;
-  yearsToReach: number | string = 0;
-  yearsToReachCurrent: number | string = 0;
-  yearsToReachRemaining: number | string | null = null;
   currentMonthlyEquivalent: number = 0;
-  currentPortfolioValue: number = 0;
-  progressPercentage: number = 0;
+
+  readonly portfolioGoal: Signal<number> = computed(() => {
+    const monthly = this.retirementIncomeGoal();
+    const exact = this.exactAnnualIncome();
+    // Preserve the exact stored annual income while the rounded monthly
+    // display value is untouched (avoids drift from /12 → ×12 round-trips).
+    const annual = (exact !== null && Math.round(exact / 12) === monthly)
+      ? exact
+      : monthly * 12;
+    return annual / this.SAFE_WITHDRAWAL_RATE;
+  });
+
+  readonly progressPercentage: Signal<number> = computed(() => {
+    const goal = this.portfolioGoal();
+    return goal > 0 ? Math.min(this.currentPortfolioValue() / goal, 1.0) : 0;
+  });
 
   // ── Referral ───────────────────────────────────────────────────────────────
   referralCode: string = '';
@@ -133,7 +157,7 @@ export class MyProfilePage implements OnInit, OnDestroy {
   equityLevel: number = 0;
 
   get avatarSrc(): string {
-    return EquityPigUtils.pigSrcFromEquity(this.currentPortfolioValue);
+    return EquityPigUtils.pigSrcFromEquity(this.currentPortfolioValue());
   }
 
   // ── Tier ──────────────────────────────────────────────────────────────────
@@ -145,15 +169,34 @@ export class MyProfilePage implements OnInit, OnDestroy {
   get isPlusOrPro(): boolean { return this.isPlus || this.isPro; }
 
   // ── State ──────────────────────────────────────────────────────────────────
-  isDirty: boolean = false;
   isSubExpired: boolean = false;
-  private originalValues: { monthly: number; income: number } = { monthly: 0, income: 0 };
-  private exactAnnualIncome: number | null = null;
+  private readonly originalValues = signal<{ monthly: number; income: number }>({ monthly: 0, income: 0 });
+  private readonly exactAnnualIncome = signal<number | null>(null);
+  /** True once the tiles have been seeded from a real DB progress emission. */
+  private hasSeededPlan = false;
   currentFrequency: string = '';
 
-  // ── Constants ──────────────────────────────────────────────────────────────
-  private readonly SAFE_WITHDRAWAL_RATE = 0.04;
-  private readonly AVG_MARKET_YIELD = 0.10;
+  readonly isDirty: Signal<boolean> = computed(() => {
+    const original = this.originalValues();
+    return this.monthlyInvestGoal() !== original.monthly ||
+           this.retirementIncomeGoal() !== original.income;
+  });
+
+  // ── Projection rates (user-adjustable, frontend-wide) ─────────────────────
+  // Guarded inject: the freedom-plan math specs construct this page directly
+  // (new MyProfilePage(...)) outside an injection context — they fall back to
+  // the standard defaults. Getters keep the original constant names so every
+  // call site (and its signal reactivity) is unchanged.
+  private ratesService: RateAssumptionsService | null = (() => {
+    try { return inject(RateAssumptionsService); } catch { return null; }
+  })();
+
+  private get SAFE_WITHDRAWAL_RATE(): number {
+    return this.ratesService?.withdrawalRate() ?? DEFAULT_WITHDRAWAL_RATE;
+  }
+  private get AVG_MARKET_YIELD(): number {
+    return this.ratesService?.annualReturn() ?? DEFAULT_ANNUAL_RETURN;
+  }
 
   // Guarded for the same reason as ratesService: the math specs construct this
   // page with `new MyProfilePage(...)`, outside any injection context.
@@ -172,35 +215,74 @@ export class MyProfilePage implements OnInit, OnDestroy {
   // ── Goals ─────────────────────────────────────────────────────────────────
   goals: Goal[] = [];
 
+  // Memoized projections. The getter runs on EVERY change-detection cycle;
+  // returning fresh objects each time made the trackBy-less *ngFor destroy and
+  // recreate every goal row per CD tick. On WKWebView that DOM churn runs
+  // mid-tap (each touch triggers CD) and iOS cancels the synthesized click —
+  // the entire page reads as frozen the moment one saved goal renders
+  // (2026-08-14 device freeze). Recompute only when inputs actually change.
+  private _projCache: GoalProjection[] = [];
+  private _projCacheGoals: Goal[] | null = null;
+  private _projCacheFreq = '';
+
   get goalProjections(): GoalProjection[] {
-    return this.goals.map(g => this._projectGoal(g));
+    if (this._projCacheGoals !== this.goals || this._projCacheFreq !== this.currentFrequency) {
+      this._projCache = this.goals.map(g => this._projectGoal(g));
+      this._projCacheGoals = this.goals;
+      this._projCacheFreq = this.currentFrequency;
+    }
+    return this._projCache;
+  }
+
+  /** trackBy: rows keyed by goal id — never recreated for identity-only changes. */
+  trackGoal(_index: number, proj: GoalProjection): string {
+    return proj.goal.id;
   }
 
   // ── TLH ───────────────────────────────────────────────────────────────────
   get tlhEstimateDisplay(): string {
-    const est = tlhEstimate(this.currentPortfolioValue);
+    const est = tlhEstimate(this.currentPortfolioValue());
     return est > 0 ? `~$${est.toLocaleString()}/yr` : '~$0/yr';
   }
 
-  // ── Freedom Date (for the Goals freedom row) ───────────────────────────────
-  get freedomYear(): number | null {
-    const year = parseInt(this.freedomStats.stats().freedomYear, 10);
-    return isNaN(year) ? null : year;
-  }
+  // ── Freedom projection (live from the editable tiles) ──────────────────────
+  // Computed from the two tile values + current equity so the card reacts as a
+  // what-if calculator before any save. Same PV-inclusive formula and rounding
+  // as FreedomStatsService._calculateMonthsToTarget — keep the two in lockstep.
+  readonly freedomYear: Signal<number | null> = computed(() => {
+    const goal = this.portfolioGoal();
+    if (goal <= 0) return null;
+    const pv = this.currentPortfolioValue();
+    const pmt = this.monthlyInvestGoal() || 0;
+    if (pv <= 0 && pmt <= 0) return null;
+    const months = this._monthsToTarget(pv, pmt, goal);
+    const currentYear = new Date().getFullYear();
+    return Math.min(currentYear + Math.ceil(months / 12), currentYear + 100);
+  });
 
-  get yearsToFreedom(): number | null {
-    if (!this.freedomYear) return null;
-    return this.freedomYear - new Date().getFullYear();
-  }
+  readonly freedomAge: Signal<string> = computed(() => {
+    const year = this.freedomYear();
+    const birthYear = this.freedomStats.birthYear();
+    if (year === null || !birthYear || birthYear <= 0) return '—';
+    const age = year - birthYear;
+    return age > 0 ? String(age) : '—';
+  });
+
+  readonly yearsToFreedom: Signal<number | null> = computed(() => {
+    const year = this.freedomYear();
+    if (!year) return null;
+    return year - new Date().getFullYear();
+  });
 
   get freedomGoalSub(): string {
-    const goal = this.portfolioGoal > 0
-      ? (this.portfolioGoal >= 1_000_000
-          ? '$' + (this.portfolioGoal / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-          : '$' + Math.round(this.portfolioGoal / 1_000) + 'k')
+    const goalValue = this.portfolioGoal();
+    const goal = goalValue > 0
+      ? (goalValue >= 1_000_000
+          ? '$' + (goalValue / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+          : '$' + Math.round(goalValue / 1_000) + 'k')
       : '—';
-    const yr = this.freedomYear ?? '—';
-    const invest = this.monthlyInvestGoal ? `$${this.monthlyInvestGoal.toLocaleString()}/mo` : '—';
+    const yr = this.freedomYear() ?? '—';
+    const invest = this.monthlyInvestGoal() ? `$${this.monthlyInvestGoal().toLocaleString()}/mo` : '—';
     return `${goal} by ${yr} · ${invest} through FRED`;
   }
 
@@ -277,13 +359,25 @@ export class MyProfilePage implements OnInit, OnDestroy {
             this.userName = progress.firstName;
           }
 
-          if (progress.monthlyInvestment) {
-            this.monthlyInvestGoal = progress.monthlyInvestment;
-          }
+          // Seed the tiles from real DB emissions only. The FIRST DB emission
+          // always seeds (pre-seed keystrokes must not pin the empty defaults
+          // as the baseline forever); after that, seeding respects unsaved
+          // edits — userProgress$ re-emits in the background (token refresh
+          // calls loadUserProgress) and must not clobber what the user is
+          // typing. localStorageFallback emissions carry no plan values for
+          // onboarded users and never seed or stamp the baseline.
+          const seedPlan =
+            (progress as any)._source !== 'localStorageFallback' &&
+            (!this.hasSeededPlan || !this.isDirty());
+          if (seedPlan) {
+            if (progress.monthlyInvestment) {
+              this.monthlyInvestGoal.set(progress.monthlyInvestment);
+            }
 
-          if (progress.retirementIncome) {
-            this.exactAnnualIncome = progress.retirementIncome;
-            this.retirementIncomeGoal = Math.round(progress.retirementIncome / 12);
+            if (progress.retirementIncome) {
+              this.exactAnnualIncome.set(progress.retirementIncome);
+              this.retirementIncomeGoal.set(Math.round(progress.retirementIncome / 12));
+            }
           }
 
           if (progress.referralCode) {
@@ -308,12 +402,15 @@ export class MyProfilePage implements OnInit, OnDestroy {
             this.selectedTier = progress.selectedTier;
           }
 
-          this.originalValues = {
-            monthly: this.monthlyInvestGoal,
-            income: this.retirementIncomeGoal
-          };
-
-          this.calculatePlan();
+          if (seedPlan) {
+            this.hasSeededPlan = true;
+            // Stamping the baseline clears any pre-seed dirt (isDirty is
+            // computed from this signal).
+            this.originalValues.set({
+              monthly: this.monthlyInvestGoal(),
+              income: this.retirementIncomeGoal()
+            });
+          }
 
           const fullyOnboarded = progress.investmentConfirmationCompleted === true;
           const hasActiveSub = progress.selectedTier != null;
@@ -321,6 +418,7 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
           // Load persisted goals + prefs now that userId is stable.
           this._loadGoalsAndPrefs();
+          this.ratesService?.ensureUser();
         }
       });
 
@@ -330,7 +428,17 @@ export class MyProfilePage implements OnInit, OnDestroy {
           this.currentScheduledInvestment = investment.investmentAmount;
           this.currentFrequency = investment.frequency ? investment.frequency.toLowerCase() : '';
           this.formatScheduleText(investment);
-          this.calculateCurrentScheduleYears();
+          this.currentMonthlyEquivalent = InvestmentFrequencyUtils.toMonthlyEquivalent(
+            this.currentScheduledInvestment, this.currentFrequency);
+
+          // Flipped-rule fallback (2026-08-01): with no saved goal, the
+          // schedule's monthly equivalent is the contribution tab3 projects
+          // with — seed the tile from it so the at-rest card matches.
+          if (!this.monthlyInvestGoal() && !this.isDirty() && this.currentMonthlyEquivalent > 0) {
+            const monthly = Math.round(this.currentMonthlyEquivalent);
+            this.monthlyInvestGoal.set(monthly);
+            this.originalValues.update(v => ({ ...v, monthly }));
+          }
         }
       },
       error: () => {
@@ -338,21 +446,17 @@ export class MyProfilePage implements OnInit, OnDestroy {
         this.investmentFrequencyText = '';
         this.currentFrequency = '';
         this.currentMonthlyEquivalent = 0;
-        this.yearsToReachCurrent = '∞';
       }
     });
 
     this.portfolioService.getPortfolioDashboard().subscribe({
       next: (data) => {
         if (data && data.summary) {
-          this.currentPortfolioValue = data.summary.equity || 0;
-          this.calculateProgress();
-          this.calculateCurrentScheduleYears();
+          this.currentPortfolioValue.set(data.summary.equity || 0);
         }
       },
       error: () => {
-        this.currentPortfolioValue = 0;
-        this.calculateProgress();
+        this.currentPortfolioValue.set(0);
       }
     });
 
@@ -415,114 +519,60 @@ export class MyProfilePage implements OnInit, OnDestroy {
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
   }
 
-  calculatePlan(): void {
-    this.calculatePortfolioGoal();
-    this.calculateHypotheticalYears();
-    this.calculateCurrentScheduleYears();
-    this.checkDirty();
+  // The tile handlers only write the signal — portfolioGoal, freedomYear,
+  // progressPercentage, and isDirty are all computed() and re-render on their
+  // own, with change detection scheduled by the signal write itself.
+  onIncomeInput(event: Event): void {
+    this.retirementIncomeGoal.set(this._sanitizeTileInput(event));
   }
 
-  onIncomeChange(): void {
-    if (this.retirementIncomeGoal && this.retirementIncomeGoal.toString().length > 5) {
-      this.retirementIncomeGoal = Number(this.retirementIncomeGoal.toString().slice(0, 5));
+  onInvestInput(event: Event): void {
+    this.monthlyInvestGoal.set(this._sanitizeTileInput(event));
+  }
+
+  /**
+   * Digits only, capped at 5 digits, with the input element rewritten in
+   * place. This is the sole maxlength enforcement by design: a DOM maxlength
+   * truncates pasted formatted values ("$5,000" → "$5,00" → 500) before this
+   * handler can strip the separators, and it is ignored on type="number"
+   * inputs anyway.
+   */
+  private _sanitizeTileInput(event: Event): number {
+    const input = event.target as HTMLInputElement;
+    const digits = input.value.replace(/\D/g, '').slice(0, 5);
+    const value = digits ? parseInt(digits, 10) : 0;
+    const canonical = value > 0 ? String(value) : '';
+    if (input.value !== canonical) {
+      input.value = canonical;
     }
-    this.calculatePortfolioGoal();
-    this.calculateHypotheticalYears();
-    this.calculateCurrentScheduleYears();
-    this.checkDirty();
+    return value;
   }
 
-  onInvestChange(): void {
-    if (this.monthlyInvestGoal && this.monthlyInvestGoal.toString().length > 5) {
-      this.monthlyInvestGoal = Number(this.monthlyInvestGoal.toString().slice(0, 5));
-    }
-    this.calculateHypotheticalYears();
-    this.checkDirty();
-  }
-
-  private calculatePortfolioGoal(): void {
-    let annualIncome: number;
-    if (this.exactAnnualIncome !== null &&
-        Math.round(this.exactAnnualIncome / 12) === this.retirementIncomeGoal) {
-      annualIncome = this.exactAnnualIncome;
-    } else {
-      annualIncome = this.retirementIncomeGoal * 12;
-    }
-    this.portfolioGoal = annualIncome / this.SAFE_WITHDRAWAL_RATE;
-    this.calculateProgress();
-  }
-
-  private calculateProgress(): void {
-    if (this.portfolioGoal > 0) {
-      this.progressPercentage = Math.min(this.currentPortfolioValue / this.portfolioGoal, 1.0);
-    } else {
-      this.progressPercentage = 0;
-    }
-  }
-
-  private calculateHypotheticalYears(): void {
-    this.yearsToReach = this.monthlyInvestGoal > 0
-      ? this.calculateYears(this.monthlyInvestGoal)
-      : '∞';
-  }
-
-  private calculateCurrentScheduleYears(): void {
-    if (this.currentScheduledInvestment > 0) {
-      const monthly = InvestmentFrequencyUtils.toMonthlyEquivalent(
-        this.currentScheduledInvestment, this.currentFrequency);
-      this.currentMonthlyEquivalent = monthly;
-      this.yearsToReachCurrent = this.calculateYears(monthly);
-      if (this.currentPortfolioValue > 0) {
-        this.yearsToReachRemaining = this.calculateYearsWithPV(monthly, this.currentPortfolioValue);
-      } else {
-        this.yearsToReachRemaining = null;
-      }
-    }
-  }
-
-  calculateYearsWithPV(monthlyAmount: number, currentEquity: number): string | number {
-    if (monthlyAmount <= 0) return '∞';
-    if (currentEquity >= this.portfolioGoal) return 0;
-    const r = this.AVG_MARKET_YIELD / 12;
-    const numerator = Math.log((this.portfolioGoal + monthlyAmount / r) / (currentEquity + monthlyAmount / r));
-    const denominator = Math.log(1 + r);
-    const months = numerator / denominator;
-    return (isNaN(months) || !isFinite(months)) ? '∞' : (months / 12).toFixed(1);
-  }
-
-  calculateYears(monthlyAmount: number): string | number {
-    if (monthlyAmount <= 0) return '∞';
-    const r = this.AVG_MARKET_YIELD / 12;
-    const numerator = Math.log((this.portfolioGoal * r / monthlyAmount) + 1);
-    const denominator = Math.log(1 + r);
-    const months = numerator / denominator;
-    return (isNaN(months) || !isFinite(months)) ? '∞' : (months / 12).toFixed(1);
-  }
-
-  calculateYearsToReach(monthlyAmount: number): void {
-    this.yearsToReach = this.calculateYears(monthlyAmount);
-  }
-
-  checkDirty(): void {
-    this.isDirty =
-      this.monthlyInvestGoal !== this.originalValues.monthly ||
-      this.retirementIncomeGoal !== this.originalValues.income;
+  /**
+   * Months until pv grows to fv at 10%/yr with a monthly contribution.
+   * Ported from FreedomStatsService._calculateMonthsToTarget (600 = 50-year
+   * cap on degenerate inputs) so the card stays in parity with tab3/MFU.
+   */
+  private _monthsToTarget(pv: number, pmt: number, fv: number): number {
+    return monthsToTarget(pv, pmt, fv, this.AVG_MARKET_YIELD);
   }
 
   saveChanges(): void {
-    if (!this.isDirty) return;
-    if (!this.monthlyInvestGoal || !this.retirementIncomeGoal) {
+    if (!this.isDirty()) return;
+    const monthly = this.monthlyInvestGoal();
+    const income = this.retirementIncomeGoal();
+    if (!monthly || !income) {
       this.toastService.showToast('Please enter valid amounts for both goals.', 'warning');
       return;
     }
     this.authService.updateUserProfile({
-      monthlyInvestment: this.monthlyInvestGoal,
-      retirementIncome: this.retirementIncomeGoal * 12
+      monthlyInvestment: monthly,
+      retirementIncome: income * 12
     }).subscribe({
       next: () => {
         this.toastService.showToast('Profile updated!', 'success');
-        this.isDirty = false;
-        this.originalValues = { monthly: this.monthlyInvestGoal, income: this.retirementIncomeGoal };
+        // Baseline = saved values; the isDirty computed clears itself.
+        this.originalValues.set({ monthly, income });
         this.authService.loadUserProgress();
       },
       error: () => {
@@ -614,6 +664,46 @@ export class MyProfilePage implements OnInit, OnDestroy {
     this.goalsService.savePrefs(this.userId, { rebalanceSchedule: schedule });
   }
 
+  // ── Freedom detail sheet ──────────────────────────────────────────────────
+
+  /**
+   * Full Freedom Plan story — editing tiles, insights, and adjustable rate
+   * assumptions. Opened from the Freedom Plan card and the Freedom Date row.
+   */
+  async openFreedomSheet(): Promise<void> {
+    this.ratesService?.ensureUser();
+    const modal = await this.modalController.create({
+      component: FreedomDetailSheetComponent,
+      componentProps: {
+        income: this.retirementIncomeGoal(),
+        invest: this.monthlyInvestGoal(),
+        equity: this.currentPortfolioValue(),
+      },
+      ...BOTTOM_SHEET_MODAL_OPTS,
+      // Tall variant: this sheet's content should fit without scrolling.
+      cssClass: 'mc-bottom-sheet-modal mc-bottom-sheet-tall',
+    });
+    // Tour: hide the overlay while the sheet is up, then hand control back
+    // when it closes (either call is a no-op unless the tour is on this step).
+    this.tourService?.suspend();
+    await modal.present();
+    const { role, data } = await modal.onDidDismiss<FreedomSheetResult>();
+    this.tourService?.freedomSheetClosed();
+    if (role === 'saved' && data) {
+      this.ratesService?.setRates(data.annualReturn, data.withdrawalRate);
+      // The sheet's Save is gated on a complete plan; guard anyway so a
+      // zeroed payload can never wipe the live signals.
+      if (data.income > 0) this.retirementIncomeGoal.set(data.income);
+      if (data.invest > 0) this.monthlyInvestGoal.set(data.invest);
+      if (this.isDirty()) {
+        this.saveChanges();
+      } else {
+        // Only the assumptions moved — no server write needed.
+        this.toastService.showToast('Plan updated', 'success');
+      }
+    }
+  }
+
   // ── Goals ─────────────────────────────────────────────────────────────────
 
   async openAddGoalSheet(editGoal?: Goal): Promise<void> {
@@ -623,19 +713,29 @@ export class MyProfilePage implements OnInit, OnDestroy {
     }
     const modal = await this.modalController.create({
       component: GoalAddSheetComponent,
-      componentProps: editGoal ? { editGoal } : {},
-      cssClass: 'mc-bottom-sheet-modal',
+      componentProps: {
+        payFrequency: this.currentFrequency,
+        ...(editGoal ? { editGoal } : {}),
+      },
+      ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
     const { role, data } = await modal.onDidDismiss();
     if (role === 'saved' && data) {
       const newGoal = this.goalsService.addGoal(this.userId, data);
       this.goals = [...this.goals, newGoal];
-      this.toastService.showToast('Goal added — projection tracked', 'success');
+      this.toastService.showToast('Goal added. Projection tracked.', 'success');
     } else if (role === 'updated' && data) {
       this.goalsService.updateGoal(this.userId, data);
       this.goals = this.goals.map(g => g.id === data.id ? data : g);
       this.toastService.showToast('Goal updated', 'success');
+    } else if (role === 'completed' && data) {
+      this.goalsService.updateGoal(this.userId, data);
+      this.goals = this.goals.map(g => g.id === data.id ? data : g);
+      this.toastService.showToast(
+        data.completed ? 'Goal marked complete 🎉' : 'Goal reopened', 'success');
+    } else if (role === 'deleted' && data) {
+      this.deleteGoal(data);
     }
   }
 
@@ -643,27 +743,6 @@ export class MyProfilePage implements OnInit, OnDestroy {
     this.goalsService.deleteGoal(this.userId, goalId);
     this.goals = this.goals.filter(g => g.id !== goalId);
     this.toastService.showToast('Goal removed', 'success');
-  }
-
-  /** Long-press on a goal row opens the edit sheet with a delete affordance. */
-  async onGoalLongPress(goal: Goal): Promise<void> {
-    if (!this.isPlusOrPro) return;
-    const alert = await this.alertController.create({
-      header: goal.name,
-      buttons: [
-        {
-          text: 'Edit',
-          handler: () => { this.openAddGoalSheet(goal); }
-        },
-        {
-          text: 'Delete',
-          role: 'destructive',
-          handler: () => { this.deleteGoal(goal.id); }
-        },
-        { text: 'Cancel', role: 'cancel' }
-      ]
-    });
-    await alert.present();
   }
 
   // ── Nudge sheets ───────────────────────────────────────────────────────────
@@ -685,11 +764,11 @@ export class MyProfilePage implements OnInit, OnDestroy {
       componentProps: {
         mode: 'nudge',
         nudgeTitle: 'Unlock multi-goal tracking with Piggy Plus',
-        nudgeBody: 'Track your house, emergency fund, college savings, and more — side by side with projected timelines.',
+        nudgeBody: 'Track your house, emergency fund, college savings, and more, side by side with projected timelines.',
         nudgeCtaLabel: 'Upgrade to Piggy Plus',
         targetTier: 'plus',
       },
-      cssClass: 'mc-bottom-sheet-modal',
+      ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
     const { role } = await modal.onDidDismiss();
@@ -709,11 +788,11 @@ export class MyProfilePage implements OnInit, OnDestroy {
       componentProps: {
         mode: 'nudge',
         nudgeTitle: 'Go deeper with Piggy Pro',
-        nudgeBody: 'Rule-based Tax Loss Harvesting automatically sells losing positions and replaces them with similar ETFs — potentially saving you hundreds per year.',
+        nudgeBody: 'Rule-based Tax Loss Harvesting automatically sells losing positions and replaces them with similar ETFs, potentially saving you hundreds per year.',
         nudgeCtaLabel: 'Upgrade to Pro',
         targetTier: 'pro',
       },
-      cssClass: 'mc-bottom-sheet-modal',
+      ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
     const { role } = await modal.onDidDismiss();
@@ -749,16 +828,30 @@ export class MyProfilePage implements OnInit, OnDestroy {
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
 
-    const monthly = Math.max(0, g.monthlyOutsideFRED);
+    // Per-paycheck saving → monthly, using the user's schedule frequency
+    // (FRED's invest-per-paycheck model makes that the pay frequency).
+    const monthly = InvestmentFrequencyUtils.toMonthlyEquivalent(
+      Math.max(0, g.perPaycheckOutsideFRED), this.currentFrequency);
 
-    // Months needed to accumulate targetAmount at the stated monthly saving.
-    // Guard: if monthly is 0, projection is infinite → rendered as "late".
-    let monthsNeeded: number;
-    if (monthly <= 0) {
-      monthsNeeded = 9999;
-    } else {
-      monthsNeeded = Math.ceil(g.targetAmount / monthly);
+    if (g.completed) {
+      return { goal: g, onTrack: true, projectedLabel: 'Done', progressPct: 100, monthlyEquivalent: monthly };
     }
+
+    // Progress bar: actual saved fraction (floor 2% so the bar reads as started).
+    const savedPct = g.targetAmount > 0
+      ? Math.max(2, Math.min(100, Math.round(((g.startingValue || 0) / g.targetAmount) * 100)))
+      : 100;
+
+    // Months needed to cover what's left after the starting value.
+    const remaining = Math.max(0, g.targetAmount - (g.startingValue || 0));
+
+    // $0/paycheck with an unmet target: no pace → no honest date to project
+    // (the old 9999-month sentinel rendered "Projected · Nov 2859").
+    if (remaining > 0 && monthly <= 0) {
+      return { goal: g, onTrack: false, projectedLabel: 'no pace set', progressPct: savedPct, monthlyEquivalent: monthly };
+    }
+
+    const monthsNeeded = remaining <= 0 ? 0 : Math.ceil(remaining / monthly);
 
     const projYear = currentYear + Math.floor((currentMonth + monthsNeeded) / 12);
     const projMonth = (currentMonth + monthsNeeded) % 12;
@@ -770,12 +863,6 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
     const projectedLabel = projDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
-    // Progress: rough fraction of time elapsed toward the target (capped 2%–100%)
-    const totalMonths = (g.targetYear - currentYear) * 12 + (12 - currentMonth);
-    const pct = totalMonths > 0
-      ? Math.max(2, Math.min(100, Math.round((monthsNeeded > 0 ? (1 - monthsNeeded / totalMonths) * 100 : 100))))
-      : 100;
-
-    return { goal: g, onTrack, projectedLabel, progressPct: pct };
+    return { goal: g, onTrack, projectedLabel, progressPct: savedPct, monthlyEquivalent: monthly };
   }
 }

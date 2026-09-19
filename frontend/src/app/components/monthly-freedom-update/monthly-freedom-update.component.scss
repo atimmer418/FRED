@@ -47,10 +47,16 @@ $indigo-50: #eef2ff;
 // --------------------------------------------------------------------------
 :host {
   display: flex;
-  align-items: center;
+  align-items: flex-start; // anchor the sheet's TOP edge at the padding line (centering would halve any nudge)
   justify-content: center;
   height: 100%;
-  padding: 16px;
+  // Fixed 40px top (device-validated): sits the sheet UP under the notch, intentionally above the
+  // ~62px safe-area inset so it reads as centered under the Dynamic Island rather than below the
+  // status bar. A calc(env(safe-area-inset-top) + n) can never go below the inset, so it is a flat
+  // value on purpose. Bottom is a flat 8px so the sheet runs DOWN over the floating tab bar /
+  // home-indicator zone and the whole update fits without internal scrolling; overflow-y on
+  // .mfu-modal stays as the small-device fallback.
+  padding: 40px 16px 8px;
   font-family: $font-family;
   color: $slate-900;
 }
@@ -212,78 +218,138 @@ $indigo-50: #eef2ff;
   border-radius: 16px; // rounded-2xl
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); // shadow-2xl
   overflow: hidden;
-  max-height: 90vh;
+  max-height: 100%; // of the padded host (safe-area top, flat 8px bottom), so the sheet always fits the view
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding-top: 0;
   padding-bottom: 8px;
-  margin-top: -32px;
 
   @extend .hide-scrollbar;
 }
 
 // --------------------------------------------------------------------------
-// Header
+// Branded hero (Concept 1) — compact family-gradient band, full-bleed to the
+// card's rounded top (the card clips it via overflow:hidden). Height is kept
+// close to the old plain header's so the whole update still fits in one view.
 // --------------------------------------------------------------------------
-.mfu-header {
-  padding: 0 20px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+.mfu-hero {
   position: relative;
-  margin-top: 20px;
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px 34px; // extra bottom = gradient strip the white sheet curves up over (tab3 pattern)
+  background: linear-gradient(160deg, #1e60e3 0%, #1a58d0 58%, #0e3a96 100%);
+  color: #ffffff;
+  overflow: hidden;
 
-  &__spacer {
-    width: 32px;
-  }
-
-  &__title {
-    font-size: 24px; // text-2xl
-    font-weight: 800; // font-extrabold
-    color: $slate-900;
-    line-height: 1.25; // leading-tight
-    flex: 1;
-    text-align: center;
-    margin: -4px 0 0 0;
+  // radial light catches (matches the app's family gradient hero)
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(120% 90% at 12% 0%, rgba(255, 255, 255, 0.22), transparent 52%),
+      radial-gradient(90% 80% at 100% 0%, rgba(120, 170, 255, 0.30), transparent 55%);
+    pointer-events: none;
+    z-index: 0;
   }
 
   &__close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 3;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    color: $slate-400;
-    background: transparent;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
     border: none;
     cursor: pointer;
-    transition: color 0.15s, background-color 0.15s;
-    border-radius: 9999px;
-    flex-shrink: 0;
-    z-index: 10;
-    margin-top: -4px;
     padding: 0;
+    transition: background-color 0.15s;
 
     .material-symbols-outlined {
-      font-size: 24px;
+      font-size: 19px;
     }
 
     &:hover {
-      color: $slate-600;
-      background: $slate-100;
+      background: rgba(255, 255, 255, 0.26);
     }
+  }
+
+  &__avatar {
+    position: relative;
+    z-index: 1; // above the ::before glow (the old `> *` rule did this but out-specified __close)
+    width: 50px;
+    height: 50px;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: #ffffff;
+    padding: 2px;
+    box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.5);
+
+    // level ring
+    &::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 9999px;
+      border: 2px solid rgba(255, 255, 255, 0.5);
+    }
+
+    img {
+      width: 100%;
+      height: 100%;
+      border-radius: 9999px;
+      object-fit: cover;
+      object-position: 50% 42%;
+      display: block;
+      background: #eaf6fd;
+    }
+  }
+
+  &__text {
+    position: relative;
+    z-index: 1;
+    text-align: left;
+    min-width: 0;
+    padding-right: 30px; // keep the subtitle clear of the close button
+  }
+
+  &__wordmark {
+    font-family: 'Montserrat Black Italic', sans-serif;
+    font-weight: 900;
+    font-style: italic;
+    font-size: 22px;
+    line-height: 1;
+    color: #f2f4ff;
+  }
+
+  &__title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #eaf0ff;
+    margin: 3px 0 0 0;
   }
 }
 
 // --------------------------------------------------------------------------
-// Content
+// Content — white sheet with a rounded top pulled up over the hero's gradient
+// strip, so the gradient shows in the top corners (matches the tab3 hero → sheet).
 // --------------------------------------------------------------------------
 .mfu-content {
-  padding: 0 24px 8px;
+  position: relative;
+  z-index: 1;
+  background: #ffffff;
+  border-radius: 22px 22px 0 0;
+  margin-top: -22px;
+  padding: 16px 24px 8px;
   text-align: center;
-  margin-top: -4px;
 }
 
 // --------------------------------------------------------------------------
@@ -338,7 +404,7 @@ $indigo-50: #eef2ff;
 // Milestone
 // --------------------------------------------------------------------------
 .mfu-milestone {
-  margin-bottom: 24px;
+  margin-bottom: 14px;
   margin-top: -8px;
 
   &__card {
@@ -352,8 +418,6 @@ $indigo-50: #eef2ff;
     display: flex;
     align-items: center;
     gap: 12px;
-    width: 105%;
-    margin-left: -2.5%;
     z-index: 10;
   }
 
@@ -414,7 +478,7 @@ $indigo-50: #eef2ff;
 // Bought Back
 // --------------------------------------------------------------------------
 .mfu-bought-back {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   text-align: left;
 
   &__header {
@@ -440,7 +504,7 @@ $indigo-50: #eef2ff;
     font-size: 14px; // text-sm
     color: $slate-500;
     margin: 0 0 8px 0;
-    line-height: 1.625; // leading-relaxed
+    line-height: 1.425; // leading-relaxed
   }
 }
 
@@ -461,7 +525,7 @@ $indigo-50: #eef2ff;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .mfu-stat {
@@ -521,13 +585,14 @@ $indigo-50: #eef2ff;
 // Freedom Tracker
 // --------------------------------------------------------------------------
 .mfu-tracker {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
   gap: 12px;
   background: $slate-50;
   padding: 12px;
   border-radius: 8px;
+  border: 1px solid $slate-100; // match the stat / milestone / CTA card outlines
 
   &__icon {
     color: $slate-400;
@@ -567,7 +632,7 @@ $indigo-50: #eef2ff;
   border-radius: 12px;
   background: linear-gradient(to bottom right, $blue-50, $indigo-50);
   border: 1px solid $blue-100;
-  padding: 20px 20px 10px 20px;
+  padding: 16px 20px 8px 20px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   text-align: left;
 
@@ -666,6 +731,139 @@ $indigo-50: #eef2ff;
 }
 
 // --------------------------------------------------------------------------
+// Retire "sky card" (FRED-217) — replaces the invest-more CTA once the
+// projected freedom year has arrived. A blue-gradient card with the flying
+// pig fading into its sky, a one-time confetti burst, and a button through
+// to the tab2 Education section.
+// --------------------------------------------------------------------------
+.mfu-retire {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  text-align: center;
+  background: linear-gradient(180deg, #54a0e8 0%, #3f83d8 46%, #2f68c4 100%);
+  color: #ffffff;
+  box-shadow: 0 22px 48px -20px rgba(12, 40, 110, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding-bottom: 16px;
+
+  &__sky {
+    position: relative;
+    height: 240px; // taller hero (artifact proportions) so the pig's wings clear the top with breathing room
+    overflow: hidden;
+  }
+
+  &__pig {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 38%; // bias down a touch so the sky above the wings shows, not the wingtips cropped
+    display: block;
+    // Fade the sky into the card's gradient so the pig looks airborne, not boxed.
+    -webkit-mask-image: linear-gradient(to bottom, #000 68%, transparent 99%);
+    mask-image: linear-gradient(to bottom, #000 68%, transparent 99%);
+    animation: mfu-retire-bob 4s ease-in-out infinite;
+  }
+
+  &__confetti {
+    position: absolute;
+    inset: 0 0 30% 0;
+    pointer-events: none;
+    z-index: 2;
+    // One-time burst on reveal (the card mounts once when the freedom year is reached).
+    animation: mfu-retire-confetti-in 800ms ease-out both;
+
+    i {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      opacity: 0.95;
+    }
+  }
+
+  &__body {
+    position: relative;
+    z-index: 3;
+    padding: 0 20px;
+    margin-top: -14px; // lift the copy up onto the faded sky, matching the mockup
+  }
+
+  &__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 800;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #eaf3ff;
+    margin-bottom: 8px;
+  }
+
+  &__eyebrow-icon {
+    font-size: 16px;
+    font-variation-settings: 'FILL' 1;
+  }
+
+  &__title {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0 0 7px 0;
+    line-height: 1.15;
+  }
+
+  &__line {
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0 0 15px 0;
+    line-height: 1.45;
+  }
+
+  &__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: #ffffff;
+    color: #1856c7;
+    border: none;
+    cursor: pointer;
+    font-family: $font-family;
+    border-radius: 999px;
+    padding: 13px;
+    font-weight: 800;
+    font-size: 15px;
+    box-shadow: 0 8px 18px -8px rgba(6, 20, 60, 0.55);
+    transition: transform 0.15s;
+
+    &:active { transform: scale(0.98); }
+  }
+
+  &__btn-arrow {
+    font-size: 19px;
+  }
+}
+
+@keyframes mfu-retire-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes mfu-retire-confetti-in {
+  0% { opacity: 0; transform: translateY(-10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+// Reduce Motion: the pig holds still and the confetti is skipped entirely.
+@media (prefers-reduced-motion: reduce) {
+  .mfu-retire__pig { animation: none; }
+  .mfu-retire__confetti { display: none; }
+}
+
+// --------------------------------------------------------------------------
 // Footer
 // --------------------------------------------------------------------------
 .mfu-footer {
@@ -708,14 +906,6 @@ $indigo-50: #eef2ff;
 }
 
 // --------------------------------------------------------------------------
-// Locked close button placeholder
-// --------------------------------------------------------------------------
-.mfu-header__close--locked {
-  width: 36px;
-  height: 36px;
-  visibility: hidden;
-}
-
 // --------------------------------------------------------------------------
 // Negative value styling
 // --------------------------------------------------------------------------

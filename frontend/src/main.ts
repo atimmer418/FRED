@@ -1,4 +1,4 @@
-import { enableProdMode, importProvidersFrom } from '@angular/core';
+import { enableProdMode, importProvidersFrom, provideZoneChangeDetection } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { RouteReuseStrategy, provideRouter, withPreloading, withDisabledInitialNavigation } from '@angular/router';
@@ -20,6 +20,10 @@ if (environment.production) {
 
 bootstrapApplication(AppComponent, {
   providers: [
+    // Coalesce change detection for event bursts (touchmove/scroll storms) into
+    // one pass per animation frame — every component here is default-CD and all
+    // four tabs stay mounted, so uncoalesced per-event CD is real jank.
+    provideZoneChangeDetection({ eventCoalescing: true }),
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     provideIonicAngular(),
     provideRouter(routes, withPreloading(SelectivePreloadStrategy), withDisabledInitialNavigation()),

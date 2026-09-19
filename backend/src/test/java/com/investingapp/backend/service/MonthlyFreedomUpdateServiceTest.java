@@ -59,19 +59,31 @@ class MonthlyFreedomUpdateServiceTest {
     }
 
     @Test
-    void contributionPrefersScheduleOverSurvey() {
+    void contributionPrefersSavedGoalOverSchedule() {
+        // Flipped 2026-08-01 (was schedule-else-survey): the saved goal drives
+        // the freedom date so my-profile saves always propagate.
+        // PARITY: mirrored in freedom-stats.service.spec.ts "prefers the saved
+        // Investing goal over the actual schedule". Change one → change both.
         User user = new User();
-        user.setMonthlyInvestment(999.0); // survey value must NOT win
+        user.setMonthlyInvestment(999.0); // saved goal wins
         BigDecimal result = service.resolveMonthlyContribution(new BigDecimal("433.00"), user);
-        assertEquals(0, new BigDecimal("433.00").compareTo(result));
+        assertEquals(0, new BigDecimal("999.0").compareTo(result));
     }
 
     @Test
-    void contributionFallsBackToSurveyWhenNoSchedule() {
+    void contributionUsesGoalWhenNoSchedule() {
         User user = new User();
         user.setMonthlyInvestment(500.0);
         BigDecimal result = service.resolveMonthlyContribution(BigDecimal.ZERO, user);
         assertEquals(0, new BigDecimal("500").compareTo(result));
+    }
+
+    @Test
+    void contributionFallsBackToScheduleWhenNoGoal() {
+        User user = new User();
+        user.setMonthlyInvestment(null);
+        BigDecimal result = service.resolveMonthlyContribution(new BigDecimal("433.00"), user);
+        assertEquals(0, new BigDecimal("433.00").compareTo(result));
     }
 
     @Test
@@ -81,6 +93,52 @@ class MonthlyFreedomUpdateServiceTest {
         User userNull = new User();
         userNull.setMonthlyInvestment(null);
         assertEquals(0, BigDecimal.ZERO.compareTo(service.resolveMonthlyContribution(null, userNull)));
+    }
+
+    // --- Dynamic "invest more" boost (percentage of the member's own recurring amount) -------------
+    // Cycle 0 (mfuCount % 3 == 0) suggests +20%, cycle 1 suggests +10%, both rounded to the nearest
+    // $10 and floored at the old flat amount ($50 cycle 0, $25 cycle 1) so small/zero contributors
+    // still get a meaningful nudge.
+
+    @Test
+    void boostIsTwentyPercentOnCycleZero() {
+        assertEquals(0, new BigDecimal("100").compareTo(service.calculateBoostAmount(new BigDecimal("500"), 0)));
+    }
+
+    @Test
+    void boostIsTenPercentOnCycleOne() {
+        // 10% of $500 = $50 (>= the $25 cycle-1 floor)
+        assertEquals(0, new BigDecimal("50").compareTo(service.calculateBoostAmount(new BigDecimal("500"), 1)));
+    }
+
+    @Test
+    void boostRoundsToNearestTenDollars() {
+        // 20% of $317 = $63.40 → nearest $10 = $60
+        assertEquals(0, new BigDecimal("60").compareTo(service.calculateBoostAmount(new BigDecimal("317"), 0)));
+        // 20% of $325 = $65.00 → HALF_UP to nearest $10 = $70
+        assertEquals(0, new BigDecimal("70").compareTo(service.calculateBoostAmount(new BigDecimal("325"), 0)));
+    }
+
+    @Test
+    void boostFloorsAtFlatAmountForSmallContributors() {
+        // 20% of $60 = $12 → rounds to $10 → floored up to the $50 cycle-0 minimum
+        assertEquals(0, new BigDecimal("50").compareTo(service.calculateBoostAmount(new BigDecimal("60"), 0)));
+        // 10% of $60 = $6 → rounds to $10 → floored up to the $25 cycle-1 minimum
+        assertEquals(0, new BigDecimal("25").compareTo(service.calculateBoostAmount(new BigDecimal("60"), 1)));
+    }
+
+    @Test
+    void boostFloorsAtFlatAmountForZeroOrNullContribution() {
+        assertEquals(0, new BigDecimal("50").compareTo(service.calculateBoostAmount(BigDecimal.ZERO, 0)));
+        assertEquals(0, new BigDecimal("25").compareTo(service.calculateBoostAmount(BigDecimal.ZERO, 1)));
+        assertEquals(0, new BigDecimal("50").compareTo(service.calculateBoostAmount(null, 3))); // mfuCount 3 → cycle 0
+    }
+
+    @Test
+    void boostCycleDerivesFromMfuCountModuloThree() {
+        // mfuCount 3 → cycle 0 (+20%), mfuCount 4 → cycle 1 (+10%)
+        assertEquals(0, new BigDecimal("100").compareTo(service.calculateBoostAmount(new BigDecimal("500"), 3)));
+        assertEquals(0, new BigDecimal("50").compareTo(service.calculateBoostAmount(new BigDecimal("500"), 4)));
     }
 
     @Test

@@ -39,4 +39,11 @@ public interface DripExecutionRepository extends JpaRepository<DripExecution, Lo
      * Find a DRIP execution by its Alpaca order ID
      */
     Optional<DripExecution> findByAlpacaOrderId(String alpacaOrderId);
+
+    /**
+     * TLH in-flight-buy veto: a dividend reinvestment for this symbol is
+     * detected or already ordered.
+     */
+    boolean existsByUserAndSymbolAndStatusIn(User user, String symbol,
+            java.util.Collection<DripExecution.DripStatus> statuses);
 }

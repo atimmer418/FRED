@@ -160,7 +160,7 @@ public class MarketBreakdownService {
                 You are FRED, a calm, plain-English investing companion for everyday long-term \
                 investors. You write the market recap section of FRED's Monthly Market Breakdown email.
 
-                Hard rules — violating any of these makes the output unusable:
+                Hard rules (violating any of these makes the output unusable):
                 - NEVER recommend any action. No changes to allocation, contributions, or strategy. \
                 Never tell the reader to buy, sell, hold, wait, or "consider" anything. You explain what \
                 happened; you do not advise.
@@ -169,6 +169,7 @@ public class MarketBreakdownService {
                 round differently any figure. Facts about news events must come from your web search results.
                 - Voice: calm, clear, friendly, jargon-free. If a term like "yield" or "index" is needed, \
                 explain it in a few plain words. Never salesy, never urgent.
+                - NEVER use em dashes (—) or en dashes (–); they read as machine-written. Write complete sentences instead, or use commas, colons, or parentheses.
                 - Output: an HTML fragment using ONLY <p>, <strong>, <em>, <h3>, <ul>, <li>, <br> tags. \
                 No other tags, no attributes, no links, no markdown, no code fences.
                 """;
@@ -182,7 +183,7 @@ public class MarketBreakdownService {
             Integer weight = PORTFOLIO_WEIGHTS.get(r.symbol);
             String role = weight != null
                     ? weight + "% of the FRED default portfolio"
-                    : "S&P 500, market context only — NOT in the portfolio";
+                    : "S&P 500, market context only (NOT in the portfolio)";
             numbers.append(String.format(Locale.US,
                     "- %s (%s): %s%% for %s (closed the prior month at $%s, %s at $%s)%n",
                     r.symbol, role, r.returnPct, label, r.priorClose, label, r.endClose));
@@ -195,8 +196,8 @@ public class MarketBreakdownService {
 
                 Actual %1$s monthly results (month-end close to month-end close):
                 %2$s
-                Search the web for the major market-moving events of %1$s — for example Federal Reserve \
-                decisions, inflation reports, jobs data, notable earnings themes, and world events — and \
+                Search the web for the major market-moving events of %1$s (for example Federal Reserve \
+                decisions, inflation reports, jobs data, notable earnings themes, and world events) and \
                 explain in plain English what happened and why these funds likely moved the way they did.
 
                 Structure exactly:
@@ -204,7 +205,7 @@ public class MarketBreakdownService {
                 <h3>Why your funds moved</h3> followed by a <ul> with one <li> per portfolio fund \
                 (VTI, VXUS, VBR), each mentioning that fund's actual return from the numbers above.
 
-                Length: 300-500 words. Remember: explain only — no advice, no predictions, no invented numbers.
+                Length: 300-500 words. Remember: explain only. No advice, no predictions, no invented numbers.
                 """, label, numbers);
     }
 
@@ -242,8 +243,8 @@ public class MarketBreakdownService {
 
             if (summary.sources.isEmpty()) {
                 throw new IllegalStateException(
-                        "Narrative not grounded: the model performed no web searches — "
-                        + "market facts must come from search results");
+                        "Narrative not grounded: the model performed no web searches. "
+                        + "Market facts must come from search results");
             }
 
             MarketNarrativeValidator.ValidationResult check =

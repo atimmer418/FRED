@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IonicModule } from '@ionic/angular';
@@ -35,7 +35,7 @@ interface FaqItem {
     standalone: true,
     imports: [CommonModule, FormsModule, IonicModule]
 })
-export class FaqPage implements OnInit {
+export class FaqPage {
 
     faqs: FaqItem[] = [
         {
@@ -110,9 +110,6 @@ export class FaqPage implements OnInit {
             cashOutline,
             statsChartOutline
         });
-    }
-
-    ngOnInit() {
     }
 
     toggleSection(index: number) {

@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -44,7 +44,7 @@ export interface InvestmentScheduleResponse {
     KeyboardAvoidDirective
   ]
 })
-export class InvestmentScheduleComponent implements OnInit, OnDestroy {
+export class InvestmentScheduleComponent implements OnInit {
   // User's financial data from initial survey
   monthlyGoal: number = 0;
 
@@ -586,8 +586,5 @@ export class InvestmentScheduleComponent implements OnInit, OnDestroy {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(amount);
-  }
-
-  ngOnDestroy() {
   }
 }

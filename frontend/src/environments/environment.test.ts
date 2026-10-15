@@ -3,5 +3,7 @@ export const environment = {
     local: false,
     backendApiUrl: 'https://api-test.fredvested.com/api',
     rpId: 'api-test.fredvested.com', // Your test frontend/app origin hostname
-    devToolsKey: ''
+    devToolsKey: '',
+    posthogKey: '',
+    posthogApiHost: 'https://m.fredvested.com'
   };

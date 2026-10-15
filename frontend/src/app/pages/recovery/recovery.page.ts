@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -28,7 +28,7 @@ import { create } from '@github/webauthn-json';
     KeyboardAvoidDirective
   ]
 })
-export class RecoveryPage implements OnInit {
+export class RecoveryPage {
   step: 'email' | 'otp' = 'email';
   email: string = '';
   otp: string = '';
@@ -44,8 +44,6 @@ export class RecoveryPage implements OnInit {
   ) {
     addIcons({ shieldCheckmarkOutline, keyOutline, mailOutline });
   }
-
-  ngOnInit() {}
 
   goBack() {
     this.location.back();

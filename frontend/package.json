@@ -10,7 +10,8 @@
     "start": "serve www",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "lint": "ng lint"
+    "lint": "ng lint",
+    "test:lint-rule": "node scripts/lint/assert-posthog-restriction.mjs"
   },
   "private": true,
   "dependencies": {
@@ -43,6 +44,7 @@
     "lottie-web": "^5.13.0",
     "marked": "^18.0.5",
     "ng2-pdf-viewer": "^10.4.0",
+    "posthog-js": "^1.438.10",
     "rxjs": "~7.8.0",
     "serve": "^14.2.6",
     "swiper": "^12.1.4",

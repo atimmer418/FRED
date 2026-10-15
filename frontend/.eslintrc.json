@@ -1,11 +1,17 @@
 {
   "root": true,
-  "ignorePatterns": ["projects/**/*"],
+  "ignorePatterns": [
+    "projects/**/*"
+  ],
   "overrides": [
     {
-      "files": ["*.ts"],
+      "files": [
+        "*.ts"
+      ],
       "parserOptions": {
-        "project": ["tsconfig.json"],
+        "project": [
+          "tsconfig.json"
+        ],
         "createDefaultProgram": true
       },
       "extends": [
@@ -16,7 +22,10 @@
         "@angular-eslint/component-class-suffix": [
           "error",
           {
-            "suffixes": ["Page", "Component"]
+            "suffixes": [
+              "Page",
+              "Component"
+            ]
           }
         ],
         "@angular-eslint/component-selector": [
@@ -34,13 +43,44 @@
             "prefix": "app",
             "style": "camelCase"
           }
+        ],
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "posthog-js",
+                "message": "Import posthog-js only in src/app/services/analytics/posthog.adapter.ts. Everything else must go through AnalyticsService, which is where opt-out, sanitizing and the never-break-a-flow guarantee live."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "posthog-js/*"
+                ],
+                "message": "Import posthog-js only in src/app/services/analytics/posthog.adapter.ts. Everything else must go through AnalyticsService."
+              }
+            ]
+          }
         ]
       }
     },
     {
-      "files": ["*.html"],
-      "extends": ["plugin:@angular-eslint/template/recommended"],
+      "files": [
+        "*.html"
+      ],
+      "extends": [
+        "plugin:@angular-eslint/template/recommended"
+      ],
       "rules": {}
+    },
+    {
+      "files": [
+        "src/app/services/analytics/posthog.adapter.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
     }
   ]
 }

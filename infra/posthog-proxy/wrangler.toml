@@ -1,0 +1,17 @@
+# Cloudflare Worker that proxies PostHog ingestion through our own domain.
+# Deploy steps, written for someone who has never used Cloudflare Workers:
+# FREDdocs/posthog-proxy-deploy.md
+
+name = "fred-metrics-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# m.fredvested.com is intentionally neutral: hostnames containing posthog, analytics, track,
+# telemetry or events are on block lists, which is the problem this proxy exists to solve.
+# The zone already lives in Cloudflare, so this needs a DNS record plus this route.
+routes = [
+  { pattern = "m.fredvested.com/*", zone_name = "fredvested.com" }
+]
+
+# No observability block on purpose: request bodies here are product events, and Worker logs
+# would become a second copy of them outside the analytics tool.

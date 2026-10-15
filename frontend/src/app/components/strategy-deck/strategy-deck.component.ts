@@ -1,11 +1,4 @@
-import {
-  Component,
-  Input,
-  OnInit,
-  OnDestroy,
-  ViewChild,
-  ElementRef,
-} from '@angular/core';
+import { Component, Input, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalController } from '@ionic/angular/standalone';
 import { ToastService } from '../../services/toast.service';
@@ -187,7 +180,7 @@ export const EDU_CARD_DEFS = STRATEGIES.map(s => ({
   standalone: true,
   imports: [CommonModule],
 })
-export class StrategyDeckComponent implements OnInit, OnDestroy {
+export class StrategyDeckComponent implements OnInit {
 
   @Input() strategyKey = 'yield';
 
@@ -223,11 +216,6 @@ export class StrategyDeckComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.strategy = STRATEGIES.find(s => s.key === this.strategyKey) ?? STRATEGIES[0];
-  }
-
-  ngOnDestroy(): void {
-    // Angular template event bindings (scroll, click) are removed automatically
-    // when the component is destroyed — no manual teardown required.
   }
 
   // ── Slide helpers ─────────────────────────────────────────────────────────

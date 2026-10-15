@@ -88,17 +88,26 @@ jobs:
           EOF
           bash test/api/run-all.sh
 
-      - name: Frontend — install + tsc + scoped unit
+      - name: Frontend — install + tsc + lint + scoped unit
         working-directory: frontend
         run: |
           npm ci --legacy-peer-deps
           npx tsc --noEmit
+          # Lint is a gate now, not decoration: the no-restricted-imports rule that keeps
+          # posthog-js inside services/analytics/posthog.adapter.ts only protects anything
+          # if a red lint fails the build. The four pre-existing errors were fixed when it
+          # was switched on, so this starts green.
+          npx ng lint
+          # And prove the rule itself fires — a lint rule nobody tests is a comment.
+          npm run test:lint-rule
           # Scoped on purpose: the full `ng test` fails on FRED's bit-rotted
           # legacy CLI-generated component specs. jwt-token.utils.spec.ts is
           # proven green and confirms the karma/ChromeHeadless runner works.
           # TODO: select the per-story specs by diff in a later iteration
           # (the verifier already runs `ng test --include=<changed>.spec.ts`).
           npx ng test --include='**/jwt-token.utils.spec.ts' --watch=false --browsers=ChromeHeadless
+          # Analytics specs: these are new and green, so they are gated from the start.
+          npx ng test --include='**/services/analytics/*.spec.ts' --include='**/dev-tools-key.utils.spec.ts' --watch=false --browsers=ChromeHeadless
 
       # Design-fidelity gate: render the changed route + calibration refs in a headless
       # mobile browser, then a Claude-vision judge compares the render to the approved

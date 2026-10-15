@@ -179,13 +179,17 @@ public class AuthController {
 
         logger.info("JWT token refreshed for user: {}", username);
         
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "jwtToken", newToken,
-                "id", user.getId(),
-                "publicId", user.getPublicId(),
-                "email", user.getEmail()
-        ));
+        // A HashMap, not Map.of: users.public_id is nullable until the migration that tightens it,
+        // and Map.of throws on a null value, which would turn a missing public_id into a 500 on
+        // every token refresh for that user.
+        java.util.Map<String, Object> body = new java.util.HashMap<>();
+        body.put("success", true);
+        body.put("jwtToken", newToken);
+        body.put("id", user.getId());
+        body.put("publicId", user.getPublicId());
+        body.put("email", user.getEmail());
+
+        return ResponseEntity.ok(body);
     }
 
 }

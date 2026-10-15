@@ -10,7 +10,13 @@ export const environment = {
   // Empty on purpose. local.fredvested.com is a public hostname whenever the tunnel is up, so a
   // key committed here would be no lock at all. Pass it once as ?devKey=... (see
   // utils/dev-tools-key.utils.ts); only the CI build, which targets localhost, carries a literal.
-  devToolsKey: ''
+  devToolsKey: '',
+  // PostHog: paste the dev project key here. One project for local, dev and test (the free plan
+  // allows one); CI stays empty so renders send nothing. Never hardcode a key in source files.
+  posthogKey: '',
+  // Our own reverse-proxied host (Cloudflare Worker on the fredvested.com zone), so the SDK is not
+  // blocked by ad-block lists and cookies stay first-party. See FREDdocs/posthog-proxy-deploy.md.
+  posthogApiHost: 'https://m.fredvested.com'
 };
 
 /*

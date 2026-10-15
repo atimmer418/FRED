@@ -16,6 +16,7 @@ import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourComponent } from './components/first-time-tour/first-time-tour.component';
 import { environment } from '../environments/environment';
 import { captureDevToolsKeyFromUrl } from './utils/dev-tools-key.utils';
+import { AnalyticsService } from './services/analytics/analytics.service';
 import { combineLatest, debounceTime, distinctUntilChanged, filter, Subject, throttleTime } from 'rxjs';
 import { addIcons } from 'ionicons';
 import { lockClosedOutline, fingerPrintOutline } from 'ionicons/icons';
@@ -49,7 +50,8 @@ export class AppComponent implements OnInit {
     private appLockService: AppLockService,
     private passkeyService: PasskeyService,
     private pushNotificationService: PushNotificationService,
-    private portfolioStore: PortfolioStoreService
+    private portfolioStore: PortfolioStoreService,
+    private analytics: AnalyticsService
   ) {
     addIcons({ lockClosedOutline, fingerPrintOutline });
 
@@ -133,6 +135,11 @@ export class AppComponent implements OnInit {
     if (urlParams.get('testing') === 'true') {
       return;
     }
+
+    // One event per app start. Until consent is wired (Checkpoint C) the service is opted out by
+    // default, so this is a no-op in practice; it exists to prove the client, proxy and project
+    // line up once a key is configured. It carries no user data and cannot throw.
+    this.analytics.trackAppOpened();
 
     // In dev mode, simulate login as an existing user BEFORE setting up navigation
     // This prevents the race condition where navigation fires before auth completes

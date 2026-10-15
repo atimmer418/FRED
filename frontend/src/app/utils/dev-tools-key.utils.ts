@@ -23,7 +23,11 @@ export function resolveDevToolsKey(): string {
   }
 }
 
-/** Persists `?devKey=` so the next launch does not need it in the URL. */
+/**
+ * Persists `?devKey=` so the next launch does not need it in the URL, then removes it from the
+ * address bar. The strip runs even if storing failed: a dev-tools key should never sit in a URL
+ * that can be screenshotted, shared, or pasted into a bug report.
+ */
 export function captureDevToolsKeyFromUrl(params: URLSearchParams): void {
   const key = params.get('devKey');
   if (!key) {
@@ -33,5 +37,21 @@ export function captureDevToolsKeyFromUrl(params: URLSearchParams): void {
     localStorage.setItem(STORAGE_KEY, key);
   } catch {
     // Private mode or blocked storage: the key simply will not persist past this load.
+  }
+  stripDevKeyFromAddressBar();
+}
+
+/** Rewrites the current URL without `devKey`, keeping every other param (`devPage` included). */
+function stripDevKeyFromAddressBar(): void {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('devKey')) {
+      return;
+    }
+    url.searchParams.delete('devKey');
+    const query = url.searchParams.toString();
+    window.history.replaceState(window.history.state, '', `${url.pathname}${query ? `?${query}` : ''}${url.hash}`);
+  } catch {
+    // Non-browser context or a blocked History API: nothing to strip.
   }
 }

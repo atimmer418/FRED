@@ -7,5 +7,8 @@ export const environment = {
   backendApiUrl: 'http://localhost:8080/api',
   rpId: 'localhost',
   // Must match app.dev-tools.key in application-ci.properties.
-  devToolsKey: 'ci-local-dev-tools'
+  devToolsKey: 'ci-local-dev-tools',
+  // Empty on purpose: CI renders must never reach a real project.
+  posthogKey: '',
+  posthogApiHost: ''
 };

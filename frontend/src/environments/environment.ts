@@ -13,7 +13,7 @@ export const environment = {
   devToolsKey: '',
   // PostHog: paste the dev project key here. One project for local, dev and test (the free plan
   // allows one); CI stays empty so renders send nothing. Never hardcode a key in source files.
-  posthogKey: '',
+  posthogKey: 'phc_qiuVDMvCrVWYdcqpDq5ziPKuy78xbmNZuMQPKf4Es6x4',
   // Our own reverse-proxied host (Cloudflare Worker on the fredvested.com zone), so the SDK is not
   // blocked by ad-block lists and cookies stay first-party. See FREDdocs/posthog-proxy-deploy.md.
   posthogApiHost: 'https://m.fredvested.com'

@@ -59,16 +59,16 @@ If you would rather click than type:
 
 ## Step 4: point the app at it
 
-`frontend/src/environments/environment.ts` already has:
+Already done, 2026-10-15: the FRED Dev project key is set in
+`frontend/src/environments/environment.ts` (the local build) and `environment.dev.ts`, both pointing
+at `https://m.fredvested.com`.
 
-```ts
-posthogKey: '',
-posthogApiHost: 'https://m.fredvested.com'
-```
+`environment.ci.ts` stays empty so CI renders never reach the project, and `environment.prod.ts`
+stays empty until a production project exists.
 
-Paste the `phc_...` key from step 1 into `posthogKey` in `environment.ts` (the local build) and in
-`environment.dev.ts`. Leave `environment.ci.ts` empty, so CI renders never reach the project, and
-leave `environment.prod.ts` empty until a production project exists.
+A `phc_` project key is a capture-only key and is designed to ship inside a client bundle, which is
+why it lives in the environment config rather than in a secret store. It can only write events to
+this project; it cannot read anything out of PostHog.
 
 ## Step 5: check it works
 

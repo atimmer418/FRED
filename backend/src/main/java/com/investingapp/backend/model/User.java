@@ -42,6 +42,14 @@ public class User {
     @Column(name = "public_id", nullable = false, unique = true, updatable = false, length = 36)
     private String publicId;
 
+    /**
+     * Analytics consent, owned by the server so it is honoured on every device and by server-side
+     * emission, not just by the client that set it. TRUE means opted OUT; a user who has never been
+     * asked is not measured, and a failure to read this value fails closed.
+     */
+    @Column(name = "analytics_opt_out", nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
+    private Boolean analyticsOptOut = true;
+
     // @NotBlank(message = "First name cannot be blank")
     @Size(max = 50)
     private String firstName; // Optional if you only want email initially

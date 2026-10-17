@@ -144,6 +144,16 @@ export class JwtTokenUtils {
    * Returns null if no valid token is stored or the claim is absent.
    * Reads only from the JWT — no separate localStorage key.
    */
+  /**
+   * Read the "pid" (public_id) claim from the currently stored valid JWT: the opaque analytics
+   * identity. Returns null on an older token issued before the claim existed, in which case the
+   * session payload carries it instead.
+   */
+  static getPublicId(): string | null {
+    const t = this.getValidJwtToken();
+    return t ? (this.decodeJwtPayload(t)?.pid ?? null) : null;
+  }
+
   static getNextStepHint(): string | null {
     const t = this.getValidJwtToken();
     return t ? (this.decodeJwtPayload(t)?.ns ?? null) : null;

@@ -36,6 +36,7 @@ interface SessionsResponse {
 import { AppLockService } from '../../services/app-lock.service';
 import { PinService } from '../../services/pin.service';
 import { ToastService } from '../../services/toast.service';
+import { AnalyticsConsentService } from '../../services/analytics/analytics-consent.service';
 
 @Component({
   selector: 'app-security-settings',
@@ -60,6 +61,9 @@ export class SecuritySettingsPage implements OnInit {
   // Settings State
   appLockEnabled = false;
   sensitiveAuthEnabled = false; // Default to false until loaded
+  /** Mirrors users.analytics_opt_out. The toggle is phrased positively, so it is the inverse. */
+  usageDataEnabled = false;
+  savingUsageData = false;
   userEmail: string = '';
 
   // Real Data
@@ -73,7 +77,8 @@ export class SecuritySettingsPage implements OnInit {
     private appLockService: AppLockService,
     private pinService: PinService,
     private toastService: ToastService,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analyticsConsent: AnalyticsConsentService
   ) {
     addIcons({
       shieldCheckmarkOutline, phonePortraitOutline,
@@ -91,6 +96,10 @@ export class SecuritySettingsPage implements OnInit {
 
     // Sync App Lock state
     this.appLockEnabled = this.appLockService.isEnabled();
+
+    // Analytics consent comes from the server with the session payload; AuthService has already
+    // applied it by the time this page is reachable.
+    this.usageDataEnabled = !this.analyticsConsent.isOptedOut();
 
     // Check if PIN is set (Sensitive Auth / step-up enabled).
     // checkingStepUp=true while this resolves — the template shows only a
@@ -163,6 +172,27 @@ export class SecuritySettingsPage implements OnInit {
       await navigator.clipboard.writeText(this.alpacaAccountNumber);
       this.toastService.showToast('Account number copied to clipboard', 'success');
     }
+  }
+
+  /**
+   * Writes consent to the server. On failure the switch goes back to what the server still holds,
+   * so the control never shows a state that was not saved.
+   */
+  toggleUsageData() {
+    const requested = this.usageDataEnabled;
+    this.savingUsageData = true;
+
+    this.analyticsConsent.setOptOut(!requested).subscribe({
+      next: (optOut) => {
+        this.usageDataEnabled = !optOut;
+        this.savingUsageData = false;
+      },
+      error: () => {
+        this.usageDataEnabled = !this.analyticsConsent.isOptedOut();
+        this.savingUsageData = false;
+        this.toastService.showToast('Could not save that. Please try again.', 'danger');
+      },
+    });
   }
 
   toggleAppLock() {

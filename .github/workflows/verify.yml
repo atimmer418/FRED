@@ -57,6 +57,14 @@ jobs:
       - name: Pin npm version
         run: npm install -g npm@10.9.7
 
+      - name: Backend — unit + context tests
+        working-directory: backend
+        run: |
+          # The mysql service above is exactly what the `ci` profile points at, so the
+          # @SpringBootTest context test actually runs here (it skips on machines without a
+          # database). Nothing ran the backend suite before this step existed.
+          ./gradlew test
+
       - name: Boot backend (ci profile)
         working-directory: backend
         run: |

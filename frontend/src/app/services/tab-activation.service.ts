@@ -1,5 +1,6 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
+import { AnalyticsService } from './analytics/analytics.service';
 
 /**
  * Tells each top-level tab when it becomes the active slide in the swipeable
@@ -14,8 +15,20 @@ export class TabActivationService {
   private readonly _activeTab = signal<string>('tab1', { equal: () => false });
   readonly activeTab = this._activeTab.asReadonly();
 
+  private readonly analytics = inject(AnalyticsService);
+
   setActive(tab: string): void {
     this._activeTab.set(tab);
+
+    // The only hook that catches every visible tab change. Swipes, floating-bar taps and
+    // programmatic moves all land here, and none of them produce a router navigation, so
+    // NavigationEnd would miss them and router.url would report a stale tab.
+    //
+    // Called imperatively rather than from an effect on the signal: signal writes coalesce per
+    // change-detection flush, so an effect neither counts calls nor sees every change. The
+    // service drops an unchanged screen name, which is what filters the deliberate re-pulses
+    // (returning to a cached tab) from real screen changes. Name only: no ids, no params.
+    this.analytics.screen(`/tabs/${tab}`);
   }
 
   // Programmatic "move the pager to <tab>" requests (first-time tour). TabsPage

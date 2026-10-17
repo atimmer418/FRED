@@ -187,6 +187,7 @@ public class AuthController {
         body.put("jwtToken", newToken);
         body.put("id", user.getId());
         body.put("publicId", user.getPublicId());
+        body.put("analyticsOptOut", !Boolean.FALSE.equals(user.getAnalyticsOptOut()));
         body.put("email", user.getEmail());
 
         return ResponseEntity.ok(body);

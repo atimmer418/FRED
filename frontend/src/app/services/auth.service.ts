@@ -4,6 +4,7 @@ import { Observable, BehaviorSubject, Subject, tap, catchError, of, lastValueFro
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
 import { resolveDevToolsKey } from '../utils/dev-tools-key.utils';
+import { AnalyticsService } from './analytics/analytics.service';
 import { DeviceIdService } from './device-id.service';
 import { KeychainSyncService } from './keychain-sync.service';
 import { NativePasskeyService } from './native-passkey.service';
@@ -30,6 +31,10 @@ export interface UserProgress {
   selectedTier?: 'core' | 'plus' | 'pro';
   billingPeriod?: string;
   privateBeta?: boolean;
+  /** Opaque analytics identity. Never the email or the numeric id. */
+  publicId?: string;
+  /** Server-owned analytics consent. true means opted out. */
+  analyticsOptOut?: boolean;
   referralRewardTriggered?: boolean;
   currentFreedomEstimate?: number;
   timeToFI?: string;
@@ -80,7 +85,8 @@ export class AuthService {
     private http: HttpClient,
     private deviceIdService: DeviceIdService,
     private keychainSyncService: KeychainSyncService,
-    private nativePasskeyService: NativePasskeyService
+    private nativePasskeyService: NativePasskeyService,
+    private analytics: AnalyticsService
   ) {
     // Check if user is already logged in on app start
     this.checkExistingSession();
@@ -106,6 +112,10 @@ export class AuthService {
     if (token) {
       // Valid token exists — restore session and load progress from backend
       this.isLoggedInSubject.next(true);
+      // A returning user never passes through handleSuccessfulAuthentication, so identity is
+      // applied here as well. Consent still gates everything, and it arrives with the progress
+      // payload a moment later.
+      this.identifyFromStoredToken();
       this.loadUserProgress();
     } else {
       // No valid token — check if there's a known user whose session expired
@@ -175,12 +185,18 @@ export class AuthService {
       this.loadUserProgress();
     }
 
+    // Analytics identity. The pid claim is on the token we just stored; the progress payload that
+    // follows carries the server's consent value, which is what actually opens the gate.
+    this.identifyFromStoredToken();
+
     // Notify app.component so it can perform optimistic nav from the JWT hint.
     // This fires AFTER the load chain is kicked off (additive — does not replace it).
     this.authSucceededSubject.next();
   }
 
   logout(): void {
+    // Before the token goes: the next user on this device must not inherit this identity.
+    this.analytics.reset();
     JwtTokenUtils.clearJwtData();
     this.isLoggedInSubject.next(false);
     this.reAuthInProgressSubject.next(false);
@@ -190,6 +206,18 @@ export class AuthService {
 
   isAuthenticated(): boolean {
     return !JwtTokenUtils.isJwtExpired();
+  }
+
+  /**
+   * Identifies the current user to analytics from the stored token's pid claim. Silent when the
+   * claim is absent (a token issued before the claim existed): the progress payload carries the
+   * public id too, and that path runs moments later.
+   */
+  private identifyFromStoredToken(): void {
+    const publicId = JwtTokenUtils.getPublicId();
+    if (publicId) {
+      this.analytics.identify(publicId);
+    }
   }
 
   /** DEV ONLY: true once dev/tier-mock.ts has written its tier to the server this launch. */
@@ -333,6 +361,11 @@ export class AuthService {
     ).subscribe({
       next: (progress) => {
         // Real DB data — safe to drive navigation.
+        // The server owns consent; this is where the client learns it.
+        this.analytics.applyServerConsent(progress.analyticsOptOut);
+        if (progress.publicId) {
+          this.analytics.identify(progress.publicId);
+        }
         this.userProgressSubject.next({ ...progress, _source: 'db' });
       },
       error: (err) => {

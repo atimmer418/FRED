@@ -2,9 +2,14 @@
 // `ng build` replaces `environment.ts` with `environment.prod.ts`.
 // The list of file replacements can be found in `angular.json`.
 
+import { EnvironmentName } from './environment-name';
+
 export const environment = {
   production: false, // It's a test build, not a full production build
   local: true,
+  // Build identity. Analytics only sends from 'dev' and 'prod': local and ci traffic would
+  // otherwise pollute every funnel, and test has no project.
+  name: 'local' as EnvironmentName,
   backendApiUrl: 'https://local.fredvested.com/api',
   rpId: 'local.fredvested.com', // Your test frontend/app origin hostname
   // Empty on purpose. local.fredvested.com is a public hostname whenever the tunnel is up, so a

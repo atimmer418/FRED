@@ -70,6 +70,7 @@ public class UserController {
         private String billingPeriod;
         private boolean privateBeta;
         private String publicId;
+        private boolean analyticsOptOut;
         private boolean referralRewardTriggered;
         private Integer currentFreedomEstimate;
         private String timeToFI;
@@ -114,6 +115,9 @@ public class UserController {
             this.billingPeriod = user.getBillingPeriod();
             this.privateBeta = Boolean.TRUE.equals(user.getPrivateBeta());
             this.publicId = user.getPublicId();
+            // Defaults to opted OUT when the column is somehow null, so a missing value never
+            // turns analytics on for someone who was never asked.
+            this.analyticsOptOut = !Boolean.FALSE.equals(user.getAnalyticsOptOut());
             this.referralRewardTriggered = Boolean.TRUE.equals(user.getReferralRewardTriggered());
             this.currentFreedomEstimate = user.getCurrentFreedomEstimate();
             this.timeToFI = user.getTimeToFI();
@@ -199,6 +203,11 @@ public class UserController {
         /** Analytics identity, for clients holding a token issued before the pid claim existed. */
         public String getPublicId() {
             return publicId;
+        }
+
+        /** Analytics consent. TRUE means opted out, and the client gate reads this, not a local default. */
+        public boolean isAnalyticsOptOut() {
+            return analyticsOptOut;
         }
 
         public boolean isReferralRewardTriggered() {
@@ -621,6 +630,39 @@ public class UserController {
         }
         subscriptionService.confirmSubscription(email, tier, billingPeriod);
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Analytics consent toggle.
+     * PUT /user/analytics-consent  { "optOut": true|false }
+     *
+     * The server owns this value so it is honoured on every device the user signs in on, and so
+     * server-side emission can respect it too. Returns the stored value, which is what the client
+     * applies to its gate.
+     */
+    @PutMapping("/analytics-consent")
+    public ResponseEntity<?> updateAnalyticsConsent(@RequestBody Map<String, Object> payload,
+            Authentication authentication) {
+        if (authentication == null || authentication.getPrincipal() == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        User user = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Object optOut = payload.get("optOut");
+        if (!(optOut instanceof Boolean)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "'optOut' must be true or false"));
+        }
+
+        user.setAnalyticsOptOut((Boolean) optOut);
+        userRepository.save(user);
+        logger.info("Analytics consent updated for user {}: optOut={}", user.getId(), optOut);
+
+        return ResponseEntity.ok(Map.of("analyticsOptOut", user.getAnalyticsOptOut()));
     }
 
     // The unauthenticated RevenueCat-shaped webhook that used to live here (POST

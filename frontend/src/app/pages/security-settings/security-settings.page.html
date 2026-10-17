@@ -61,6 +61,14 @@
           </div>
           <ion-toggle slot="end" [(ngModel)]="sensitiveAuthEnabled" (ionChange)="toggleSensitiveAuth()"></ion-toggle>
         </ion-item>
+
+        <ion-item class="toggle-item">
+          <div class="toggle-info">
+            <span class="toggle-label">Share anonymous usage data</span>
+            <span class="toggle-desc">Helps us see where the app is confusing. Never your name, email, balances or any dollar amounts</span>
+          </div>
+          <ion-toggle slot="end" [(ngModel)]="usageDataEnabled" [disabled]="savingUsageData" (ionChange)="toggleUsageData()"></ion-toggle>
+        </ion-item>
       </ion-list>
     </div>
 

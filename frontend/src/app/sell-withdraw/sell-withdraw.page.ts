@@ -42,6 +42,7 @@ import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { PasskeyPromptComponent } from '../components/passkey-prompt/passkey-prompt.component';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
+import { AnalyticsService } from '../services/analytics/analytics.service';
 
 @Component({
   selector: 'app-sell-withdraw',
@@ -100,7 +101,8 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
     private toastService: ToastService,
     private passkeyService: PasskeyService,
     private pinService: PinService,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({
       pieChartOutline,
@@ -508,6 +510,11 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       if (response?.success) {
         this.showToast('Your account has been permanently closed.', 'success');
         // Clear any stored auth tokens and navigate to root
+        // Drop the analytics identity BEFORE the store is wiped: reset() needs the vendor's own
+        // localStorage entries to still be there, and the next user on this device must not inherit
+        // this one's identity.
+        this.analytics.reset();
+
         localStorage.clear();
         sessionStorage.clear();
         this.router.navigateByUrl('/', { replaceUrl: true });

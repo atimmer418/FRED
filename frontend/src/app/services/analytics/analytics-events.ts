@@ -24,7 +24,10 @@ export type ScalarValue = string | number | boolean | null;
 /** A payload whose values are all scalars. Used by `screen()`, which has no fixed vocabulary. */
 export type ScalarProps = Record<string, ScalarValue>;
 
-/** Which build is reporting. Keeps dev and CI noise separable from real usage. */
+/**
+ * Which build is reporting, taken from environment.name. Only 'dev' and 'prod' may send at all;
+ * the property exists so the two can be told apart inside one project.
+ */
 export type AppEnvironment = 'local' | 'dev' | 'test' | 'ci' | 'prod';
 
 /**
@@ -33,16 +36,16 @@ export type AppEnvironment = 'local' | 'dev' | 'test' | 'ci' | 'prod';
  */
 export type AnalyticsEvent =
   /**
-   * Fired once per app start. Its purpose is to prove the whole path works (client, proxy,
-   * project) while carrying nothing that could identify anyone.
-   *
-   * Not to be confused with the funnel's first-open event: `app_first_opened` (Phase 4a) is a
-   * once-per-install event and needs install detection, which Checkpoint C adds.
+   * The very first launch after an install. Fires once; every launch after it is `app_opened`.
+   * Install detection is storage-based, so a cleared store or a reinstall reads as a new install
+   * (see AnalyticsService.trackAppOpened).
    */
+  | { name: 'app_first_opened'; props: { platform: 'ios' | 'web'; app_environment: AppEnvironment } }
+  /** Every launch after the first. Carries nothing that could identify anyone. */
   | { name: 'app_opened'; props: { platform: 'ios' | 'web'; app_environment: AppEnvironment } };
 
-// TODO: not yet implemented — Checkpoint C adds the Phase 4 taxonomy here:
-//   4a activation funnel: app_first_opened, onboarding_started, account_created, kyc_started,
+// TODO: not yet implemented — a later checkpoint adds the rest of the Phase 4 taxonomy here:
+//   4a activation funnel: onboarding_started, account_created, kyc_started,
 //      kyc_step_completed, kyc_submitted, kyc_approved, kyc_rejected, kyc_action_required,
 //      bank_link_started, bank_link_completed, bank_link_failed, recurring_created,
 //      deposit_initiated, deposit_settled, deposit_failed, deposit_returned, order_filled

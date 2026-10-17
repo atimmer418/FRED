@@ -1,6 +1,9 @@
+import { EnvironmentName } from './environment-name';
+
 export const environment = {
   production: true,
   local: false,
+  name: 'prod' as EnvironmentName,
   backendApiUrl: 'https://api.fredvested.com/api',
   rpId: 'app.fredvested.com', // Your final production app origin hostname
   devToolsKey: '',

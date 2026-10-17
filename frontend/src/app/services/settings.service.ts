@@ -11,8 +11,11 @@ export interface UserPreferences {
     portfolioAlerts: boolean;
     investmentReminders: boolean;
   };
+  // Analytics consent is NOT here: it lives on the server (users.analytics_opt_out) so it follows
+  // the user across devices and can be honoured by server-side emission. A local copy would be a
+  // second source of truth. The old privacy.shareAnalytics flag was removed when that landed: it
+  // was never read and had no UI label.
   privacy: {
-    shareAnalytics: boolean;
     marketingEmails: boolean;
   };
   investment: {
@@ -48,7 +51,6 @@ export class SettingsService {
       investmentReminders: true
     },
     privacy: {
-      shareAnalytics: false,
       marketingEmails: false
     },
     investment: {

@@ -11,7 +11,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "test:lint-rule": "node scripts/lint/assert-posthog-restriction.mjs"
+    "test:lint-rule": "node scripts/lint/assert-posthog-restriction.mjs",
+    "test:events-documented": "node scripts/docs/assert-events-documented.mjs"
   },
   "private": true,
   "dependencies": {

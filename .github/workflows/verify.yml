@@ -108,6 +108,9 @@ jobs:
           npx ng lint
           # And prove the rule itself fires — a lint rule nobody tests is a comment.
           npm run test:lint-rule
+          # The event taxonomy and its documentation have to stay in step; a stale taxonomy doc is
+          # worse than none, because it gets read as authoritative.
+          npm run test:events-documented
           # Scoped on purpose: the full `ng test` fails on FRED's bit-rotted
           # legacy CLI-generated component specs. jwt-token.utils.spec.ts is
           # proven green and confirms the karma/ChromeHeadless runner works.

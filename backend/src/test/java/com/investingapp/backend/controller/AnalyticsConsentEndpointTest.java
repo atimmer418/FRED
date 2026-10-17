@@ -53,9 +53,9 @@ class AnalyticsConsentEndpointTest {
     }
 
     @Test
-    @DisplayName("a new user starts opted out")
-    void defaultsToOptedOut() {
-        assertThat(user.getAnalyticsOptOut()).isTrue();
+    @DisplayName("a new user starts opted in, and can turn it off in Settings")
+    void defaultsToOptedIn() {
+        assertThat(user.getAnalyticsOptOut()).isFalse();
     }
 
     @Test
@@ -74,7 +74,6 @@ class AnalyticsConsentEndpointTest {
     @DisplayName("opting back out stores true")
     @SuppressWarnings("unchecked")
     void optOutAgain() {
-        user.setAnalyticsOptOut(false);
 
         ResponseEntity<?> response = controller.updateAnalyticsConsent(Map.of("optOut", true), authentication());
 

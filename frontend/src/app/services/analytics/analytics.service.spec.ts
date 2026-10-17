@@ -75,7 +75,9 @@ describe('AnalyticsService', () => {
     localStorage.setItem(FIRST_OPEN_KEY, 'seen');
   }
 
-  it('defaults to opted out, so this checkpoint sends nothing', () => {
+  it('treats consent as unknown, and so opted out, until the server answers', () => {
+    // Server-side the default is now opted IN for a new user, but the client must not assume that:
+    // until the session payload arrives it has no idea, and unknown has to mean silent.
     expect(service.isOptedOut()).toBeTrue();
   });
 

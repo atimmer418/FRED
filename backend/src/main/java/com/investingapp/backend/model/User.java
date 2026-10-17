@@ -44,11 +44,15 @@ public class User {
 
     /**
      * Analytics consent, owned by the server so it is honoured on every device and by server-side
-     * emission, not just by the client that set it. TRUE means opted OUT; a user who has never been
-     * asked is not measured, and a failure to read this value fails closed.
+     * emission, not just by the client that set it. TRUE means opted OUT.
+     *
+     * New users default to opted IN (false): an opt-in default would leave every funnel built from
+     * a small self-selected group. The Settings toggle and the privacy disclosure are what make
+     * that fair. The client still treats consent as unknown, and so opted out, until it reads this
+     * value, so a failure to read it fails closed.
      */
-    @Column(name = "analytics_opt_out", nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
-    private Boolean analyticsOptOut = true;
+    @Column(name = "analytics_opt_out", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private Boolean analyticsOptOut = false;
 
     // @NotBlank(message = "First name cannot be blank")
     @Size(max = 50)

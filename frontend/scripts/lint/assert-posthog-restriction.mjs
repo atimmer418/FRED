@@ -89,6 +89,22 @@ if (adapterSource.includes('sanitize_properties')) {
       'Use before_send, which buildBeforeSend wraps.',
   );
 }
+// $opt_in is a billable event, and the SDK captures one on every opt_in_capturing() call. The
+// adapter therefore has to do two things, and both are easy to undo by accident: skip the call
+// entirely when the SDK is already opted in, and suppress the vendor event when it is not.
+if (!/has_opted_out_capturing\(\)/.test(adapterSource)) {
+  failures.push(
+    `${ALLOWED} calls opt_in_capturing without first checking has_opted_out_capturing(), so every ` +
+      'launch will capture a billable $opt_in for a consent state that did not change.',
+  );
+}
+if (/opt_in_capturing\(\s*\)/.test(adapterSource)) {
+  failures.push(
+    `${ALLOWED} calls opt_in_capturing() with no options, which captures a $opt_in. Pass ` +
+      '{ captureEventName: null }: the consent change is already reported as setting_changed.',
+  );
+}
+
 if (!/before_send:\s*buildBeforeSend\(config\.sanitize\)/.test(adapterSource)) {
   failures.push(
     `${ALLOWED} does not pass the service's sanitizer to before_send. Without it the SDK sends ` +
@@ -107,5 +123,5 @@ if (failures.length > 0) {
 console.log(
   `PASS: ${RULE} blocks posthog-js outside the adapter ` +
     `(${violation.length} message(s) on the fixture, 0 on the adapter), ` +
-    'and the adapter scrubs through before_send',
+    'the adapter scrubs through before_send, and it captures no $opt_in',
 );

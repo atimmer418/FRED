@@ -27,6 +27,14 @@ import { buildBeforeSend } from './posthog-before-send';
  *   option was called twice per capture, once for the event properties and once for the person
  *   properties, so the hook has to scrub both; buildBeforeSend spells out why.
  */
+/**
+ * posthog-js accepts options on `opt_in_capturing` at runtime, but @posthog/types declares it as
+ * taking none. Declared here, in the one file allowed to know about the vendor.
+ */
+interface OptInCapturing {
+  opt_in_capturing(options?: { captureEventName?: string | null }): void;
+}
+
 export class PostHogAdapter implements AnalyticsAdapter {
 
   private ready = false;
@@ -71,8 +79,20 @@ export class PostHogAdapter implements AnalyticsAdapter {
   setOptOut(optedOut: boolean): void {
     if (optedOut) {
       posthog.opt_out_capturing();
-    } else {
-      posthog.opt_in_capturing();
+      return;
     }
+
+    // The SDK is opted in by default, and every launch told it so again. Each of those calls
+    // captured a billable `$opt_in`, once per launch per user, for a state that had not changed.
+    // Nothing is opted in here unless the SDK says it is currently opted OUT.
+    if (!posthog.has_opted_out_capturing()) {
+      return;
+    }
+
+    // And when it genuinely does change, the vendor's own event is suppressed: a consent change
+    // is already reported as setting_changed{analytics_consent}, which carries the outcome and
+    // the surface. `captureEventName` is honoured at runtime but missing from the published
+    // types, hence the narrow cast rather than a blanket `any` on posthog.
+    (posthog as unknown as OptInCapturing).opt_in_capturing({ captureEventName: null });
   }
 }

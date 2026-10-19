@@ -447,6 +447,55 @@ describe('AnalyticsService', () => {
     });
   });
 
+  it('claims the install exactly once across many launches on the same device', () => {
+    // A launch is a fresh service against the SAME storage. The flag, not the instance, is what
+    // makes an install an install, so this is the shape that proves it: the earlier spec only
+    // covered two launches through one service.
+    localStorage.removeItem(FIRST_OPEN_KEY);
+    const launches: string[] = [];
+
+    for (let launch = 0; launch < 5; launch++) {
+      const freshAdapter = new RecordingAdapter();
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [AnalyticsService, { provide: ANALYTICS_ADAPTER, useValue: freshAdapter }],
+      });
+      const freshService = TestBed.inject(AnalyticsService);
+      (environment as { posthogKey: string }).posthogKey = 'phc_test_key_not_real';
+      (environment as { name: typeof realName }).name = 'dev';
+      spyOn(
+        freshService as unknown as { isUnderTest: () => boolean },
+        'isUnderTest',
+      ).and.returnValue(false);
+
+      freshService.trackAppOpened();
+      freshService.applyServerConsent(false);
+
+      launches.push(...freshAdapter.captured.map((c) => c.name));
+    }
+
+    expect(launches).toEqual([
+      'app_first_opened',
+      'app_opened',
+      'app_opened',
+      'app_opened',
+      'app_opened',
+    ]);
+  });
+
+  it('never claims a second install when storage is unreadable', () => {
+    // Blocked site data makes the flag unreadable AND unwritable. Treating that as an install
+    // would report one on every single launch, which is the worst possible answer.
+    allowDispatch();
+    localStorage.removeItem(FIRST_OPEN_KEY);
+    spyOn(Storage.prototype, 'getItem').and.throwError('site data blocked');
+    service.setOptOut(false);
+
+    service.trackAppOpened();
+
+    expect(adapter.captured.map((c) => c.name)).toEqual(['app_opened']);
+  });
+
   it('scrubs the session-entry URL the SDK attaches to every event', () => {
     // The SDK stamps the first URL of the session onto every event. It is a full href, query
     // string included, so it leaks exactly what $current_url would have.

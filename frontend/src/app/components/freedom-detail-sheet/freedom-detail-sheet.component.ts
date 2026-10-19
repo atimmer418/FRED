@@ -6,6 +6,9 @@ import { SheetDragDismissDirective } from '../../directives/sheet-drag-dismiss.d
 import { FreedomStatsService } from '../../services/freedom-stats.service';
 import { RateAssumptionsService } from '../../services/rate-assumptions.service';
 import { monthsToTarget } from '../../utils/freedom-projection.utils';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { ReturnPreset } from '../../services/analytics/analytics-events';
+import { toAmountBand, toYearsBand } from '../../services/analytics/analytics-bands';
 
 /** Dismiss payload for role 'saved'. */
 export interface FreedomSheetResult {
@@ -47,6 +50,7 @@ export class FreedomDetailSheetComponent implements OnInit {
   private rates = inject(RateAssumptionsService);
   private freedomStats = inject(FreedomStatsService);
   private keyboardAvoid = inject(KeyboardAvoidDirective);
+  private analytics = inject(AnalyticsService);
 
   // ── Live what-if state ─────────────────────────────────────────────────────
   readonly incomeSig = signal(0);
@@ -54,6 +58,13 @@ export class FreedomDetailSheetComponent implements OnInit {
   readonly annualReturn = signal(0.10);
   /** Fixed at the industry-standard 4% rule (customization removed 2026-09-12). */
   readonly withdrawalRate = signal(0.04);
+
+  /**
+   * The return the sheet opened with, captured AFTER the snap-to-nearest below so that snapping a
+   * legacy free-form rate is not read as the user choosing a preset. Only selectReturn/resetRates
+   * change the signal after that, so the comparison is exact.
+   */
+  private openedReturn = 0.10;
 
   ngOnInit(): void {
     this.incomeSig.set(this.income || 0);
@@ -64,6 +75,7 @@ export class FreedomDetailSheetComponent implements OnInit {
     const nearest = this.RETURN_SCENARIOS.reduce((best, s) =>
       Math.abs(s.rate - stored) < Math.abs(best.rate - stored) ? s : best);
     this.annualReturn.set(nearest.rate);
+    this.openedReturn = nearest.rate;
     // Withdrawal stays 4% regardless of any legacy stored customization.
     this.keyboardAvoid.wrapperSelector = '.fd-tile';
   }
@@ -182,10 +194,12 @@ export class FreedomDetailSheetComponent implements OnInit {
    * speak the same language. Three choices by design: free-form return
    * customization invited over-tuning.
    */
-  readonly RETURN_SCENARIOS: { label: string; rate: number }[] = [
-    { label: 'Conservative (8%)', rate: 0.08 },
-    { label: 'Moderate (10%)',    rate: 0.10 },
-    { label: 'Optimistic (12%)',  rate: 0.12 },
+  // `preset` is the analytics name for the same choice, carried on the scenario itself so the
+  // chips and the reported value cannot drift apart.
+  readonly RETURN_SCENARIOS: { label: string; rate: number; preset: ReturnPreset }[] = [
+    { label: 'Conservative (8%)', rate: 0.08, preset: 'conservative' },
+    { label: 'Moderate (10%)',    rate: 0.10, preset: 'moderate'     },
+    { label: 'Optimistic (12%)',  rate: 0.12, preset: 'optimistic'   },
   ];
 
   selectReturn(rate: number): void {
@@ -208,7 +222,50 @@ export class FreedomDetailSheetComponent implements OnInit {
       annualReturn: this.annualReturn(),
       withdrawalRate: this.withdrawalRate(),
     };
+    this.trackPlanChanged();
     this.modalController.dismiss(result, 'saved');
+  }
+
+  /**
+   * The plan's one save point.
+   *
+   * Deliberately here and nowhere else: the tiles fire on every keystroke and the scenario chips
+   * on every tap, so anything earlier would emit per character. Both downstream paths run through
+   * this single dismiss — my-profile persists the plan when it is dirty and only applies the rates
+   * when it is not — so the event is counted exactly once either way.
+   *
+   * Amounts are banded, never raw. `*_changed` compares against the plan the sheet was opened
+   * with, which is what the user actually moved in this session. `preset_changed` is what makes
+   * the rates-only save legible: without it, a save that moved only the chips looks identical to
+   * a save that moved nothing, since both carry the same bands.
+   */
+  private trackPlanChanged(): void {
+    const income = this.incomeSig();
+    const invest = this.investSig();
+    this.analytics.track({
+      name: 'freedom_plan_changed',
+      props: {
+        surface: 'freedom_sheet',
+        income_changed: income !== (this.income || 0),
+        invest_changed: invest !== (this.invest || 0),
+        preset_changed: this.annualReturn() !== this.openedReturn,
+        monthly_income_band: income > 0 ? toAmountBand(income) : null,
+        monthly_invest_band: invest > 0 ? toAmountBand(invest) : null,
+        return_preset: this.returnPreset(),
+        years_to_freedom: toYearsBand(this.yearsToFreedom()),
+      },
+    });
+  }
+
+  /** The chosen return as the taxonomy names it. Null if the rate is not one of the three chips. */
+  private returnPreset(): ReturnPreset | null {
+    return this.RETURN_SCENARIOS.find((s) => s.rate === this.annualReturn())?.preset ?? null;
+  }
+
+  /** Years until the projected freedom year; null when there is no reachable date. */
+  private yearsToFreedom(): number | null {
+    const year = this.freedomYear();
+    return year === null ? null : year - new Date().getFullYear();
   }
 
   close(): void {

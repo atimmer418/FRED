@@ -6,6 +6,7 @@ import { Goal, GoalIcon } from '../../services/goals.service';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
 import { SheetDragDismissDirective } from '../../directives/sheet-drag-dismiss.directive';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 
 /**
  * Add-a-goal bottom sheet — FRED-216.
@@ -113,7 +114,10 @@ export class GoalAddSheetComponent implements OnInit {
 
   private keyboardAvoid = inject(KeyboardAvoidDirective);
 
-  constructor(private modalController: ModalController) {}
+  constructor(
+    private modalController: ModalController,
+    private analytics: AnalyticsService
+  ) {}
 
   ngOnInit(): void {
     // Bring the whole labeled field (incl. validation text) above the keyboard.
@@ -225,6 +229,17 @@ export class GoalAddSheetComponent implements OnInit {
     }
 
     // $0/paycheck is allowed — projection renders "late" (lump-sum tracking).
+
+    if (!valid) {
+      // One event per rejected attempt, not one per field: the user tapped once, and several
+      // fields fail together on an empty form. The messages themselves never leave the device —
+      // they quote the user's own goal fields — so only the category and how it was shown go.
+      //
+      // Surface is the sheet, not the page that presented it: this sheet is reachable from the
+      // goals list and from a goal row, and "the goal form was rejected" is a different fact from
+      // "the profile page failed to save".
+      this.analytics.trackErrorShown('validation', 'goals', 'inline_field');
+    }
 
     return valid;
   }

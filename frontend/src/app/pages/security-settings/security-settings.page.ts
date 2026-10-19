@@ -37,6 +37,8 @@ import { AppLockService } from '../../services/app-lock.service';
 import { PinService } from '../../services/pin.service';
 import { ToastService } from '../../services/toast.service';
 import { AnalyticsConsentService } from '../../services/analytics/analytics-consent.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 
 @Component({
   selector: 'app-security-settings',
@@ -78,7 +80,8 @@ export class SecuritySettingsPage implements OnInit {
     private pinService: PinService,
     private toastService: ToastService,
     private navCtrl: NavController,
-    private analyticsConsent: AnalyticsConsentService
+    private analyticsConsent: AnalyticsConsentService,
+    private analytics: AnalyticsService
   ) {
     addIcons({
       shieldCheckmarkOutline, phonePortraitOutline,
@@ -182,14 +185,44 @@ export class SecuritySettingsPage implements OnInit {
     const requested = this.usageDataEnabled;
     this.savingUsageData = true;
 
+    // Ordering trap. Consent gates dispatch, so the two directions have to fire on opposite sides
+    // of the write: an opt-OUT can only be recorded here, before consent is applied, because once
+    // it is applied the gate drops everything; an opt-IN can only be recorded after, because until
+    // then the user is still opted out and the gate would drop it. Neither is a guess about the
+    // outcome: the opt-out write is what the user asked for, and a failure re-fires below with
+    // outcome 'failed' (still dispatchable, because a failed write never applied consent).
+    if (!requested) {
+      this.analytics.track({
+        name: 'setting_changed',
+        props: { setting: 'analytics_consent', enabled: false, value: null, outcome: 'applied' },
+      });
+    }
+
     this.analyticsConsent.setOptOut(!requested).subscribe({
       next: (optOut) => {
         this.usageDataEnabled = !optOut;
         this.savingUsageData = false;
+        if (requested) {
+          this.analytics.track({
+            name: 'setting_changed',
+            props: { setting: 'analytics_consent', enabled: !optOut, value: null, outcome: 'applied' },
+          });
+        }
       },
-      error: () => {
+      error: (err) => {
         this.usageDataEnabled = !this.analyticsConsent.isOptedOut();
         this.savingUsageData = false;
+        this.analytics.track({
+          name: 'setting_changed',
+          props: { setting: 'analytics_consent', enabled: requested, value: null, outcome: 'failed' },
+        });
+        this.analytics.trackErrorShown(
+          isNetworkFailure(err) ? 'network' : 'save_failed',
+          'settings',
+          'toast',
+          httpStatusOf(err),
+          false,
+        );
         this.toastService.showToast('Could not save that. Please try again.', 'danger');
       },
     });
@@ -197,26 +230,56 @@ export class SecuritySettingsPage implements OnInit {
 
   toggleAppLock() {
     this.appLockService.setEnabled(this.appLockEnabled);
+    this.analytics.track({
+      name: 'setting_changed',
+      props: { setting: 'app_lock', enabled: this.appLockEnabled, value: null, outcome: 'applied' },
+    });
     console.log('App lock toggled:', this.appLockEnabled);
   }
 
   async toggleSensitiveAuth() {
-    if (this.sensitiveAuthEnabled) {
+    // Read once: the cancel branch writes the switch back, and `enabled` has to carry the state the
+    // user was reaching for, not the one they were returned to.
+    const requested = this.sensitiveAuthEnabled;
+
+    if (requested) {
       // User turned it ON
       const success = await this.pinService.promptPin('create');
       if (success) {
         // PIN was created — set the localStorage marker so hasPin() is
         // fail-closed even if the next network call errors.
         this.pinService.markStepUpEnabled();
+        this.analytics.track({
+          name: 'setting_changed',
+          props: { setting: 'step_up_auth', enabled: true, value: null, outcome: 'applied' },
+        });
         this.presentToast('Sensitive Action PIN enabled.');
       } else {
         // Creation cancelled
         this.sensitiveAuthEnabled = false;
+        this.analytics.track({
+          name: 'setting_changed',
+          props: { setting: 'step_up_auth', enabled: true, value: null, outcome: 'cancelled' },
+        });
       }
     } else {
       // User turned it OFF
-      await this.pinService.deletePin();
+      try {
+        await this.pinService.deletePin();
+      } catch (error) {
+        // Recorded and rethrown: the rejection still propagates exactly as it did before, so the
+        // toast below is still skipped and nothing the user sees changes.
+        this.analytics.track({
+          name: 'setting_changed',
+          props: { setting: 'step_up_auth', enabled: false, value: null, outcome: 'failed' },
+        });
+        throw error;
+      }
       // deletePin() already clears the marker internally.
+      this.analytics.track({
+        name: 'setting_changed',
+        props: { setting: 'step_up_auth', enabled: false, value: null, outcome: 'applied' },
+      });
       this.presentToast('Sensitive Action PIN disabled.');
     }
   }

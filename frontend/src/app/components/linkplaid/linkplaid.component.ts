@@ -11,6 +11,8 @@ import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { catchError, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -47,7 +49,8 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
     private http: HttpClient,
     private router: Router,
     private navCtrl: NavController,
-    private authService: AuthService
+    private authService: AuthService,
+    private analytics: AnalyticsService
   ) {}
 
   ngOnInit() {
@@ -58,6 +61,8 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
     this.isUserAuthenticated = !!jwtToken; // Convert to boolean
 
     console.log(`LinkPlaidComponent ngOnInit - User Authenticated: ${this.isUserAuthenticated}`);
+    // Nothing is drafted on this screen, so there is no saved state to resume from.
+    this.analytics.trackOnboardingStepViewed('link_plaid', null, false);
     this.initializePlaidLink();
   }
 
@@ -90,6 +95,10 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
       this.plaidHandler = Plaid.create({
         token: linkToken,
         onSuccess: (public_token: string, metadata: any) => {
+          // The step finishes when the user comes back out of the Plaid sheet having picked an
+          // account, not when the Connect button was tapped: the sheet can be abandoned invisibly.
+          // Nothing from public_token or metadata is ever read here.
+          this.analytics.trackOnboardingStepCompleted('link_plaid', null);
           console.log('Plaid Link success! Public Token:', public_token, "Metadata:", metadata);
           this.statusMessage = 'Processing...';
           this.isLoading = true;
@@ -112,6 +121,9 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
           this.isLoading = false;
           this.isPlaidReady = true;
           if (err != null) {
+            // The only thing taken from the exit is that an error was present. Not the code, not
+            // the message, and nothing at all out of metadata.
+            this.analytics.trackErrorShown('bank_link', 'onboarding', 'inline_banner', null, true);
             console.error('Plaid Link exited with error:', err, metadata);
             this.statusMessage = `Link flow exited: ${err.display_message || err.error_message || 'User closed.'}`;
           } else {
@@ -124,6 +136,9 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
         }
       });
     } catch (error: any) {
+      // The link token could not be fetched or the SDK refused it; the user sees an error and can
+      // retry from the same button.
+      this.analytics.trackErrorShown('bank_link', 'onboarding', 'inline_banner', httpStatusOf(error), true);
       console.error('Error initializing Plaid Link:', error);
       this.statusMessage = `Error: ${error.message || 'Could not initialize bank linking.'}`;
       this.isLoading = false;
@@ -169,6 +184,7 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
         }),
         catchError(err => {
           this.isLoading = false;
+          this.analytics.trackErrorShown('bank_link', 'onboarding', 'inline_banner', httpStatusOf(err), true);
           this.statusMessage = `Error: ${err.error?.message || 'Failed to link bank account.'}`;
           return this.handleError(err);
         })

@@ -4,6 +4,7 @@ import { AnalyticsAdapter, AnalyticsAdapterConfig } from './analytics-adapter';
 import { ANALYTICS_ADAPTER } from './analytics-adapter.token';
 import { AnalyticsService } from './analytics.service';
 import { PersonProperties, ScalarProps } from './analytics-events';
+import { buildBeforeSend } from './posthog-before-send';
 
 /** Records calls instead of reaching a vendor, so a spec can never send real traffic. */
 class RecordingAdapter implements AnalyticsAdapter {
@@ -378,6 +379,112 @@ describe('AnalyticsService', () => {
     expect(adapter.screens.length).toBe(1);
     expect(adapter.screens[0].name).toBe('/beneficiaries/edit/:id');
     expect(adapter.screens[0].props).toEqual({ surface: 'settings' });
+  });
+
+  it('reports an onboarding step view, defaulting sub_step and resumed', () => {
+    allowDispatch();
+    service.setOptOut(false);
+
+    service.trackOnboardingStepViewed('get_started');
+
+    expect(adapter.captured).toEqual([
+      { name: 'onboarding_step_viewed', props: { step: 'get_started', sub_step: null, resumed: false } },
+    ]);
+  });
+
+  it('carries the sub step and the resumed flag when a step has them', () => {
+    allowDispatch();
+    service.setOptOut(false);
+
+    service.trackOnboardingStepViewed('kyc_verification', 2, true);
+
+    expect(adapter.captured[0].props).toEqual({ step: 'kyc_verification', sub_step: 2, resumed: true });
+  });
+
+  it('reports an onboarding step completion', () => {
+    allowDispatch();
+    service.setOptOut(false);
+
+    service.trackOnboardingStepCompleted('link_plaid');
+
+    expect(adapter.captured).toEqual([
+      { name: 'onboarding_step_completed', props: { step: 'link_plaid', sub_step: null } },
+    ]);
+  });
+
+  it('reports a shown error as a category, never a message', () => {
+    allowDispatch();
+    service.setOptOut(false);
+
+    service.trackErrorShown('save_failed', 'my_profile', 'toast', 500, true);
+
+    expect(adapter.captured).toEqual([
+      {
+        name: 'error_shown',
+        props: {
+          category: 'save_failed',
+          surface: 'my_profile',
+          display: 'toast',
+          http_status: 500,
+          retry_available: true,
+        },
+      },
+    ]);
+  });
+
+  it('defaults a shown error to a toast with no status and no retry', () => {
+    allowDispatch();
+    service.setOptOut(false);
+
+    service.trackErrorShown('network', 'portfolio');
+
+    expect(adapter.captured[0].props).toEqual({
+      category: 'network',
+      surface: 'portfolio',
+      display: 'toast',
+      http_status: null,
+      retry_available: false,
+    });
+  });
+
+  it('scrubs the session-entry URL the SDK attaches to every event', () => {
+    // The SDK stamps the first URL of the session onto every event. It is a full href, query
+    // string included, so it leaks exactly what $current_url would have.
+    allowDispatch();
+    service.setOptOut(false);
+    service.trackAppOpened();
+
+    const cleaned = adapter.initCalls[0].sanitize({
+      $session_entry_url: 'http://localhost:4200/beneficiaries/edit/42?token=abc',
+      $session_entry_pathname: '/beneficiaries/edit/42',
+    });
+
+    expect(cleaned['$session_entry_url']).toBe('http://localhost:4200/beneficiaries/edit/:id');
+    expect(cleaned['$session_entry_pathname']).toBe('/beneficiaries/edit/:id');
+  });
+
+  it('scrubs an initial person property through the hook the vendor is given', () => {
+    // The end of the chain: the service's own sanitizer, wired into the SDK hook exactly as the
+    // adapter wires it, applied to the person properties posthog builds for itself. A route id
+    // landing here would be permanent, because a person property outlives the event.
+    allowDispatch();
+    service.setOptOut(false);
+    service.trackAppOpened();
+
+    const beforeSend = buildBeforeSend(adapter.initCalls[0].sanitize);
+
+    const result = beforeSend({
+      properties: {},
+      $set_once: {
+        $initial_current_url: 'http://localhost:4200/beneficiaries/edit/42?token=abc',
+        $initial_pathname: '/beneficiaries/edit/42',
+      },
+    });
+
+    expect(result!.$set_once).toEqual({
+      $initial_current_url: 'http://localhost:4200/beneficiaries/edit/:id',
+      $initial_pathname: '/beneficiaries/edit/:id',
+    });
   });
 
   it('does not reset a vendor it never initialized', () => {

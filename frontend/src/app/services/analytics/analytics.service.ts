@@ -3,7 +3,16 @@ import { Capacitor } from '@capacitor/core';
 import { environment } from '../../../environments/environment';
 import { AnalyticsAdapter } from './analytics-adapter';
 import { ANALYTICS_ADAPTER } from './analytics-adapter.token';
-import { AnalyticsEvent, AppEnvironment, PersonProperties, ScalarProps } from './analytics-events';
+import {
+  AnalyticsEvent,
+  AppEnvironment,
+  ErrorCategory,
+  ErrorDisplay,
+  OnboardingStep,
+  PersonProperties,
+  ScalarProps,
+  Surface,
+} from './analytics-events';
 
 /**
  * The single dispatch point for product analytics.
@@ -221,6 +230,41 @@ export class AnalyticsService {
   }
 
   /**
+   * An onboarding step was shown. `resumed` separates a returning user being routed back to their
+   * first incomplete step from a fresh arrival, which is the difference between a drop-off and a
+   * normal progression.
+   */
+  trackOnboardingStepViewed(step: OnboardingStep, subStep: number | null = null, resumed = false): void {
+    this.track({ name: 'onboarding_step_viewed', props: { step, sub_step: subStep, resumed } });
+  }
+
+  /**
+   * The user finished an onboarding step. Call at the user's action, not in the save callback:
+   * the progress write is fire-and-forget and the app navigates either way, so waiting for it
+   * would undercount.
+   */
+  trackOnboardingStepCompleted(step: OnboardingStep, subStep: number | null = null): void {
+    this.track({ name: 'onboarding_step_completed', props: { step, sub_step: subStep } });
+  }
+
+  /**
+   * An error the user actually saw. Takes a category, never a message: app copy interpolates
+   * names, bank names, amounts and transfer ids, and server messages are unbounded.
+   */
+  trackErrorShown(
+    category: ErrorCategory,
+    surface: Surface,
+    display: ErrorDisplay = 'toast',
+    httpStatus: number | null = null,
+    retryAvailable = false,
+  ): void {
+    this.track({
+      name: 'error_shown',
+      props: { category, surface, display, http_status: httpStatus, retry_available: retryAvailable },
+    });
+  }
+
+  /**
    * Lazy init: nothing is loaded until the first real call, and never while opted out, under
    * Karma, or without a key.
    */
@@ -283,7 +327,14 @@ export class AnalyticsService {
     return sanitized;
   }
 
-  /** Properties the SDK fills with a real URL. */
+  /**
+   * Properties the SDK fills with a real URL, which therefore carry our route ids and query
+   * strings unless they are scrubbed. The `$initial_*` three reach the vendor as person
+   * properties rather than event properties, which is why the scrub has to run over `$set_once`
+   * as well as `properties`. `$initial_host` is deliberately absent: it is a bare hostname with
+   * no scheme, so scrubUrl cannot parse it as a URL and would mangle it, and a hostname carries
+   * nothing of ours anyway.
+   */
   private static readonly URL_PROPERTIES = [
     '$current_url',
     '$pathname',
@@ -291,6 +342,8 @@ export class AnalyticsService {
     '$initial_pathname',
     '$referrer',
     '$initial_referrer',
+    '$session_entry_url',
+    '$session_entry_pathname',
   ];
 
   /** A path segment that is an id rather than a route name. */

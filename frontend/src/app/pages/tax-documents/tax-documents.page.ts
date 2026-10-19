@@ -5,6 +5,8 @@ import { IonicModule, ModalController } from '@ionic/angular';
 import { PortfolioService } from '../../services/portfolio.service';
 import { LoadingController } from '@ionic/angular';
 import { ToastService } from '../../services/toast.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { addIcons } from 'ionicons';
 import { documentTextOutline, documentAttachOutline, downloadOutline, chevronDownOutline, chevronForwardOutline } from 'ionicons/icons';
 import { PdfViewerModalComponent } from '../../components/pdf-viewer-modal/pdf-viewer-modal.component';
@@ -43,7 +45,8 @@ export class TaxDocumentsPage implements OnInit {
     private loadingController: LoadingController,
     private toastService: ToastService,
     private modalController: ModalController,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({ documentTextOutline, documentAttachOutline, downloadOutline, chevronDownOutline, chevronForwardOutline });
   }
@@ -140,6 +143,7 @@ export class TaxDocumentsPage implements OnInit {
         
         if (blob.size === 0) {
           console.error('Received empty blob');
+          this.analytics.trackErrorShown('document', 'portfolio', 'toast', null, false);
           await this.toastService.showToast('Document is empty', 'danger', 2000);
           return;
         }
@@ -154,6 +158,7 @@ export class TaxDocumentsPage implements OnInit {
           
           if (!header.startsWith('%PDF-')) {
             console.error('Not a valid PDF! First 100 bytes:', String.fromCharCode(...uint8Array.slice(0, Math.min(100, uint8Array.length))));
+            this.analytics.trackErrorShown('document', 'portfolio', 'toast', null, false);
             await this.toastService.showToast('Invalid document format', 'danger', 2000);
             return;
           }
@@ -187,6 +192,13 @@ export class TaxDocumentsPage implements OnInit {
       error: async (err) => {
         loading.dismiss();
         console.error('Error downloading document:', err);
+        this.analytics.trackErrorShown(
+          isNetworkFailure(err) ? 'network' : 'document',
+          'portfolio',
+          'toast',
+          httpStatusOf(err),
+          false,
+        );
         await this.toastService.showToast('Failed to load document', 'danger', 2000);
       }
     });

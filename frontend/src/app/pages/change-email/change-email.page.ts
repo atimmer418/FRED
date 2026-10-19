@@ -14,6 +14,8 @@ import { AuthService } from '../../services/auth.service';
 import { PasskeyService } from '../../services/passkey.service';
 import { PinService } from '../../services/pin.service';
 import { ToastService } from '../../services/toast.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { addIcons } from 'ionicons';
 import { mailOutline, alertCircleOutline, shieldCheckmarkOutline } from 'ionicons/icons';
@@ -46,7 +48,8 @@ export class ChangeEmailPage implements OnInit {
     private passkeyService: PasskeyService,
     private pinService: PinService,
     private toastService: ToastService,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({ mailOutline, alertCircleOutline, shieldCheckmarkOutline });
   }
@@ -105,6 +108,9 @@ export class ChangeEmailPage implements OnInit {
 
       this.isLoading = false;
       this.errorMessage = 'Authentication required to update email.';
+      // Reached only once BOTH the passkey and the PIN fallback have failed or been dismissed, so
+      // one event per attempt rather than one per factor.
+      this.analytics.trackErrorShown('auth_required', 'my_profile', 'toast', null, false);
       this.toastService.showToast(this.errorMessage, 'danger');
     }
   }
@@ -176,6 +182,13 @@ export class ChangeEmailPage implements OnInit {
           this.isLoading = false;
           console.error('Error updating email:', error);
           this.errorMessage = error.error?.message || 'Failed to update email.';
+          this.analytics.trackErrorShown(
+            isNetworkFailure(error) ? 'network' : 'save_failed',
+            'my_profile',
+            'toast',
+            httpStatusOf(error),
+            false,
+          );
           this.toastService.showToast(this.errorMessage, 'danger');
         }
       });

@@ -4,6 +4,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { toAmountBand, toYearsBand } from '../../services/analytics/analytics-bands';
 import {
   IonContent,
   IonHeader,
@@ -47,7 +49,28 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
   private readonly AVG_MARKET_YIELD = 0.10;     // ~10% average annual return
   private readonly SAFE_WITHDRAWAL_RATE = 0.04; // 4% safe withdrawal rate
 
-  constructor(private router: Router, private authService: AuthService, private navCtrl: NavController) {
+  /**
+   * Whether the USER moved each control, recorded at the handlers rather than inferred by comparing
+   * against an opening snapshot. The subscription in loadSavedValues() lives for the lifetime of the
+   * screen and rewrites both values whenever progress re-emits, so a snapshot comparison would
+   * report a change the user never made (and, after a save round-trip, miss one they did).
+   */
+  private userChangedInvest = false;
+  private userChangedIncome = false;
+
+  // Last values this component applied itself, so a handler can tell a real edit from an echo.
+  private lastKnownMonthlyInvestment = 0;
+  private lastKnownRetirementIncome = 0;
+
+  /** True when saved values (user progress or localStorage) were found for this step. */
+  private resumedFromSavedValues = false;
+
+  constructor(
+    private router: Router,
+    private authService: AuthService,
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
+  ) {
   }
 
   ngOnInit() {
@@ -61,6 +84,10 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
 
     this.updateFormattedValues();
     this.calculateFITimeline();
+
+    this.rememberCurrentValues();
+    this.analytics.trackOnboardingStepViewed('survey_initial', null, this.resumedFromSavedValues);
+
     this.preloadAssets();
   }
 
@@ -125,10 +152,15 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
     this.authService.userProgress$.subscribe(progress => {
       if (progress && progress.monthlyInvestment !== undefined) {
         this.monthlyInvestment = progress.monthlyInvestment;
+        this.resumedFromSavedValues = true;
       }
       if (progress && progress.retirementIncome !== undefined) {
         this.retirementIncome = progress.retirementIncome / 12;
+        this.resumedFromSavedValues = true;
       }
+      // This subscription stays alive for the life of the screen and fires again after every
+      // save. Re-baseline so the server's echo of our own write is never read as a user edit.
+      this.rememberCurrentValues();
       this.updateFormattedValues();
     });
 
@@ -138,10 +170,12 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
 
     if (savedMonthlyInvestment && this.monthlyInvestment === 2000) {
       this.monthlyInvestment = parseInt(savedMonthlyInvestment, 10);
+      this.resumedFromSavedValues = true;
     }
 
     if (savedRetirementIncome && this.retirementIncome === 7500) {
       this.retirementIncome = parseInt(savedRetirementIncome, 10) / 12;
+      this.resumedFromSavedValues = true;
     }
 
     this.updateFormattedValues();
@@ -174,6 +208,9 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
 
   // --- Event Handlers ---
   onSliderChange() {
+    // Both sliders share this handler, so which one moved is decided by comparing against the
+    // values this component last applied. Recording only, never a dispatch: this runs per tick.
+    this.noteUserEdits();
     this.updateFormattedValues();
     this.calculateFITimeline();
     this.saveValues();
@@ -186,6 +223,7 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
   formatAndSetMonthlyInvestment() {
     const numericValue = parseInt(this.formattedMonthlyInvestment.replace(/,/g, ''), 10);
     this.monthlyInvestment = isNaN(numericValue) ? 100 : numericValue;
+    this.noteUserEdits();
     this.updateFormattedValues();
     this.calculateFITimeline();
     this.saveValues();
@@ -198,9 +236,26 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
   formatAndSetRetirementIncome() {
     const numericValue = parseInt(this.formattedRetirementIncome.replace(/,/g, ''), 10);
     this.retirementIncome = isNaN(numericValue) ? 3000 : numericValue;
+    this.noteUserEdits();
     this.updateFormattedValues();
     this.calculateFITimeline();
     this.saveValues();
+  }
+
+  /** Flags the controls whose value differs from what this component last applied. */
+  private noteUserEdits() {
+    if (this.monthlyInvestment !== this.lastKnownMonthlyInvestment) {
+      this.userChangedInvest = true;
+    }
+    if (this.retirementIncome !== this.lastKnownRetirementIncome) {
+      this.userChangedIncome = true;
+    }
+    this.rememberCurrentValues();
+  }
+
+  private rememberCurrentValues() {
+    this.lastKnownMonthlyInvestment = this.monthlyInvestment;
+    this.lastKnownRetirementIncome = this.retirementIncome;
   }
 
   private updateFormattedValues() {
@@ -233,6 +288,30 @@ export class SurveyInitialComponent implements OnInit, ViewWillEnter {
    */
   viewMyPlan() {
     this.isLoading = true;
+
+    // The one save point for this screen. The sliders write to the server on every tick, so the
+    // plan event fires here and nowhere else, carrying bands plus what-actually-changed flags.
+    this.analytics.trackOnboardingStepCompleted('survey_initial', null);
+    this.analytics.track({
+      name: 'freedom_plan_changed',
+      props: {
+        surface: 'onboarding',
+        income_changed: this.userChangedIncome,
+        invest_changed: this.userChangedInvest,
+        // No rate control on this screen, so the preset cannot have moved. Kept explicit rather
+        // than optional so a future rate control on onboarding has to decide what to send.
+        preset_changed: false,
+        // retirementIncome is held MONTHLY on this screen, which is the unit the property names.
+        monthly_income_band: toAmountBand(this.retirementIncome),
+        monthly_invest_band: toAmountBand(this.monthlyInvestment),
+        // No rate control on this screen; the presets live on the freedom sheet.
+        return_preset: null,
+        // timeToFI is a formatted string, and the unreachable case is the literal infinity glyph,
+        // which parses to NaN and bands as 'never'.
+        years_to_freedom: toYearsBand(parseFloat(this.timeToFI)),
+      },
+    });
+
     console.log('Navigating to results with:', {
       monthly: this.monthlyInvestment,
       annual: this.retirementIncome,

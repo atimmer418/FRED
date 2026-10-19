@@ -23,6 +23,8 @@ import { DrawdownDeckComponent } from '../drawdown-deck/drawdown-deck.component'
 import { buildFade } from '../../utils/modal-fade.utils';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { RetirementSectionService } from '../../services/retirement-section.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { GatedFeature, Tier } from '../../services/analytics/analytics-events';
 
 
 @Component({
@@ -46,7 +48,16 @@ export class RetirementPlanningComponent implements OnInit {
 
   // ── Tier gate ─────────────────────────────────────────────────────────────────
 
-  private currentTier: string | null = null;
+  private currentTier: Tier = null;
+
+  /** True once a userProgress emission has been applied, so the gate state is not a guess. */
+  private tierKnown = false;
+
+  /** True once the user has deliberately landed on the (possibly gated) simulator section. */
+  private simulatorArrived = false;
+
+  /** One monte_carlo nudge per screen instance; the overlay is declarative and never re-presents. */
+  private lockNudgeReported = false;
 
   get isMonteCarloLocked(): boolean {
     return this.currentTier !== 'plus' && this.currentTier !== 'pro';
@@ -62,6 +73,10 @@ export class RetirementPlanningComponent implements OnInit {
 
   setSelectedSection(section: 'simulator' | 'education'): void {
     this.selectedSection = section;
+    if (section === 'simulator') {
+      this.simulatorArrived = true;
+      this.reportMonteCarloLockIfShown();
+    }
   }
 
   // ── Education section ─────────────────────────────────────────────────────────
@@ -172,6 +187,7 @@ export class RetirementPlanningComponent implements OnInit {
     private modalController: ModalController,
     private toastService: ToastService,
     private retirementSection: RetirementSectionService,
+    private analytics: AnalyticsService,
   ) {
     addIcons({ diceOutline, schoolOutline });
   }
@@ -181,6 +197,9 @@ export class RetirementPlanningComponent implements OnInit {
   ngOnInit(): void {
     this.authService.userProgress$.subscribe(progress => {
       this.currentTier = progress?.selectedTier ?? null;
+      this.tierKnown = true;
+      // The tier can arrive after the user is already looking at the gate.
+      this.reportMonteCarloLockIfShown();
     });
     // Deep-link requests (e.g. the MFU Retire card, FRED-217) switch the visible section.
     this.retirementSection.request$.subscribe(section => this.setSelectedSection(section));
@@ -195,12 +214,59 @@ export class RetirementPlanningComponent implements OnInit {
     }
   }
 
+  // ── Analytics ─────────────────────────────────────────────────────────────────
+
+  private trackPaywallNudge(
+    feature: GatedFeature,
+    action: 'shown' | 'upgrade_tapped' | 'dismissed',
+  ): void {
+    this.analytics.track({
+      name: 'paywall_nudge_shown',
+      props: { feature, tier: this.currentTier, action },
+    });
+  }
+
+  /**
+   * Reports the simulator lock as shown, once, when it is genuinely on screen.
+   *
+   * It is deliberately NOT reported from ngOnInit: all four tabs mount together in the swipeable
+   * pager, so this component is constructed at launch for every user whether or not they ever open
+   * the Retirement tab, and an init-time event would credit a nudge to all of them. Arriving at
+   * the simulator section is the one moment this component can observe by itself; the tier has to
+   * be known too, or a user whose progress has not loaded looks gated when they are not.
+   */
+  private reportMonteCarloLockIfShown(): void {
+    if (this.lockNudgeReported || !this.simulatorArrived || !this.tierKnown) {
+      return;
+    }
+    if (!this.isMonteCarloLocked) {
+      return;
+    }
+    this.lockNudgeReported = true;
+    this.trackPaywallNudge('monte_carlo', 'shown');
+  }
+
+  /**
+   * The lock overlay's Upgrade button. Separate from upgradeToPlusClicked because the same upgrade
+   * routine is reached from three different gates, and the event has to name the gated feature.
+   */
+  upgradeFromMonteCarloLock(): void {
+    this.trackPaywallNudge('monte_carlo', 'upgrade_tapped');
+    this.upgradeToPlusClicked();
+  }
+
   // ── Modal presentation ────────────────────────────────────────────────────────
 
   async openSimulatorFlow(historyEntry?: SimulationHistoryEntry): Promise<void> {
     if (this.isMonteCarloLocked) { this.upgradeToPlusClicked(); return; }
     if (this.flowLock) return;
     this.flowLock = true;
+
+    // At the user's action, after the double-present guard so one tap is one open.
+    this.analytics.track({
+      name: 'monte_carlo_opened',
+      props: { source: historyEntry ? 'history' : 'orb', tier: this.currentTier },
+    });
 
     // Slower fade in (premium reveal), snappier fade out on close.
     // Uses the shared buildFade util (WKWebView lesson: must drive both
@@ -254,8 +320,14 @@ export class RetirementPlanningComponent implements OnInit {
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
+    this.trackPaywallNudge('market_scenarios', 'shown');
     const { role } = await modal.onDidDismiss();
-    if (role === 'upgrade') this.upgradeToPlusClicked();
+    if (role === 'upgrade') {
+      this.trackPaywallNudge('market_scenarios', 'upgrade_tapped');
+      this.upgradeToPlusClicked();
+    } else {
+      this.trackPaywallNudge('market_scenarios', 'dismissed');
+    }
   }
 
   // ── Landing helper formatters ──────────────────────────────────────────────────

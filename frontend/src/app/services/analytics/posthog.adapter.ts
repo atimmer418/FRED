@@ -1,6 +1,7 @@
 import posthog from 'posthog-js';
 import { AnalyticsAdapter, AnalyticsAdapterConfig } from './analytics-adapter';
 import { PersonProperties, ScalarProps } from './analytics-events';
+import { buildBeforeSend } from './posthog-before-send';
 
 /**
  * The ONLY file in the app allowed to import posthog-js. The ESLint rule
@@ -21,6 +22,10 @@ import { PersonProperties, ScalarProps } from './analytics-events';
  * - `persistence: 'localStorage'` — no cookies to consent-manage. Note the app is served from a
  *   remote origin in the iOS build, so storage is per-origin.
  * - `person_profiles: 'identified_only'` — no person records for anonymous traffic.
+ * - `before_send` — the last-line scrub, applied by the SDK to every payload including the ones
+ *   it builds itself. This replaced `sanitize_properties`, which posthog-js deprecated. The old
+ *   option was called twice per capture, once for the event properties and once for the person
+ *   properties, so the hook has to scrub both; buildBeforeSend spells out why.
  */
 export class PostHogAdapter implements AnalyticsAdapter {
 
@@ -36,7 +41,7 @@ export class PostHogAdapter implements AnalyticsAdapter {
       capture_performance: false,
       persistence: 'localStorage',
       debug: config.debug,
-      sanitize_properties: (properties) => config.sanitize(properties as ScalarProps),
+      before_send: buildBeforeSend(config.sanitize),
     });
     this.ready = true;
   }

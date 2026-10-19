@@ -32,6 +32,8 @@ import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AccountStatusService } from '../services/account-status.service';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
+import { AnalyticsService } from '../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 interface InvestmentFrequencyOption {
   value: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'SEMI_MONTHLY';
@@ -113,7 +115,8 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
     private toastService: ToastService,
     private accountStatusService: AccountStatusService,
     private alertController: AlertController,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({ cashOutline, timeOutline, calendarOutline, addOutline, checkmarkCircleOutline, pauseOutline, playOutline, alertCircleOutline, settingsOutline, informationCircleOutline });
   }
@@ -155,6 +158,15 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
             console.log('No investment schedule found - user probably hasn\'t set one up yet');
             this.currentInvestment = null;
           } else {
+            // The 404 above is the normal "no schedule yet" state and shows nothing, so only this
+            // branch is an error the user actually saw.
+            this.analytics.trackErrorShown(
+              isNetworkFailure(error) ? 'network' : 'load_failed',
+              'portfolio',
+              'toast',
+              httpStatusOf(error),
+              false,
+            );
             this.toastService.showToast('Failed to load investment schedule', 'danger');
           }
           this.isLoading = false;
@@ -532,6 +544,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
       if (hasPin) {
         const verified = await this.pinService.promptPin('verify');
         if (!verified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.toastService.showToast('Authentication required to change investment status.', 'warning');
           this.isLoading = false;
           return;
@@ -540,6 +553,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
 
       // Gate: only check account status when resuming (unpausing)
       if (!isPausing && !this.accountStatusService.isAccountActive()) {
+        this.analytics.trackErrorShown('unavailable', 'portfolio', 'toast', null, false);
         this.toastService.showToast(
           'Your account is not yet active. Investments will resume once your account is fully verified.',
           'warning'
@@ -565,11 +579,20 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
             console.error('Error updating investment status:', error);
             // Fallback: handle 403 from backend as account-not-active gate
             if (error.status === 403) {
+              // The server's version of the same account-not-active gate.
+              this.analytics.trackErrorShown('unavailable', 'portfolio', 'toast', 403, false);
               this.toastService.showToast(
                 'Your account is not yet active. Investments will resume once your account is fully verified.',
                 'warning'
               );
             } else {
+              this.analytics.trackErrorShown(
+                isNetworkFailure(error) ? 'network' : 'save_failed',
+                'portfolio',
+                'toast',
+                httpStatusOf(error),
+                false,
+              );
               this.toastService.showToast('Failed to update investment schedule. Please try again.', 'danger');
             }
             this.isLoading = false;
@@ -583,6 +606,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
 
   async saveChanges() {
     if (!this.editedInvestment.investmentAmount || this.editedInvestment.investmentAmount < 1) {
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       this.toastService.showToast('Investment amount must be at least $1', 'danger');
       return;
     }
@@ -598,6 +622,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
       if (hasPin) {
         const verified = await this.pinService.promptPin('verify');
         if (!verified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.toastService.showToast('Authentication required to save changes.', 'warning');
           this.isLoading = false;
           return;
@@ -662,6 +687,13 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
           },
           error: (error) => {
             console.error('Error updating investment:', error);
+            this.analytics.trackErrorShown(
+              isNetworkFailure(error) ? 'network' : 'save_failed',
+              'portfolio',
+              'toast',
+              httpStatusOf(error),
+              false,
+            );
             this.toastService.showToast('Failed to update investment schedule. Please try again.', 'danger');
             this.isLoading = false;
           }

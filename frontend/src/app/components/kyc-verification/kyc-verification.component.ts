@@ -9,6 +9,8 @@ import {
 } from '@ionic/angular/standalone';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { AlpacaService, CreateAlpacaAccountRequest, UpdateKycRequest } from '../../services/alpaca.service';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 
@@ -136,7 +138,8 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     private authService: AuthService,
     private alpacaService: AlpacaService,
     private toastController: ToastController,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private analytics: AnalyticsService
   ) {}
 
   ngOnInit() {
@@ -157,9 +160,12 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
       this.loadKycDataForEdit();
     } else {
       this.prefillUserData();
-      if (this.loadStep1Draft()) {
+      const resumedFromDraft = this.loadStep1Draft();
+      if (resumedFromDraft) {
         this.currentStep = 2;
       }
+      // Onboarding only. In editMode this screen is a settings form, not a funnel step.
+      this.analytics.trackOnboardingStepViewed('kyc_verification', this.currentStep, resumedFromDraft);
     }
 
   }
@@ -416,6 +422,10 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     }
     this.saveStep1Draft();
     await this.animateStep(2);
+    if (!this.editMode) {
+      // Part 2 is now on screen. The sub-step pair is how the two halves of the form are told apart.
+      this.analytics.trackOnboardingStepViewed('kyc_verification', 2, false);
+    }
   }
 
   private async animateStep(target: 1 | 2) {
@@ -433,6 +443,11 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
 
   async submitKyc() {
     if (!this.step2Valid) return;
+
+    if (!this.editMode) {
+      // At the tap. Whether Alpaca accepts the account is a server-side fact (kyc_submitted).
+      this.analytics.trackOnboardingStepCompleted('kyc_verification', this.currentStep);
+    }
 
     this.isLoading = true;
 
@@ -479,6 +494,14 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
         },
         error: async (err) => {
           this.isLoading = false;
+          // Category and status only: this toast interpolates the server's own message.
+          this.analytics.trackErrorShown(
+            isNetworkFailure(err) ? 'network' : 'save_failed',
+            'onboarding',
+            'toast',
+            httpStatusOf(err),
+            true,
+          );
           const msg = err.error?.message || err.message || 'Account creation failed. Please try again.';
           const toast = await this.toastController.create({
             message: msg,

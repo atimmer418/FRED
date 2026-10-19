@@ -19,6 +19,7 @@ import { MonthlyFreedomUpdateService } from '../../services/monthly-freedom-upda
 import { GoalsService, Goal } from '../../services/goals.service';
 import { FreedomStatsService } from '../../services/freedom-stats.service';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 
 const V2_GOAL: Goal = {
   id: 'g-1',
@@ -67,6 +68,8 @@ function setup(goals: Goal[]): ComponentFixture<MyProfilePage> {
           birthYear: () => 0,
           stats: () => ({ freedomYear: '—', freedomAge: '—', dollarsAway: '—' }),
       } },
+      // Fire-and-forget here; payload assertions live in my-profile.analytics.spec.ts.
+      { provide: AnalyticsService, useValue: { track: () => {}, trackErrorShown: () => {} } },
     ],
   });
   const fixture = TestBed.createComponent(MyProfilePage);

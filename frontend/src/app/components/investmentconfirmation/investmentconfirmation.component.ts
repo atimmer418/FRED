@@ -12,6 +12,7 @@ import {
 } from '@ionic/angular/standalone';
 import { ToastService } from '../../services/toast.service';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { InvestmentService } from '../../services/investment.service';
 import { environment } from '../../../environments/environment';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
@@ -299,7 +300,8 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
     private navCtrl: NavController,
     private http: HttpClient,
     private toastService: ToastService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private analytics: AnalyticsService
   ) {}
 
   goBack(): void {
@@ -315,6 +317,8 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
   async proceedToTrustStep() {
     if (!this.agreedToTerms) return;
     await this.animateStep(2);
+    // The trust step is now on screen; the two internal pages are told apart by sub_step.
+    this.analytics.trackOnboardingStepViewed('investment_confirmation', 2, false);
   }
 
   private async animateStep(target: 1 | 2) {
@@ -332,6 +336,15 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
   ngOnInit() {
     console.log('[InvestmentConfirmationComponent] Initializing investment confirmation page');
 
+    // ionViewWillEnter applies the saved step (and re-runs on every return from portfolio-customize),
+    // so the funnel event is fired once here and reads the same stored value it will apply.
+    const resumedAtTrustStep = this.savedStep() === '2';
+    this.analytics.trackOnboardingStepViewed(
+      'investment_confirmation',
+      resumedAtTrustStep ? 2 : this.currentStep,
+      resumedAtTrustStep,
+    );
+
     // Load user data and investment schedule
     this.loadUserFinancialData();
     this.loadInvestmentSchedule();
@@ -342,6 +355,15 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
     if (userEmail) {
       this.userEmail = userEmail;
       console.log('[InvestmentConfirmationComponent] User email:', userEmail);
+    }
+  }
+
+  /** Storage can throw (private mode, blocked site data); analytics must never break the screen. */
+  private savedStep(): string | null {
+    try {
+      return localStorage.getItem('fred.investmentConfirmation.step');
+    } catch {
+      return null;
     }
   }
 
@@ -635,6 +657,11 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
   }
 
   onMarketingPreferenceChange(opted: boolean): void {
+    // A checkbox, so this is already the commit point: one event per tap, never per frame.
+    this.analytics.track({
+      name: 'setting_changed',
+      props: { setting: 'marketing_emails', enabled: opted, value: null, outcome: 'applied' },
+    });
     // TODO: persist marketing preference to backend
     console.log('[InvestmentConfirmation] Marketing emails opted:', opted);
   }
@@ -647,9 +674,13 @@ export class InvestmentConfirmationComponent implements OnInit, AfterViewInit, O
 
   async authorizeRecurringInvestment() {
     if (!this.agreedToTerms) {
+      this.analytics.trackErrorShown('validation', 'onboarding', 'toast', null, false);
       this.toastService.showToast('Please agree to the Terms of Service and Privacy Policy to continue.', 'warning');
       return;
     }
+
+    // At the user's action. Everything after this is money movement, which the server reports.
+    this.analytics.trackOnboardingStepCompleted('investment_confirmation', this.currentStep);
 
     this.isAuthorizing = true;
 

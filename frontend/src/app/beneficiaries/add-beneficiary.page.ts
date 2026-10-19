@@ -28,6 +28,8 @@ import { BeneficiaryService, Beneficiary } from '../services/beneficiary.service
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
+import { AnalyticsService } from '../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 @Component({
   selector: 'app-add-beneficiary',
@@ -82,7 +84,8 @@ export class AddBeneficiaryPage implements OnInit {
     private passkeyService: PasskeyService,
     private pinService: PinService,
     private toastService: ToastService,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({
       arrowBackOutline,
@@ -136,11 +139,20 @@ export class AddBeneficiaryPage implements OnInit {
         // Store original state for change detection
         this.originalBeneficiary = JSON.stringify(this.beneficiary);
       } else {
+        // The read itself succeeded; the row just was not in it, so there is no status to send.
+        this.analytics.trackErrorShown('load_failed', 'portfolio', 'toast', null, false);
         this.toastService.showToast('Beneficiary not found', 'danger');
         this.router.navigate(['/beneficiaries']);
       }
     } catch (error) {
       console.error('Error loading beneficiary for edit:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'load_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       this.toastService.showToast('Failed to load beneficiary data', 'danger');
     } finally {
       this.isLoading = false;
@@ -167,7 +179,13 @@ export class AddBeneficiaryPage implements OnInit {
   }
 
   async onSave() {
-    if (!this.validateForm()) return;
+    if (!this.validateForm()) {
+      // Fired here rather than inside validateForm's nine branches: each one shows the same kind
+      // of toast and would produce an identical payload, and the message is what differs, which is
+      // the one thing that may not be sent.
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
+      return;
+    }
 
     try {
       this.isLoading = true;
@@ -178,6 +196,7 @@ export class AddBeneficiaryPage implements OnInit {
       if (hasPin) {
         const pinVerified = await this.pinService.promptPin('verify');
         if (!pinVerified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.toastService.showToast('Authentication required to save beneficiary.', 'warning');
           this.isLoading = false;
           return;
@@ -228,6 +247,13 @@ export class AddBeneficiaryPage implements OnInit {
 
     } catch (error: any) {
       console.error('Error saving beneficiary:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'save_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       
       let errorMessage = 'Failed to save beneficiary. Please try again.';
       

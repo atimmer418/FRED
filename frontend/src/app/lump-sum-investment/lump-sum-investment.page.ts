@@ -36,6 +36,8 @@ import { PortfolioService, AccountSummary } from '../services/portfolio.service'
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
+import { AnalyticsService } from '../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 interface AcatsTransferResponse {
   transferId: string;
@@ -119,7 +121,8 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
     private passkeyService: PasskeyService,
     private pinService: PinService,
     private toastService: ToastService,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({
       cashOutline,
@@ -313,6 +316,7 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
 
   async submitAcatsTransfer() {
     if (!this.transferBrokerageDtc || !this.transferAccountNumber) {
+       this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
        this.toastService.showToast('Please select a brokerage and enter your account number.', 'warning');
        return;
     }
@@ -338,6 +342,13 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
 
     } catch (error) {
         console.error('Error submitting ACATS transfer:', error);
+        this.analytics.trackErrorShown(
+          isNetworkFailure(error) ? 'network' : 'save_failed',
+          'portfolio',
+          'toast',
+          httpStatusOf(error),
+          false,
+        );
         this.toastService.showToast('Transfer request failed. Please try again.', 'danger');
     } finally {
         this.isLoading = false;
@@ -347,6 +358,10 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
   async makeInvestment() {
     // If we have separate buttons, this function should strictly handle investment logic
     if (!this.validateInvestment()) {
+      // Fired here rather than inside validateInvestment's five branches: they all show the same
+      // kind of toast and would produce an identical payload. One of those messages quotes the
+      // user's buying power, which is exactly what must not be sent.
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       return;
     }
 
@@ -359,6 +374,7 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
       if (hasPin) {
         const pinVerified = await this.pinService.promptPin('verify');
         if (!pinVerified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.toastService.showToast('Authentication required to make investment.', 'warning');
           this.isLoading = false;
           return;
@@ -401,12 +417,21 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
               this.investmentType = 'portfolio';
             }, 2000);
           } else {
+            // HTTP 200 with a failure in the body, so there is no status to send.
+            this.analytics.trackErrorShown('save_failed', 'portfolio', 'toast', null, false);
             this.toastService.showToast(response.message || 'Failed to process investment', 'danger');
           }
         },
         error: (error) => {
           this.isLoading = false;
           console.error('Investment error:', error);
+          this.analytics.trackErrorShown(
+            isNetworkFailure(error) ? 'network' : 'save_failed',
+            'portfolio',
+            'toast',
+            httpStatusOf(error),
+            false,
+          );
 
           let errorMessage = 'Failed to process investment. Please try again.';
           if (error.error?.message) {
@@ -420,6 +445,9 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
       });
     } catch (error) {
       console.error('Error making investment:', error);
+      // Nothing reached the network on this path (it is the step-up prompt or payload build), so
+      // the category stays 'unknown' rather than pretending to know the cause.
+      this.analytics.trackErrorShown('unknown', 'portfolio', 'toast', httpStatusOf(error), false);
       this.toastService.showToast('An unexpected error occurred.', 'danger');
       this.isLoading = false;
     }

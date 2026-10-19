@@ -1,8 +1,9 @@
-import { Component, ViewChild, ElementRef, AfterViewInit, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
+import { Component, ViewChild, ElementRef, AfterViewInit, OnInit, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IonContent } from '@ionic/angular/standalone';
 import { NavController, createAnimation } from '@ionic/angular';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 import type { SwiperContainer } from 'swiper/element';
 
 @Component({
@@ -13,12 +14,31 @@ import type { SwiperContainer } from 'swiper/element';
   imports: [CommonModule, IonContent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA]
 })
-export class GetStartedComponent implements AfterViewInit {
+export class GetStartedComponent implements OnInit, AfterViewInit {
   @ViewChild('swiper') swiperRef: ElementRef<SwiperContainer> | undefined;
 
   private preloadImg?: HTMLImageElement;
 
-  constructor(private navController: NavController, private authService: AuthService) { }
+  constructor(
+    private navController: NavController,
+    private authService: AuthService,
+    private analytics: AnalyticsService
+  ) { }
+
+  ngOnInit() {
+    // A stored onboardingStep means this device has already been through the first step, so this
+    // arrival is a return rather than a fresh install walking in.
+    this.analytics.trackOnboardingStepViewed('get_started', null, this.hasStoredOnboardingStep());
+  }
+
+  /** Storage can throw (private mode, blocked site data); analytics must never break the screen. */
+  private hasStoredOnboardingStep(): boolean {
+    try {
+      return !!localStorage.getItem('onboardingStep');
+    } catch {
+      return false;
+    }
+  }
 
   ngAfterViewInit() {
     // Preload starts immediately on mount, regardless of which slide the user is on.
@@ -40,6 +60,10 @@ export class GetStartedComponent implements AfterViewInit {
   }
 
   getSetUp() {
+    // At the tap, not in the completeStep callback: the progress write is fire-and-forget and the
+    // app navigates either way, so waiting for it would undercount.
+    this.analytics.trackOnboardingStepCompleted('get_started', null);
+
     localStorage.setItem('onboardingStep', '1');
 
     this.navController.navigateRoot('/survey-initial', {

@@ -4,6 +4,8 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { IonHeader, IonToolbar, IonContent, IonFooter, IonSpinner, NavController } from '@ionic/angular/standalone';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { PlanStrategy } from '../../services/analytics/analytics-events';
 
 // Define a type for our strategy for clean code
 export interface StrategyTag {
@@ -90,7 +92,8 @@ export class FiPlanResultsComponent implements OnInit, OnDestroy {
     public router: Router,
     private authService: AuthService,
     private cdr: ChangeDetectorRef,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {}
 
   ngOnInit() {
@@ -136,6 +139,28 @@ export class FiPlanResultsComponent implements OnInit, OnDestroy {
     }, 100);
 
     this.preloadAssets();
+
+    // A saved strategy means the user has stood on this screen before. Read here rather than
+    // waiting for loadSelectedStrategy, which runs on a timer.
+    this.analytics.trackOnboardingStepViewed('fi_plan_results', null, this.hasSavedStrategy());
+
+  }
+
+  /** Storage can throw (private mode, blocked site data); analytics must never break the screen. */
+  private hasSavedStrategy(): boolean {
+    try {
+      return !!localStorage.getItem('fiPlanSelectedStrategy');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Narrows the card id to the taxonomy's closed set. selectedStrategyId is a plain string, so an
+   * unrecognised id sends nothing rather than inventing a value.
+   */
+  private toPlanStrategy(id: string): PlanStrategy | null {
+    return id === 'yield' || id === 'guardrails' || id === 'sbloc' || id === 'annuity' ? id : null;
   }
 
   private preloadAssets() {
@@ -289,6 +314,13 @@ export class FiPlanResultsComponent implements OnInit, OnDestroy {
   
   confirmSelection() {
     this.isLoading = true;
+
+    const strategy = this.toPlanStrategy(this.selectedStrategyId);
+    if (strategy) {
+      this.analytics.track({ name: 'plan_strategy_selected', props: { strategy } });
+    }
+    this.analytics.trackOnboardingStepCompleted('fi_plan_results', null);
+
     console.log(`User selected the ${this.getSelectedStrategyName()} plan.`);
 
     // Complete the fiPlanResults step

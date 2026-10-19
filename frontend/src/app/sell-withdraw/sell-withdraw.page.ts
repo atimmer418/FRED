@@ -43,6 +43,7 @@ import { PinService } from '../services/pin.service';
 import { PasskeyPromptComponent } from '../components/passkey-prompt/passkey-prompt.component';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
 import { AnalyticsService } from '../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 @Component({
   selector: 'app-sell-withdraw',
@@ -164,6 +165,13 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
 
     } catch (error) {
       console.error('Error loading trading data:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'load_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       this.showToast('Failed to load portfolio data', 'danger');
     } finally {
       this.isLoading = false;
@@ -193,6 +201,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
 
     // Check if position has available quantity or is effectively 100% pending
     if ((position.quantityAvailable !== undefined && position.quantityAvailable <= 0 && position.quantity > 0) || pendingPercent === 100) {
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       this.showToast('This full position is pending sale.', 'warning');
       return;
     }
@@ -258,6 +267,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       if (hasPin) {
         const pinVerified = await this.pinService.promptPin('verify');
         if (!pinVerified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.showToast('Authentication required to sell positions.', 'warning');
           return;
         }
@@ -297,11 +307,21 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       } else {
         // Gentle error message instead of raw backend error
         console.error('Sell error:', response?.error);
+        // The call succeeded at the HTTP level and the failure is in the body, so there is no
+        // status to send.
+        this.analytics.trackErrorShown('save_failed', 'portfolio', 'toast', null, false);
         this.showToast('Unable to process sale. You may have pending orders for this position.', 'danger');
       }
 
     } catch (error) {
       console.error('Error selling position:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'save_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       this.showToast('Unable to process sale. Please try again later.', 'danger');
     } finally {
       this.isSelling = false;
@@ -320,6 +340,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       if (hasPin) {
         const pinVerified = await this.pinService.promptPin('verify');
         if (!pinVerified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.showToast('Authentication required to withdraw funds.', 'warning');
           return;
         }
@@ -338,11 +359,19 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
         this.withdrawAmount = null; // Clear input
         await this.loadData(); // Refresh data
       } else {
+        this.analytics.trackErrorShown('save_failed', 'portfolio', 'toast', null, false);
         this.showToast(response?.error || 'Failed to initiate withdrawal', 'danger');
       }
 
     } catch (error) {
       console.error('Error withdrawing cash:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'save_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       this.showToast('Failed to initiate withdrawal', 'danger');
     } finally {
       this.isWithdrawing = false;
@@ -363,6 +392,12 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
     this.tradingService.setDripEnabled(newValue).subscribe({
       next: (response) => {
         this.dripEnabled = response.dripEnabled;
+        // Reports what the server stored rather than what was tapped: the two could disagree, and
+        // the switch is already following the server.
+        this.analytics.track({
+          name: 'setting_changed',
+          props: { setting: 'drip', enabled: response.dripEnabled, value: null, outcome: 'applied' },
+        });
         this.showToast(
           response.dripEnabled
             ? 'DRIP enabled. Dividends will be reinvested automatically.'
@@ -375,6 +410,18 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
         console.error('Error toggling DRIP:', err);
         // Revert the toggle visually
         this.dripEnabled = !newValue;
+        // `enabled` is the state the user was reaching for, which the revert above has just undone.
+        this.analytics.track({
+          name: 'setting_changed',
+          props: { setting: 'drip', enabled: newValue, value: null, outcome: 'failed' },
+        });
+        this.analytics.trackErrorShown(
+          isNetworkFailure(err) ? 'network' : 'save_failed',
+          'portfolio',
+          'toast',
+          httpStatusOf(err),
+          false,
+        );
         this.showToast('Failed to update DRIP setting.', 'danger');
         this.dripToggling = false;
       }
@@ -483,6 +530,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       const { data } = await modal.onDidDismiss();
 
       if (!data?.authenticated) {
+        this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
         this.showToast('Authentication required to close your account.', 'warning');
         return;
       }
@@ -491,6 +539,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       this.showCloseConfirmation = true;
     } catch (error) {
       console.error('Error during close account auth:', error);
+      this.analytics.trackErrorShown('passkey', 'portfolio', 'toast', httpStatusOf(error), false);
       this.showToast('Authentication failed. Please try again.', 'danger');
     }
   }
@@ -519,10 +568,18 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
         sessionStorage.clear();
         this.router.navigateByUrl('/', { replaceUrl: true });
       } else {
+        this.analytics.trackErrorShown('save_failed', 'portfolio', 'toast', null, false);
         this.showToast(response?.error || 'Failed to close account. Please try again.', 'danger');
       }
     } catch (error) {
       console.error('Error closing account:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'save_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       this.showToast('Failed to close account. Please ensure all positions are sold and all cash is withdrawn.', 'danger');
     } finally {
       this.isClosingAccount = false;

@@ -4,6 +4,8 @@ import { ModalController } from '@ionic/angular/standalone';
 import { ToastService } from '../../services/toast.service';
 import { McInfoSheetComponent } from '../mc-info-sheet/mc-info-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { DeckExit, PlanStrategy, Tier } from '../../services/analytics/analytics-events';
 
 // ─── Content types ────────────────────────────────────────────────────────────
 
@@ -25,7 +27,8 @@ interface StrategySlides {
 }
 
 interface StrategyData {
-  key:    string;
+  /** Typed as PlanStrategy so the deck key and the analytics vocabulary cannot drift apart. */
+  key:    PlanStrategy;
   icon:   string;
   name:   string;
   tag:    string;
@@ -196,6 +199,12 @@ export class StrategyDeckComponent implements OnInit {
   currentSlide = 0;
   hintShown    = false;
 
+  /**
+   * Furthest slide the user reached. Accumulated by onScroll (which runs per scroll frame, so it
+   * only records state) and reported once, when the deck closes.
+   */
+  maxSlideReached = 0;
+
   /** Guard against double-presenting the upgrade nudge. */
   private nudgeLock = false;
 
@@ -212,6 +221,7 @@ export class StrategyDeckComponent implements OnInit {
   constructor(
     private modalController: ModalController,
     private toastService: ToastService,
+    private analytics: AnalyticsService,
   ) {}
 
   ngOnInit(): void {
@@ -235,6 +245,9 @@ export class StrategyDeckComponent implements OnInit {
     if (!el) return;
     const idx = Math.round(el.scrollLeft / el.clientWidth);
     this.currentSlide = idx;
+    if (idx > this.maxSlideReached) {
+      this.maxSlideReached = idx;
+    }
     if (el.scrollLeft > 30 && !this.hintShown) {
       this.hintShown = true;
     }
@@ -256,17 +269,54 @@ export class StrategyDeckComponent implements OnInit {
     }
   }
 
+  /**
+   * One strategy_viewed per deck session, fired from each dismiss path rather than per slide: the
+   * exit role and how far the user got are the two things worth knowing, and they are only both
+   * available at the close. Every way out of the deck is one of the five DeckExit values.
+   */
+  private trackDeckViewed(exit: DeckExit): void {
+    if (!this.strategy) {
+      return;
+    }
+    this.analytics.track({
+      name: 'strategy_viewed',
+      props: {
+        strategy: this.strategy.key,
+        surface: 'retirement_planning',
+        max_slide_reached: this.maxSlideReached,
+        slide_count: this.SLIDE_INDICES.length,
+        exit,
+      },
+    });
+  }
+
+  /** The tier as analytics knows it. An unrecognised plan reports null rather than a guess. */
+  private get analyticsTier(): Tier {
+    const tier = this.userTier;
+    return tier === 'core' || tier === 'plus' || tier === 'pro' ? tier : null;
+  }
+
+  private trackDrawdownNudge(action: 'shown' | 'upgrade_tapped' | 'dismissed'): void {
+    this.analytics.track({
+      name: 'paywall_nudge_shown',
+      props: { feature: 'optimal_drawdown', tier: this.analyticsTier, action },
+    });
+  }
+
   // ── Dismiss paths ─────────────────────────────────────────────────────────
 
   async dismiss(): Promise<void> {
+    this.trackDeckViewed('cancel');
     await this.modalController.dismiss(null, 'cancel');
   }
 
   async stressTest(): Promise<void> {
+    this.trackDeckViewed('stress_test');
     await this.modalController.dismiss(null, 'stress-test');
   }
 
   async done(): Promise<void> {
+    this.trackDeckViewed('done');
     await this.modalController.dismiss(null, 'done');
   }
 
@@ -280,6 +330,7 @@ export class StrategyDeckComponent implements OnInit {
    */
   async discoverDrawdown(): Promise<void> {
     if (this.isPro) {
+      this.trackDeckViewed('drawdown');
       await this.modalController.dismiss(null, 'drawdown');
       return;
     }
@@ -299,12 +350,17 @@ export class StrategyDeckComponent implements OnInit {
         },
       });
       await sheet.present();
+      this.trackDrawdownNudge('shown');
       ({ role } = await sheet.onDidDismiss());
     } finally {
       this.nudgeLock = false;
     }
     if (role === 'upgrade') {
+      this.trackDrawdownNudge('upgrade_tapped');
+      this.trackDeckViewed('upgrade');
       await this.modalController.dismiss(null, 'upgrade');
+    } else {
+      this.trackDrawdownNudge('dismissed');
     }
   }
 }

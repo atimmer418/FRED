@@ -28,6 +28,10 @@ import { RateAssumptionsService, DEFAULT_ANNUAL_RETURN, DEFAULT_WITHDRAWAL_RATE 
 import { monthsToTarget } from '../../utils/freedom-projection.utils';
 import { FreedomDetailSheetComponent, FreedomSheetResult } from '../../components/freedom-detail-sheet/freedom-detail-sheet.component';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { ErrorCategory, GatedFeature, GoalAction, Tier } from '../../services/analytics/analytics-events';
+import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../services/analytics/analytics-bands';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 
 /** Computed projection for a single user-added goal. */
 export interface GoalProjection {
@@ -315,7 +319,8 @@ export class MyProfilePage implements OnInit, OnDestroy {
     private navCtrl: NavController,
     private modalController: ModalController,
     private goalsService: GoalsService,
-    public freedomStats: FreedomStatsService
+    public freedomStats: FreedomStatsService,
+    private analytics: AnalyticsService
   ) {
     addIcons({ camera, walletOutline, timeOutline, shareOutline, ticketOutline, checkmarkCircleOutline, saveOutline });
     this.actionRequired$ = this.accountStatusService.actionRequired$;
@@ -563,6 +568,8 @@ export class MyProfilePage implements OnInit, OnDestroy {
     const income = this.retirementIncomeGoal();
     if (!monthly || !income) {
       this.toastService.showToast('Please enter valid amounts for both goals.', 'warning');
+      // The copy is not sent: category plus how it was shown is the whole payload.
+      this.analytics.trackErrorShown('validation', 'my_profile', 'toast');
       return;
     }
     this.authService.updateUserProfile({
@@ -575,8 +582,13 @@ export class MyProfilePage implements OnInit, OnDestroy {
         this.originalValues.set({ monthly, income });
         this.authService.loadUserProgress();
       },
-      error: () => {
+      error: (error) => {
         this.toastService.showToast('Failed to save changes.', 'danger');
+        // Split by analytics-error.utils' rule rather than by message: a request that never
+        // reached a server is a network failure, anything with a status is a failed save. The
+        // baseline is untouched on failure, so the Save button is still there to retry.
+        const category: ErrorCategory = isNetworkFailure(error) ? 'network' : 'save_failed';
+        this.analytics.trackErrorShown(category, 'my_profile', 'toast', httpStatusOf(error), true);
       }
     });
   }
@@ -657,11 +669,27 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
   selectSchedule(schedule: RebalanceSchedule): void {
     if (!this.isPlusOrPro) {
-      this.openPlusNudge();
+      this.openPlusNudge('rebalancing');
       return;
     }
     this.selectedSchedule = schedule;
     this.goalsService.savePrefs(this.userId, { rebalanceSchedule: schedule });
+    // The chip IS the commit point — savePrefs is a synchronous localStorage write, so the
+    // outcome is known here and is always 'applied'.
+    this.analytics.track({
+      name: 'setting_changed',
+      props: {
+        setting: 'rebalance_schedule',
+        enabled: null,
+        value: MyProfilePage.scheduleValue(schedule),
+        outcome: 'applied',
+      },
+    });
+  }
+
+  /** 'Semi-annual' → 'semi_annual'. A stable slug, not the display label. */
+  private static scheduleValue(schedule: RebalanceSchedule): string {
+    return schedule.toLowerCase().replace(/[^a-z0-9]+/g, '_');
   }
 
   // ── Freedom detail sheet ──────────────────────────────────────────────────
@@ -708,7 +736,7 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
   async openAddGoalSheet(editGoal?: Goal): Promise<void> {
     if (!this.isPlusOrPro) {
-      await this.openPlusNudge();
+      await this.openPlusNudge('goals');
       return;
     }
     const modal = await this.modalController.create({
@@ -725,18 +753,54 @@ export class MyProfilePage implements OnInit, OnDestroy {
       const newGoal = this.goalsService.addGoal(this.userId, data);
       this.goals = [...this.goals, newGoal];
       this.toastService.showToast('Goal added. Projection tracked.', 'success');
+      this._trackGoalChanged('created', newGoal);
     } else if (role === 'updated' && data) {
       this.goalsService.updateGoal(this.userId, data);
       this.goals = this.goals.map(g => g.id === data.id ? data : g);
       this.toastService.showToast('Goal updated', 'success');
+      this._trackGoalChanged('updated', data);
     } else if (role === 'completed' && data) {
       this.goalsService.updateGoal(this.userId, data);
       this.goals = this.goals.map(g => g.id === data.id ? data : g);
       this.toastService.showToast(
         data.completed ? 'Goal marked complete 🎉' : 'Goal reopened', 'success');
+      // Two sides of one toggle, told apart by the goal's new state.
+      this._trackGoalChanged(data.completed ? 'completed' : 'reopened', data);
     } else if (role === 'deleted' && data) {
+      // Read the goal before it goes: the dismiss payload is the id alone, and the id is the one
+      // thing that must never be sent — the icon and the bands are what describe it.
+      const removed = this.goals.find(g => g.id === data);
       this.deleteGoal(data);
+      if (removed) {
+        this._trackGoalChanged('removed', removed);
+      }
     }
+  }
+
+  /**
+   * The single goal instrumentation point: every change arrives as a sheet dismiss role, so the
+   * five actions are reported from one place with one shape. Called AFTER `goals` has been
+   * updated, because `goal_count` is the count the user is left with.
+   *
+   * The goal's name is free text the user typed and its id is a UUID: neither is in the payload.
+   */
+  private _trackGoalChanged(action: GoalAction, goal: Goal): void {
+    const target = goal.targetAmount || 0;
+    const progress = target > 0
+      ? toPercentBand(((goal.startingValue || 0) / target) * 100)
+      : null;
+    this.analytics.track({
+      name: 'goal_changed',
+      props: {
+        action,
+        icon: goal.icon,
+        target_band: toAmountBand(target),
+        years_to_target: toYearsBand(
+          goal.targetYear ? goal.targetYear - new Date().getFullYear() : null),
+        progress,
+        goal_count: toCountBand(this.goals.length),
+      },
+    });
   }
 
   deleteGoal(goalId: string): void {
@@ -754,11 +818,16 @@ export class MyProfilePage implements OnInit, OnDestroy {
    */
   async openGoalsVeilNudge(): Promise<void> {
     if (this.isPlusOrPro) return;
-    await this.openPlusNudge();
+    await this.openPlusNudge('goals');
   }
 
-  /** Reusable Plus upgrade nudge — used by goals veil + rebalancing lock tap. */
-  async openPlusNudge(): Promise<void> {
+  /**
+   * Reusable Plus upgrade nudge — used by goals veil + rebalancing lock tap.
+   *
+   * `feature` only names which gate was hit for analytics; the sheet, the copy and the upgrade
+   * path are identical for both and unchanged.
+   */
+  async openPlusNudge(feature: GatedFeature = 'goals'): Promise<void> {
     const modal = await this.modalController.create({
       component: McInfoSheetComponent,
       componentProps: {
@@ -771,7 +840,9 @@ export class MyProfilePage implements OnInit, OnDestroy {
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
+    this._trackNudge(feature, 'shown');
     const { role } = await modal.onDidDismiss();
+    this._trackNudge(feature, role === 'upgrade' ? 'upgrade_tapped' : 'dismissed');
     if (role === 'upgrade') {
       this.upgradeToPlusClicked();
     }
@@ -795,9 +866,34 @@ export class MyProfilePage implements OnInit, OnDestroy {
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
+    this._trackNudge('tax_loss_harvesting', 'shown');
     const { role } = await modal.onDidDismiss();
+    this._trackNudge('tax_loss_harvesting', role === 'upgrade' ? 'upgrade_tapped' : 'dismissed');
     if (role === 'upgrade') {
       this.upgradeToProClicked();
+    }
+  }
+
+  /**
+   * A paywalled surface was hit. Product data only: which gate, what the user has today, and
+   * what they did with the nudge. No price, no billing period, no purchase — those are the
+   * billing workstream's and are untouched here.
+   */
+  private _trackNudge(feature: GatedFeature, action: 'shown' | 'upgrade_tapped' | 'dismissed'): void {
+    this.analytics.track({
+      name: 'paywall_nudge_shown',
+      props: { feature, tier: this._tier(), action },
+    });
+  }
+
+  /** The user's tier as the taxonomy names it. 'piggy' is the legacy name for core; '' is none. */
+  private _tier(): Tier {
+    switch (this.selectedTier) {
+      case 'piggy':
+      case 'core': return 'core';
+      case 'plus': return 'plus';
+      case 'pro':  return 'pro';
+      default:     return null;
     }
   }
 

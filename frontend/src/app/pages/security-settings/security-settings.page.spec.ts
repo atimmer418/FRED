@@ -1,11 +1,15 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { Router } from '@angular/router';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { NavController } from '@ionic/angular';
+import { of, throwError } from 'rxjs';
 import { SecuritySettingsPage } from './security-settings.page';
 import { AppLockService } from '../../services/app-lock.service';
-import { PinService } from '../../services/pin.service';
+import { PinService, PinResponse } from '../../services/pin.service';
 import { ToastService } from '../../services/toast.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { AnalyticsConsentService } from '../../services/analytics/analytics-consent.service';
 
 /**
  * Spec for SecuritySettingsPage three-state gating logic.
@@ -214,5 +218,212 @@ describe('SecuritySettingsPage — three-state gating (AC-3, AC-4, AC-5)', () =>
     createComponent(false);
     fixture.detectChanges();
     expect((component as any).isAuthenticating).toBeUndefined();
+  });
+});
+
+// =================================================================================================
+// Analytics call sites.
+//
+// Built by constructing the page directly with stubs rather than through TestBed: these assertions
+// are about which payload leaves which handler, and the three-state template gating above already
+// covers the rendering. Every expectation asserts the whole props object, so adding, renaming or
+// re-valuing a property fails the spec rather than silently changing the data.
+// =================================================================================================
+describe('SecuritySettingsPage — analytics', () => {
+  let analytics: jasmine.SpyObj<AnalyticsService>;
+  let consent: jasmine.SpyObj<AnalyticsConsentService>;
+  let appLock: jasmine.SpyObj<AppLockService>;
+  let pin: jasmine.SpyObj<PinService>;
+  let toast: jasmine.SpyObj<ToastService>;
+  let page: SecuritySettingsPage;
+
+  const pinOk: PinResponse = { success: true, message: '', lockedOut: false, lockoutDurationSeconds: 0 };
+
+  beforeEach(() => {
+    analytics = jasmine.createSpyObj<AnalyticsService>('AnalyticsService', [
+      'track',
+      'trackOnboardingStepViewed',
+      'trackOnboardingStepCompleted',
+      'trackErrorShown',
+      'screen',
+    ]);
+    consent = jasmine.createSpyObj<AnalyticsConsentService>('AnalyticsConsentService', [
+      'setOptOut',
+      'isOptedOut',
+    ]);
+    appLock = jasmine.createSpyObj<AppLockService>('AppLockService', ['isEnabled', 'setEnabled']);
+    pin = jasmine.createSpyObj<PinService>('PinService', [
+      'hasPin',
+      'promptPin',
+      'deletePin',
+      'markStepUpEnabled',
+      'clearStepUpMarker',
+    ]);
+    toast = jasmine.createSpyObj<ToastService>('ToastService', ['showToast']);
+
+    page = new SecuritySettingsPage(
+      jasmine.createSpyObj<Router>('Router', ['navigate']),
+      jasmine.createSpyObj<HttpClient>('HttpClient', ['get', 'post']),
+      appLock,
+      pin,
+      toast,
+      jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
+      consent,
+      analytics,
+    );
+  });
+
+  // ── app_lock ───────────────────────────────────────────────────────────────
+
+  it('app lock on: reports the state the switch now holds', () => {
+    page.appLockEnabled = true;
+
+    page.toggleAppLock();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'app_lock', enabled: true, value: null, outcome: 'applied' },
+    });
+  });
+
+  it('app lock off: same event with enabled false', () => {
+    page.appLockEnabled = false;
+
+    page.toggleAppLock();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'app_lock', enabled: false, value: null, outcome: 'applied' },
+    });
+  });
+
+  // ── step_up_auth: three outcomes ───────────────────────────────────────────
+
+  it('step-up on, PIN created: applied', async () => {
+    page.sensitiveAuthEnabled = true;
+    pin.promptPin.and.resolveTo(true);
+
+    await page.toggleSensitiveAuth();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'step_up_auth', enabled: true, value: null, outcome: 'applied' },
+    });
+  });
+
+  it('step-up on, PIN prompt backed out of: cancelled, and enabled still reports what was wanted', async () => {
+    page.sensitiveAuthEnabled = true;
+    pin.promptPin.and.resolveTo(false);
+
+    await page.toggleSensitiveAuth();
+
+    // The switch has reverted, but `enabled` is the state the user was reaching for: a cancelled
+    // event with enabled:false would be indistinguishable from turning the setting off.
+    expect(page.sensitiveAuthEnabled).toBeFalse();
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'step_up_auth', enabled: true, value: null, outcome: 'cancelled' },
+    });
+  });
+
+  it('step-up off, PIN deleted: applied', async () => {
+    page.sensitiveAuthEnabled = false;
+    pin.deletePin.and.resolveTo(pinOk);
+
+    await page.toggleSensitiveAuth();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'step_up_auth', enabled: false, value: null, outcome: 'applied' },
+    });
+  });
+
+  it('step-up off, delete fails: failed, and the rejection still propagates', async () => {
+    page.sensitiveAuthEnabled = false;
+    pin.deletePin.and.rejectWith(new HttpErrorResponse({ status: 500 }));
+
+    await expectAsync(page.toggleSensitiveAuth()).toBeRejected();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'step_up_auth', enabled: false, value: null, outcome: 'failed' },
+    });
+    // Behaviour is unchanged: the toast was skipped before this event existed and still is.
+    expect(toast.showToast).not.toHaveBeenCalled();
+  });
+
+  // ── analytics_consent: the ordering trap ───────────────────────────────────
+
+  it('opting OUT dispatches before the write, because applied consent would suppress it', () => {
+    const order: string[] = [];
+    analytics.track.and.callFake(() => order.push('track'));
+    consent.setOptOut.and.callFake(() => {
+      order.push('setOptOut');
+      return of(true);
+    });
+    page.usageDataEnabled = false; // the user has just switched it off
+
+    page.toggleUsageData();
+
+    expect(order).toEqual(['track', 'setOptOut']);
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'analytics_consent', enabled: false, value: null, outcome: 'applied' },
+    });
+  });
+
+  it('opting IN dispatches after the write, because nothing may be sent until consent is applied', () => {
+    const order: string[] = [];
+    analytics.track.and.callFake(() => order.push('track'));
+    // The real service applies consent inside its own tap, before this value is handed over.
+    consent.setOptOut.and.callFake(() => {
+      order.push('setOptOut');
+      return of(false);
+    });
+    page.usageDataEnabled = true; // the user has just switched it on
+
+    page.toggleUsageData();
+
+    expect(order).toEqual(['setOptOut', 'track']);
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'analytics_consent', enabled: true, value: null, outcome: 'applied' },
+    });
+  });
+
+  it('opting IN reports what the server stored when the two disagree', () => {
+    consent.setOptOut.and.returnValue(of(true));
+    page.usageDataEnabled = true;
+
+    page.toggleUsageData();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'analytics_consent', enabled: false, value: null, outcome: 'applied' },
+    });
+  });
+
+  it('a failed consent write reports failed plus the error the user saw', () => {
+    consent.setOptOut.and.returnValue(throwError(() => new HttpErrorResponse({ status: 503 })));
+    consent.isOptedOut.and.returnValue(false);
+    page.usageDataEnabled = true;
+
+    page.toggleUsageData();
+
+    expect(analytics.track).toHaveBeenCalledOnceWith({
+      name: 'setting_changed',
+      props: { setting: 'analytics_consent', enabled: true, value: null, outcome: 'failed' },
+    });
+    expect(analytics.trackErrorShown).toHaveBeenCalledOnceWith('save_failed', 'settings', 'toast', 503, false);
+  });
+
+  it('a consent write that never reached the server is network, not save_failed', () => {
+    consent.setOptOut.and.returnValue(throwError(() => new HttpErrorResponse({ status: 0 })));
+    consent.isOptedOut.and.returnValue(true);
+    page.usageDataEnabled = false;
+
+    page.toggleUsageData();
+
+    expect(analytics.trackErrorShown).toHaveBeenCalledOnceWith('network', 'settings', 'toast', null, false);
   });
 });

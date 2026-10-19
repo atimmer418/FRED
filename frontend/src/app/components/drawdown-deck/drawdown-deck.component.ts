@@ -11,6 +11,8 @@ import { ModalController } from '@ionic/angular/standalone';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { PortfolioStoreService } from '../../services/portfolio-store.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { DeckExit } from '../../services/analytics/analytics-events';
 
 // ─── Content types ────────────────────────────────────────────────────────────
 
@@ -79,6 +81,12 @@ export class DrawdownDeckComponent implements OnInit, OnDestroy {
   currentSlide = 0;
   hintShown = false;
 
+  /**
+   * Furthest slide the user reached. Accumulated by onScroll (per scroll frame, so it only records
+   * state) and reported once, when the deck closes.
+   */
+  maxSlideReached = 0;
+
   fredValue: number | null = null;
   k401: number | null = null;
   roth: number | null = null;
@@ -88,6 +96,7 @@ export class DrawdownDeckComponent implements OnInit, OnDestroy {
   constructor(
     private modalController: ModalController,
     private portfolioStore: PortfolioStoreService,
+    private analytics: AnalyticsService,
   ) {}
 
   ngOnInit(): void {
@@ -147,6 +156,9 @@ export class DrawdownDeckComponent implements OnInit, OnDestroy {
     if (!el) return;
     const idx = Math.round(el.scrollLeft / el.clientWidth);
     this.currentSlide = idx;
+    if (idx > this.maxSlideReached) {
+      this.maxSlideReached = idx;
+    }
     if (el.scrollLeft > 30 && !this.hintShown) {
       this.hintShown = true;
     }
@@ -168,15 +180,35 @@ export class DrawdownDeckComponent implements OnInit, OnDestroy {
 
   // ── Dismiss paths ─────────────────────────────────────────────────────────
 
+  /**
+   * One strategy_viewed per deck session, fired from each dismiss path rather than per slide. This
+   * is the Pro-only drawdown deck, so the strategy is always 'optimal_drawdown'.
+   */
+  private trackDeckViewed(exit: DeckExit): void {
+    this.analytics.track({
+      name: 'strategy_viewed',
+      props: {
+        strategy: 'optimal_drawdown',
+        surface: 'retirement_planning',
+        max_slide_reached: this.maxSlideReached,
+        slide_count: this.SLIDE_INDICES.length,
+        exit,
+      },
+    });
+  }
+
   async dismiss(): Promise<void> {
+    this.trackDeckViewed('cancel');
     await this.modalController.dismiss(null, 'cancel');
   }
 
   async stressTest(): Promise<void> {
+    this.trackDeckViewed('stress_test');
     await this.modalController.dismiss(null, 'stress-test');
   }
 
   async done(): Promise<void> {
+    this.trackDeckViewed('done');
     await this.modalController.dismiss(null, 'done');
   }
 }

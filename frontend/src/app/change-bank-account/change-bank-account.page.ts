@@ -17,6 +17,8 @@ import {
   IonSpinner
 } from '@ionic/angular/standalone';
 import { ToastService } from '../services/toast.service';
+import { AnalyticsService } from '../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 declare var Plaid: any;
 
@@ -55,7 +57,8 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
     private plaidService: PlaidService,
     private passkeyService: PasskeyService,
     private pinService: PinService,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {}
 
   ngOnInit() {
@@ -100,6 +103,9 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
       this.initializePlaidLink();
     };
     script.onerror = () => {
+      // The CDN script never loaded, so this is the network rather than the server. The banner has
+      // a Try again button, but it stays disabled while isPlaidReady is false, which it is here.
+      this.analytics.trackErrorShown('network', 'portfolio', 'inline_banner', null, false);
       this.statusMessage = 'Failed to load Plaid script. Please check your internet connection.';
     };
     document.head.appendChild(script);
@@ -138,6 +144,8 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
           this.isPlaidReady = true;
           if (err != null) {
             console.error('Plaid Link exited with error:', err, metadata);
+            // Only the error exit is recorded. A plain close carries no err and is not a failure.
+            this.analytics.trackErrorShown('bank_link', 'portfolio', 'inline_banner', null, false);
             this.statusMessage = `Link flow exited: ${err.display_message || err.error_message || 'User closed.'}`;
           } else {
             console.log('Plaid Link exited by user.', metadata);
@@ -151,6 +159,13 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
 
     } catch (error: any) {
       console.error('Error initializing Plaid Link:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'bank_link',
+        'portfolio',
+        'inline_banner',
+        httpStatusOf(error),
+        false,
+      );
       this.statusMessage = `Error: ${error.message || 'Could not initialize bank linking.'}`;
       this.isLoading = false;
     }
@@ -164,6 +179,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
       if (hasPin) {
         const pinVerified = await this.pinService.promptPin('verify');
         if (!pinVerified) {
+          this.analytics.trackErrorShown('auth_required', 'portfolio', 'toast', null, false);
           this.toastService.showToast('Authentication required to change bank account.', 'warning', 3000);
           return;
         }
@@ -171,6 +187,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
 
       this.plaidHandler.open();
     } else {
+      this.analytics.trackErrorShown('bank_link', 'portfolio', 'inline_banner', null, false);
       this.statusMessage = 'Plaid is not ready. Please try again.';
     }
   }
@@ -205,6 +222,13 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
       }),
       catchError(async (err) => {
         this.isLoading = false;
+        this.analytics.trackErrorShown(
+          isNetworkFailure(err) ? 'network' : 'bank_link',
+          'portfolio',
+          'toast',
+          httpStatusOf(err),
+          false,
+        );
         this.statusMessage = `Error: ${err.error?.message || 'Failed to update bank account.'}`;
         
         // Show error toast

@@ -27,8 +27,17 @@ import { MonthlyFreedomUpdateService } from '../../services/monthly-freedom-upda
 import { GoalsService } from '../../services/goals.service';
 import { FreedomStatsService } from '../../services/freedom-stats.service';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 
 const CURRENT_YEAR = new Date().getFullYear();
+
+/**
+ * Analytics is fire-and-forget on this page, so these specs only need it not to throw. The
+ * payload assertions live in my-profile.analytics.spec.ts, which asserts the exact props.
+ */
+function analyticsStub(): AnalyticsService {
+  return { track: () => {}, trackErrorShown: () => {} } as unknown as AnalyticsService;
+}
 
 function makePage(birthYear: number = 0): MyProfilePage {
   const accountStatusMock = { actionRequired$: of(false) } as any;
@@ -48,7 +57,8 @@ function makePage(birthYear: number = 0): MyProfilePage {
     {} as any,            // NavController
     {} as any,            // ModalController
     {} as any,            // GoalsService (FRED-216)
-    freedomStatsMock      // FreedomStatsService
+    freedomStatsMock,     // FreedomStatsService
+    analyticsStub()       // AnalyticsService
   );
 }
 
@@ -252,7 +262,8 @@ function setupDom(initialProgress: any, schedule$ = of(null as any)): DomHarness
       { provide: FreedomStatsService, useValue: {
           birthYear: () => 0,
           stats: () => ({ freedomYear: '—', freedomAge: '—', dollarsAway: '—' })
-      } }
+      } },
+      { provide: AnalyticsService, useValue: analyticsStub() }
     ]
   });
 

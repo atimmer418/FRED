@@ -7,6 +7,8 @@ import {
   IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner, NavController
 } from '@ionic/angular/standalone';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { InvestmentService } from '../../services/investment.service'; // Import this
 import { environment } from '../../../environments/environment';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
@@ -50,6 +52,9 @@ export class InvestmentScheduleComponent implements OnInit {
 
   isSubmitting: boolean = false;
   isReady: boolean = false;
+
+  /** True when a transfer draft was restored from storage, i.e. the user has been here before. */
+  private resumedFromSavedDraft = false;
   
   // ACATS Transfer
   showTransferOptions: boolean = false;
@@ -73,7 +78,8 @@ export class InvestmentScheduleComponent implements OnInit {
     private navCtrl: NavController,
     private authService: AuthService,
     private investmentService: InvestmentService,
-    private http: HttpClient
+    private http: HttpClient,
+    private analytics: AnalyticsService
   ) {}
 
   // Investment schedule configuration
@@ -120,6 +126,9 @@ export class InvestmentScheduleComponent implements OnInit {
     console.log('[InvestmentScheduleComponent] ngOnInit - Initializing Investment Schedule Page.');
 
     this.restoreAcatsFromStorage();
+    // Fired before the data loads: the saved-schedule restore is asynchronous, so the only state
+    // this screen knows about synchronously is the transfer draft.
+    this.analytics.trackOnboardingStepViewed('investment_schedule', null, this.resumedFromSavedDraft);
     this.loadUserFinancialData();
 
     // Let Manrope render before revealing content
@@ -136,6 +145,7 @@ export class InvestmentScheduleComponent implements OnInit {
         this.transferAccountNumber = account || '';
         if (this.transferBrokerageDtc || this.transferAccountNumber) {
           this.showTransferOptions = true;
+          this.resumedFromSavedDraft = true;
         }
       } catch (_) {}
     }
@@ -525,6 +535,8 @@ export class InvestmentScheduleComponent implements OnInit {
 
   goToStockPreferences(): void {
     console.log('[InvestmentScheduleComponent] Proceeding to investment confirmation with schedule:', this.schedule);
+    // At the tap. The amount and frequency themselves are a server-side fact (recurring_created).
+    this.analytics.trackOnboardingStepCompleted('investment_schedule', null);
     this.isSubmitting = true;
 
     // Prepare data for backend - match CreateInvestmentScheduleRequest DTO
@@ -573,6 +585,14 @@ export class InvestmentScheduleComponent implements OnInit {
         error: (error) => {
           console.error('[InvestmentScheduleComponent] ❌ Error saving investment schedule:', error);
           this.isSubmitting = false;
+          // Before the alert, which blocks the thread until the user dismisses it.
+          this.analytics.trackErrorShown(
+            isNetworkFailure(error) ? 'network' : 'save_failed',
+            'onboarding',
+            'alert',
+            httpStatusOf(error),
+            true,
+          );
           // Show error message to user
           alert('Error saving investment schedule. Please try again.');
         }

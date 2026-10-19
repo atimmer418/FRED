@@ -19,6 +19,15 @@ import { ToastService } from '../../services/toast.service';
 import { FreedomStatsService } from '../../services/freedom-stats.service';
 import { McInfoSheetComponent } from '../mc-info-sheet/mc-info-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
+import {
+  InputMethod,
+  MonteCarloStep,
+  SimulationOutcome,
+  Tier,
+} from '../../services/analytics/analytics-events';
+import { toCountBand } from '../../services/analytics/analytics-bands';
+import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
 
 // ─── Flow step machine type ──────────────────────────────────────────────────
 
@@ -56,6 +65,20 @@ function valueToSlider(v: number): number {
   const c = Math.min(Math.max(v, PF_MIN), PF_MAX);
   return Math.round(1000 * Math.log(c / PF_MIN) / Math.log(PF_MAX / PF_MIN));
 }
+
+// ─── Analytics constants ──────────────────────────────────────────────────────
+
+/**
+ * A strategy "holds" at 75% success. The same floor badge() uses for 'moderate', and the same one
+ * the landing's "N of 5 hold" pill counts with, so the band and the screen cannot disagree.
+ */
+const HOLD_THRESHOLD_PCT = 75;
+
+/**
+ * Quiet period that closes a burst of adjuster taps. The steppers re-run the simulation on every
+ * tap, so ten taps are one intent: report the net direction once the user stops.
+ */
+const ADJUST_BURST_MS = 700;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -142,6 +165,8 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     const t = +(event.target as HTMLInputElement).value;
     this.portfolioSliderRaw.set(t);
     this.portfolioValue.set(sliderToValue(t));
+    // Per-frame handler: record only. The step event fires at Continue.
+    this.recordInputMethod('portfolio', 'slider');
   }
 
   syncPortfolioSlider(): void {
@@ -164,6 +189,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     if (!isNaN(v) && v > 0) {
       this.portfolioValue.set(v);
       this.syncPortfolioSlider();
+      this.recordInputMethod('portfolio', 'typed');
     }
     this.portfolioTyping.set(false);
   }
@@ -181,14 +207,18 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
         if (v && v > 0) {
           this.portfolioValue.set(Math.round(v));
           this.syncPortfolioSlider();
+          this.recordInputMethod('portfolio', 'fetched');
           this.toastService.showToast('Live portfolio value applied', 'success', 2000);
         } else {
           this.toastService.showToast('No holdings found. Enter a value manually', 'medium', 2500);
+          // A 200 with nothing in it: the value could not be loaded, and the user is told so.
+          this.analytics.trackErrorShown('load_failed', 'monte_carlo', 'toast', null, true);
         }
         this.portfolioFetching.set(false);
       },
-      error: () => {
+      error: (err: unknown) => {
         this.toastService.showToast('Could not fetch portfolio. Enter a value manually', 'medium', 2500);
+        this.analytics.trackErrorShown('load_failed', 'monte_carlo', 'toast', httpStatusOf(err), true);
         this.portfolioFetching.set(false);
       }
     });
@@ -214,6 +244,8 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     this.k401Raw = raw ? (+raw).toLocaleString('en-US') : '';
     (event.target as HTMLInputElement).value = this.k401Raw;
     this.k401Balance.set(raw ? +raw : 0);
+    // Per-keystroke handler: record only. The step event fires at Continue.
+    this.recordInputMethod('outside', 'typed');
   }
 
   onRothInput(event: Event): void {
@@ -221,6 +253,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     this.rothRaw = raw ? (+raw).toLocaleString('en-US') : '';
     (event.target as HTMLInputElement).value = this.rothRaw;
     this.rothBalance.set(raw ? +raw : 0);
+    this.recordInputMethod('outside', 'typed');
   }
 
   // ── Spend step ────────────────────────────────────────────────────────────
@@ -233,6 +266,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   onSpendSlider(event: Event): void {
     this.monthlySpend.set(+(event.target as HTMLInputElement).value);
+    this.recordInputMethod('spend', 'slider');
   }
 
   get spendContinueEnabled(): boolean {
@@ -260,6 +294,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   onDurationSlider(event: Event): void {
     this.yearsToLast.set(+(event.target as HTMLInputElement).value);
+    this.recordInputMethod('duration', 'slider');
   }
 
   // ── Scenario ──────────────────────────────────────────────────────────────
@@ -353,6 +388,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     }
     setTimeout(() => {
       this.showStep('results');
+      this.trackResultViewed(result);
       // Save to history after results are shown
       if (!this.resultsSaved) {
         this.resultsSaved = true;
@@ -417,25 +453,33 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
   }
 
   stepContrib(delta: number): void {
+    const previous = this.monthlyContrib();
     const next = Math.max(0, Math.min(10000, this.monthlyContrib() + delta));
     this.monthlyContrib.set(next);
+    this.recordResultAdjustment('adjusted_contribution', next - previous);
     this._liveRerun();
   }
 
   stepRetirement(delta: number): void {
+    const previous = this.yearsToRetirement();
     const next = Math.max(0, Math.min(40, this.yearsToRetirement() + delta));
     this.yearsToRetirement.set(next);
+    this.recordResultAdjustment('adjusted_retirement', next - previous);
     this._liveRerun();
   }
 
   flipScenario(sc: ScenarioType): void {
     this.scenario.set(sc);
+    this.analytics.track({
+      name: 'monte_carlo_result_acted',
+      props: { action: 'changed_scenario', direction: null, scenario: sc },
+    });
     this._liveRerun();
   }
 
   // ─── Badge helper ─────────────────────────────────────────────────────────
 
-  badge(pct: number): { cls: string; label: string } {
+  badge(pct: number): { cls: SimulationOutcome; label: string } {
     if (pct >= 90) return { cls: 'strong',   label: 'Strong' };
     if (pct >= 75) return { cls: 'moderate', label: 'Moderate' };
     return             { cls: 'risk',      label: 'At risk' };
@@ -527,6 +571,11 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
    * which also kept a duplicate copy of the assumptions content.
    */
   async openAssumptions(): Promise<void> {
+    // The info button only exists on the results screen (display:none elsewhere).
+    this.analytics.track({
+      name: 'monte_carlo_result_acted',
+      props: { action: 'opened_assumptions', direction: null, scenario: null },
+    });
     const modal = await this.modalController.create({
       component: McInfoSheetComponent,
       componentProps: { mode: 'assumptions' },
@@ -535,12 +584,28 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     await modal.present();
   }
 
-  openNudge(): void { this.nudgeSheetOpen.set(true); }
-  closeNudge(): void { this.nudgeSheetOpen.set(false); }
+  openNudge(): void {
+    this.nudgeSheetOpen.set(true);
+    this.trackScenarioNudge('shown');
+  }
+
+  closeNudge(): void {
+    // Only a real dismissal: upgradeClicked() closes the sheet on its way out and reports
+    // upgrade_tapped instead, and the always-present backdrop can fire this while closed.
+    if (this.nudgeSheetOpen() && !this.nudgeUpgrading) {
+      this.trackScenarioNudge('dismissed');
+    }
+    this.nudgeSheetOpen.set(false);
+  }
 
   // ─── Share ───────────────────────────────────────────────────────────────
 
   async shareResults(): Promise<void> {
+    // Fired at the tap: whether the OS share sheet was completed is not observable.
+    this.analytics.track({
+      name: 'monte_carlo_result_acted',
+      props: { action: 'shared', direction: null, scenario: null },
+    });
     try {
       const el = document.querySelector('.flow-results-capture') as HTMLElement;
       if (!el) return;
@@ -565,6 +630,8 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     } catch (err) {
       console.error('[MCFlow] Share failed:', err);
       this.toastService.showToast('Unable to share. Please try again.', 'danger');
+      // Category only. The thrown message can carry a file path or a vendor string.
+      this.analytics.trackErrorShown('unavailable', 'monte_carlo', 'toast', null, true);
     }
   }
 
@@ -578,6 +645,8 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
   // ─── Upgrade CTA (nudge sheet) ────────────────────────────────────────────
 
   upgradeClicked(): void {
+    this.nudgeUpgrading = true;
+    this.trackScenarioNudge('upgrade_tapped');
     this.closeNudge();
     // Emit dismiss with upgrade flag — parent can navigate to upgrade screen
     this.modalController.dismiss({ upgrade: true });
@@ -596,6 +665,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef,
     private el: ElementRef<HTMLElement>,
     private freedomStats: FreedomStatsService,
+    private analytics: AnalyticsService,
   ) {}
 
   ngOnInit(): void {
@@ -655,6 +725,8 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
   }
 
   private _cancelTimers(): void {
+    // The modal can close mid-burst; report what the user did rather than losing it.
+    this.flushResultAdjustment();
     if (this._calcTimer) { clearInterval(this._calcTimer); this._calcTimer = null; }
     if (this._calcLineTimer) { clearTimeout(this._calcLineTimer); this._calcLineTimer = null; }
     this._teardownKeyboardAvoid();
@@ -878,10 +950,123 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
   }
 
   onContinueClick(): void {
+    const step = this.currentStep();
+    if (isMonteCarloInputStep(step)) {
+      this.analytics.track({
+        name: 'monte_carlo_step_completed',
+        props: { step, input_method: this.inputMethods[step] ?? null },
+      });
+    }
     this._persistLastUsed();
     if (this.includeOutside && this.currentStep() === 'outside') {
       this.saveOutsideBalances();
     }
     this.goNext();
   }
+
+  // ─── Analytics ────────────────────────────────────────────────────────────
+
+  /**
+   * How the value on each input step was last set. The slider and text handlers run per frame and
+   * per keystroke, so they only write here; monte_carlo_step_completed reads it at Continue. A step
+   * the user accepted without touching reports null, which is a real answer.
+   */
+  private inputMethods: Partial<Record<MonteCarloStep, InputMethod>> = {};
+
+  private recordInputMethod(step: MonteCarloStep, method: InputMethod): void {
+    this.inputMethods[step] = method;
+  }
+
+  /** The tier as analytics knows it; an unrecognised plan reports null rather than a guess. */
+  private get analyticsTier(): Tier {
+    const tier = this.userTier;
+    return tier === 'core' || tier === 'plus' || tier === 'pro' ? tier : null;
+  }
+
+  /**
+   * The Pro gate on this screen: the scenario chips and the veil over the live adjusters are the
+   * same lock, presented as one nudge sheet.
+   */
+  private trackScenarioNudge(action: 'shown' | 'upgrade_tapped' | 'dismissed'): void {
+    this.analytics.track({
+      name: 'paywall_nudge_shown',
+      props: { feature: 'market_scenarios', tier: this.analyticsTier, action },
+    });
+  }
+
+  /** Suppresses the dismissed event on the close that upgradeClicked() performs on its way out. */
+  private nudgeUpgrading = false;
+
+  /**
+   * Reports a finished run as the results screen is revealed. No percentage is sent: `outcome`
+   * applies the same badge() thresholds the user can see (90 / 75) to the headline strategy, the
+   * one the results sentence quotes, and `strategies_held` bands how many of the five held.
+   */
+  private trackResultViewed(result: ShowdownResult): void {
+    const held = Object.values(result).filter(pct => pct >= HOLD_THRESHOLD_PCT).length;
+    this.analytics.track({
+      name: 'monte_carlo_result_viewed',
+      props: {
+        outcome: this.badge(this.successFor('traditional')).cls,
+        scenario: this.scenario(),
+        strategies_held: toCountBand(held),
+        is_rerun: this.isHistoryRerun(),
+        included_outside_accounts: this.includeOutside,
+      },
+    });
+  }
+
+  // The open adjuster burst: which stepper, and how far it has moved in total.
+  private adjustBurst: { action: 'adjusted_contribution' | 'adjusted_retirement'; delta: number } | null = null;
+  private adjustBurstTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Collapses a run of taps on one stepper into a single event. Nothing is sent while the user is
+   * still tapping, and the amount itself never leaves the device: only the net direction does.
+   */
+  private recordResultAdjustment(
+    action: 'adjusted_contribution' | 'adjusted_retirement',
+    delta: number,
+  ): void {
+    if (delta === 0) {
+      // Clamped at a bound: the tap moved nothing, so there is nothing to report.
+      return;
+    }
+    if (this.adjustBurst && this.adjustBurst.action !== action) {
+      // Switched controls: close the first burst before opening the second.
+      this.flushResultAdjustment();
+    }
+    const carried = this.adjustBurst ? this.adjustBurst.delta : 0;
+    this.adjustBurst = { action, delta: carried + delta };
+    if (this.adjustBurstTimer) {
+      clearTimeout(this.adjustBurstTimer);
+    }
+    this.adjustBurstTimer = setTimeout(() => this.flushResultAdjustment(), ADJUST_BURST_MS);
+  }
+
+  private flushResultAdjustment(): void {
+    if (this.adjustBurstTimer) {
+      clearTimeout(this.adjustBurstTimer);
+      this.adjustBurstTimer = null;
+    }
+    const burst = this.adjustBurst;
+    this.adjustBurst = null;
+    if (!burst || burst.delta === 0) {
+      // Tapped up and back down: the user ended where they started.
+      return;
+    }
+    this.analytics.track({
+      name: 'monte_carlo_result_acted',
+      props: {
+        action: burst.action,
+        direction: burst.delta > 0 ? 'increase' : 'decrease',
+        scenario: null,
+      },
+    });
+  }
+}
+
+/** Narrows a flow step to the four the taxonomy names; 'calc' and 'results' are not input steps. */
+function isMonteCarloInputStep(step: FlowStep): step is MonteCarloStep {
+  return step === 'portfolio' || step === 'outside' || step === 'spend' || step === 'duration';
 }

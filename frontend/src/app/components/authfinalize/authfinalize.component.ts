@@ -15,6 +15,7 @@ import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directiv
 // --- NEW IMPORTS ---
 import { PasskeyService } from '../../services/passkey.service';
 import { AuthService } from '../../services/auth.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { create } from '@github/webauthn-json';
 
@@ -52,12 +53,16 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
 
   private routeSub: Subscription | undefined;
 
+  /** True when the screen had to rebuild its plan data from storage rather than the query params. */
+  private resumedFromSavedData = false;
+
   constructor(
     private route: ActivatedRoute,
     private router: Router,
     private navCtrl: NavController,
     private passkeyService: PasskeyService,
     private authService: AuthService,
+    private analytics: AnalyticsService,
   ) {
     addIcons({lockClosed,helpCircleOutline,personCircleOutline});
     this.registerForm = new FormGroup({
@@ -95,6 +100,9 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
       // Validate after loading from both query params and localStorage
       this.validateRequiredParams();
     });
+
+    // queryParamMap emits synchronously on subscribe, so the resumed flag is already settled.
+    this.analytics.trackOnboardingStepViewed('auth_finalize', null, this.resumedFromSavedData);
   }
 
   private validateRequiredParams() {
@@ -123,6 +131,10 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
   }
   
   private loadSavedData() {
+    // Snapshot first: 'resumed' means storage actually filled something in, not merely that this
+    // method ran (it also runs when only one query param is missing).
+    const beforeLoad = this.planDataFingerprint();
+
     // Try to get from localStorage - check multiple sources for each piece of data
     const savedPlan = localStorage.getItem('fiPlanSelectedStrategy');
     const savedTimeToFI = localStorage.getItem('fiPlanTimeToFI');
@@ -161,6 +173,10 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
                               (savedAuthData?.monthlyInvestment || null);
     }
     
+    if (this.planDataFingerprint() !== beforeLoad) {
+      this.resumedFromSavedData = true;
+    }
+
     console.log('Auth-finalize loaded saved data from localStorage:', {
       planId: this.planId,
       timeToFI: this.timeToFI,
@@ -177,6 +193,11 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
     });
   }
   
+  /** Cheap equality check over the five plan fields, used only to detect a storage-driven refill. */
+  private planDataFingerprint(): string {
+    return [this.planId, this.timeToFI, this.targetPortfolio, this.retirementIncome, this.monthlyInvestment].join('|');
+  }
+
   private saveDataToLocalStorage() {
     localStorage.setItem('authFinalizeData', JSON.stringify({
       planId: this.planId,
@@ -273,6 +294,10 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
                     if (response.success && response.jwtToken) {
                       console.log('SIMULATED registration and login successful!', response);
 
+                      // The step finishes here, not at the tap: the OS passkey sheet sits between
+                      // the two and can be abandoned invisibly, which is the drop worth seeing.
+                      this.analytics.trackOnboardingStepCompleted('auth_finalize', null);
+
                       // Store JWT first so completeStep can authenticate against the backend.
                       // We call handleSuccessfulAuthentication AFTER completeStep so that when
                       // loadUserProgress fires, the DB already has authFinalizeCompleted=true.
@@ -332,6 +357,10 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
                   if (response.success && response.jwtToken) {
                     console.log('Registration and login successful!', response);
 
+                    // The step finishes here, not at the tap: the OS passkey sheet sits between
+                    // the two and can be abandoned invisibly, which is the drop worth seeing.
+                    this.analytics.trackOnboardingStepCompleted('auth_finalize', null);
+
                     // Store JWT first so completeStep can authenticate against the backend.
                     // We call handleSuccessfulAuthentication AFTER completeStep so that when
                     // loadUserProgress fires, the DB already has authFinalizeCompleted=true.
@@ -368,6 +397,8 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
             this.isLoading = false;
             // Handle errors from the browser's credential creation (e.g., user cancels)
             this.errorMessage = `Passkey creation was cancelled or failed.`;
+            // Category only. The message itself never leaves the device.
+            this.analytics.trackErrorShown('passkey', 'onboarding', 'inline_banner', null, true);
             console.error('Error during navigator.credentials.create():', error);
           }
         },

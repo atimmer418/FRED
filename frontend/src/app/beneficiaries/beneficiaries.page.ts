@@ -39,6 +39,8 @@ import {
   peopleCircleOutline, checkmarkOutline } from 'ionicons/icons';
 import { BeneficiaryService, Beneficiary, BeneficiaryAllocationSummary } from '../services/beneficiary.service';
 import { ToastService } from '../services/toast.service';
+import { AnalyticsService } from '../services/analytics/analytics.service';
+import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 @Component({
   selector: 'app-beneficiaries',
@@ -64,7 +66,8 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
     private beneficiaryService: BeneficiaryService,
     private toastService: ToastService,
     private actionSheetCtrl: ActionSheetController,
-    private navCtrl: NavController
+    private navCtrl: NavController,
+    private analytics: AnalyticsService
   ) {
     addIcons({trashOutline, peopleOutline,informationCircleOutline,shieldCheckmarkOutline,pieChartOutline,alertCircleOutline,checkmarkOutline,personAddOutline,checkmarkCircleOutline,addOutline,calendarOutline,mailOutline,shieldOutline,personOutline,pricetagOutline,timeOutline,closeCircleOutline,arrowBackOutline,peopleCircleOutline});
   }
@@ -98,6 +101,13 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
       
     } catch (error) {
       console.error('Error loading beneficiaries:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'load_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       this.toastService.showToast('Failed to load beneficiaries. Please check your connection.', 'danger');
       
       // Initialize empty data on error
@@ -195,6 +205,7 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
    */
   async onSubmitBeneficiary(beneficiary: Beneficiary) {
     if (!beneficiary.id) {
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       this.toastService.showToast('Cannot submit beneficiary: Invalid ID', 'danger');
       return;
     }
@@ -211,6 +222,13 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
       
     } catch (error: any) {
       console.error('Error submitting beneficiary:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'save_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       
       // Show more detailed error information
       let errorMessage = 'Failed to submit beneficiary. Please try again.';
@@ -234,6 +252,7 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
     const pendingCount = this.getPendingBeneficiaries().length;
     
     if (pendingCount === 0) {
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       this.toastService.showToast('No pending beneficiaries to submit', 'warning');
       return;
     }
@@ -250,6 +269,13 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
       
     } catch (error: any) {
       console.error('Error submitting all beneficiaries:', error);
+      this.analytics.trackErrorShown(
+        isNetworkFailure(error) ? 'network' : 'save_failed',
+        'portfolio',
+        'toast',
+        httpStatusOf(error),
+        false,
+      );
       
       // Show more detailed error information  
       let errorMessage = 'Failed to submit beneficiaries. Please try again.';
@@ -271,6 +297,7 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
    */
   async onDeleteBeneficiary(beneficiary: Beneficiary) {
     if (!beneficiary.id) {
+      this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       this.toastService.showToast('Cannot delete beneficiary: Invalid ID', 'danger');
       return;
     }
@@ -297,6 +324,13 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
               
             } catch (error) {
               console.error('Error deleting beneficiary:', error);
+              this.analytics.trackErrorShown(
+                isNetworkFailure(error) ? 'network' : 'save_failed',
+                'portfolio',
+                'toast',
+                httpStatusOf(error),
+                false,
+              );
               this.toastService.showToast('Failed to delete beneficiary. Please try again.', 'danger');
             }
           }

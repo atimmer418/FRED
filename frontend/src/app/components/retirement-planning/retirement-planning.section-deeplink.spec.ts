@@ -1,6 +1,7 @@
 import { of } from 'rxjs';
 import { RetirementPlanningComponent } from './retirement-planning.component';
 import { RetirementSectionService } from '../../services/retirement-section.service';
+import { AnalyticsService } from '../../services/analytics/analytics.service';
 
 /**
  * FRED-217: an outside caller (the MFU Retire card) can deep-link the retirement screen to its
@@ -12,7 +13,9 @@ describe('RetirementPlanningComponent — section deep-link', () => {
     const section = new RetirementSectionService();
     const authService = { userProgress$: of(null), getCurrentUserId: () => null } as any;
     const historyService = { getHistory: () => [] } as any;
-    const cmp = new RetirementPlanningComponent(authService, historyService, {} as any, {} as any, section);
+    const analytics = jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track']);
+    const cmp = new RetirementPlanningComponent(
+      authService, historyService, {} as any, {} as any, section, analytics);
     return { cmp, section };
   }
 

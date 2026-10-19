@@ -154,6 +154,9 @@ export type Surface =
   | 'onboarding'
   | 'freedom_sheet'
   | 'my_profile'
+  // The goal sheet is its own surface, not the page that presents it: it is reachable from more
+  // than one place, and an error inside it is a different fact from an error on the profile page.
+  | 'goals'
   | 'retirement_planning'
   | 'monte_carlo'
   | 'strategy_deck'
@@ -222,6 +225,15 @@ export type AnalyticsEvent =
    * The freedom plan was changed. Fired at the save point, never per keystroke, and carries bands
    * plus what-changed flags. Note the two amounts are in different units on screen: income is the
    * monthly target, investing is the monthly contribution goal.
+   *
+   * The three *_changed flags are what make the event readable: without them a save where the user
+   * touched only the return preset is indistinguishable from a save where they touched nothing,
+   * because both carry the same bands.
+   *
+   * The two surfaces establish them differently, which matters when comparing across them. The
+   * freedom sheet reports a net change against what it opened with. Onboarding reports that the
+   * control was operated, and cannot use a snapshot: the saved plan arrives asynchronously and
+   * rewrites both amounts after the screen opened, so a snapshot would report edits nobody made.
    */
   | {
       name: 'freedom_plan_changed';
@@ -229,6 +241,8 @@ export type AnalyticsEvent =
         surface: Extract<Surface, 'onboarding' | 'freedom_sheet'>;
         income_changed: boolean;
         invest_changed: boolean;
+        /** False on a surface with no rate control, where `return_preset` is always null. */
+        preset_changed: boolean;
         monthly_income_band: AmountBand | null;
         monthly_invest_band: AmountBand | null;
         return_preset: ReturnPreset | null;

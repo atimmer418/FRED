@@ -17,6 +17,7 @@ import { FirstTimeTourComponent } from './components/first-time-tour/first-time-
 import { environment } from '../environments/environment';
 import { captureDevToolsKeyFromUrl } from './utils/dev-tools-key.utils';
 import { AnalyticsService } from './services/analytics/analytics.service';
+import { ScreenTrackingService } from './services/analytics/screen-tracking.service';
 import { combineLatest, debounceTime, distinctUntilChanged, filter, Subject, throttleTime } from 'rxjs';
 import { addIcons } from 'ionicons';
 import { lockClosedOutline, fingerPrintOutline } from 'ionicons/icons';
@@ -51,7 +52,8 @@ export class AppComponent implements OnInit {
     private passkeyService: PasskeyService,
     private pushNotificationService: PushNotificationService,
     private portfolioStore: PortfolioStoreService,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    private screenTracking: ScreenTrackingService
   ) {
     addIcons({ lockClosedOutline, fingerPrintOutline });
 
@@ -140,6 +142,10 @@ export class AppComponent implements OnInit {
     // default, so this is a no-op in practice; it exists to prove the client, proxy and project
     // line up once a key is configured. It carries no user data and cannot throw.
     this.analytics.trackAppOpened();
+
+    // Every routed page reports a screen view from here, so a new page is covered the day it is
+    // added rather than whenever someone remembers. Tabs are excluded: they do not navigate.
+    this.screenTracking.start();
 
     // In dev mode, simulate login as an existing user BEFORE setting up navigation
     // This prevents the race condition where navigation fires before auth completes

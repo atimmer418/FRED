@@ -447,7 +447,7 @@ class ProdPlaidPropertiesTest {
 ```
 
 Run: `cd backend && ./gradlew test --tests 'com.investingapp.backend.config.ProdPlaidPropertiesTest'`
-Expected: `BUILD FAILED`, `2 tests completed, 2 failed`. The first fails on its first assertion (`plaid.client.id` is the literal `6844e93b7fcffa0021bcfbb5` at :16 today); the second fails because `plaid.secret` at :17 is the sandbox literal.
+Expected: `BUILD FAILED`, `2 tests completed, 2 failed`. The first fails on its first assertion (`plaid.client.id` is the literal `<plaid client id>` at :16 today); the second fails because `plaid.secret` at :17 is the sandbox literal.
 
 - [ ] **Step 11: Green: the env-driven prod Plaid block**
 

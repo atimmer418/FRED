@@ -64,6 +64,8 @@ class AccountStatusServiceKycDecidedTest {
     private InvestmentScheduleService investmentScheduleService;
     @Mock
     private AnalyticsOutboxService analyticsOutboxService;
+    @Mock
+    private AchRelationshipService achRelationshipService;
 
     @Captor
     private ArgumentCaptor<String> eventNameCaptor;
@@ -85,7 +87,8 @@ class AccountStatusServiceKycDecidedTest {
                 emailService,
                 plaidToAlpacaService,
                 investmentScheduleService,
-                analyticsOutboxService);
+                analyticsOutboxService,
+                achRelationshipService);
 
         user = new User("kyc@fredvested.com");
         user.setId(42L);
@@ -255,5 +258,27 @@ class AccountStatusServiceKycDecidedTest {
         assertThat(AccountStatusService.kycOutcome("SUBMITTED")).isNull();
         assertThat(AccountStatusService.kycOutcome("")).isNull();
         assertThat(AccountStatusService.kycOutcome(null)).isNull();
+    }
+
+    @Test
+    @DisplayName("a bank change records the previous relationship, resets, cancels, and never creates synchronously")
+    void bankChangeResetsThenCancelsAndNeverCreatesSynchronously() {
+        user.setAlpacaAchRelationshipId("ENC:rel-old");
+        user.setPlaidAccessToken("ENC:token");
+        user.setPlaidAccountId("plaid-acct");
+        user.setFirstName("Ada");
+        user.setLastName("Lovelace");
+
+        service.handleBankAccountChange(user);
+
+        assertThat(user.getPreviousAchRelationshipId()).isEqualTo("ENC:rel-old");
+        InOrder order = inOrder(investmentScheduleService, achRelationshipService);
+        order.verify(investmentScheduleService).resetForBankChange(user);
+        order.verify(achRelationshipService).cancelAllActive(user);
+        verify(achRelationshipService, never()).ensureRelationship(any());
+
+        service.attemptAchCreation(user);
+
+        verify(achRelationshipService).ensureRelationship(user);
     }
 }

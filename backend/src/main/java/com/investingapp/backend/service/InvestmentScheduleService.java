@@ -1,7 +1,9 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.HoldReason;
 import com.investingapp.backend.model.InvestmentFrequency;
 import com.investingapp.backend.model.InvestmentSchedule;
+import com.investingapp.backend.model.ScheduleMode;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.service.PortfolioService;
@@ -225,44 +227,16 @@ public class InvestmentScheduleService {
     }
 
     /**
-     * Clear ACH data and re-pause the schedule when a user changes their bank account.
-     * A new ACH relationship will be created by attemptAchCreation after this.
+     * Bank change step 2 (spec 7.8): drop the old relationship id and hold the schedule. is_paused is
+     * not written; the hold is cleared by AchRelationshipService.adopt when the new relationship lands.
      */
     public void resetForBankChange(User user) {
-        Optional<InvestmentSchedule> scheduleOpt = investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
-        if (scheduleOpt.isEmpty()) {
-            logger.info("No investment schedule found for user {} — nothing to reset", user.getEmail());
-            return;
-        }
-        InvestmentSchedule schedule = scheduleOpt.get();
-        schedule.setAchRequestId(null);
-        schedule.setIsPaused(true);
-        investmentScheduleRepository.save(schedule);
-        logger.info("Investment schedule re-paused for bank account change — user {}", user.getEmail());
-    }
-
-    /**
-     * Update investment schedule with ACH request ID
-     */
-    public InvestmentSchedule updateWithAchRequestId(User user, String achRequestId) {
-        logger.info("Updating investment schedule with ACH request ID: {} for user: {}",
-                achRequestId, user.getEmail());
-
-        Optional<InvestmentSchedule> scheduleOpt = investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
-
-        if (scheduleOpt.isEmpty()) {
-            logger.warn("No investment schedule found for user: {} — ACH saved to user profile, schedule will pick it up when created", user.getEmail());
-            return null;
-        }
-
-        InvestmentSchedule schedule = scheduleOpt.get();
-        schedule.setAchRequestId(achRequestId);
-        schedule.setIsPaused(false); // Unpause when ACH is confirmed
-
-        InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
-        logger.info("Successfully updated investment schedule ID: {} with ACH request ID: {} and unpaused it",
-                updatedSchedule.getId(), achRequestId);
-        return updatedSchedule;
+        investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user).ifPresent(schedule -> {
+            schedule.setAchRequestId(null);
+            schedule.setHoldReason(HoldReason.BANK_CHANGE);
+            investmentScheduleRepository.save(schedule);
+            logger.info("Investment schedule held for bank change, user {}", user.getEmail());
+        });
     }
 
     /**
@@ -282,32 +256,26 @@ public class InvestmentScheduleService {
     }
 
     /**
-     * Get all schedules ready for investment execution on {@code todayET} (for cron processing).
-     * Only returns schedules where:
-     *   - isPaused == false (the user has not paused the schedule), AND
-     *   - user.accountStatus == "ACTIVE" (the Alpaca account is fully active)
-     * Both conditions must be true for a trade to be placed.
+     * Schedules the 11:55 cron may queue tonight: user ACTIVE (both modes), then the per-mode clause.
      */
     @Transactional(readOnly = true)
     public List<InvestmentSchedule> getSchedulesReadyForInvestment(LocalDate todayET) {
-        logger.info("Finding investment schedules ready for execution on {}...", todayET);
-
         List<InvestmentSchedule> readySchedules = investmentScheduleRepository
                 .findByUser_AccountStatus("ACTIVE")
                 .stream()
                 .filter(s -> isReady(s, todayET))
                 .toList();
-
-        logger.info("Found {} schedules ready for investment execution", readySchedules.size());
+        logger.info("Found {} schedules ready for investment execution on {}", readySchedules.size(), todayET);
         return readySchedules;
     }
 
-    /**
-     * Eligibility of one schedule on one Eastern calendar day. Phase 0 knows only MANUAL schedules;
-     * T10 turns this into the mode switch and adds the hold clause.
-     */
-    boolean isReady(InvestmentSchedule schedule, LocalDate todayET) {
-        return schedule.isReadyForInvestment(todayET);
+    /** Mode switch (spec 5.2). Phase 0 never produces DETECTED rows; the branch exists so the switch is exhaustive. */
+    static boolean isReady(InvestmentSchedule s, LocalDate todayET) {
+        ScheduleMode mode = s.getMode() == null ? ScheduleMode.MANUAL : s.getMode();
+        return switch (mode) {
+            case MANUAL -> s.isReadyForInvestment(todayET);
+            case DETECTED -> false;
+        };
     }
 
     /**

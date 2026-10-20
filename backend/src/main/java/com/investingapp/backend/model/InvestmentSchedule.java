@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import com.investingapp.backend.util.EasternTime;
 
 @Data
@@ -305,25 +306,23 @@ public class InvestmentSchedule {
         this.nextInvestmentDate = calculateNextInvestmentDate(this.nextInvestmentDate);
     }
 
+    /** Holds that stop a MANUAL schedule from investing (spec 5.2); BANK_CHANGE is not one of them. */
+    private static final EnumSet<HoldReason> BLOCKING_HOLDS = EnumSet.of(
+            HoldReason.ACH_RETURN_UNAUTHORIZED, HoldReason.ACH_RETURN_ACCOUNT, HoldReason.MANUAL_REVIEW);
+
     /**
-     * Check if this schedule is ready for investment execution on the given Eastern calendar day.
-     * The cron computes todayET once per run and passes it in; this method never reads a clock.
+     * MANUAL eligibility for the given Eastern date (spec 5.2): not paused, ACH linked, no blocking
+     * hold, and either the start date is today or the next investment date is today or past due.
      */
     public boolean isReadyForInvestment(LocalDate todayET) {
-        // Must not be paused and must have ACH linked
-        boolean basicRequirements = !isPaused && achRequestId != null;
-
-        if (!basicRequirements) {
+        if (!Boolean.FALSE.equals(isPaused) || achRequestId == null) {
             return false;
         }
-
-        // Check if either:
-        // 1. Start date is today (first-time investment)
-        // 2. Next investment date is today or past due (recurring investment)
-        boolean dateRequirement = (startDate != null && startDate.equals(todayET)) ||
-                (nextInvestmentDate != null && !nextInvestmentDate.isAfter(todayET));
-
-        return dateRequirement;
+        if (holdReason != null && BLOCKING_HOLDS.contains(holdReason)) {
+            return false;
+        }
+        return (startDate != null && startDate.equals(todayET))
+                || (nextInvestmentDate != null && !nextInvestmentDate.isAfter(todayET));
     }
 
     /**

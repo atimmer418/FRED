@@ -30,6 +30,7 @@ public class AccountStatusService {
     private final PlaidToAlpacaService plaidToAlpacaService;
     private final InvestmentScheduleService investmentScheduleService;
     private final AnalyticsOutboxService analyticsOutboxService;
+    private final AchRelationshipService achRelationshipService;
     private final ObjectMapper objectMapper;
 
     public AccountStatusService(
@@ -40,7 +41,8 @@ public class AccountStatusService {
             EmailService emailService,
             PlaidToAlpacaService plaidToAlpacaService,
             InvestmentScheduleService investmentScheduleService,
-            AnalyticsOutboxService analyticsOutboxService) {
+            AnalyticsOutboxService analyticsOutboxService,
+            AchRelationshipService achRelationshipService) {
         this.userRepository = userRepository;
         this.investmentScheduleRepository = investmentScheduleRepository;
         this.alpacaApiService = alpacaApiService;
@@ -49,6 +51,7 @@ public class AccountStatusService {
         this.plaidToAlpacaService = plaidToAlpacaService;
         this.investmentScheduleService = investmentScheduleService;
         this.analyticsOutboxService = analyticsOutboxService;
+        this.achRelationshipService = achRelationshipService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -191,25 +194,25 @@ public class AccountStatusService {
     }
 
     /**
-     * Called when a user changes their linked bank account.
-     * Resets the investment schedule and triggers a fresh ACH creation if the account is already ACTIVE.
+     * Bank change (spec 7.8), in order: record the relationship being replaced, hold the schedule,
+     * cancel the old relationships, and leave creation to the 15-minute poll. The exchange that calls
+     * this already copied previous_ach_relationship_id and nulled alpacaAchRelationshipId (T09), so the
+     * copy below is a no-op there and only matters for any other caller.
      */
     @Transactional
     public void handleBankAccountChange(User user) {
+        if (user.getAlpacaAchRelationshipId() != null) {
+            user.setPreviousAchRelationshipId(user.getAlpacaAchRelationshipId());
+        }
         investmentScheduleService.resetForBankChange(user);
-
-        if ("ACTIVE".equals(user.getAccountStatus())) {
-            logger.info("Account ACTIVE for user {} — triggering ACH creation for new bank account", user.getEmail());
-            attemptAchCreation(user);
-        } else {
-            logger.info("Account not yet ACTIVE for user {} — ACH will be created when account becomes active", user.getEmail());
+        if (!achRelationshipService.cancelAllActive(user)) {
+            logger.warn("Bank change for user {}: ACH cancellation deferred while a transfer is in flight; the poll retries", user.getEmail());
         }
     }
 
     /**
-     * Attempt to create an ACH relationship for a user using their stored Plaid data.
-     * Silently skips if Plaid data is not yet available (the retry scheduler will pick it up).
-     * Sends an error email if creation fails unexpectedly.
+     * Precondition guards (Plaid data, Alpaca account, legal name), then
+     * AchRelationshipService.ensureRelationship, which is the only path that creates or adopts.
      */
     @Transactional
     public void attemptAchCreation(User user) {
@@ -232,81 +235,7 @@ public class AccountStatusService {
             return;
         }
 
-        // If an ACH relationship was already created (e.g., user linked bank during onboarding
-        // before their account became ACTIVE), skip creation and use the existing ID to unpause.
-        if (user.getAlpacaAchRelationshipId() != null) {
-            try {
-                String existingAchId = encryptionService.decrypt(user.getAlpacaAchRelationshipId());
-                investmentScheduleService.updateWithAchRequestId(user, existingAchId);
-                logger.info("ACH relationship already exists ({}) — investment schedule unpaused for user {}",
-                        existingAchId, user.getEmail());
-            } catch (Exception e) {
-                logger.error("Error unpausing schedule with existing ACH relationship for user {}: {}",
-                        user.getEmail(), e.getMessage(), e);
-            }
-            return;
-        }
-
-        // Guard against cases where Alpaca already has an active ACH relationship but our DB
-        // never recorded it (e.g., a previous run crashed between Alpaca responding and the DB write).
-        try {
-            String alpacaAccountId = encryptionService.decrypt(user.getAlpacaAccountId());
-            String existingRelationships = alpacaApiService.getAchRelationships(alpacaAccountId);
-            JsonNode relationships = objectMapper.readTree(existingRelationships);
-            if (relationships.isArray()) {
-                for (JsonNode rel : relationships) {
-                    String status = rel.has("status") ? rel.get("status").asText() : "";
-                    if ("APPROVED".equals(status) || "QUEUED".equals(status)) {
-                        String achId = rel.get("id").asText();
-                        logger.info("Found existing active ACH relationship {} on Alpaca for user {} — saving and unpausing",
-                                achId, user.getEmail());
-                        investmentScheduleService.updateWithAchRequestId(user, achId);
-                        return;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Could not check existing ACH relationships for user {} — proceeding with creation: {}",
-                    user.getEmail(), e.getMessage());
-        }
-
-        String ownerName = firstName + " " + lastName;
-
-        try {
-            String alpacaAccountId = encryptionService.decrypt(user.getAlpacaAccountId());
-
-            Map<String, Object> achResult = plaidToAlpacaService.createAchRelationshipFromPlaid(
-                    alpacaAccountId,
-                    user.getPlaidAccountId(),
-                    ownerName,
-                    user);
-
-            if (achResult.containsKey("error")) {
-                String errorMsg = (String) achResult.get("error");
-                logger.error("ACH creation failed for user {}: {}", user.getEmail(), errorMsg);
-                emailService.sendEmail(
-                        user.getEmail(),
-                        "Action needed: bank account linking failed",
-                        "We were unable to automatically link your bank account after your FRED account was approved. "
-                        + "Please open the FRED app and link your bank account manually in Settings. "
-                        + "Error: " + errorMsg);
-                return;
-            }
-
-            String achId = (String) achResult.get("id");
-            if (achId == null) {
-                logger.warn("ACH creation for user {} returned no ID — cannot update investment schedule", user.getEmail());
-                return;
-            }
-
-            // Save ACH ID to InvestmentSchedule and unpause it
-            investmentScheduleService.updateWithAchRequestId(user, achId);
-            logger.info("ACH relationship {} created and investment schedule unpaused for user {}",
-                    achId, user.getEmail());
-
-        } catch (Exception e) {
-            logger.error("Unexpected error creating ACH relationship for user {}: {}", user.getEmail(), e.getMessage(), e);
-        }
+        achRelationshipService.ensureRelationship(user);
     }
 
     // --- Analytics ------------------------------------------------------------------------------

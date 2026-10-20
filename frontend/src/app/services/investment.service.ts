@@ -227,27 +227,6 @@ export class InvestmentService {
   }
 
   /**
-   * Update ACH request ID for investment schedule
-   */
-  updateAchRequestId(achRequestId: string): Observable<InvestmentSchedule> {
-    const token = localStorage.getItem('jwtToken');
-    if (!token) {
-      throw new Error('No authentication token found');
-    }
-
-    // Decode token to get user email (simplified - you might want to use a proper JWT library)
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const userEmail = payload.sub;
-
-    return this.http.post<InvestmentSchedule>(`${this.scheduleApiUrl}/update-ach-request-id`, {
-      userEmail,
-      achRequestId
-    }, {
-      headers: this.getAuthHeaders()
-    });
-  }
-
-  /**
    * Helper method to get status display text
    */
   getStatusDisplayText(status: string): string {

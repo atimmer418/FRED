@@ -678,15 +678,6 @@ export class AuthService {
       { headers: this.getAuthHeaders() });
   }
 
-  updateAchRequestId(achRequestId: string, userEmail: string): Observable<any> {
-    console.log('[AuthService] Updating ACH request ID for schedule...');
-    // Update ACH request ID for investment schedule
-    return this.http.post(`${BACKEND_API_URL}/investment-schedule/update-ach-request-id`, {
-      achRequestId,
-      userEmail
-    }, { headers: this.getAuthHeaders() });
-  }
-
   pauseInvestmentSchedule(scheduleId: number): Observable<any> {
     console.log('[AuthService] Pausing investment schedule:', scheduleId);
     return this.http.post(`${BACKEND_API_URL}/investment-schedule/${scheduleId}/pause`, {},

@@ -212,7 +212,7 @@ public class InvestmentExecutionService {
 
                 // Update ALL executions in the batch with the SAME transfer ID
                 // This links them all to the single ACH event
-                applyToFreshRows(batchUser.executionIds(), execution -> {
+                applyToFreshRows(batchUser.userId(), batchUser.executionIds(), execution -> {
                     execution.setAlpacaTransferId(transferResponse.id);
                     execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_INITIATED);
                     execution.setExecutionDate(now);
@@ -225,7 +225,7 @@ public class InvestmentExecutionService {
                         transferResponse.id, batchUser.totalAmount(), batchUser.executionIds().size());
             } else {
                 // Mark all batched executions as failed
-                applyToFreshRows(batchUser.executionIds(), execution -> {
+                applyToFreshRows(batchUser.userId(), batchUser.executionIds(), execution -> {
                     execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
                     execution.setErrorMessage("Batch ACH transfer failed: " + transferResponse.errorMessage);
                 });
@@ -245,13 +245,19 @@ public class InvestmentExecutionService {
      * Re-loads the given rows fresh and applies the writer to each, all inside one committed
      * REQUIRES_NEW transaction. Always called after the Alpaca POST has already returned, so the
      * HTTP call itself never sits inside an open database transaction; this unit commits (or rolls
-     * back) independently of every other user's write.
+     * back) independently of every other user's write. A short reload (fewer rows found than ids
+     * passed in, e.g. a row deleted between the claim and this write) is alerted rather than
+     * silently skipped; whatever rows were found are still written.
      */
-    private void applyToFreshRows(List<Long> ids, Consumer<InvestmentExecution> writer) {
+    private void applyToFreshRows(Long userId, List<Long> ids, Consumer<InvestmentExecution> writer) {
         TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
         writeTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         writeTx.executeWithoutResult(status -> {
-            for (InvestmentExecution execution : executionRepository.findAllById(ids)) {
+            List<InvestmentExecution> found = executionRepository.findAllById(ids);
+            if (found.size() != ids.size()) {
+                logger.error("alert.batch_rows_missing user={} expected={} found={}", userId, ids.size(), found.size());
+            }
+            for (InvestmentExecution execution : found) {
                 writer.accept(execution);
                 executionRepository.save(execution);
             }
@@ -386,7 +392,7 @@ public class InvestmentExecutionService {
 
     /** Spec 5.5 (c): every row FUNDING_FAILED, the user told once with the total, nothing posted. */
     private void failBatchWithoutPost(BatchUser batchUser, String details) {
-        applyToFreshRows(batchUser.executionIds(), execution -> {
+        applyToFreshRows(batchUser.userId(), batchUser.executionIds(), execution -> {
             execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
             execution.setErrorMessage(details);
         });

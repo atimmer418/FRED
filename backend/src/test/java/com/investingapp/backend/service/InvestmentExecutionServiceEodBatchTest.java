@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -46,7 +47,9 @@ import static org.mockito.Mockito.when;
  * night, and the Alpaca POST must never sit inside the ambient class-level transaction; findings
  * round 2: the batch must never touch a detached entity again after that selecting transaction
  * closes, since grouping by the User entity or reading its fields later would force a lazy
- * Hibernate proxy to initialize with no session open). The REQUIRES_NEW propagation itself IS
+ * Hibernate proxy to initialize with no session open; round 2 addendum: the null-relationship
+ * fail path writes through the same applyToFreshRows unit the Alpaca-failure branch uses, and a
+ * short reload there is alerted, not silently skipped). The REQUIRES_NEW propagation itself IS
  * provable here (captured off the mocked PlatformTransactionManager, same pattern as
  * JobLockServiceTest); what the mock cannot prove is that a real connection actually commits
  * independently per call, since TransactionTemplate runs the callback straight through regardless
@@ -162,6 +165,27 @@ class InvestmentExecutionServiceEodBatchTest {
             assertThat(execution.getTransferAttemptedAt()).isEqualTo(BATCH_START);
             assertThat(execution.getBatchNight()).isEqualTo(BATCH_NIGHT);
         });
+    }
+
+    /**
+     * Addendum to finding round 2, #2: applyToFreshRows must not silently skip a row that vanished
+     * between the claim and this write (e.g. deleted). It still writes whatever rows it did find.
+     */
+    @Test
+    void applyToFreshRowsStillWritesTheRowsItFindsWhenTheReloadComesBackShort() {
+        InvestmentExecution a = queued(1L, user, "400.00", MARKER);
+        InvestmentExecution b = queued(2L, user, "150.00", MARKER);
+        selected(a, b);
+        claimSucceeds(List.of(1L, 2L), a, b);
+        // b vanishes between the claim and this write's reload: only a comes back.
+        when(executionRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(a));
+
+        assertThatCode(() -> service.runEndOfDayBatch(BATCH_START)).doesNotThrowAnyException();
+
+        assertThat(a.getStatus()).isEqualTo(ExecutionStatus.FUNDING_INITIATED);
+        assertThat(a.getAlpacaTransferId()).isEqualTo("xfer-1");
+        // b was never found by the reload, so nothing in this run touches it
+        assertThat(b.getStatus()).isEqualTo(ExecutionStatus.SCHEDULED);
     }
 
     @Test

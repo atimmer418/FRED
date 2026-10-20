@@ -21,6 +21,9 @@ import retrofit2.Response;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.Executor;
+import jakarta.persistence.EntityManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,6 +76,9 @@ class PlaidLinkedAnalyticsTest {
         ReflectionTestUtils.setField(plaidService, "encryptionService", encryptionService);
         ReflectionTestUtils.setField(plaidService, "accountStatusService", accountStatusService);
         ReflectionTestUtils.setField(plaidService, "analyticsOutboxService", analyticsOutboxService);
+        ReflectionTestUtils.setField(plaidService, "plaidItemLifecycleService", mock(PlaidItemLifecycleService.class));
+        ReflectionTestUtils.setField(plaidService, "plaidExecutor", (Executor) runnable -> { });
+        ReflectionTestUtils.setField(plaidService, "entityManager", mock(EntityManager.class));
 
         when(encryptionService.encrypt(RAW_ACCESS_TOKEN)).thenReturn("ENC:encrypted-access-token");
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
@@ -83,6 +89,7 @@ class PlaidLinkedAnalyticsTest {
         user.setId(99L);
         user.setPublicId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
         user.setUserProgress(new UserProgress());
+        when(userRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(user));
         return user;
     }
 

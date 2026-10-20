@@ -39,6 +39,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Find a user by their Plaid item ID for webhook processing
     User findByPlaidItemId(String plaidItemId);
 
+    // Every user holding a Plaid access token: the one-off /item/webhook/update backfill
+    // (PlaidItemLifecycleService.backfillWebhookUrl, exposed by DevPlaidController)
+    List<User> findByPlaidAccessTokenIsNotNull();
+
     // Find users by registration IP who have completed auth-finalize (for passkey
     // re-auth prompting)
     @Query("SELECT u FROM User u JOIN u.userProgress up WHERE u.registrationIpAddress = :ipAddress AND up.authFinalizeCompleted = :completed")

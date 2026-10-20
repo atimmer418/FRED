@@ -5,6 +5,10 @@ import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
+import com.investingapp.backend.model.PlaidItemStatus;
+import com.investingapp.backend.util.EasternTime;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 // Import for frequency enum
 import com.plaid.client.model.*;
 import com.plaid.client.request.PlaidApi;
@@ -14,6 +18,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional; // Import Transactional
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.util.concurrent.Executor;
 import retrofit2.Response;
 
 import java.io.IOException;
@@ -82,6 +90,17 @@ public class PlaidService {
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
 
+    @Autowired
+    private PlaidItemLifecycleService plaidItemLifecycleService;
+
+    /** Bounded Plaid pool (SchedulingConfig.plaidExecutor); the TaskScheduler is also an Executor, hence the qualifier. */
+    @Autowired
+    @Qualifier("plaidExecutor")
+    private Executor plaidExecutor;
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
     /**
      * Spec 2.2 and 2.3: every token carries redirect_uri, webhook and the DTM customization name.
      * LINK asks for auth + identity and collects the Transactions consent; UPDATE reopens the stored
@@ -129,6 +148,18 @@ public class PlaidService {
     public ItemPublicTokenExchangeResponse exchangePublicTokenAndLinkUser(String publicToken, User appUser) throws IOException {
         logger.info("Exchanging public token for user ID: {}", appUser.getId());
 
+        // Serialize per user: SELECT ... FOR UPDATE blocks a second exchange until the first commits.
+        // The controller's instance is usually already managed by the request's EntityManager
+        // (open-in-view is on), and Hibernate upgrades the lock on a managed instance without
+        // re-reading it, so refresh after the lock to see what the other exchange committed.
+        appUser = userRepository.findByIdForUpdate(appUser.getId()).orElseThrow();
+        entityManager.refresh(appUser);
+        LocalDateTime linkedAt = EasternTime.now();
+        if (appUser.getPlaidItemLinkedAt() != null
+                && appUser.getPlaidItemLinkedAt().isAfter(linkedAt.minusSeconds(60))) {
+            throw new LinkInProgressException();
+        }
+
         // Read BEFORE anything is overwritten. One endpoint serves the first link, a relink after
         // Plaid revoked the item, and a deliberate bank change; once the new token is stored the
         // three are indistinguishable, so this boolean is the only thing that separates them.
@@ -146,12 +177,27 @@ public class PlaidService {
         ItemPublicTokenExchangeResponse exchangeResponse = response.body();
         String rawAccessToken = exchangeResponse.getAccessToken(); // Raw token from Plaid
 
+        // Spec 2.4 step 1, before the new token overwrites the old one: queue the old Item for
+        // /item/remove (Plaid bills per Item until then) and remember which Alpaca relationship
+        // belonged to the old bank so AchRelationshipService.adopt refuses to re-adopt it.
+        if (isPresent(appUser.getPlaidAccessToken())) {
+            plaidItemLifecycleService.enqueueRemoval(appUser);
+        }
+        if (isPresent(appUser.getAlpacaAchRelationshipId())) {
+            appUser.setPreviousAchRelationshipId(appUser.getAlpacaAchRelationshipId());
+        }
+
         String encryptedAccessToken = encryptionService.encrypt(rawAccessToken);
 
         // Store basic Plaid info
         appUser.setPlaidAccessToken(encryptedAccessToken);
         appUser.setPlaidItemId(exchangeResponse.getItemId());
-        
+        appUser.setPlaidItemLinkedAt(linkedAt);
+        appUser.setPlaidItemStatus(PlaidItemStatus.OK);
+        appUser.setPlaidItemErrorCode(null);
+        appUser.setPlaidTransactionsConsented(null); // unknown until the after-commit /item/get answers
+        appUser.setPlaidAccountMask(null); // stays null when enrichment fails; adopt then skips the mask check
+
         // Update progress in UserProgress entity
         if (appUser.getUserProgress() != null) {
             appUser.getUserProgress().setLinkPlaidCompleted(true);
@@ -184,6 +230,21 @@ public class PlaidService {
 
         // Reset investment schedule and trigger ACH creation if account is already ACTIVE
         accountStatusService.handleBankAccountChange(appUser);
+
+        // Spec 2.4 step 6: /item/get runs after commit on the Plaid pool, never inside this
+        // transaction. With no synchronization active (plain unit tests) it goes to the pool now.
+        Long userId = appUser.getId();
+        Runnable consentRead = () -> plaidItemLifecycleService.recordConsentAfterLink(userId, rawAccessToken);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    plaidExecutor.execute(consentRead);
+                }
+            });
+        } else {
+            plaidExecutor.execute(consentRead);
+        }
 
         return exchangeResponse;
     }
@@ -225,6 +286,7 @@ public class PlaidService {
             
             // Store account details
             appUser.setPlaidAccountId(primaryAccount.getAccountId());
+            appUser.setPlaidAccountMask(primaryAccount.getMask());
             appUser.setPlaidAccountName(primaryAccount.getName());
             appUser.setPlaidAccountType(primaryAccount.getType() != null ? 
                 primaryAccount.getType().toString() : null);

@@ -3,6 +3,7 @@ package com.investingapp.backend.controller;
 import com.investingapp.backend.dto.MessageResponse;
 import com.investingapp.backend.dto.CreateLinkTokenRequest;
 import com.investingapp.backend.dto.ErrorCodeResponse;
+import com.investingapp.backend.service.LinkInProgressException;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
@@ -112,6 +113,10 @@ public class PlaidController {
             // The service method already updates the user and saves.
 
             return ResponseEntity.ok(new MessageResponse("Plaid public token exchanged successfully and linked to user."));
+        } catch (LinkInProgressException e) {
+            logger.info("/exchange_public_token: user {} already has a link in progress", appUser.getId());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ErrorCodeResponse("LINK_IN_PROGRESS", "A bank link is already in progress"));
         } catch (IOException e) {
             logger.error("Error exchanging Plaid public token for user {}: {}", appUser.getId(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

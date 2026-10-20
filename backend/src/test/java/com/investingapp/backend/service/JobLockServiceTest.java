@@ -10,6 +10,7 @@ import org.springframework.transaction.TransactionDefinition;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -42,6 +43,19 @@ class JobLockServiceTest {
         assertEquals(TransactionDefinition.PROPAGATION_REQUIRES_NEW, definition.getValue().getPropagationBehavior(),
                 "the lock row must commit on its own, before the job body runs");
         verify(transactionManager).commit(any());
+    }
+
+    @Test
+    void theLeaseClockIsUtcNotEasternOrTheSystemDefaultZone() {
+        when(repository.insertIgnore(anyString(), any(), anyString())).thenReturn(1);
+
+        ArgumentCaptor<LocalDateTime> until = ArgumentCaptor.forClass(LocalDateTime.class);
+        service.tryAcquire(JobLocks.EOD_BATCH, LEASE);
+        verify(repository).insertIgnore(anyString(), until.capture(), anyString());
+
+        LocalDateTime expectedUntil = LocalDateTime.now(ZoneOffset.UTC).plus(LEASE);
+        assertTrue(Duration.between(until.getValue(), expectedUntil).abs().compareTo(Duration.ofSeconds(5)) < 0,
+                "locked_until must be derived from the UTC clock, not Eastern or the JVM default zone");
     }
 
     @Test

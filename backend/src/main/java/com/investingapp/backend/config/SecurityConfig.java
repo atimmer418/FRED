@@ -111,6 +111,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers("/.well-known/apple-app-site-association").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/plaid/webhook").permitAll() // signature-verified by PlaidWebhookVerificationFilter
                 .requestMatchers("/api/plaid/create_link_token_anonymous").permitAll()
                 .requestMatchers("/api/plaid/exchange_public_token_anonymous").permitAll()
                 .requestMatchers("/api/passkey/**").permitAll()

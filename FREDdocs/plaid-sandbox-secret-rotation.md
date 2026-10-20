@@ -6,10 +6,14 @@ them). The file is tracked, so the secret is in git history for good; deleting t
 un-leak it. The only fix is to rotate the secret in the Plaid dashboard. This is a manual step for
 Andy; nothing in the repo can do it.
 
-The leaked value is pinned as `BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET`
-(`backend/src/main/java/com/investingapp/backend/config/BrokerEnvironmentGuard.java`) and the prod
-profile refuses to start with it. That constant only knows the pre-rotation literal: it is a
-tripwire for the old value, not proof that the new one is safe. After rotation it stays in the code
+The leaked value is pinned as a SHA-256 digest, `BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET_SHA256`
+(`backend/src/main/java/com/investingapp/backend/config/BrokerEnvironmentGuard.java`), not as the
+plaintext itself: the guard hashes `plaid.secret` with SHA-256 and compares digests, so neither this
+source file nor the compiled jar holds a working credential for the old value. The digest was
+computed once, locally, by reading the plaintext straight out of the pre-fix source file and piping
+it through SHA-256 without printing or logging the plaintext anywhere; only the resulting hex digest
+was pasted into the constant. That constant only recognizes the pre-rotation value: it is a tripwire
+for the old secret, not proof that the new one is safe. After rotation it stays in the code
 unchanged. Until the rotation is confirmed in the dashboard, the old secret is still a working
 sandbox credential for anyone who reads the git history.
 
@@ -51,7 +55,8 @@ before beta, because the same dashboard holds the production keys.
 - No tracked file gets a Plaid secret literal, ever. The dev, test and prod profiles read
   `${PLAID_SECRET_SANDBOX}` or `${PLAID_SECRET_PRODUCTION}` from the environment.
 - `application-local.properties` is the only place a literal belongs, and it is gitignored.
-- Do not update `KNOWN_SANDBOX_SECRET` to the new value. It exists to catch the leaked one.
+- Do not update `KNOWN_SANDBOX_SECRET_SHA256` to the new value's digest. It exists to catch the
+  leaked one, and a rotated secret has nothing to do with it.
 
 ## Production variables (first prod deploy, separate from this rotation)
 

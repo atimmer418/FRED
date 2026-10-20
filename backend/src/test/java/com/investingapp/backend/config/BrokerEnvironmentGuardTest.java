@@ -1,5 +1,6 @@
 package com.investingapp.backend.config;
 
+import com.investingapp.backend.security.plaid.CiBypassPlaidWebhookVerifier;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
@@ -23,6 +24,11 @@ class BrokerEnvironmentGuardTest {
     private static final String LOCAL_WEBHOOK = "https://local.fredvested.com/api/plaid/webhook";
     private static final String PROD_SECRET = "prod-secret-not-the-sandbox-one";
     private static final String CI_SECRET = "ci-disabled";
+
+    /** A fixture value standing in for the real leaked sandbox secret, so tests never carry it. */
+    private static final String TEST_KNOWN_SANDBOX_SECRET = "test-fixture-sandbox-secret-not-the-real-one";
+    private static final String TEST_KNOWN_SANDBOX_SECRET_SHA256 =
+            BrokerEnvironmentGuard.sha256Hex(TEST_KNOWN_SANDBOX_SECRET);
 
     private void run(MockEnvironment env) {
         run(env, new DefaultListableBeanFactory());
@@ -56,11 +62,14 @@ class BrokerEnvironmentGuardTest {
         return env;
     }
 
-    /** A bean factory carrying the ci bypass verifier definition, to prove prod refuses it. */
+    /**
+     * A bean factory carrying a {@link CiBypassPlaidWebhookVerifier} definition under a bean name that
+     * has nothing to do with the class, to prove prod refuses it by type rather than by bean name.
+     */
     private DefaultListableBeanFactory withCiBypassBean() {
         DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
-        beanFactory.registerBeanDefinition(BrokerEnvironmentGuard.CI_BYPASS_VERIFIER_BEAN,
-                new RootBeanDefinition(Object.class));
+        beanFactory.registerBeanDefinition("someUnrelatedBeanName",
+                new RootBeanDefinition(CiBypassPlaidWebhookVerifier.class));
         return beanFactory;
     }
 
@@ -217,11 +226,11 @@ class BrokerEnvironmentGuardTest {
     }
 
     @Test
-    @DisplayName("prod refuses to start while the ci webhook-verifier bypass bean is registered")
+    @DisplayName("prod refuses to start while a ci webhook-verifier bypass bean is registered, by type, under any bean name")
     void prodCiBypassVerifierRefuses() {
         assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production"), withCiBypassBean()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(BrokerEnvironmentGuard.CI_BYPASS_VERIFIER_BEAN)
+                .hasMessageContaining(CiBypassPlaidWebhookVerifier.class.getSimpleName())
                 .hasMessageContaining("signatures would not be checked");
     }
 
@@ -236,17 +245,19 @@ class BrokerEnvironmentGuardTest {
     @DisplayName("prod refuses the sandbox secret that was once committed, and never prints it")
     void prodKnownSandboxSecretRefuses() {
         assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production",
-                PROD_WEBHOOK, BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET)))
+                PROD_WEBHOOK, TEST_KNOWN_SANDBOX_SECRET)
+                .withProperty("plaid.known-sandbox-secret-sha256", TEST_KNOWN_SANDBOX_SECRET_SHA256)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("plaid.secret is the sandbox secret")
-                .hasMessageNotContaining(BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET);
+                .hasMessageNotContaining(TEST_KNOWN_SANDBOX_SECRET);
     }
 
     @Test
     @DisplayName("local keeps working on the old sandbox secret until it is rotated")
     void localKnownSandboxSecretStarts() {
         assertThatCode(() -> run(env("local", SANDBOX_BROKER, PAPER_TRADING, "sandbox",
-                LOCAL_WEBHOOK, BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET)))
+                LOCAL_WEBHOOK, TEST_KNOWN_SANDBOX_SECRET)
+                .withProperty("plaid.known-sandbox-secret-sha256", TEST_KNOWN_SANDBOX_SECRET_SHA256)))
                 .doesNotThrowAnyException();
     }
 }

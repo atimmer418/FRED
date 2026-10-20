@@ -1,5 +1,6 @@
 package com.investingapp.backend.config;
 
+import com.investingapp.backend.security.plaid.CiBypassPlaidWebhookVerifier;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -7,8 +8,12 @@ import org.springframework.context.EnvironmentAware;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,11 +60,16 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
     static final String PLAID_ENV_SANDBOX = "sandbox";
     static final String PLAID_ENV_PRODUCTION = "production";
 
-    /** The sandbox secret that sat in application-prod.properties from b08d9e3 (2025-06-28) until Phase 0. Git history keeps it, so prod refuses it. */
-    static final String KNOWN_SANDBOX_SECRET = "14256c166ee8a12a370a6ccf90abbf";
-
-    /** The @Profile("ci") webhook verifier that accepts any Plaid-Verification header (T07). Never in prod. */
-    static final String CI_BYPASS_VERIFIER_BEAN = "ciBypassPlaidWebhookVerifier";
+    /**
+     * SHA-256 digest of the sandbox secret that sat in application-prod.properties from b08d9e3
+     * (2025-06-28) until Phase 0. Git history keeps the plaintext forever, so prod refuses it; this
+     * constant holds only the digest, never the secret itself, so a reader of this source file (or
+     * the compiled jar) does not get a working credential out of it. Overridable via
+     * {@code plaid.known-sandbox-secret-sha256} so tests can prove the refusal path with a fixture
+     * value instead of the real secret.
+     */
+    static final String KNOWN_SANDBOX_SECRET_SHA256 =
+            "eb6a0b8ac8ea858d54d48239cde42bf5d5c29c6c2edab0f96754c1b4ab22d86d";
 
     private Environment environment;
 
@@ -151,20 +161,43 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
         }
     }
 
-    /** The ci profile swaps the webhook verifier for one that accepts anything; in prod that bean means unsigned webhooks are trusted. */
+    /**
+     * The ci profile swaps the webhook verifier for one that accepts anything; in prod a bean of that
+     * type means unsigned webhooks are trusted. Looked up by type, not by bean name, so a differently
+     * named bean of the same class is still caught; {@code allowEagerInit=false} avoids instantiating
+     * anything just to run this check.
+     */
     private static void checkProdBypassVerifier(ConfigurableListableBeanFactory beanFactory, List<String> violations) {
-        if (beanFactory.containsBeanDefinition(CI_BYPASS_VERIFIER_BEAN)) {
-            violations.add("bean " + CI_BYPASS_VERIFIER_BEAN
+        String[] names = beanFactory.getBeanNamesForType(CiBypassPlaidWebhookVerifier.class, true, false);
+        if (names.length > 0) {
+            violations.add("bean(s) " + String.join(", ", names) + " of type "
+                    + CiBypassPlaidWebhookVerifier.class.getSimpleName()
                     + " is registered, so Plaid webhook signatures would not be checked in prod");
         }
     }
 
-    /** The sandbox secret lived in application-prod.properties until Phase 0 and is in git history forever. Never print it. */
+    /**
+     * The sandbox secret lived in application-prod.properties until Phase 0 and is in git history
+     * forever. Compared as a SHA-256 digest, never as plaintext, so neither this source file nor a
+     * violation message can leak a working credential.
+     */
     private void checkProdPlaidSecret(List<String> violations) {
         String value = environment.getProperty("plaid.secret", "");
-        if (KNOWN_SANDBOX_SECRET.equals(value)) {
+        String knownDigest = environment.getProperty("plaid.known-sandbox-secret-sha256", KNOWN_SANDBOX_SECRET_SHA256);
+        if (sha256Hex(value).equalsIgnoreCase(knownDigest)) {
             violations.add("plaid.secret is the sandbox secret that was once committed to this repo; "
                     + "set PLAID_SECRET_PRODUCTION and rotate the sandbox one (FREDdocs/plaid-sandbox-secret-rotation.md)");
+        }
+    }
+
+    /** SHA-256 of the given value as lowercase hex. SHA-256 is a guaranteed JDK algorithm, so this never throws in practice. */
+    static String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available on this JVM", e);
         }
     }
 

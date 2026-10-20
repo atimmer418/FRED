@@ -42,6 +42,8 @@ class ProdPlaidPropertiesTest {
     @DisplayName("the once-committed sandbox secret is gone from the prod file")
     void prodFileDoesNotCarryTheSandboxSecret() throws IOException {
         Properties props = prodProperties();
-        assertThat(props.values()).noneMatch(BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET::equals);
+        assertThat(props.values())
+                .extracting(value -> BrokerEnvironmentGuard.sha256Hex((String) value))
+                .noneMatch(digest -> digest.equalsIgnoreCase(BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET_SHA256));
     }
 }

@@ -7,6 +7,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Subject, takeUntil, catchError, tap, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { clearPlaidLinkSession, readPlaidLinkToken, storePlaidLinkSession } from '../utils/plaid-link-session';
 import { PlaidService } from '../services/plaid.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
@@ -117,17 +118,26 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
     this.statusMessage = 'Initializing secure connection...';
 
     try {
-      // Get link token for updating bank account
-      const linkTokenData = await this.getLinkTokenAuthenticated().toPromise();
-      const linkToken = linkTokenData.link_token;
-
-      if (!linkToken) {
-        throw new Error('Failed to retrieve link_token from backend.');
+      // Back from the bank's OAuth page: Link must resume with the SAME link_token it left with.
+      const returnHref = this.oauthReturnHref();
+      const storedToken = returnHref ? readPlaidLinkToken() : null;
+      const resuming = returnHref !== null && storedToken !== null;
+      let linkToken: string;
+      if (resuming) {
+        linkToken = storedToken as string;
+      } else {
+        const linkTokenData = await this.getLinkTokenAuthenticated().toPromise();
+        linkToken = linkTokenData.link_token;
+        if (!linkToken) {
+          throw new Error('Failed to retrieve link_token from backend.');
+        }
+        storePlaidLinkSession(linkToken, 'change-bank');
       }
 
-      this.plaidHandler = Plaid.create({
+      const config: any = {
         token: linkToken,
         onSuccess: (public_token: string, metadata: any) => {
+          clearPlaidLinkSession();
           console.log('Plaid Link success! Public Token:', public_token, 'Metadata:', metadata);
           this.statusMessage = 'Processing...';
           this.isLoading = true;
@@ -140,6 +150,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
           this.statusMessage = 'Ready to change your bank account.';
         },
         onExit: (err: any, metadata: any) => {
+          clearPlaidLinkSession();
           this.isLoading = false;
           this.isPlaidReady = true;
           if (err != null) {
@@ -155,7 +166,15 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         onEvent: (eventName: string, metadata: any) => {
           console.log('Plaid Link event:', eventName, metadata);
         }
-      });
+      };
+      if (resuming) {
+        config.receivedRedirectUri = returnHref;
+      }
+      this.plaidHandler = Plaid.create(config);
+      if (resuming) {
+        // The PIN step-up already passed before Link left for the bank; Plaid requires open() straight away.
+        this.plaidHandler.open();
+      }
 
     } catch (error: any) {
       console.error('Error initializing Plaid Link:', error);
@@ -193,9 +212,14 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
   }
 
   private getLinkTokenAuthenticated() {
-    return this.http.post<any>(`${BACKEND_API_URL}/plaid/create_link_token`, {}, { 
-      headers: this.getAuthHeaders() 
+    return this.http.post<any>(`${BACKEND_API_URL}/plaid/create_link_token`, { mode: 'link' }, {
+      headers: this.getAuthHeaders()
     });
+  }
+
+  /** The current URL when it carries Plaid's oauth_state_id, else null. Stubbed in specs. */
+  private oauthReturnHref(): string | null {
+    return window.location.search.includes('oauth_state_id') ? window.location.href : null;
   }
 
   private exchangePublicTokenAuthenticated(publicToken: string): void {

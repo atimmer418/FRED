@@ -15,6 +15,7 @@ import com.plaid.client.request.PlaidApi;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -94,7 +95,7 @@ class PlaidServiceExchangeLifecycleTest {
     private User lockedUser() {
         User user = new User("exchange@fredvested.com");
         user.setId(99L);
-        when(userRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdateNoWait(99L)).thenReturn(Optional.of(user));
         return user;
     }
 
@@ -123,6 +124,20 @@ class PlaidServiceExchangeLifecycleTest {
         assertThat(user.getPlaidItemStatus()).isEqualTo(PlaidItemStatus.OK);
         assertThat(user.getPlaidItemErrorCode()).isNull();
         assertThat(user.getPlaidTransactionsConsented()).isNull();
+    }
+
+    @Test
+    void aContendedRowLockIs409NotA500() {
+        User user = new User("locked@fredvested.com");
+        user.setId(99L);
+        when(userRepository.findByIdForUpdateNoWait(99L))
+                .thenThrow(new CannotAcquireLockException("could not obtain pessimistic lock"));
+
+        assertThatThrownBy(() -> plaidService.exchangePublicTokenAndLinkUser(PUBLIC_TOKEN, user))
+                .isInstanceOf(LinkInProgressException.class);
+
+        verify(plaidApi, never()).itemPublicTokenExchange(any());
+        verify(lifecycleService, never()).enqueueRemoval(any());
     }
 
     @Test

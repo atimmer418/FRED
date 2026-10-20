@@ -8,7 +8,10 @@ import com.investingapp.backend.util.ServerAnalyticsEvent;
 import com.investingapp.backend.model.PlaidItemStatus;
 import com.investingapp.backend.util.EasternTime;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockTimeoutException;
 import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.PessimisticLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
 // Import for frequency enum
 import com.plaid.client.model.*;
 import com.plaid.client.request.PlaidApi;
@@ -148,11 +151,19 @@ public class PlaidService {
     public ItemPublicTokenExchangeResponse exchangePublicTokenAndLinkUser(String publicToken, User appUser) throws IOException {
         logger.info("Exchanging public token for user ID: {}", appUser.getId());
 
-        // Serialize per user: SELECT ... FOR UPDATE blocks a second exchange until the first commits.
-        // The controller's instance is usually already managed by the request's EntityManager
-        // (open-in-view is on), and Hibernate upgrades the lock on a managed instance without
-        // re-reading it, so refresh after the lock to see what the other exchange committed.
-        appUser = userRepository.findByIdForUpdate(appUser.getId()).orElseThrow();
+        // Serialize per user: SELECT ... FOR UPDATE NOWAIT fails fast instead of blocking, because
+        // this lock is held across outbound Plaid HTTP calls below; a contended second exchange
+        // must surface the designed 409 LINK_IN_PROGRESS, not wait out the DB's lock timeout and
+        // then 500. The controller's instance is usually already managed by the request's
+        // EntityManager (open-in-view is on), and Hibernate upgrades the lock on a managed instance
+        // without re-reading it, so refresh after the lock to see what the other exchange committed.
+        try {
+            appUser = userRepository.findByIdForUpdateNoWait(appUser.getId()).orElseThrow();
+        } catch (PessimisticLockingFailureException | LockTimeoutException | PessimisticLockException e) {
+            logger.info("exchangePublicTokenAndLinkUser: user {} row is locked by another exchange: {}",
+                    appUser.getId(), e.getMessage());
+            throw new LinkInProgressException();
+        }
         entityManager.refresh(appUser);
         LocalDateTime linkedAt = EasternTime.now();
         if (appUser.getPlaidItemLinkedAt() != null

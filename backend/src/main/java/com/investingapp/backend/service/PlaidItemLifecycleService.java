@@ -126,7 +126,11 @@ public class PlaidItemLifecycleService {
         Boolean consented = consentedProducts != null && consentedProducts.contains(Products.TRANSACTIONS)
                 ? Boolean.TRUE
                 : null;
-        writeTx.executeWithoutResult(status -> userRepository.findById(userId).ifPresent(user -> {
+        // Row lock before the read, not just before the write: without it this is a classic
+        // read-then-blind-write race. A concurrent relink's findByIdForUpdate (in the exchange)
+        // could commit a brand new token/item/mask between this method's read and its save, and
+        // Hibernate's full-column UPDATE from this stale snapshot would revert that commit.
+        writeTx.executeWithoutResult(status -> userRepository.findByIdForUpdate(userId).ifPresent(user -> {
             if (!itemId.equals(user.getPlaidItemId())) {
                 logger.info("recordConsentAfterLink: user {} has moved on from item {}, skipping", userId, itemId);
                 return;

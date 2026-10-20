@@ -196,7 +196,7 @@ class PlaidItemLifecycleServiceTest {
 
     private User consentUser(String storedItemId, String plaidItemId, Products... consented) {
         User user = user("ENC:new", storedItemId);
-        when(userRepository.findById(99L)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(user));
         ItemGetResponse body = new ItemGetResponse()
                 .item(new ItemWithConsentFields().itemId(plaidItemId).consentedProducts(List.of(consented)));
         Call<ItemGetResponse> response = call(0, body, null);
@@ -227,7 +227,7 @@ class PlaidItemLifecycleServiceTest {
 
     @Test
     void recordConsentSwallowsAPlaidFailureAndWritesNothing() {
-        when(userRepository.findById(99L)).thenReturn(Optional.of(user("ENC:new", "item-new")));
+        when(userRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(user("ENC:new", "item-new")));
         Call<ItemGetResponse> failing = this.<ItemGetResponse>call(-1, null, null);
         when(plaidApi.itemGet(any(ItemGetRequest.class))).thenReturn(failing);
 

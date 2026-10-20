@@ -89,7 +89,7 @@ class PlaidLinkedAnalyticsTest {
         user.setId(99L);
         user.setPublicId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
         user.setUserProgress(new UserProgress());
-        when(userRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdateNoWait(99L)).thenReturn(Optional.of(user));
         return user;
     }
 

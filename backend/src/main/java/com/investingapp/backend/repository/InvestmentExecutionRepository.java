@@ -150,8 +150,17 @@ public interface InvestmentExecutionRepository extends JpaRepository<InvestmentE
      * NOT NULL) is load-bearing: without it, a row stranded by a crash between the claim and the
      * status write would be selected again every night, its claim would always come up short
      * against the fresh rows beside it, and the whole user would be skipped forever.
+     *
+     * <p>JOIN FETCH, not a derived query: the selecting transaction is short-lived (spec 5.5), and
+     * the caller snapshots each row's user into a plain value object before that transaction ends.
+     * The fetch join is belt-and-braces against an accidental later touch of the association: it
+     * loads a fully-hydrated User, not a lazy proxy, so even a stray access after the rows detach
+     * reads real data instead of throwing LazyInitializationException.
      */
-    List<InvestmentExecution> findByStatusAndTransferAttemptedAtIsNullAndCreatedAtBefore(ExecutionStatus status, LocalDateTime before);
+    @Query("SELECT e FROM InvestmentExecution e JOIN FETCH e.user WHERE e.status = :status " +
+           "AND e.transferAttemptedAt IS NULL AND e.createdAt < :before")
+    List<InvestmentExecution> findByStatusAndTransferAttemptedAtIsNullAndCreatedAtBefore(
+            @Param("status") ExecutionStatus status, @Param("before") LocalDateTime before);
 
     /** Deferral guard (T10 bank change, T11 deletion): is money in flight for this user. */
     boolean existsByUserAndStatus(User user, ExecutionStatus status);

@@ -4,6 +4,7 @@ import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
+import org.hibernate.LazyInitializationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -37,13 +40,17 @@ import static org.mockito.Mockito.when;
  * Scope: the 11:59 hardening changes (spec 5.5, decision 15) around the unchanged one-POST-per-
  * user shape: selection by createdAt < batchStart, never-claimed (transferAttemptedAt IS NULL)
  * plus the marker filter, the conditional claim before the POST, the null-relationship fail-fast,
- * and the post-POST status write committing in its own REQUIRES_NEW unit (findings round 1: a
- * stranded claim must not block every later night, and the Alpaca POST must never sit inside the
- * ambient class-level transaction). The REQUIRES_NEW propagation itself IS provable here (captured
- * off the mocked PlatformTransactionManager, same pattern as JobLockServiceTest); what the mock
- * cannot prove is that a real connection actually commits independently per call, since
- * TransactionTemplate runs the callback straight through regardless (same caveat as
- * TlhHarvestServiceCycleTest).
+ * the post-POST status write committing in its own REQUIRES_NEW unit, and the whole selection
+ * running inside its own short REQUIRES_NEW unit that snapshots every user into a plain BatchUser
+ * before that transaction ends (findings round 1: a stranded claim must not block every later
+ * night, and the Alpaca POST must never sit inside the ambient class-level transaction; findings
+ * round 2: the batch must never touch a detached entity again after that selecting transaction
+ * closes, since grouping by the User entity or reading its fields later would force a lazy
+ * Hibernate proxy to initialize with no session open). The REQUIRES_NEW propagation itself IS
+ * provable here (captured off the mocked PlatformTransactionManager, same pattern as
+ * JobLockServiceTest); what the mock cannot prove is that a real connection actually commits
+ * independently per call, since TransactionTemplate runs the callback straight through regardless
+ * (same caveat as TlhHarvestServiceCycleTest).
  */
 class InvestmentExecutionServiceEodBatchTest {
 
@@ -264,8 +271,8 @@ class InvestmentExecutionServiceEodBatchTest {
         service.runEndOfDayBatch(BATCH_START);
 
         ArgumentCaptor<TransactionDefinition> definitions = ArgumentCaptor.forClass(TransactionDefinition.class);
-        // once to commit the claim, once to commit the post-POST status write
-        verify(transactionManager, times(2)).getTransaction(definitions.capture());
+        // once for the select, once for the claim, once for the post-POST status write
+        verify(transactionManager, times(3)).getTransaction(definitions.capture());
         assertThat(definitions.getAllValues()).allSatisfy(definition ->
                 assertThat(definition.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW));
         assertThat(lump.getStatus()).isEqualTo(ExecutionStatus.FUNDING_INITIATED);
@@ -296,5 +303,81 @@ class InvestmentExecutionServiceEodBatchTest {
         assertThat(mine.getAlpacaTransferId()).isEqualTo("xfer-1");
         // theirs never got the write: the reload blew up before any save for that user
         assertThat(theirs.getStatus()).isEqualTo(ExecutionStatus.SCHEDULED);
+    }
+
+    /**
+     * Finding round 2: a detached, lazily-loaded User proxy throws LazyInitializationException the
+     * instant anything calls hashCode(), equals(), getEmail() or getAlpacaAchRelationshipId() on it
+     * with no session open. This suite otherwise builds plain POJO users, so nothing else here can
+     * see that regression; this one user stands in for a real Hibernate proxy, throwing the same
+     * exception once "detached" flips, which happens the moment the selecting transaction commits
+     * (the same point a real session would close). The batch must still claim and post for this
+     * user without ever triggering the throw.
+     */
+    @Test
+    void batchNeverTouchesAUserEntityAfterItsSelectingTransactionCloses() {
+        AtomicBoolean detached = new AtomicBoolean(false);
+        User flaky = new DetachedThrowingUser("flaky@fredvested.com", detached);
+        flaky.setId(99L);
+        flaky.setAlpacaAccountId("acct3");
+        flaky.setAlpacaAchRelationshipId("rel3");
+
+        InvestmentExecution execution = queued(5L, flaky, "250.00", MARKER);
+        selected(execution);
+        claimSucceeds(List.of(5L), execution);
+        when(alpacaService.initiateAchTransfer(eq("acct3"), eq("rel3"), any())).thenReturn(
+                new AlpacaService.AlpacaTransferResponse("xfer-3", "QUEUED", new BigDecimal("250.00"), null, null));
+        // Flip the instant the select's own REQUIRES_NEW transaction commits: everything the batch
+        // still needs after this point must already be snapshotted into plain values, never read
+        // off the entity again.
+        doAnswer(invocation -> {
+            detached.set(true);
+            return null;
+        }).when(transactionManager).commit(any());
+
+        service.runEndOfDayBatch(BATCH_START);
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FUNDING_INITIATED);
+        assertThat(execution.getAlpacaTransferId()).isEqualTo("xfer-3");
+    }
+
+    /** Stands in for a Hibernate lazy proxy: throws LazyInitializationException once detached. */
+    private static final class DetachedThrowingUser extends User {
+        private final AtomicBoolean detached;
+
+        DetachedThrowingUser(String email, AtomicBoolean detached) {
+            super(email);
+            this.detached = detached;
+        }
+
+        private void guardAgainstDetachedAccess() {
+            if (detached.get()) {
+                throw new LazyInitializationException("could not initialize proxy - no Session (simulated for test)");
+            }
+        }
+
+        @Override
+        public String getEmail() {
+            guardAgainstDetachedAccess();
+            return super.getEmail();
+        }
+
+        @Override
+        public String getAlpacaAchRelationshipId() {
+            guardAgainstDetachedAccess();
+            return super.getAlpacaAchRelationshipId();
+        }
+
+        @Override
+        public int hashCode() {
+            guardAgainstDetachedAccess();
+            return super.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            guardAgainstDetachedAccess();
+            return super.equals(o);
+        }
     }
 }

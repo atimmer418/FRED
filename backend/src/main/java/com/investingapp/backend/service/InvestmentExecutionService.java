@@ -169,6 +169,17 @@ public class InvestmentExecutionService {
     }
 
     /**
+     * One user's share of tonight's batch, read from the InvestmentExecution/User entities while
+     * their selecting transaction was still open (spec 5.5). Everything past selectBatchUsers works
+     * off this record alone: no code downstream ever calls a method on the entities that produced
+     * it, so a detached, uninitialized User proxy (in production; plain objects in this test suite)
+     * is never touched again.
+     */
+    private record BatchUser(Long userId, String email, String alpacaAccountIdEnc, String achRelationshipIdEnc,
+            List<Long> executionIds, BigDecimal totalAmount) {
+    }
+
+    /**
      * Process batched investments with a single ACH transfer for the total amount (spec 5.5).
      *
      * <p>The Alpaca POST never runs inside an open database transaction: this method is reached
@@ -176,33 +187,24 @@ public class InvestmentExecutionService {
      * propagation, so nothing here holds a connection open across the HTTP call. The status write
      * that follows the POST runs afterward in its own committed REQUIRES_NEW unit
      * (applyToFreshRows), re-loading the rows by id: the claim already changed transferAttemptedAt
-     * and batchNight on the DB row since these in-memory entities were selected, so a reload is
-     * what makes the row current rather than copying those two fields onto a stale object. Because
-     * each user's write is its own transaction, a failure writing one user's status can never undo
-     * another user's already-committed write.
+     * and batchNight on the DB row since these ids were snapshotted, so a reload is what makes the
+     * row current. Because each user's write is its own transaction, a failure writing one user's
+     * status can never undo another user's already-committed write.
      */
-    private void processBatchedInvestments(User user, List<InvestmentExecution> batchExecutions) {
-        logger.info("Processing {} batched investments for user {}", batchExecutions.size(), user.getEmail());
-
-        // Calculate total amount for all batched investments
-        BigDecimal totalAmount = batchExecutions.stream()
-                .map(InvestmentExecution::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        logger.info("Total amount for batched investments: {}", totalAmount);
-
-        List<Long> ids = batchExecutions.stream().map(InvestmentExecution::getId).toList();
+    private void processBatchedInvestments(BatchUser batchUser) {
+        logger.info("Processing {} batched investments for user {}", batchUser.executionIds().size(), batchUser.email());
+        logger.info("Total amount for batched investments: {}", batchUser.totalAmount());
 
         try {
             // Decrypt sensitive IDs before passing to Alpaca API
-            String alpacaAccountId = encryptionService.decrypt(user.getAlpacaAccountId());
-            String plaidRelationshipId = encryptionService.decrypt(user.getPlaidRelationshipId());
+            String alpacaAccountId = encryptionService.decrypt(batchUser.alpacaAccountIdEnc());
+            String plaidRelationshipId = encryptionService.decrypt(batchUser.achRelationshipIdEnc());
 
             // Initiate single ACH transfer for TOTAL amount
             AlpacaService.AlpacaTransferResponse transferResponse = alpacaService.initiateAchTransfer(
                     alpacaAccountId,
                     plaidRelationshipId,
-                    totalAmount);
+                    batchUser.totalAmount());
 
             if (transferResponse.isSuccess()) {
                 LocalDateTime now = LocalDateTime.now(MARKET_TIMEZONE);
@@ -210,7 +212,7 @@ public class InvestmentExecutionService {
 
                 // Update ALL executions in the batch with the SAME transfer ID
                 // This links them all to the single ACH event
-                applyToFreshRows(ids, execution -> {
+                applyToFreshRows(batchUser.executionIds(), execution -> {
                     execution.setAlpacaTransferId(transferResponse.id);
                     execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_INITIATED);
                     execution.setExecutionDate(now);
@@ -220,21 +222,21 @@ public class InvestmentExecutionService {
                 });
 
                 logger.info("Successfully initiated batch ACH transfer {} for total amount {} covering {} investments",
-                        transferResponse.id, totalAmount, batchExecutions.size());
+                        transferResponse.id, batchUser.totalAmount(), batchUser.executionIds().size());
             } else {
                 // Mark all batched executions as failed
-                applyToFreshRows(ids, execution -> {
+                applyToFreshRows(batchUser.executionIds(), execution -> {
                     execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
                     execution.setErrorMessage("Batch ACH transfer failed: " + transferResponse.errorMessage);
                 });
 
-                logger.error("Batch ACH transfer failed for user {}: {}", user.getEmail(),
+                logger.error("Batch ACH transfer failed for user {}: {}", batchUser.email(),
                         transferResponse.errorMessage);
                 throw new RuntimeException("Batch ACH transfer failed: " + transferResponse.errorMessage);
             }
 
         } catch (Exception e) {
-            logger.error("Error processing batched investments for user {}: {}", user.getEmail(), e.getMessage(), e);
+            logger.error("Error processing batched investments for user {}: {}", batchUser.email(), e.getMessage(), e);
             throw e;
         }
     }
@@ -292,6 +294,59 @@ public class InvestmentExecutionService {
         LocalDate batchNight = batchStart.toLocalDate();
 
         try {
+            List<BatchUser> batchUsers = selectBatchUsers(batchStart);
+            logger.info("Found {} users with queued investments for end-of-day processing", batchUsers.size());
+
+            for (BatchUser batchUser : batchUsers) {
+                try {
+                    // (c) fail fast, tested BEFORE any decrypt: no relationship id means no POST
+                    if (batchUser.achRelationshipIdEnc() == null) {
+                        failBatchWithoutPost(batchUser, "No ACH relationship on file");
+                        continue;
+                    }
+
+                    // (b) claim in its own committed transaction before the POST. The exclusion in
+                    // the selection query above means a short claim here is always a genuine
+                    // concurrent race, never a previously-stranded row being re-selected.
+                    List<Long> ids = batchUser.executionIds();
+                    int claimed = claimInNewTransaction(ids, batchStart, batchNight);
+                    if (claimed != ids.size()) {
+                        logger.error("alert.batch_claim_short user={} expected={} claimed={}", batchUser.userId(), ids.size(), claimed);
+                        continue;
+                    }
+
+                    logger.info("Processing {} queued investments for user {}", ids.size(), batchUser.email());
+                    processBatchedInvestments(batchUser);
+                } catch (Exception e) {
+                    logger.error("Failed to process end-of-day batch for user {}: {}", batchUser.email(), e.getMessage(), e);
+                }
+            }
+            logger.info("Completed end-of-day batch transfer processing");
+        } catch (Exception e) {
+            logger.error("Error in end-of-day batch transfer processing: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Selects tonight's queued rows and snapshots each user into a plain BatchUser, all inside one
+     * short, read-only REQUIRES_NEW transaction (spec 5.5). Every field the rest of the batch
+     * needs, the user's id, email and encrypted Alpaca ids, is read here while that transaction's
+     * session is still open.
+     *
+     * <p>Grouping is by user id, not by the User entity: putting an entity in a HashMap key
+     * position calls hashCode() on it, and a lazily-loaded Hibernate proxy's hashCode() forces
+     * initialization, which throws once the session has closed (it has, by the time
+     * processEndOfDayBatchTransfers' NOT_SUPPORTED method resumes). Reading getId() does not force
+     * initialization: the identifier is already known from the foreign key column, so Hibernate
+     * never needs to hit the database for it. The repository query itself also JOIN FETCHes the
+     * user, as a second line of defense should anything downstream ever touch the association
+     * again (it should not: nothing past this method holds an entity reference at all).
+     */
+    private List<BatchUser> selectBatchUsers(LocalDateTime batchStart) {
+        TransactionTemplate selectTx = new TransactionTemplate(transactionManager);
+        selectTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        selectTx.setReadOnly(true);
+        List<BatchUser> batchUsers = selectTx.execute(status -> {
             // (a) every SCHEDULED row created before this batch started, never claimed, still
             // carrying the queue marker. Excluding an already-claimed row keeps a row stranded by
             // a prior crash from being selected again (and shorting every claim after it).
@@ -302,40 +357,23 @@ public class InvestmentExecutionService {
                             exec.getErrorMessage().contains("Queued for end-of-day"))
                     .toList();
 
-            Map<User, List<InvestmentExecution>> executionsByUser = scheduledExecutions.stream()
-                    .collect(Collectors.groupingBy(InvestmentExecution::getUser));
-            logger.info("Found {} users with queued investments for end-of-day processing", executionsByUser.size());
+            Map<Long, List<InvestmentExecution>> byUserId = scheduledExecutions.stream()
+                    .collect(Collectors.groupingBy(exec -> exec.getUser().getId()));
 
-            for (Map.Entry<User, List<InvestmentExecution>> entry : executionsByUser.entrySet()) {
-                User user = entry.getKey();
-                List<InvestmentExecution> userExecutions = entry.getValue();
-                try {
-                    // (c) fail fast, tested BEFORE any decrypt: no relationship id means no POST
-                    if (user.getAlpacaAchRelationshipId() == null) {
-                        failBatchWithoutPost(user, userExecutions, "No ACH relationship on file");
-                        continue;
-                    }
+            return byUserId.values().stream().map(this::snapshot).toList();
+        });
+        return batchUsers == null ? List.of() : batchUsers;
+    }
 
-                    // (b) claim in its own committed transaction before the POST. The exclusion in
-                    // the selection query above means a short claim here is always a genuine
-                    // concurrent race, never a previously-stranded row being re-selected.
-                    List<Long> ids = userExecutions.stream().map(InvestmentExecution::getId).toList();
-                    int claimed = claimInNewTransaction(ids, batchStart, batchNight);
-                    if (claimed != ids.size()) {
-                        logger.error("alert.batch_claim_short user={} expected={} claimed={}", user.getId(), ids.size(), claimed);
-                        continue;
-                    }
-
-                    logger.info("Processing {} queued investments for user {}", userExecutions.size(), user.getEmail());
-                    processBatchedInvestments(user, userExecutions);
-                } catch (Exception e) {
-                    logger.error("Failed to process end-of-day batch for user {}: {}", user.getEmail(), e.getMessage(), e);
-                }
-            }
-            logger.info("Completed end-of-day batch transfer processing");
-        } catch (Exception e) {
-            logger.error("Error in end-of-day batch transfer processing: {}", e.getMessage(), e);
-        }
+    /** Reads every field the batch needs off one user's rows while the selecting session is still open. */
+    private BatchUser snapshot(List<InvestmentExecution> userExecutions) {
+        User user = userExecutions.get(0).getUser();
+        List<Long> ids = userExecutions.stream().map(InvestmentExecution::getId).toList();
+        BigDecimal total = userExecutions.stream()
+                .map(InvestmentExecution::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new BatchUser(user.getId(), user.getEmail(), user.getAlpacaAccountId(),
+                user.getAlpacaAchRelationshipId(), ids, total);
     }
 
     /** The compare-and-set claim (spec 5.5 b), committed before the Alpaca POST. */
@@ -347,16 +385,14 @@ public class InvestmentExecutionService {
     }
 
     /** Spec 5.5 (c): every row FUNDING_FAILED, the user told once with the total, nothing posted. */
-    private void failBatchWithoutPost(User user, List<InvestmentExecution> executions, String details) {
-        BigDecimal total = BigDecimal.ZERO;
-        for (InvestmentExecution execution : executions) {
+    private void failBatchWithoutPost(BatchUser batchUser, String details) {
+        applyToFreshRows(batchUser.executionIds(), execution -> {
             execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
             execution.setErrorMessage(details);
-            executionRepository.save(execution);
-            total = total.add(execution.getAmount());
-        }
-        logger.error("alert.batch_no_relationship user={} rows={} total={}", user.getId(), executions.size(), total);
-        notifyUserOfFailure(user, total, "Funding Failed", details);
+        });
+        logger.error("alert.batch_no_relationship user={} rows={} total={}",
+                batchUser.userId(), batchUser.executionIds().size(), batchUser.totalAmount());
+        notifyUserOfFailure(batchUser.email(), batchUser.totalAmount(), "Funding Failed", details);
     }
 
     /**
@@ -1162,15 +1198,16 @@ public class InvestmentExecutionService {
         }
     }
 
-    private void notifyUserOfFailure(User user, BigDecimal amount, String reason, String details) {
+    /** Takes an email, not a User: the batch works off BatchUser snapshots, never an entity. */
+    private void notifyUserOfFailure(String email, BigDecimal amount, String reason, String details) {
         try {
             String subject = "Investment Execution Failed";
             String message = String.format(
                     "Your scheduled investment of $%s could not be executed.\n\nReason: %s\n\nDetails: %s\n\nPlease check your account settings and ensure sufficient funds are available.",
                     amount, reason, details);
-            emailService.sendEmail(user.getEmail(), subject, message);
+            emailService.sendEmail(email, subject, message);
         } catch (Exception e) {
-            logger.error("Failed to send batch failure notification to user {}", user.getId(), e);
+            logger.error("Failed to send batch failure notification to {}", email, e);
         }
     }
 

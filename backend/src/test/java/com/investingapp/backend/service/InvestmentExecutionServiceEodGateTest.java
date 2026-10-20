@@ -8,6 +8,7 @@ import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.mockito.stubbing.Answer;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Duration;
 
@@ -18,7 +19,9 @@ import static org.mockito.Mockito.*;
 /**
  * Only the gate and the lock around processEndOfDayBatchTransfers. The batch body is not
  * stubbed by query name on purpose: T06 replaces findByStatus with
- * findByStatusAndCreatedAtBefore and this test must keep passing unchanged.
+ * findByStatusAndTransferAttemptedAtIsNullAndCreatedAtBefore and this test must keep passing
+ * unchanged. transactionManager is mocked (unstubbed) because the selection itself now runs
+ * inside a TransactionTemplate (spec 5.5 findings round 2), even when there is nothing to select.
  */
 class InvestmentExecutionServiceEodGateTest {
 
@@ -45,6 +48,7 @@ class InvestmentExecutionServiceEodGateTest {
         ReflectionTestUtils.setField(service, "executionRepository", executionRepository);
         ReflectionTestUtils.setField(service, "schedulerGate", schedulerGate);
         ReflectionTestUtils.setField(service, "jobLockService", jobLockService);
+        ReflectionTestUtils.setField(service, "transactionManager", mock(PlatformTransactionManager.class));
         when(schedulerGate.isEnabled()).thenReturn(true);
         when(jobLockService.tryAcquire(anyString(), any())).thenReturn(true);
     }

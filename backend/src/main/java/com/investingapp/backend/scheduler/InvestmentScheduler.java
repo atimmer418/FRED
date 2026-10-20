@@ -1,7 +1,10 @@
 package com.investingapp.backend.scheduler;
 
+import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.service.DripService;
 import com.investingapp.backend.service.InvestmentExecutionService;
+import com.investingapp.backend.service.JobLockService;
+import com.investingapp.backend.service.JobLocks;
 import com.investingapp.backend.service.PaydayNotificationService;
 import com.investingapp.backend.util.EasternTime;
 import org.slf4j.Logger;
@@ -10,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDate;
 
 @Component
@@ -26,6 +30,12 @@ public class InvestmentScheduler {
     @Autowired
     private PaydayNotificationService paydayNotificationService;
 
+    @Autowired
+    private SchedulerGate schedulerGate;
+
+    @Autowired
+    private JobLockService jobLockService;
+
     /**
      * Process scheduled investments every day at 11:55 PM ET
      * This runs before the 11:59 PM batch process, allowing users to update their
@@ -34,6 +44,12 @@ public class InvestmentScheduler {
      */
     @Scheduled(cron = "0 55 23 * * *", zone = "America/New_York")
     public void processScheduledInvestments() {
+        if (!schedulerGate.isEnabled()) return;
+        if (!jobLockService.tryAcquire(JobLocks.PROCESS_SCHEDULED, Duration.ofMinutes(10))) {
+            logger.warn("Skipping scheduled investment processing: job lock {} not taken (held by another run or job_locks unreachable)",
+                    JobLocks.PROCESS_SCHEDULED);
+            return;
+        }
         LocalDate todayET = EasternTime.today();
         logger.info("Starting scheduled investment processing job for {}", todayET);
         try {
@@ -41,6 +57,8 @@ public class InvestmentScheduler {
             logger.info("Completed scheduled investment processing job successfully");
         } catch (Exception e) {
             logger.error("Error in scheduled investment processing job", e);
+        } finally {
+            jobLockService.release(JobLocks.PROCESS_SCHEDULED);
         }
     }
     
@@ -51,6 +69,7 @@ public class InvestmentScheduler {
      */
     @Scheduled(cron = "0 */30 8-17 * * MON-FRI", zone = "America/New_York")
     public void checkFundingStatus() {
+        if (!schedulerGate.isEnabled()) return;
         logger.info("Starting funding status check job");
         try {
             investmentExecutionService.checkFundingStatus();
@@ -67,6 +86,7 @@ public class InvestmentScheduler {
      */
     @Scheduled(cron = "0 */15 9-15 * * MON-FRI", zone = "America/New_York")
     public void checkTradingStatus() {
+        if (!schedulerGate.isEnabled()) return;
         logger.info("Starting trading status check job");
         try {
             investmentExecutionService.checkTradingStatus();
@@ -84,6 +104,7 @@ public class InvestmentScheduler {
      */
     @Scheduled(cron = "0 0 10 * * TUE,THU", zone = "America/New_York")
     public void processDripDividends() {
+        if (!schedulerGate.isEnabled()) return;
         logger.info("Starting DRIP dividend processing job");
         try {
             dripService.processAllDividends();
@@ -99,6 +120,7 @@ public class InvestmentScheduler {
      */
     @Scheduled(cron = "0 */15 10-15 * * MON-FRI", zone = "America/New_York")
     public void checkDripOrderStatus() {
+        if (!schedulerGate.isEnabled()) return;
         logger.info("Starting DRIP order status check job");
         try {
             dripService.checkDripOrderStatus();
@@ -124,6 +146,7 @@ public class InvestmentScheduler {
 
     @Scheduled(cron = "0 0 7 * * *", zone = "America/New_York")
     public void sendDayBeforePaydayNotifications() {
+        if (!schedulerGate.isEnabled()) return;
         LocalDate todayET = EasternTime.today();
         logger.info("Sending D-1 payday notifications for {}", todayET);
         try {
@@ -135,6 +158,7 @@ public class InvestmentScheduler {
 
     @Scheduled(cron = "0 0 0 * * *", zone = "America/New_York")
     public void sendPaydayNotifications() {
+        if (!schedulerGate.isEnabled()) return;
         LocalDate todayET = EasternTime.today();
         logger.info("Sending D+0 payday notifications for {}", todayET.minusDays(1));
         try {
@@ -146,6 +170,7 @@ public class InvestmentScheduler {
 
     @Scheduled(cron = "0 0 8 * * *", zone = "America/New_York")
     public void sendDayAfterPaydayNotifications() {
+        if (!schedulerGate.isEnabled()) return;
         LocalDate todayET = EasternTime.today();
         logger.info("Sending D+1 payday notifications for {}", todayET);
         try {

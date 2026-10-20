@@ -1,5 +1,6 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.model.*;
 import com.investingapp.backend.repository.*;
 import com.investingapp.backend.util.AnalyticsBands;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -72,6 +74,12 @@ public class InvestmentExecutionService {
 
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
+
+    @Autowired
+    private SchedulerGate schedulerGate;
+
+    @Autowired
+    private JobLockService jobLockService;
 
     /**
      * Check if markets are currently open (US Eastern Time)
@@ -215,6 +223,12 @@ public class InvestmentExecutionService {
      */
     @Scheduled(cron = "0 59 23 * * *", zone = "America/New_York")
     public void processEndOfDayBatchTransfers() {
+        if (!schedulerGate.isEnabled()) return;
+        if (!jobLockService.tryAcquire(JobLocks.EOD_BATCH, Duration.ofMinutes(30))) {
+            logger.warn("Skipping end-of-day batch transfer processing: job lock {} not taken (held by another run or job_locks unreachable)",
+                    JobLocks.EOD_BATCH);
+            return;
+        }
         logger.info("Starting end-of-day batch transfer processing");
 
         try {
@@ -254,6 +268,8 @@ public class InvestmentExecutionService {
 
         } catch (Exception e) {
             logger.error("Error in end-of-day batch transfer processing: {}", e.getMessage(), e);
+        } finally {
+            jobLockService.release(JobLocks.EOD_BATCH);
         }
     }
 

@@ -59,9 +59,11 @@ public interface InvestmentScheduleRepository extends JpaRepository<InvestmentSc
     void deleteAllByUser(User user);
 
     /**
-     * Find active (non-paused) schedules whose next investment date matches the given date.
-     * Used for D-1 payday notifications.
+     * MANUAL schedules, not paused, whose next investment date matches the given date.
+     * Used for the MANUAL D-1 payday notice (spec 5.8, 10). DETECTED schedules are never selected
+     * here; Phase 2 adds findDetectedByNextExpectedDate for them.
      */
-    @Query("SELECT s FROM InvestmentSchedule s WHERE s.nextInvestmentDate = :date AND s.isPaused = false")
+    @Query("SELECT s FROM InvestmentSchedule s WHERE s.nextInvestmentDate = :date AND s.isPaused = false"
+            + " AND s.mode = com.investingapp.backend.model.ScheduleMode.MANUAL")
     List<InvestmentSchedule> findActiveByNextInvestmentDate(@Param("date") java.time.LocalDate date);
 }

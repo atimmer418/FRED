@@ -432,6 +432,11 @@ Add export ability for monthly freedom update (export to insta story and what no
 # ✓ DONE — Completed
 _Shipped. Kept for history; never re-picked._
 
+## FRED-227 — ✓ Reject a second POST /create-account when a brokerage account already exists
+**Severity: HIGH.**
+`POST /api/alpaca/create-account` had no guard on the user's existing `alpaca_account_id`, so a second submission created a SECOND real brokerage account at the broker and then overwrote the stored id with it, orphaning the first: a real account, belonging to a real person, that our database no longer knew about. Found while wiring `kyc_submitted` for Checkpoint E, which records the attempt number but could not prevent the duplicate. Fixed by refusing with 409 `ACCOUNT_ALREADY_EXISTS` **before** the broker call, since once that call succeeds the duplicate exists whatever we do locally. A real resubmission after the broker asks for more information goes through `PATCH /account/kyc` and the document upload, not this endpoint. Tests assert the broker is never called on the second submission, that the first still goes through, and that a blank stored id does not block. Found and fixed 2026-10-20.
+
+
 ## FRED-99 — ✓ Implement all features from tiered pricing
 implement all features from tiered pricing
 

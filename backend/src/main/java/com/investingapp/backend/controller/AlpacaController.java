@@ -94,6 +94,24 @@ public class AlpacaController {
                 clientIp = httpRequest.getRemoteAddr();
             }
 
+            // A second submission used to create a SECOND brokerage account at the broker, and
+            // then overwrite the stored account id with it, orphaning the first. Rejected here,
+            // before the broker call, because once that call succeeds the duplicate account exists
+            // whatever we do locally. A real resubmission (the broker asked for more information)
+            // goes through PATCH /account/kyc and the document upload, not through this endpoint.
+            Long currentUserId = getCurrentUserId();
+            if (currentUserId != null) {
+                User existing = userRepository.findById(currentUserId).orElse(null);
+                if (existing != null && existing.getAlpacaAccountId() != null
+                        && !existing.getAlpacaAccountId().isBlank()) {
+                    logger.warn("Refused a second create-account for user {}: a brokerage account "
+                            + "already exists", currentUserId);
+                    return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                            "error", "An account application already exists for this user.",
+                            "code", "ACCOUNT_ALREADY_EXISTS"));
+                }
+            }
+
             Map<String, Object> result = alpacaApiService.createAccount(request, clientIp);
 
             if (result.containsKey("error")) {

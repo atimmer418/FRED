@@ -6,6 +6,7 @@ import com.plaid.client.model.JWKPublicKey;
 import com.plaid.client.model.WebhookVerificationKeyGetRequest;
 import com.plaid.client.model.WebhookVerificationKeyGetResponse;
 import com.plaid.client.request.PlaidApi;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import retrofit2.Response;
 
@@ -51,6 +52,8 @@ public class PlaidWebhookKeyCache {
             .maximumSize(16)
             .build();
 
+    /** The container constructor. Two constructors exist, so Spring needs to be told which one is its own. */
+    @Autowired
     public PlaidWebhookKeyCache(PlaidApi plaidApi) {
         this(plaidApi, Clock.systemUTC());
     }

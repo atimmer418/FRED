@@ -19,24 +19,45 @@ import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
 import java.security.spec.ECPoint;
 import java.security.spec.ECPublicKeySpec;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Plaid's webhook verification keys, fetched by kid from /webhook_verification_key/get and cached
  * for an hour. A failed fetch is never cached: Caffeine drops the mapping when the loader throws.
+ *
+ * <p>Uncached fetches are also bounded process-wide to {@link #MAX_FETCHES_PER_WINDOW} per {@link
+ * #FETCH_WINDOW}: {@code /api/plaid/webhook} is unauthenticated and the kid in the Plaid-Verification
+ * header is attacker-chosen, so an attacker who sends a flood of distinct kids can otherwise force
+ * this cache to call Plaid once per request. Twenty fetches a minute is far above Plaid's real key
+ * rotation rate, so a legitimate deploy never notices the bound; a legitimate fetch refused while the
+ * budget is exhausted under attack simply answers 503, and Plaid retries.
  */
 @Component
 public class PlaidWebhookKeyCache {
 
+    static final int MAX_FETCHES_PER_WINDOW = 20;
+    static final Duration FETCH_WINDOW = Duration.ofMinutes(1);
+
     private final PlaidApi plaidApi;
+    private final Clock clock;
+    private final ArrayDeque<Instant> fetchTimestamps = new ArrayDeque<>();
     private final Cache<String, JWKPublicKey> keys = Caffeine.newBuilder()
             .expireAfterWrite(1, TimeUnit.HOURS)
             .maximumSize(16)
             .build();
 
     public PlaidWebhookKeyCache(PlaidApi plaidApi) {
+        this(plaidApi, Clock.systemUTC());
+    }
+
+    PlaidWebhookKeyCache(PlaidApi plaidApi, Clock clock) {
         this.plaidApi = plaidApi;
+        this.clock = clock;
     }
 
     public JWKPublicKey get(String kid) {
@@ -48,6 +69,7 @@ public class PlaidWebhookKeyCache {
     }
 
     private JWKPublicKey fetch(String kid) {
+        recordFetchOrThrow(kid);
         try {
             Response<WebhookVerificationKeyGetResponse> response = plaidApi
                     .webhookVerificationKeyGet(new WebhookVerificationKeyGetRequest().keyId(kid))
@@ -60,6 +82,21 @@ public class PlaidWebhookKeyCache {
         } catch (IOException e) {
             throw new PlaidWebhookUnavailableException(
                     "webhook verification key fetch unreachable for kid " + kid, e);
+        }
+    }
+
+    /** Cache hits never reach this method; a failed Plaid call below still consumed its slot. */
+    private void recordFetchOrThrow(String kid) {
+        synchronized (fetchTimestamps) {
+            Instant cutoff = clock.instant().minus(FETCH_WINDOW);
+            while (!fetchTimestamps.isEmpty() && fetchTimestamps.peekFirst().isBefore(cutoff)) {
+                fetchTimestamps.pollFirst();
+            }
+            if (fetchTimestamps.size() >= MAX_FETCHES_PER_WINDOW) {
+                throw new PlaidWebhookUnavailableException(
+                        "webhook verification key fetch budget exhausted; refusing to call Plaid for kid " + kid);
+            }
+            fetchTimestamps.addLast(clock.instant());
         }
     }
 

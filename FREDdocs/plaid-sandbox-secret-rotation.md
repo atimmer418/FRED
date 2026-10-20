@@ -4,7 +4,10 @@ Until Phase 0 of paycheck autopilot, `backend/src/main/resources/application-pro
 carried the Plaid **sandbox** client id and secret as literals (commit b08d9e3, 2025-06-28, added
 them). The file is tracked, so the secret is in git history for good; deleting the line does not
 un-leak it. The only fix is to rotate the secret in the Plaid dashboard. This is a manual step for
-Andy; nothing in the repo can do it.
+Andy; nothing in the repo can do it. The same plaintext also sat four times in
+`FREDdocs/plans/2026-10-19-paycheck-autopilot-phase-0/task-14-prod-plaid-block.md`, which was
+committed to develop before this branch and scrubbed in f236785; both leak sites are permanent in
+history, which is why rotation is the only remedy.
 
 The leaked value is pinned as a SHA-256 digest, `BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET_SHA256`
 (`backend/src/main/java/com/investingapp/backend/config/BrokerEnvironmentGuard.java`), not as the
@@ -66,9 +69,8 @@ start when any of the webhook rules fail or when the secret equals the leaked sa
 
 ## Not covered here
 
-`application-prod.properties` still carries a localhost datasource with a password (lines 1 to 3),
-a hard-coded `jwt.secret` (line 10) and an ngrok WebAuthn relying party (the `webauthn.relyingparty.*`
-lines at the bottom). Phase 0 only moved the Plaid block to the environment; the rest is tracked
-separately before the first prod deploy. Two further guard rules from spec 12.1, refusing
-`app.ops.alert.provider=logging` and an unset `ADMIN_TOOLS_KEY`, arrive with the Phase 1 ops alert
-channel and admin surface.
+Phase 0 only moved the Plaid block to the environment; the final fix wave before Phase 0 shipped
+then moved the datasource, JWT and WebAuthn values of `application-prod.properties` to environment
+placeholders too, and the guard now refuses a loopback datasource and the committed dev JWT secret
+in prod. Two further guard rules from spec 12.1, refusing `app.ops.alert.provider=logging` and an
+unset `ADMIN_TOOLS_KEY`, arrive with the Phase 1 ops alert channel and admin surface.

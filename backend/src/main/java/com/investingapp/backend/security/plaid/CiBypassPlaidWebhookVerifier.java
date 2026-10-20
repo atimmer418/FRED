@@ -8,7 +8,7 @@ import java.time.Instant;
 /**
  * CI has no Plaid network, so the stub PlaidApi could never fetch a verification key. Under ci
  * every webhook is accepted as if signed now. Registered only under ci; BrokerEnvironmentGuard
- * refuses this bean name in prod.
+ * refuses any bean of this type in prod.
  */
 @Component("ciBypassPlaidWebhookVerifier")
 @Profile("ci")

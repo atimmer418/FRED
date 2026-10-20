@@ -18,6 +18,10 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.ECPublicKey;
 import java.security.spec.ECGenParameterSpec;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -160,5 +164,85 @@ class PlaidWebhookKeyCacheTest {
                 .isInstanceOf(PlaidWebhookUnavailableException.class);
         assertThatThrownBy(() -> PlaidWebhookKeyCache.toEcPublicKey(noPoint))
                 .isInstanceOf(PlaidWebhookUnavailableException.class);
+    }
+
+    /** A Clock whose instant() can be moved forward by the test, so the fetch budget window is deterministic. */
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneId.of("UTC");
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+    }
+
+    @Test
+    void the21stDistinctKidFetchWithinOneMinuteIsUnavailable() throws Exception {
+        JWKPublicKey jwk = jwkFor((ECPublicKey) p256().getPublic(), "kid-budget");
+        Call<WebhookVerificationKeyGetResponse> call = call(plaidKey(jwk));
+        when(plaidApi.webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class))).thenReturn(call);
+        PlaidWebhookKeyCache bounded =
+                new PlaidWebhookKeyCache(plaidApi, new MutableClock(Instant.parse("2026-01-01T00:00:00Z")));
+
+        for (int i = 0; i < PlaidWebhookKeyCache.MAX_FETCHES_PER_WINDOW; i++) {
+            bounded.get("kid-budget-" + i);
+        }
+
+        assertThatThrownBy(() -> bounded.get("kid-budget-20"))
+                .isInstanceOf(PlaidWebhookUnavailableException.class)
+                .hasMessageContaining("budget exhausted");
+        verify(plaidApi, times(PlaidWebhookKeyCache.MAX_FETCHES_PER_WINDOW))
+                .webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class));
+    }
+
+    @Test
+    void theFetchBudgetWindowResetsSixtyOneSecondsLater() throws Exception {
+        JWKPublicKey jwk = jwkFor((ECPublicKey) p256().getPublic(), "kid-reset");
+        Call<WebhookVerificationKeyGetResponse> call = call(plaidKey(jwk));
+        when(plaidApi.webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class))).thenReturn(call);
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        PlaidWebhookKeyCache bounded = new PlaidWebhookKeyCache(plaidApi, clock);
+
+        for (int i = 0; i < PlaidWebhookKeyCache.MAX_FETCHES_PER_WINDOW; i++) {
+            bounded.get("kid-reset-" + i);
+        }
+        clock.advance(Duration.ofSeconds(61));
+        bounded.get("kid-reset-20");
+
+        verify(plaidApi, times(PlaidWebhookKeyCache.MAX_FETCHES_PER_WINDOW + 1))
+                .webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class));
+    }
+
+    @Test
+    void repeatedGetsOfOneCachedKidDoNotConsumeTheFetchBudget() throws Exception {
+        JWKPublicKey jwk = jwkFor((ECPublicKey) p256().getPublic(), "kid-cached");
+        Call<WebhookVerificationKeyGetResponse> call = call(plaidKey(jwk));
+        when(plaidApi.webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class))).thenReturn(call);
+        PlaidWebhookKeyCache bounded =
+                new PlaidWebhookKeyCache(plaidApi, new MutableClock(Instant.parse("2026-01-01T00:00:00Z")));
+
+        for (int i = 0; i < 25; i++) {
+            bounded.get("kid-cached");
+        }
+
+        verify(plaidApi, times(1)).webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class));
     }
 }

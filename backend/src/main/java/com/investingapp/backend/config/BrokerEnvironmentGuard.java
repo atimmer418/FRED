@@ -17,6 +17,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Refuses to start when the broker environment does not match the Spring profile.
@@ -45,6 +46,12 @@ import java.util.Map;
  * in prod. Prod additionally needs a public https webhook receiver (no loopback, no trycloudflare or
  * ngrok tunnel), must not register the ci webhook-verifier bypass bean, and must not run on the
  * sandbox secret that was once committed to this repo (see FREDdocs/plaid-sandbox-secret-rotation.md).
+ *
+ * <p>The final fix wave before Phase 0 shipped extended prod to also refuse a loopback datasource URL
+ * and the development {@code jwt.secret} that has sat in {@code application-prod.properties} since
+ * before this guard existed. The guard does not, and cannot, check whether the environment's actual
+ * values are correct: it only proves that the known-wrong ones (localhost, the leaked sandbox secret,
+ * the committed dev JWT secret) are absent.
  */
 @Component
 public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, EnvironmentAware {
@@ -70,6 +77,18 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
      */
     static final String KNOWN_SANDBOX_SECRET_SHA256 =
             "eb6a0b8ac8ea858d54d48239cde42bf5d5c29c6c2edab0f96754c1b4ab22d86d";
+
+    /**
+     * SHA-256 digest of the jwt.secret value that sat in application-prod.properties at commit
+     * 932344d, before this final fix wave moved it to an environment placeholder. Git history keeps
+     * the plaintext forever, so prod refuses it; this constant holds only the digest. Overridable via
+     * {@code jwt.known-dev-secret-sha256} so tests can prove the refusal path with a fixture value
+     * instead of the real secret.
+     */
+    static final String KNOWN_DEV_JWT_SECRET_SHA256 =
+            "4b79a3fc0365a540f6a991f59de187a7ce485b09203c12f7d4b65d4c9a59531f";
+
+    private static final Pattern SHA256_HEX = Pattern.compile("^[0-9a-fA-F]{64}$");
 
     private Environment environment;
 
@@ -118,6 +137,8 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
             checkProdWebhookUrl(violations);
             checkProdBypassVerifier(beanFactory, violations);
             checkProdPlaidSecret(violations);
+            checkProdDatasourceUrl(violations);
+            checkProdJwtSecret(violations);
         }
 
         if (!violations.isEmpty()) {
@@ -170,9 +191,9 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
     private static void checkProdBypassVerifier(ConfigurableListableBeanFactory beanFactory, List<String> violations) {
         String[] names = beanFactory.getBeanNamesForType(CiBypassPlaidWebhookVerifier.class, true, false);
         if (names.length > 0) {
-            violations.add("bean(s) " + String.join(", ", names) + " of type "
-                    + CiBypassPlaidWebhookVerifier.class.getSimpleName()
-                    + " is registered, so Plaid webhook signatures would not be checked in prod");
+            violations.add("a bean of type " + CiBypassPlaidWebhookVerifier.class.getSimpleName()
+                    + " is registered (" + String.join(", ", names)
+                    + "), so Plaid webhook signatures would not be checked in prod");
         }
     }
 
@@ -183,11 +204,62 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
      */
     private void checkProdPlaidSecret(List<String> violations) {
         String value = environment.getProperty("plaid.secret", "");
-        String knownDigest = environment.getProperty("plaid.known-sandbox-secret-sha256", KNOWN_SANDBOX_SECRET_SHA256);
+        String knownDigest = resolveKnownDigest("plaid.known-sandbox-secret-sha256", KNOWN_SANDBOX_SECRET_SHA256, violations);
         if (sha256Hex(value).equalsIgnoreCase(knownDigest)) {
             violations.add("plaid.secret is the sandbox secret that was once committed to this repo; "
                     + "set PLAID_SECRET_PRODUCTION and rotate the sandbox one (FREDdocs/plaid-sandbox-secret-rotation.md)");
         }
+    }
+
+    /**
+     * {@code spring.datasource.url} may carry credentials in its query string, so a violation never
+     * echoes the value, only the property name.
+     */
+    private void checkProdDatasourceUrl(List<String> violations) {
+        String value = environment.getProperty("spring.datasource.url", "");
+        if (value.isBlank()) {
+            violations.add("spring.datasource.url is not set");
+            return;
+        }
+        if (isLoopback(value)) {
+            violations.add("spring.datasource.url points at this machine, which cannot be right in prod");
+        }
+    }
+
+    /**
+     * jwt.secret hard-coded the same development signing key in application-prod.properties since
+     * before this guard existed; it is in git history forever. Compared as a SHA-256 digest, never as
+     * plaintext.
+     */
+    private void checkProdJwtSecret(List<String> violations) {
+        String value = environment.getProperty("jwt.secret", "");
+        String knownDigest = resolveKnownDigest("jwt.known-dev-secret-sha256", KNOWN_DEV_JWT_SECRET_SHA256, violations);
+        if (sha256Hex(value).equalsIgnoreCase(knownDigest)) {
+            violations.add("jwt.secret is the development signing key that has been in git history since 2025; "
+                    + "set JWT_SECRET_PROD");
+        }
+    }
+
+    /**
+     * Shared override hygiene for {@code plaid.known-sandbox-secret-sha256} and
+     * {@code jwt.known-dev-secret-sha256}: blank or absent means use the built-in digest; present but
+     * not exactly 64 hex characters is itself a violation, so a typo cannot silently disable the
+     * tripwire, and the built-in digest is still used for the comparison that follows.
+     */
+    private String resolveKnownDigest(String overrideProperty, String defaultDigest, List<String> violations) {
+        String override = environment.getProperty(overrideProperty);
+        if (override == null) {
+            return defaultDigest;
+        }
+        String trimmed = override.trim();
+        if (trimmed.isEmpty()) {
+            return defaultDigest;
+        }
+        if (!SHA256_HEX.matcher(trimmed).matches()) {
+            violations.add(overrideProperty + " is set but is not a 64-character hex SHA-256 digest");
+            return defaultDigest;
+        }
+        return trimmed;
     }
 
     /** SHA-256 of the given value as lowercase hex. SHA-256 is a guaranteed JDK algorithm, so this never throws in practice. */

@@ -22,7 +22,7 @@ Screens 1 and 2 plus the pre-detection variant are locked to the mockup, copied 
 
 ### 1.4 Repo corrections to the brief
 
-Schema is Flyway-owned (`ddl-auto=validate` everywhere), so everything ships in `V6__paycheck_autopilot.sql`. The RevenueCat webhook is gone; two dead `/api/plaid/*_anonymous` permitAll paths remain. `BrokerEnvironmentGuard` already refuses prod on `plaid.env=sandbox`, yet `application-prod.properties` still hard-codes it and the committed sandbox secret; Phase 0 moves that block to environment variables and rotates the secret. Scheduler pool 4 threads, Hikari 4 connections, no ShedLock, one unversioned encryption key, `investment.scheduler.enabled` read by nothing. Commit 90a8cc1 ("removed unused files") deleted the 2025 `PaycheckDetectionService` with no stated reason; `git show 90a8cc1^:<path>` recovers it (closes decision 21).
+Schema is Flyway-owned (`ddl-auto=validate` everywhere), so everything ships in `V6__paycheck_autopilot.sql`. The RevenueCat webhook is gone; two dead `/api/plaid/*_anonymous` permitAll paths remained (Task 12 removed them). `BrokerEnvironmentGuard` already refuses prod on `plaid.env=sandbox`, yet `application-prod.properties` still hard-codes it and the committed sandbox secret; Phase 0 moves that block to environment variables and rotates the secret. Scheduler pool 4 threads, Hikari 4 connections, no ShedLock, one unversioned encryption key, `investment.scheduler.enabled` read by nothing. Commit 90a8cc1 ("removed unused files") deleted the 2025 `PaycheckDetectionService` with no stated reason; `git show 90a8cc1^:<path>` recovers it (closes decision 21).
 
 ## 2. Plaid integration
 

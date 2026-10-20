@@ -24,11 +24,18 @@ class BrokerEnvironmentGuardTest {
     private static final String LOCAL_WEBHOOK = "https://local.fredvested.com/api/plaid/webhook";
     private static final String PROD_SECRET = "prod-secret-not-the-sandbox-one";
     private static final String CI_SECRET = "ci-disabled";
+    private static final String PROD_DATASOURCE = "jdbc:mysql://db.internal:3306/fred";
+    private static final String PROD_JWT_SECRET = "prod-signing-key-not-the-dev-one";
 
     /** A fixture value standing in for the real leaked sandbox secret, so tests never carry it. */
     private static final String TEST_KNOWN_SANDBOX_SECRET = "test-fixture-sandbox-secret-not-the-real-one";
     private static final String TEST_KNOWN_SANDBOX_SECRET_SHA256 =
             BrokerEnvironmentGuard.sha256Hex(TEST_KNOWN_SANDBOX_SECRET);
+
+    /** A fixture value standing in for the real committed dev JWT secret, so tests never carry it. */
+    private static final String TEST_KNOWN_DEV_JWT_SECRET = "test-fixture-dev-jwt-secret-not-the-real-one";
+    private static final String TEST_KNOWN_DEV_JWT_SECRET_SHA256 =
+            BrokerEnvironmentGuard.sha256Hex(TEST_KNOWN_DEV_JWT_SECRET);
 
     private void run(MockEnvironment env) {
         run(env, new DefaultListableBeanFactory());
@@ -50,6 +57,7 @@ class BrokerEnvironmentGuardTest {
 
     private MockEnvironment env(String profile, String broker, String trading, String plaidEnv,
             String webhookUrl, String plaidSecret) {
+        boolean prod = BrokerEnvironmentGuard.PROD_PROFILE.equals(profile);
         MockEnvironment env = new MockEnvironment();
         if (profile != null) {
             env.setActiveProfiles(profile);
@@ -59,6 +67,12 @@ class BrokerEnvironmentGuardTest {
                 .withProperty("plaid.env", plaidEnv)
                 .withProperty("plaid.webhook.url", webhookUrl)
                 .withProperty("plaid.secret", plaidSecret);
+        if (prod) {
+            // Valid-by-default prod fixtures for the datasource/jwt rules, so existing prod tests
+            // that do not care about these two properties keep passing unchanged.
+            env.withProperty("spring.datasource.url", PROD_DATASOURCE)
+                    .withProperty("jwt.secret", PROD_JWT_SECRET);
+        }
         return env;
     }
 
@@ -139,6 +153,68 @@ class BrokerEnvironmentGuardTest {
         assertThatThrownBy(() -> run(env("prod", "http://localhost:9", LIVE_TRADING, "production")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("points at this machine");
+    }
+
+    @Test
+    @DisplayName("prod with a localhost datasource URL refuses to start")
+    void prodLocalhostDatasourceRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/fred")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.datasource.url points at this machine");
+    }
+
+    @Test
+    @DisplayName("prod with no datasource URL refuses to start")
+    void prodBlankDatasourceRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("spring.datasource.url", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.datasource.url is not set");
+    }
+
+    @Test
+    @DisplayName("prod refuses the development JWT secret that has been in git history since 2025, and never prints it")
+    void prodKnownDevJwtSecretRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("jwt.secret", TEST_KNOWN_DEV_JWT_SECRET)
+                .withProperty("jwt.known-dev-secret-sha256", TEST_KNOWN_DEV_JWT_SECRET_SHA256)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("jwt.secret is the development signing key")
+                .hasMessageNotContaining(TEST_KNOWN_DEV_JWT_SECRET);
+    }
+
+    @Test
+    @DisplayName("a malformed digest override for either tripwire refuses to start with the hygiene message")
+    void malformedDigestOverrideRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("plaid.known-sandbox-secret-sha256", "not-64-hex-characters")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "plaid.known-sandbox-secret-sha256 is set but is not a 64-character hex SHA-256 digest");
+
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("jwt.known-dev-secret-sha256", "also-not-valid-hex")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "jwt.known-dev-secret-sha256 is set but is not a 64-character hex SHA-256 digest");
+    }
+
+    @Test
+    @DisplayName("a whitespace-padded but valid 64-hex digest override is accepted, trimmed")
+    void whitespacePaddedDigestOverrideIsAccepted() {
+        assertThatCode(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("plaid.known-sandbox-secret-sha256", "  " + TEST_KNOWN_SANDBOX_SECRET_SHA256 + "  ")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("non-prod with a localhost datasource and a literal jwt secret still starts: these rules are prod-only")
+    void nonProdLocalhostDatasourceAndLiteralJwtSecretStarts() {
+        assertThatCode(() -> run(env("dev", SANDBOX_BROKER, PAPER_TRADING, "sandbox")
+                .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/investing_dev")
+                .withProperty("jwt.secret", "some-literal-dev-secret")))
+                .doesNotThrowAnyException();
     }
 
     @Test

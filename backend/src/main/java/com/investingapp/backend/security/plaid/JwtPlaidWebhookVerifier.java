@@ -17,6 +17,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Date;
 import java.util.HexFormat;
+import java.util.regex.Pattern;
 
 /**
  * Plaid webhook verification (https://plaid.com/docs/api/webhooks/webhook-verification/): the
@@ -31,6 +32,9 @@ public class JwtPlaidWebhookVerifier implements PlaidWebhookVerifier {
 
     static final String REQUIRED_ALG = "ES256";
     static final long MAX_IAT_AGE_SECONDS = 300;
+
+    /** Plaid's own kid values are short alphanumerics; a kid is attacker-chosen on this unauthenticated path. */
+    static final Pattern KID_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
 
     private final PlaidWebhookKeyCache keyCache;
 
@@ -56,6 +60,9 @@ public class JwtPlaidWebhookVerifier implements PlaidWebhookVerifier {
                             String kid = header.getKeyId();
                             if (kid == null || kid.isBlank()) {
                                 throw new PlaidWebhookRejectedException("kid header missing");
+                            }
+                            if (!KID_PATTERN.matcher(kid).matches()) {
+                                throw new PlaidWebhookRejectedException("kid header malformed");
                             }
                             usedKey[0] = keyCache.get(kid);
                             return PlaidWebhookKeyCache.toEcPublicKey(usedKey[0]);

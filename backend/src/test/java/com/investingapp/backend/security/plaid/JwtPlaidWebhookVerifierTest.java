@@ -26,6 +26,7 @@ import java.util.Date;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -100,6 +101,26 @@ class JwtPlaidWebhookVerifierTest {
 
         rejects(hs256, "ES256");
         verify(plaidApi, never()).webhookVerificationKeyGet(any(WebhookVerificationKeyGetRequest.class));
+    }
+
+    @Test
+    void rejectsMalformedKidWithoutFetchingAKey() {
+        PlaidWebhookKeyCache mockCache = mock(PlaidWebhookKeyCache.class);
+        JwtPlaidWebhookVerifier coldVerifier = new JwtPlaidWebhookVerifier(mockCache);
+        String tooLong = "a".repeat(65);
+        String withSpace = "kid with space";
+
+        String tokenTooLong = jwt(tooLong, now, JwtPlaidWebhookVerifier.sha256Hex(BODY), pair.getPrivate(), SignatureAlgorithm.ES256);
+        String tokenWithSpace = jwt(withSpace, now, JwtPlaidWebhookVerifier.sha256Hex(BODY), pair.getPrivate(), SignatureAlgorithm.ES256);
+
+        assertThatThrownBy(() -> coldVerifier.verifyAndReturnIat(BODY, tokenTooLong))
+                .isInstanceOf(PlaidWebhookRejectedException.class)
+                .hasMessageContaining("kid header malformed");
+        assertThatThrownBy(() -> coldVerifier.verifyAndReturnIat(BODY, tokenWithSpace))
+                .isInstanceOf(PlaidWebhookRejectedException.class)
+                .hasMessageContaining("kid header malformed");
+
+        verify(mockCache, never()).get(anyString());
     }
 
     @Test

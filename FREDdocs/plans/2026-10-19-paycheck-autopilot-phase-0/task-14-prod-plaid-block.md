@@ -1,5 +1,12 @@
 ### Task 14: prod-plaid-block
 
+Execution note (2026-10-20): the guard as shipped (commit 7d1d994) pins the leaked secret as a
+SHA-256 digest (`KNOWN_SANDBOX_SECRET_SHA256`, overridable via `plaid.known-sandbox-secret-sha256`)
+and refuses the ci bypass verifier by type (`getBeanNamesForType`), not by bean name, so the
+`KNOWN_SANDBOX_SECRET` plaintext constant and the `containsBeanDefinition` check below are the
+superseded design. The final fix wave extended the prod rules to the datasource URL and the JWT
+secret.
+
 Move the prod Plaid block to environment variables with `plaid.env=production`, extend `BrokerEnvironmentGuard` with the Phase 0 Plaid rules (exact `plaid.env`, https non-tunnel webhook URL in prod, refuse the ci bypass verifier bean and the once-committed sandbox secret), and write the manual rotation note. The guard is the only startup gate between a prod deploy and a laptop-shaped Plaid config, so every rule gets a red test first.
 
 Scope, read against spec 12.1 and 2.10 before starting:
@@ -447,7 +454,7 @@ Expected: `BUILD FAILED`, `2 tests completed, 2 failed`. The first fails on its 
 In `backend/src/main/resources/application-prod.properties`, replace lines 16-18, which read exactly:
 
 ```properties
-plaid.client.id=6844e93b7fcffa0021bcfbb5
+plaid.client.id=<plaid client id>
 plaid.secret=<redacted sandbox secret, rotate it at the Plaid dashboard>
 plaid.env=sandbox
 ```

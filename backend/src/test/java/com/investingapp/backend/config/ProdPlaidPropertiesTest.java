@@ -44,6 +44,19 @@ class ProdPlaidPropertiesTest {
         Properties props = prodProperties();
         assertThat(props.values())
                 .extracting(value -> BrokerEnvironmentGuard.sha256Hex((String) value))
-                .noneMatch(digest -> digest.equalsIgnoreCase(BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET_SHA256));
+                .noneMatch(digest -> digest.equalsIgnoreCase(BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET_SHA256))
+                .noneMatch(digest -> digest.equalsIgnoreCase(BrokerEnvironmentGuard.KNOWN_DEV_JWT_SECRET_SHA256));
+    }
+
+    @Test
+    @DisplayName("the datasource, jwt and webauthn keys read exactly their environment placeholders")
+    void prodReadsDatasourceJwtAndWebauthnFromTheEnvironment() throws IOException {
+        Properties props = prodProperties();
+        assertThat(props.getProperty("spring.datasource.url")).isEqualTo("${DATASOURCE_URL_PROD}");
+        assertThat(props.getProperty("spring.datasource.username")).isEqualTo("${MYSQLUSER}");
+        assertThat(props.getProperty("spring.datasource.password")).isEqualTo("${MYSQLPASSWORD}");
+        assertThat(props.getProperty("jwt.secret")).isEqualTo("${JWT_SECRET_PROD}");
+        assertThat(props.getProperty("webauthn.relyingparty.id")).isEqualTo("${WEBAUTHN_RP_ID_PROD}");
+        assertThat(props.getProperty("webauthn.relyingparty.origins")).isEqualTo("${WEBAUTHN_RP_ORIGINS_PROD}");
     }
 }

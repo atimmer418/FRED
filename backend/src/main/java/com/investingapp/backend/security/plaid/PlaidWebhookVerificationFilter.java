@@ -22,6 +22,9 @@ public class PlaidWebhookVerificationFilter extends OncePerRequestFilter {
     public static final String ATTR_RAW_BODY = "plaid.webhook.rawBody";
     public static final String ATTR_JWT_IAT = "plaid.webhook.iat";
 
+    /** Plaid webhook payloads are small JSON documents; 256 KiB is far above any real one. */
+    static final int MAX_BODY_BYTES = 256 * 1024;
+
     private static final Logger logger = LoggerFactory.getLogger(PlaidWebhookVerificationFilter.class);
 
     private final PlaidWebhookVerifier verifier;
@@ -41,9 +44,17 @@ public class PlaidWebhookVerificationFilter extends OncePerRequestFilter {
             return;
         }
 
-        RereadableRequestWrapper wrapped = new RereadableRequestWrapper(request);
+        long contentLength = request.getContentLengthLong();
+        if (contentLength > MAX_BODY_BYTES) {
+            logger.warn("plaid.webhook.rejected reason=body_too_large length={}", contentLength);
+            reject(response, HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+
+        RereadableRequestWrapper wrapped;
         long iat;
         try {
+            wrapped = new RereadableRequestWrapper(request, MAX_BODY_BYTES);
             iat = verifier.verifyAndReturnIat(wrapped.body(), jwt);
         } catch (PlaidWebhookRejectedException e) {
             logger.warn("plaid.webhook.rejected reason=verification detail=\"{}\"", e.getMessage());

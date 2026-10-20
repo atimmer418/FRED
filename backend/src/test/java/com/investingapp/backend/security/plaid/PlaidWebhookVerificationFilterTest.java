@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -25,10 +26,14 @@ class PlaidWebhookVerificationFilterTest {
     private final PlaidWebhookVerificationFilter filter = new PlaidWebhookVerificationFilter(verifier);
 
     private static MockHttpServletRequest webhookRequest(String jwt) {
+        return webhookRequest(jwt, BODY);
+    }
+
+    private static MockHttpServletRequest webhookRequest(String jwt, byte[] body) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/plaid/webhook");
         request.setRequestURI("/api/plaid/webhook");
         request.setContentType("application/json");
-        request.setContent(BODY);
+        request.setContent(body);
         if (jwt != null) {
             request.addHeader(PlaidWebhookVerificationFilter.HEADER, jwt);
         }
@@ -72,6 +77,35 @@ class PlaidWebhookVerificationFilterTest {
         when(verifier.verifyAndReturnIat(eq(BODY), eq("boom"))).thenThrow(new IllegalStateException("boom"));
 
         assertThat(blockedStatus("boom")).isEqualTo(503);
+    }
+
+    @Test
+    void bodyOverTheCapIs401WithoutCallingTheVerifier() throws Exception {
+        byte[] oversized = new byte[PlaidWebhookVerificationFilter.MAX_BODY_BYTES + 1];
+        MockHttpServletRequest request = webhookRequest("jwt", oversized);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).isEmpty();
+        assertThat(chain.getRequest()).as("filter chain must not continue").isNull();
+        verifyNoInteractions(verifier);
+    }
+
+    @Test
+    void bodyExactlyAtTheCapIsAccepted() throws Exception {
+        byte[] exact = new byte[PlaidWebhookVerificationFilter.MAX_BODY_BYTES];
+        when(verifier.verifyAndReturnIat(eq(exact), eq("jwt"))).thenReturn(1_700_000_000L);
+        MockHttpServletRequest request = webhookRequest("jwt", exact);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(chain.getRequest()).isNotNull();
     }
 
     @Test

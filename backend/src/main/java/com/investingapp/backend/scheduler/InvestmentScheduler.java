@@ -3,6 +3,7 @@ package com.investingapp.backend.scheduler;
 import com.investingapp.backend.service.DripService;
 import com.investingapp.backend.service.InvestmentExecutionService;
 import com.investingapp.backend.service.PaydayNotificationService;
+import com.investingapp.backend.util.EasternTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,9 +34,10 @@ public class InvestmentScheduler {
      */
     @Scheduled(cron = "0 55 23 * * *", zone = "America/New_York")
     public void processScheduledInvestments() {
-        logger.info("Starting scheduled investment processing job");
+        LocalDate todayET = EasternTime.today();
+        logger.info("Starting scheduled investment processing job for {}", todayET);
         try {
-            investmentExecutionService.processScheduledInvestments();
+            investmentExecutionService.processScheduledInvestments(todayET);
             logger.info("Completed scheduled investment processing job successfully");
         } catch (Exception e) {
             logger.error("Error in scheduled investment processing job", e);
@@ -122,9 +124,10 @@ public class InvestmentScheduler {
 
     @Scheduled(cron = "0 0 7 * * *", zone = "America/New_York")
     public void sendDayBeforePaydayNotifications() {
-        logger.info("Sending D-1 payday notifications");
+        LocalDate todayET = EasternTime.today();
+        logger.info("Sending D-1 payday notifications for {}", todayET);
         try {
-            paydayNotificationService.sendDayBeforeNotifications(LocalDate.now());
+            paydayNotificationService.sendDayBeforeNotifications(todayET);
         } catch (Exception e) {
             logger.error("Error sending D-1 payday notifications", e);
         }
@@ -132,9 +135,10 @@ public class InvestmentScheduler {
 
     @Scheduled(cron = "0 0 0 * * *", zone = "America/New_York")
     public void sendPaydayNotifications() {
-        logger.info("Sending D+0 payday notifications");
+        LocalDate todayET = EasternTime.today();
+        logger.info("Sending D+0 payday notifications for {}", todayET.minusDays(1));
         try {
-            paydayNotificationService.sendPaydayNotifications(LocalDate.now().minusDays(1));
+            paydayNotificationService.sendPaydayNotifications(todayET.minusDays(1));
         } catch (Exception e) {
             logger.error("Error sending D+0 payday notifications", e);
         }
@@ -142,9 +146,10 @@ public class InvestmentScheduler {
 
     @Scheduled(cron = "0 0 8 * * *", zone = "America/New_York")
     public void sendDayAfterPaydayNotifications() {
-        logger.info("Sending D+1 payday notifications");
+        LocalDate todayET = EasternTime.today();
+        logger.info("Sending D+1 payday notifications for {}", todayET);
         try {
-            paydayNotificationService.sendDayAfterNotifications(LocalDate.now());
+            paydayNotificationService.sendDayAfterNotifications(todayET);
         } catch (Exception e) {
             logger.error("Error sending D+1 payday notifications", e);
         }

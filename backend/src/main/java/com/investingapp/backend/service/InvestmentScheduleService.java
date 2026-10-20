@@ -5,6 +5,7 @@ import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.service.PortfolioService;
 import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.EasternTime;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,11 +75,11 @@ public class InvestmentScheduleService {
             if (startDate != null) {
                 // Only update start date if it's not already set OR if the schedule hasn't
                 // started yet (brand new)
-                if (schedule.getStartDate() == null || LocalDate.now().isBefore(schedule.getStartDate())) {
+                if (schedule.getStartDate() == null || EasternTime.today().isBefore(schedule.getStartDate())) {
                     schedule.setStartDate(startDate);
                 }
 
-                LocalDate today = LocalDate.now();
+                LocalDate today = EasternTime.today();
                 LocalDate anchorDate = schedule.getStartDate();
                 LocalDate intendedDate = null;
 
@@ -130,10 +131,10 @@ public class InvestmentScheduleService {
             schedule.setMonthlyAmount(calculateMonthlyAmountFromInvestment(investmentAmount, frequency));
 
             // Set dates
-            LocalDate effectiveStartDate = startDate != null ? startDate : LocalDate.now();
+            LocalDate effectiveStartDate = startDate != null ? startDate : EasternTime.today();
             schedule.setStartDate(effectiveStartDate);
 
-            LocalDate today = LocalDate.now();
+            LocalDate today = EasternTime.today();
             LocalDate preferenceSourceDate;
 
             // Rule: Derive from nextInvestmentDate, unless today is before start day
@@ -291,24 +292,32 @@ public class InvestmentScheduleService {
     }
 
     /**
-     * Get all schedules ready for investment execution (for cron processing).
+     * Get all schedules ready for investment execution on {@code todayET} (for cron processing).
      * Only returns schedules where:
      *   - isPaused == false (the user has not paused the schedule), AND
      *   - user.accountStatus == "ACTIVE" (the Alpaca account is fully active)
      * Both conditions must be true for a trade to be placed.
      */
     @Transactional(readOnly = true)
-    public List<InvestmentSchedule> getSchedulesReadyForInvestment() {
-        logger.info("Finding investment schedules ready for execution...");
+    public List<InvestmentSchedule> getSchedulesReadyForInvestment(LocalDate todayET) {
+        logger.info("Finding investment schedules ready for execution on {}...", todayET);
 
         List<InvestmentSchedule> readySchedules = investmentScheduleRepository
                 .findByUser_AccountStatus("ACTIVE")
                 .stream()
-                .filter(InvestmentSchedule::isReadyForInvestment)
+                .filter(s -> isReady(s, todayET))
                 .toList();
 
         logger.info("Found {} schedules ready for investment execution", readySchedules.size());
         return readySchedules;
+    }
+
+    /**
+     * Eligibility of one schedule on one Eastern calendar day. Phase 0 knows only MANUAL schedules;
+     * T10 turns this into the mode switch and adds the hold clause.
+     */
+    boolean isReady(InvestmentSchedule schedule, LocalDate todayET) {
+        return schedule.isReadyForInvestment(todayET);
     }
 
     /**

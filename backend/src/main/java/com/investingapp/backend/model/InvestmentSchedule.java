@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import com.investingapp.backend.util.EasternTime;
 
 @Data
 @AllArgsConstructor
@@ -68,12 +69,12 @@ public class InvestmentSchedule {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        createdAt = EasternTime.now();
+        updatedAt = EasternTime.now();
 
         // Set initial dates if not provided
         if (startDate == null) {
-            startDate = LocalDate.now();
+            startDate = EasternTime.today();
         }
         if (nextInvestmentDate == null) {
             nextInvestmentDate = calculateNextInvestmentDate(startDate);
@@ -82,7 +83,7 @@ public class InvestmentSchedule {
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = EasternTime.now();
     }
 
     /**
@@ -90,7 +91,7 @@ public class InvestmentSchedule {
      */
     public LocalDate calculateNextInvestmentDate(LocalDate fromDate) {
         if (fromDate == null)
-            fromDate = LocalDate.now();
+            fromDate = EasternTime.today();
 
         LocalDate nextIdealDate;
 
@@ -295,11 +296,10 @@ public class InvestmentSchedule {
     }
 
     /**
-     * Check if this schedule is ready for investment execution
+     * Check if this schedule is ready for investment execution on the given Eastern calendar day.
+     * The cron computes todayET once per run and passes it in; this method never reads a clock.
      */
-    public boolean isReadyForInvestment() {
-        LocalDate today = LocalDate.now();
-
+    public boolean isReadyForInvestment(LocalDate todayET) {
         // Must not be paused and must have ACH linked
         boolean basicRequirements = !isPaused && achRequestId != null;
 
@@ -310,8 +310,8 @@ public class InvestmentSchedule {
         // Check if either:
         // 1. Start date is today (first-time investment)
         // 2. Next investment date is today or past due (recurring investment)
-        boolean dateRequirement = (startDate != null && startDate.equals(today)) ||
-                (nextInvestmentDate != null && !nextInvestmentDate.isAfter(today));
+        boolean dateRequirement = (startDate != null && startDate.equals(todayET)) ||
+                (nextInvestmentDate != null && !nextInvestmentDate.isAfter(todayET));
 
         return dateRequirement;
     }

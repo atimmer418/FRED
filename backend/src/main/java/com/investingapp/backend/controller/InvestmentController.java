@@ -8,6 +8,7 @@ import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentTradeRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.InvestmentExecutionService;
+import com.investingapp.backend.util.EasternTime;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -58,7 +59,7 @@ public class InvestmentController {
             User user = userOpt.get();
 
             // Get recent executions (last 6 months)
-            LocalDateTime since = LocalDateTime.now().minusMonths(6);
+            LocalDateTime since = EasternTime.now().minusMonths(6);
             List<InvestmentExecution> executions = executionRepository
                     .findRecentExecutionsForUser(user.getId(), since);
 
@@ -267,7 +268,7 @@ public class InvestmentController {
             // Create investment execution with type and symbol information
             InvestmentExecution execution = new InvestmentExecution(
                     user,
-                    LocalDateTime.now(),
+                    EasternTime.now(),
                     amount,
                     investmentType,
                     selectedSymbol,

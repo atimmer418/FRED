@@ -12,9 +12,10 @@ import java.util.TimeZone;
 public class BackendApplication {
 
 	public static void main(String[] args) {
-		// Force UTC timezone to prevent date shifting issues
-		TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
-		System.setProperty("user.timezone", "UTC");
+		// Decision 17: the server runs on Eastern time. Money paths and notifications still name
+		// EasternTime.ZONE explicitly; this pin only keeps bare clocks elsewhere on the same day.
+		TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"));
+		System.setProperty("user.timezone", "America/New_York");
 		
 		SpringApplication.run(BackendApplication.class, args);
 	}

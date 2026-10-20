@@ -3,6 +3,7 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.model.*;
 import com.investingapp.backend.repository.*;
 import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.EasternTime;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +29,7 @@ import java.util.stream.Collectors;
 public class InvestmentExecutionService {
 
     private static final Logger logger = LoggerFactory.getLogger(InvestmentExecutionService.class);
-    private static final ZoneId MARKET_TIMEZONE = ZoneId.of("America/New_York");
+    private static final ZoneId MARKET_TIMEZONE = EasternTime.ZONE;
 
     // Configuration for lump sum batching behavior
     // Queue all lump sum investments until end of day for single batch processing
@@ -257,20 +258,21 @@ public class InvestmentExecutionService {
     }
 
     /**
-     * Process all scheduled investments for today
+     * Process all scheduled investments for the given Eastern calendar day.
+     *
+     * <p>{@code todayET} is computed once by InvestmentScheduler and passed down so a run that
+     * straddles midnight keeps one calendar day (spec 5.8).
      */
-    public void processScheduledInvestments() {
-        logger.info("Starting scheduled investment processing for {}", LocalDate.now(MARKET_TIMEZONE));
+    public void processScheduledInvestments(LocalDate todayET) {
+        logger.info("Starting scheduled investment processing for {}", todayET);
 
         // Get all investment schedules that are ready for execution
         // This includes schedules where either:
         // 1. nextInvestmentDate is today or past due (recurring investments)
         // 2. startDate is today (first-time investments starting today)
-        List<InvestmentSchedule> readySchedules = investmentScheduleService.getSchedulesReadyForInvestment();
+        List<InvestmentSchedule> readySchedules = investmentScheduleService.getSchedulesReadyForInvestment(todayET);
 
         logger.info("Found {} investment schedules ready for execution", readySchedules.size());
-
-        LocalDate today = LocalDate.now(MARKET_TIMEZONE);
 
         for (InvestmentSchedule schedule : readySchedules) {
             try {
@@ -280,11 +282,11 @@ public class InvestmentExecutionService {
                 boolean shouldProcessToday = false;
                 String reason = "";
 
-                if (schedule.getStartDate() != null && schedule.getStartDate().equals(today)) {
+                if (schedule.getStartDate() != null && schedule.getStartDate().equals(todayET)) {
                     shouldProcessToday = true;
                     reason = "start date is today";
                 } else if (schedule.getNextInvestmentDate() != null &&
-                        !schedule.getNextInvestmentDate().isAfter(today)) {
+                        !schedule.getNextInvestmentDate().isAfter(todayET)) {
                     shouldProcessToday = true;
                     reason = "next investment date is due";
                 }
@@ -310,7 +312,7 @@ public class InvestmentExecutionService {
                 logger.info("Recurring investment {} queued for end-of-day processing", execution.getId());
 
                 // Update the schedule's next investment date for next cycle
-                updateScheduleAfterExecution(schedule);
+                updateScheduleAfterExecution(schedule, todayET);
 
             } catch (Exception e) {
                 logger.error("Error processing investment schedule {} for user {}",
@@ -330,7 +332,7 @@ public class InvestmentExecutionService {
         InvestmentExecution execution = new InvestmentExecution();
         execution.setUser(schedule.getUser());
         execution.setAmount(schedule.getInvestmentAmount());
-        execution.setScheduledDate(LocalDateTime.now(MARKET_TIMEZONE)); // Use LocalDateTime
+        execution.setScheduledDate(EasternTime.now());
         execution.setStatus(InvestmentExecution.ExecutionStatus.SCHEDULED);
         execution.setInvestmentType("recurring");
         execution.setFundingSource("bank");
@@ -340,26 +342,25 @@ public class InvestmentExecutionService {
     }
 
     /**
-     * Update schedule's next investment date after successful execution
+     * Update schedule's next investment date after successful execution, relative to todayET
      */
-    private void updateScheduleAfterExecution(InvestmentSchedule schedule) {
+    private void updateScheduleAfterExecution(InvestmentSchedule schedule, LocalDate todayET) {
         LocalDate currentNextDate = schedule.getNextInvestmentDate();
-        LocalDate newNextDate = schedule.calculateNextInvestmentDate(LocalDate.now(MARKET_TIMEZONE));
+        LocalDate newNextDate = schedule.calculateNextInvestmentDate(todayET);
 
         schedule.setNextInvestmentDate(newNextDate);
         // Note: We don't update startDate - it remains as the original start date
 
         // Increment monthly streak if we have not already done so this calendar month
-        LocalDate today = LocalDate.now(MARKET_TIMEZONE);
         LocalDate lastIncrement = schedule.getLastStreakIncrementDate();
         boolean alreadyIncrementedThisMonth = lastIncrement != null
-                && lastIncrement.getYear() == today.getYear()
-                && lastIncrement.getMonth() == today.getMonth();
+                && lastIncrement.getYear() == todayET.getYear()
+                && lastIncrement.getMonth() == todayET.getMonth();
 
         if (!alreadyIncrementedThisMonth) {
             int current = schedule.getMonthlyStreak() != null ? schedule.getMonthlyStreak() : 0;
             schedule.setMonthlyStreak(current + 1);
-            schedule.setLastStreakIncrementDate(today);
+            schedule.setLastStreakIncrementDate(todayET);
             logger.info("Monthly streak incremented to {} for schedule {}", current + 1, schedule.getId());
         }
 

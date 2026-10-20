@@ -112,8 +112,6 @@ public class SecurityConfig {
                 .requestMatchers("/.well-known/apple-app-site-association").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/plaid/webhook").permitAll() // signature-verified by PlaidWebhookVerificationFilter
-                .requestMatchers("/api/plaid/create_link_token_anonymous").permitAll()
-                .requestMatchers("/api/plaid/exchange_public_token_anonymous").permitAll()
                 .requestMatchers("/api/passkey/**").permitAll()
                 .requestMatchers("/api/user/should-prompt-reauth").permitAll() // Allow checking reauth status without authentication
                 .requestMatchers("/api/dev/**").permitAll() // 🧪 DEV ONLY: registered only in local/dev/test/ci, and DevToolsKeyFilter requires X-Dev-Tools-Key

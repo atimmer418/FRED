@@ -130,9 +130,7 @@ All available API endpoints in the backend. Keep this file updated when adding n
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/plaid/create_link_token` | Create Plaid link token | Yes | None | LinkTokenResponse |
 | `POST` | `/api/plaid/exchange_public_token` | Exchange public token for access token | Yes | `{ public_token }` | Success/Error |
-| `GET` | `/api/plaid/user-data` | Get user's Plaid data | Yes | None | Bank data |
-| `GET` | `/api/plaid/access-token` | Get stored access token | Yes | None | Access token info |
-| `GET` | `/api/plaid/primary-bank-account` | Get primary bank account | Yes | None | Bank account details |
+| `GET` | `/api/plaid/primary-bank-account` | Primary bank account, display fields only (never the Plaid access token) | Yes | None | `{ accountId, institutionName, accountName, accountType, accountSubtype, mask, itemStatus }` |
 
 ---
 
@@ -144,7 +142,6 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | `POST` | `/api/alpaca/create-account` | Create Alpaca brokerage account (full KYC) | Yes | `CreateAlpacaAccountRequest { emailAddress, phoneNumber, streetAddress, city, state, postalCode, givenName, familyName, dateOfBirth, taxId, fundingSource[], isControlPerson, isAffiliatedExchangeOrFinra, isPoliticallyExposed, immediateFamilyExposed }` | `{ account_id, account_number }` |
 | `POST` | `/api/alpaca/sync-account-number` | Sync account number from Alpaca | Yes | None | `{ account_number }` |
 | `GET` | `/api/alpaca/assets` | Search/list available assets | Yes | Query: `status`, `asset_class`, `search` | Assets JSON |
-| `POST` | `/api/alpaca/accounts/{accountId}/ach-relationships` | Create ACH relationship (manual) | Yes | `{ accountOwnerName, bankAccountType, bankAccountNumber, bankRoutingNumber, nickname }` | ACH relationship |
 | `POST` | `/api/alpaca/accounts/{accountId}/ach-relationships/plaid` | Create ACH relationship via Plaid | Yes | `{ plaidAccessToken, plaidAccountId, accountOwnerName }` | ACH relationship |
 | `GET` | `/api/alpaca/accounts/{accountId}/ach-relationships` | List ACH relationships | Yes | None | ACH relationships JSON |
 | `GET` | `/api/alpaca/account/{accountId}/status` | Get account status by Alpaca account ID | Yes | None | Status JSON |

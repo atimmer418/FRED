@@ -7,7 +7,6 @@ import com.investingapp.backend.service.LinkInProgressException;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
-import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.service.PlaidService;
 import com.investingapp.backend.service.UpdateModeUnavailableException;
 import com.plaid.client.model.ItemPublicTokenExchangeResponse; // Make sure this is imported
@@ -25,7 +24,6 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 @CrossOrigin(origins = "*", maxAge = 3600) // For development, restrict in production
 @RestController
@@ -39,9 +37,6 @@ public class PlaidController {
 
     @Autowired
     private UserRepository userRepository;
-
-    @Autowired
-    private EncryptionService encryptionService;
 
     // --- AUTHENTICATED FLOW ENDPOINTS ---
     
@@ -124,81 +119,29 @@ public class PlaidController {
         }
     }
 
-    @GetMapping("/user-data")
-    public ResponseEntity<?> getUserPlaidData(Authentication authentication) {
-        try {
-            UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-            Optional<User> userOpt = userRepository.findByEmail(userDetails.getUsername());
-            
-            if (userOpt.isEmpty()) {
-                return ResponseEntity.badRequest().body("User not found");
-            }
-            
-            User user = userOpt.get();
-            
-            // Create response with essential Plaid data for ACH creation
-            String rawAccessToken = user.getPlaidAccessToken() != null
-                    ? encryptionService.decrypt(user.getPlaidAccessToken()) : null;
-            Map<String, Object> plaidData = new HashMap<>();
-            plaidData.put("accessToken", rawAccessToken);
-            plaidData.put("accountId", user.getPlaidAccountId());
-            plaidData.put("institutionName", user.getPlaidInstitutionName());
-            plaidData.put("hasValidToken", rawAccessToken != null && !rawAccessToken.isEmpty());
-            
-            return ResponseEntity.ok(plaidData);
-        } catch (Exception e) {
-            logger.error("Error retrieving user Plaid data", e);
-            return ResponseEntity.status(500).body("Error retrieving Plaid data");
-        }
-    }
-
-    @GetMapping("/access-token")
-    public ResponseEntity<String> getAccessToken(Authentication authentication) {
-        try {
-            UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-            Optional<User> userOpt = userRepository.findByEmail(userDetails.getUsername());
-            
-            if (userOpt.isEmpty()) {
-                return ResponseEntity.badRequest().body("User not found");
-            }
-            
-            User user = userOpt.get();
-            String encryptedToken = user.getPlaidAccessToken();
-
-            if (encryptedToken == null || encryptedToken.isEmpty()) {
-                return ResponseEntity.badRequest().body("No Plaid access token found");
-            }
-
-            return ResponseEntity.ok(encryptionService.decrypt(encryptedToken));
-        } catch (Exception e) {
-            logger.error("Error retrieving access token", e);
-            return ResponseEntity.status(500).body("Error retrieving access token");
-        }
-    }
-
     @GetMapping("/primary-bank-account")
     public ResponseEntity<?> getPrimaryBankAccount(Authentication authentication) {
         try {
             UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
             Optional<User> userOpt = userRepository.findByEmail(userDetails.getUsername());
-            
+
             if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
-            
+
             User user = userOpt.get();
-            
-            // Create response with bank account info needed for ACH
-            String rawToken = user.getPlaidAccessToken() != null
-                    ? encryptionService.decrypt(user.getPlaidAccessToken()) : null;
+
+            // Display fields only. The Plaid access token never leaves the server (FRED-218).
+            // HashMap rather than Map.of: mask is null for links made before it was stored.
             Map<String, Object> bankAccount = new HashMap<>();
             bankAccount.put("accountId", user.getPlaidAccountId());
-            bankAccount.put("accessToken", rawToken);
             bankAccount.put("institutionName", user.getPlaidInstitutionName());
             bankAccount.put("accountName", user.getPlaidAccountName());
             bankAccount.put("accountType", user.getPlaidAccountType());
             bankAccount.put("accountSubtype", user.getPlaidAccountSubtype());
-            
+            bankAccount.put("mask", user.getPlaidAccountMask());
+            bankAccount.put("itemStatus", user.getPlaidItemStatus().name());
+
             return ResponseEntity.ok(bankAccount);
         } catch (Exception e) {
             logger.error("Error retrieving primary bank account", e);

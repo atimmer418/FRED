@@ -2,6 +2,7 @@ package com.investingapp.backend.model;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
@@ -59,7 +60,27 @@ public class InvestmentExecution {
     
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
-    
+
+    // Paycheck Autopilot, Phase 0 (V6).
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "schedule_id")
+    private InvestmentSchedule schedule;
+
+    /** SCHED:{scheduleId}:{dueDate} or LUMP:{userId}:{clientUuid}; UNIQUE in V6. */
+    @Column(name = "source_key", length = 120, unique = true)
+    private String sourceKey;
+
+    /** {userId}:{queuedNightET}, recurring only; UNIQUE in V6, NULLs allowed. */
+    @Column(name = "night_key", length = 40, unique = true)
+    private String nightKey;
+
+    @Column(name = "batch_night")
+    private LocalDate batchNight;
+
+    /** Stamped by the 11:59 batch claim before the Alpaca POST (spec 5.5). */
+    @Column(name = "transfer_attempted_at")
+    private LocalDateTime transferAttemptedAt;
+
     public enum ExecutionStatus {
         SCHEDULED,      // Investment is scheduled for execution
         FUNDING_INITIATED, // ACH transfer has been initiated
@@ -165,4 +186,19 @@ public class InvestmentExecution {
     
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    public InvestmentSchedule getSchedule() { return schedule; }
+    public void setSchedule(InvestmentSchedule schedule) { this.schedule = schedule; }
+
+    public String getSourceKey() { return sourceKey; }
+    public void setSourceKey(String sourceKey) { this.sourceKey = sourceKey; }
+
+    public String getNightKey() { return nightKey; }
+    public void setNightKey(String nightKey) { this.nightKey = nightKey; }
+
+    public LocalDate getBatchNight() { return batchNight; }
+    public void setBatchNight(LocalDate batchNight) { this.batchNight = batchNight; }
+
+    public LocalDateTime getTransferAttemptedAt() { return transferAttemptedAt; }
+    public void setTransferAttemptedAt(LocalDateTime transferAttemptedAt) { this.transferAttemptedAt = transferAttemptedAt; }
 }

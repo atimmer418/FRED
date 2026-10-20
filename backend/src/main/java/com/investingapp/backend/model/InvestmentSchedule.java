@@ -55,6 +55,16 @@ public class InvestmentSchedule {
     @Column(name = "ach_request_id", length = 255)
     private String achRequestId; // This will be set when ACH linking is confirmed
 
+    // Paycheck Autopilot, Phase 0 (V6). Phase 0 never produces DETECTED.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "mode", length = 10, nullable = false)
+    private ScheduleMode mode = ScheduleMode.MANUAL;
+
+    /** The system's stop; null means none. is_paused stays the user's stop. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "hold_reason", length = 32)
+    private HoldReason holdReason;
+
     @Column(name = "monthly_streak", nullable = false)
     private Integer monthlyStreak = 0;
 

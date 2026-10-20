@@ -32,6 +32,7 @@ public class AccountStatusService {
     private final InvestmentScheduleService investmentScheduleService;
     private final AnalyticsOutboxService analyticsOutboxService;
     private final AchRelationshipService achRelationshipService;
+    private final UserDeletionService userDeletionService;
     private final ObjectMapper objectMapper;
 
     public AccountStatusService(
@@ -43,7 +44,8 @@ public class AccountStatusService {
             PlaidToAlpacaService plaidToAlpacaService,
             InvestmentScheduleService investmentScheduleService,
             AnalyticsOutboxService analyticsOutboxService,
-            AchRelationshipService achRelationshipService) {
+            AchRelationshipService achRelationshipService,
+            UserDeletionService userDeletionService) {
         this.userRepository = userRepository;
         this.investmentScheduleRepository = investmentScheduleRepository;
         this.alpacaApiService = alpacaApiService;
@@ -53,6 +55,7 @@ public class AccountStatusService {
         this.investmentScheduleService = investmentScheduleService;
         this.analyticsOutboxService = analyticsOutboxService;
         this.achRelationshipService = achRelationshipService;
+        this.userDeletionService = userDeletionService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -130,12 +133,14 @@ public class AccountStatusService {
 
     /**
      * Handle an account that has been REJECTED.
-     * Sends a rejection email, deletes the user's InvestmentSchedule, then hard-deletes the user.
-     * All cascade-deleted entities (passkeys, progress, etc.) are handled by JPA cascades.
+     * Records the decision, emails the user, then deletes the user through the one deletion path.
+     * A REJECTED account never reached ACH setup (attemptAchCreation only runs for ACTIVE users and
+     * an ACTIVE user is never re-polled), so the broker call inside that path is skipped and
+     * nothing talks to Alpaca from inside this transaction.
      */
     @Transactional
     public void handleRejected(User user) {
-        logger.warn("Account REJECTED for user {} — sending rejection email and deleting user record",
+        logger.warn("Account REJECTED for user {}: sending rejection email and deleting user record",
                 user.getEmail());
 
         // Record the decision FIRST, while the user still has an id and a public_id to copy.
@@ -151,13 +156,17 @@ public class AccountStatusService {
                 "We're sorry, but we were unable to approve your FRED brokerage account application at this time. "
                 + "If you have questions, please contact our support team.");
 
-        // Delete InvestmentSchedule first (not covered by User cascades)
-        investmentScheduleRepository.deleteAllByUser(user);
-        logger.info("Deleted InvestmentSchedule(s) for rejected user {}", user.getEmail());
-
-        // Hard delete the user — all @OneToMany cascade=ALL entities deleted by JPA
-        userRepository.delete(user);
-        logger.info("Hard-deleted user record for rejected user {}", user.getEmail());
+        try {
+            userDeletionService.delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+            logger.info("Hard-deleted user record for rejected user {}", user.getEmail());
+        } catch (DeletionDeferredException deferred) {
+            // Park the row as REJECTED: findUsersWithPendingAccountStatus excludes it, so the poller
+            // stops re-deciding, and the admin verb finishes the job once the money has settled.
+            user.setAccountStatus("REJECTED");
+            userRepository.save(user);
+            logger.error("alert.user_deletion.deferred user={} reason=KYC_REJECTED deferral={}",
+                    user.getId(), deferred.reason);
+        }
     }
 
     /**

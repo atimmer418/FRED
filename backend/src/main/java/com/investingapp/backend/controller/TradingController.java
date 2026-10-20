@@ -3,11 +3,11 @@ package com.investingapp.backend.controller;
 import com.investingapp.backend.service.AlpacaService;
 import com.investingapp.backend.service.AlpacaApiService;
 import com.investingapp.backend.service.EncryptionService;
+import com.investingapp.backend.service.DeletionDeferredException;
+import com.investingapp.backend.service.UserDeletionService;
+import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.model.User;
-import com.investingapp.backend.repository.InvestmentScheduleRepository;
-import com.investingapp.backend.repository.PortfolioRepository;
 import com.investingapp.backend.repository.UserRepository;
-import com.investingapp.backend.repository.UserSessionRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -17,7 +17,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -43,13 +42,7 @@ public class TradingController {
     private UserRepository userRepository;
 
     @Autowired
-    private InvestmentScheduleRepository investmentScheduleRepository;
-
-    @Autowired
-    private UserSessionRepository userSessionRepository;
-
-    @Autowired
-    private PortfolioRepository portfolioRepository;
+    private UserDeletionService userDeletionService;
 
     @Autowired
     private EncryptionService encryptionService;
@@ -297,10 +290,11 @@ public class TradingController {
     /**
      * Close the user's brokerage account and delete their FRED user record.
      * Prerequisites: all positions must be liquidated and all cash withdrawn.
+     * Not transactional: the broker calls run outside the database transaction that
+     * UserDeletionService opens for the row deletes.
      */
-    @Transactional
     @PostMapping("/account/close")
-    public ResponseEntity<Map<String, Object>> closeAccount(Authentication authentication) {
+    public ResponseEntity<?> closeAccount(Authentication authentication) {
         try {
             if (authentication == null || authentication.getPrincipal() == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -314,22 +308,21 @@ public class TradingController {
                     .body(Map.of("error", "User or Alpaca account not found"));
             }
 
+            // Refuse before touching the broker: closing the brokerage account and then keeping
+            // the FRED row would leave the user half deleted.
+            Optional<String> deferral = userDeletionService.deferralReason(user);
+            if (deferral.isPresent()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ErrorCodeResponse("DELETION_DEFERRED", deferral.get()));
+            }
+
             String accountId = encryptionService.decrypt(user.getAlpacaAccountId());
 
             // Close the Alpaca brokerage account
             alpacaService.closeAccount(accountId);
 
-            // Delete investment schedules first (FK not covered by JPA cascade)
-            investmentScheduleRepository.deleteAllByUser(user);
-
-            // Delete user sessions (FK not covered by JPA cascade)
-            userSessionRepository.deleteAllByUserId(user.getId());
-
-            // Delete portfolio and its items (FK not covered by JPA cascade; items cascade from portfolio)
-            portfolioRepository.findByUser(user).ifPresent(portfolioRepository::delete);
-
-            // Delete the user from our database (cascades to passkey credentials, user progress, etc.)
-            userRepository.delete(user);
+            // One path for every row that references the user (schedules, sessions, portfolio, ...)
+            userDeletionService.delete(user, UserDeletionService.DeletionReason.ACCOUNT_CLOSED);
 
             logger.info("Account closed and user deleted for alpaca account: {}", accountId);
 
@@ -338,6 +331,12 @@ public class TradingController {
                 "message", "Your account has been permanently closed."
             ));
 
+        } catch (DeletionDeferredException deferred) {
+            // A transfer landed between the pre-check and the delete. The brokerage account is
+            // already closed, so a person finishes this one through the admin verb.
+            logger.error("alert.user_deletion.deferred reason=ACCOUNT_CLOSED deferral={}", deferred.reason);
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorCodeResponse("DELETION_DEFERRED", deferred.reason));
         } catch (Exception e) {
             logger.error("Error closing account: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

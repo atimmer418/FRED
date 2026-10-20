@@ -45,4 +45,7 @@ public interface InvestmentTradeRepository extends JpaRepository<InvestmentTrade
      */
     List<InvestmentTrade> findByUserIdAndSymbolAndStatusInAndCreatedAtAfter(
             Long userId, String symbol, java.util.Collection<TradeStatus> statuses, LocalDateTime after);
+
+    /** User deletion: InvestmentTrade carries a bare user_id column (InvestmentTrade.java:15-16). */
+    void deleteAllByUserId(Long userId);
 }

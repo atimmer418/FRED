@@ -133,6 +133,9 @@ public interface InvestmentExecutionRepository extends JpaRepository<InvestmentE
      */
     boolean existsByUserAndFundingCompletedAtIsNotNull(User user);
 
+    /** User deletion: every execution of this user. Trades reference executions, so they go first. */
+    void deleteAllByUser(User user);
+
     // --- Phase 0 idempotency (spec 3.8, 5.4, 5.5) -------------------------------------------
 
     /** source_key pre-check: one row per MANUAL due date per schedule, one per lump-sum tap. */

@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -68,6 +69,8 @@ class AccountStatusServiceKycDecidedTest {
     private AnalyticsOutboxService analyticsOutboxService;
     @Mock
     private AchRelationshipService achRelationshipService;
+    @Mock
+    private UserDeletionService userDeletionService;
 
     @Captor
     private ArgumentCaptor<String> eventNameCaptor;
@@ -90,7 +93,8 @@ class AccountStatusServiceKycDecidedTest {
                 plaidToAlpacaService,
                 investmentScheduleService,
                 analyticsOutboxService,
-                achRelationshipService);
+                achRelationshipService,
+                userDeletionService);
 
         user = new User("kyc@fredvested.com");
         user.setId(42L);
@@ -170,12 +174,28 @@ class AccountStatusServiceKycDecidedTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        InOrder order = inOrder(analyticsOutboxService, userRepository);
+        InOrder order = inOrder(analyticsOutboxService, userDeletionService);
         order.verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.KYC_DECIDED), eq(user), anyMap());
-        order.verify(userRepository).delete(user);
+        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+        verify(userRepository, never()).delete(any());
         // The outbox copies both of these out of the user; neither can be recovered afterwards.
         assertThat(identityAtRecordTime.get()).isEqualTo("42|" + PUBLIC_ID);
+    }
+
+    @Test
+    @DisplayName("a deferred deletion parks the user as REJECTED so the poller stops re-deciding")
+    void deferredRejectionParksTheUserAsRejected() {
+        brokerSays("REJECTED");
+        doThrow(new DeletionDeferredException("FUNDING_INITIATED"))
+                .when(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+
+        service.checkAndUpdateAccountStatuses();
+
+        assertOneDecisionEvent("rejected", "1_3");
+        assertThat(user.getAccountStatus()).isEqualTo("REJECTED");
+        verify(userRepository).save(user);
+        verify(userRepository, never()).delete(any());
     }
 
     @Test

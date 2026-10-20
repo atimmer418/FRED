@@ -2,6 +2,7 @@ package com.investingapp.backend.config;
 
 import com.investingapp.backend.controller.DevAuthController;
 import com.investingapp.backend.controller.DevPlaidController;
+import com.investingapp.backend.controller.DevUserController;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.repository.UserSessionRepository;
 import com.investingapp.backend.security.DevToolsKeyValidator;
@@ -104,6 +105,22 @@ class DevToolsGatingTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Dev tooling must never be registered in the prod profile")
                 .hasMessageContaining("devAuthController");
+    }
+
+    @Test
+    @DisplayName("prod refuses to start when the dev user-deletion verb is registered anyway")
+    void prodGuardFailsStartupWhenDevUserControllerPresent() {
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerBeanDefinition("devUserController", new RootBeanDefinition(DevUserController.class));
+
+        DevToolsProdGuard guard = new DevToolsProdGuard();
+        MockEnvironment prod = new MockEnvironment();
+        prod.setActiveProfiles(DevToolsProdGuard.PROD_PROFILE);
+        guard.setEnvironment(prod);
+
+        assertThatThrownBy(() -> guard.postProcessBeanFactory(beanFactory))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("devUserController");
     }
 
     @Test

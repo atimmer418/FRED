@@ -503,8 +503,8 @@ before beta, because the same dashboard holds the production keys.
 | Place | Key | Tracked by git |
 |---|---|---|
 | `application-local.properties:18` | `plaid.secret=<literal>` | No (gitignored, `.gitignore:44`) |
-| `application-dev.properties:38` | `plaid.secret=${PLAID_SECRET_SANDBOX}` | Yes; the value lives on the Railway dev service |
-| `application-test.properties:32` | `plaid.secret=${PLAID_SECRET_SANDBOX}` | Yes; the value lives on the Railway test service |
+| `application-dev.properties:38` | `plaid.secret=<plaid sandbox secret, see application-dev.properties>` | Yes; the value lives on the Railway dev service |
+| `application-test.properties:32` | `plaid.secret=<plaid sandbox secret, see application-dev.properties>` | Yes; the value lives on the Railway test service |
 | `application-ci.properties:51` | `plaid.secret=ci-disabled` | Yes; no real secret |
 | `application-prod.properties` | `plaid.secret=${PLAID_SECRET_PRODUCTION}` | Yes; production key, separate from this rotation |
 
@@ -531,7 +531,7 @@ before beta, because the same dashboard holds the production keys.
 ## Never commit the new value
 
 - No tracked file gets a Plaid secret literal, ever. The dev, test and prod profiles read
-  `${PLAID_SECRET_SANDBOX}` or `${PLAID_SECRET_PRODUCTION}` from the environment.
+  `<plaid sandbox secret, see application-dev.properties>` or `${PLAID_SECRET_PRODUCTION}` from the environment.
 - `application-local.properties` is the only place a literal belongs, and it is gitignored.
 - Do not update `KNOWN_SANDBOX_SECRET` to the new value. It exists to catch the leaked one.
 

@@ -1,11 +1,14 @@
 package com.investingapp.backend.controller;
 
 import com.investingapp.backend.dto.MessageResponse;
+import com.investingapp.backend.dto.CreateLinkTokenRequest;
+import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.service.PlaidService;
+import com.investingapp.backend.service.UpdateModeUnavailableException;
 import com.plaid.client.model.ItemPublicTokenExchangeResponse; // Make sure this is imported
 import com.plaid.client.model.LinkTokenCreateResponse;
 import org.slf4j.Logger;
@@ -41,25 +44,40 @@ public class PlaidController {
 
     // --- AUTHENTICATED FLOW ENDPOINTS ---
     
-    @PostMapping("/create_link_token") // No suffix, implies authenticated
-    public ResponseEntity<?> createLinkTokenAuthenticated() {
+    @PostMapping("/create_link_token")
+    public ResponseEntity<?> createLinkTokenAuthenticated(@RequestBody(required = false) CreateLinkTokenRequest body) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof UserDetailsImpl)) {
             logger.warn("/create_link_token: User not authenticated properly.");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new MessageResponse("User not authenticated"));
         }
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        String clientUserId = String.valueOf(userDetails.getId()); // Use your app's internal user ID
-        logger.info("Request received for /create_link_token (authenticated). User ID: {}", clientUserId);
+
+        PlaidService.LinkMode mode;
+        try {
+            mode = PlaidService.LinkMode.fromRequest(body == null ? null : body.getMode());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage()));
+        }
+        logger.info("Request received for /create_link_token (mode={}). User ID: {}", mode, userDetails.getId());
+
+        User user = userRepository.findById(userDetails.getId()).orElse(null);
+        if (user == null) {
+            logger.error("/create_link_token: Authenticated user ID {} not found in database.", userDetails.getId());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponse("User not found in database"));
+        }
 
         try {
-            LinkTokenCreateResponse response = plaidService.createLinkTokenForAuthenticatedUser(clientUserId);
+            LinkTokenCreateResponse response = plaidService.createLinkToken(user, mode);
             return ResponseEntity.ok(Map.of(
                     "link_token", response.getLinkToken(),
-                    "expiration", response.getExpiration().toString() // Ensure toString
-            ));
+                    "expiration", response.getExpiration().toString()));
+        } catch (UpdateModeUnavailableException e) {
+            logger.warn("/create_link_token: update mode unavailable for user {}: {}", user.getId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorCodeResponse(
+                    "UPDATE_MODE_UNAVAILABLE", "Plaid could not reopen this bank connection. Link the bank again."));
         } catch (IOException e) {
-            logger.error("Error creating Plaid link token for authenticated user {}: {}", clientUserId, e.getMessage(), e);
+            logger.error("Error creating Plaid link token for user {}: {}", user.getId(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new MessageResponse("Error creating Plaid link token: " + e.getMessage()));
         }

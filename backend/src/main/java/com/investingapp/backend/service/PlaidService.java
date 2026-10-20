@@ -47,6 +47,32 @@ public class PlaidService {
     @Value("${plaid.client.name}")
     private String plaidClientName;
 
+    @Value("${plaid.webhook.url}")
+    private String plaidWebhookUrl;
+
+    @Value("${plaid.redirect.uri}")
+    private String plaidRedirectUri;
+
+    @Value("${plaid.link.customization}")
+    private String plaidLinkCustomization;
+
+    /** Which kind of Link session a token opens. */
+    public enum LinkMode {
+        LINK, UPDATE;
+
+        /** Request-body value to mode: null or blank is LINK; only link and update are accepted. */
+        public static LinkMode fromRequest(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return LINK;
+            }
+            return switch (raw.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "link" -> LINK;
+                case "update" -> UPDATE;
+                default -> throw new IllegalArgumentException("mode must be \"link\" or \"update\"");
+            };
+        }
+    }
+
     @Autowired
     private EncryptionService encryptionService;
 
@@ -56,26 +82,45 @@ public class PlaidService {
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
 
-    public LinkTokenCreateResponse createLinkTokenForAuthenticatedUser(String clientUserId) throws IOException {
-        logger.info("Creating Plaid Link token for authenticated user ID: {}", clientUserId);
-        LinkTokenCreateRequestUser user = new LinkTokenCreateRequestUser().clientUserId(clientUserId);
-        List<Products> products = Arrays.asList(Products.AUTH, Products.IDENTITY);
-        List<CountryCode> countryCodes = Arrays.asList(CountryCode.US);
-
+    /**
+     * Spec 2.2 and 2.3: every token carries redirect_uri, webhook and the DTM customization name.
+     * LINK asks for auth + identity and collects the Transactions consent; UPDATE reopens the stored
+     * Item (no products) and asks for that consent only while the tri-state flag is not yet true.
+     */
+    public LinkTokenCreateResponse createLinkToken(User user, LinkMode mode)
+            throws IOException, UpdateModeUnavailableException {
+        logger.info("Creating Plaid Link token (mode={}) for user ID: {}", mode, user.getId());
         LinkTokenCreateRequest request = new LinkTokenCreateRequest()
-                .user(user)
+                .user(new LinkTokenCreateRequestUser().clientUserId(String.valueOf(user.getId())))
                 .clientName(plaidClientName)
-                .products(products)
-                .countryCodes(countryCodes)
-                .language("en");
+                .countryCodes(List.of(CountryCode.US))
+                .language("en")
+                .webhook(plaidWebhookUrl)
+                .redirectUri(plaidRedirectUri)
+                .linkCustomizationName(plaidLinkCustomization);
+
+        if (mode == LinkMode.UPDATE) {
+            if (!isPresent(user.getPlaidAccessToken())) {
+                throw new UpdateModeUnavailableException("No Plaid Item on file to update");
+            }
+            request.accessToken(encryptionService.decrypt(user.getPlaidAccessToken()));
+            if (!Boolean.TRUE.equals(user.getPlaidTransactionsConsented())) {
+                request.additionalConsentedProducts(List.of(Products.TRANSACTIONS));
+            }
+        } else {
+            request.products(List.of(Products.AUTH, Products.IDENTITY))
+                    .additionalConsentedProducts(List.of(Products.TRANSACTIONS));
+        }
 
         Response<LinkTokenCreateResponse> response = plaidApi.linkTokenCreate(request).execute();
         if (!response.isSuccessful() || response.body() == null) {
             String errorBody = response.errorBody() != null ? response.errorBody().string() : "Unknown error";
-            logger.error("Plaid Link Token creation failed: {} - {}", response.code(), errorBody);
+            logger.error("Plaid Link Token creation failed (mode={}): {} - {}", mode, response.code(), errorBody);
+            if (mode == LinkMode.UPDATE) {
+                throw new UpdateModeUnavailableException("Plaid refused an update-mode token: " + errorBody);
+            }
             throw new IOException("Plaid Link Token creation failed: " + errorBody);
         }
-        logger.info("Successfully created Link token with AUTH and IDENTITY products");
         return response.body();
     }
 

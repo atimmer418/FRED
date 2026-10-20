@@ -26,6 +26,19 @@ export function readPlaidLinkToken(): string | null {
   }
 }
 
+/**
+ * Which page stored the current token, or null if none is stored. A page must check this before
+ * resuming with a stored token: onboarding and change-bank share one sessionStorage slot, so a
+ * token left behind by one flow must never be reused by the other.
+ */
+export function readPlaidLinkReturn(): PlaidLinkReturnTo | null {
+  try {
+    return sessionStorage.getItem(PLAID_LINK_RETURN_KEY) as PlaidLinkReturnTo | null;
+  } catch {
+    return null;
+  }
+}
+
 export function clearPlaidLinkSession(): void {
   try {
     sessionStorage.removeItem(PLAID_LINK_TOKEN_KEY);

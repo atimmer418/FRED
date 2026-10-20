@@ -13,7 +13,7 @@ import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
-import { clearPlaidLinkSession, readPlaidLinkToken, storePlaidLinkSession } from '../../utils/plaid-link-session';
+import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../../utils/plaid-link-session';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -74,10 +74,18 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
 
     try {
       // Back from the bank's OAuth page: Link must resume with the SAME link_token it left with.
-      // Without a stored token (storage cleared, new browser) Link simply starts over.
+      // Without a stored token (storage cleared, new browser) Link simply starts over. onboarding
+      // and change-bank share one sessionStorage slot, so a token left behind by the other flow
+      // must never be reused here: the return marker has to match this page too.
       const returnHref = this.oauthReturnHref();
       const storedToken = returnHref ? readPlaidLinkToken() : null;
-      const resuming = returnHref !== null && storedToken !== null;
+      const storedReturn = returnHref ? readPlaidLinkReturn() : null;
+      const resuming = returnHref !== null && storedToken !== null && storedReturn === 'onboarding';
+      if (returnHref !== null && storedToken !== null && !resuming) {
+        // Stale token from a different flow (or a corrupted marker): discard it and fetch a fresh
+        // one below.
+        clearPlaidLinkSession();
+      }
       let linkToken: string;
 
       if (this.isUserAuthenticated) {

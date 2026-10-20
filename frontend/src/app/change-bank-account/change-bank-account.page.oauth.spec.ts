@@ -66,6 +66,7 @@ describe('ChangeBankAccountPage OAuth round trip', () => {
 
   it('on the OAuth return it resumes Link with the stored token and opens it without a new token request', async () => {
     sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'change-bank');
     spyOn(page as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
 
     await page['initializePlaidLink']();
@@ -83,6 +84,21 @@ describe('ChangeBankAccountPage OAuth round trip', () => {
 
     await page['initializePlaidLink']();
 
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
+  it('a token left behind by the other flow does not resume here and is discarded', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-other-flow-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
+    spyOn(page as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await page['initializePlaidLink']();
+
+    expect(http.post).toHaveBeenCalled();
+    expect(plaidConfig.token).toBe('link-sandbox-token');
+    expect(plaidConfig.receivedRedirectUri).toBeUndefined();
+    expect(open).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
   });

@@ -7,7 +7,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Subject, takeUntil, catchError, tap, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
-import { clearPlaidLinkSession, readPlaidLinkToken, storePlaidLinkSession } from '../utils/plaid-link-session';
+import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../utils/plaid-link-session';
 import { PlaidService } from '../services/plaid.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
@@ -120,9 +120,17 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
 
     try {
       // Back from the bank's OAuth page: Link must resume with the SAME link_token it left with.
+      // onboarding and change-bank share one sessionStorage slot, so a token left behind by the
+      // other flow must never be reused here: the return marker has to match this page too.
       const returnHref = this.oauthReturnHref();
       const storedToken = returnHref ? readPlaidLinkToken() : null;
-      const resuming = returnHref !== null && storedToken !== null;
+      const storedReturn = returnHref ? readPlaidLinkReturn() : null;
+      const resuming = returnHref !== null && storedToken !== null && storedReturn === 'change-bank';
+      if (returnHref !== null && storedToken !== null && !resuming) {
+        // Stale token from a different flow (or a corrupted marker): discard it and fetch a fresh
+        // one below rather than ever treating it as proof this page's step-up gate already passed.
+        clearPlaidLinkSession();
+      }
       let linkToken: string;
       if (resuming) {
         linkToken = storedToken as string;

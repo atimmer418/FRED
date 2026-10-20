@@ -52,6 +52,7 @@ describe('LinkPlaidComponent OAuth round trip', () => {
 
   it('on the OAuth return it resumes Link with the stored token and receivedRedirectUri', async () => {
     sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
     spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
 
     await component.initializePlaidLink();
@@ -71,6 +72,21 @@ describe('LinkPlaidComponent OAuth round trip', () => {
 
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
+  it('a token left behind by the other flow does not resume here and is discarded', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-other-flow-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'change-bank');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await component.initializePlaidLink();
+
+    expect(post).toHaveBeenCalled();
+    expect(plaidConfig.token).toBe('link-sandbox-token');
+    expect(plaidConfig.receivedRedirectUri).toBeUndefined();
+    expect(open).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-sandbox-token');
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBe('onboarding');
   });
 
   it('an OAuth return with no stored token starts Link over with a fresh token', async () => {

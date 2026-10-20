@@ -9,6 +9,7 @@ import com.investingapp.backend.repository.InvestmentTradeRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.InvestmentExecutionService;
 import com.investingapp.backend.util.EasternTime;
+import com.investingapp.backend.util.ExecutionKeys;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -21,8 +22,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @RestController
@@ -265,6 +268,28 @@ public class InvestmentController {
                 fundingSource = (String) request.get("fundingSource");
             }
 
+            // Idempotency (decision 18): one row per tap. A retry carrying the same clientUuid
+            // finds the first row and makes no second one. Older clients send none, so a
+            // server-side UUID keeps the current app working.
+            String clientUuid = resolveClientUuid(request.get("clientUuid"));
+            if (clientUuid == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "message", "Invalid clientUuid"));
+            }
+            String sourceKey = ExecutionKeys.lump(user.getId(), clientUuid);
+            Optional<InvestmentExecution> existing = executionRepository.findBySourceKey(sourceKey);
+            if (existing.isPresent()) {
+                InvestmentExecution duplicate = existing.get();
+                return ResponseEntity.ok(Map.of(
+                        "success", true,
+                        "message", "Investment already queued.",
+                        "executionId", duplicate.getId(),
+                        "amount", duplicate.getAmount(),
+                        "status", duplicate.getStatus(),
+                        "queued", true,
+                        "duplicate", true));
+            }
+
             // Create investment execution with type and symbol information
             InvestmentExecution execution = new InvestmentExecution(
                     user,
@@ -273,6 +298,8 @@ public class InvestmentController {
                     investmentType,
                     selectedSymbol,
                     fundingSource);
+            execution.setSourceKey(sourceKey);
+            // nightKey stays null: one-per-night is for recurring rows only (spec 5.4)
 
             execution = executionRepository.save(execution);
 
@@ -403,5 +430,17 @@ public class InvestmentController {
         return frequency != null &&
                 (frequency.equals("weekly") || frequency.equals("biweekly") ||
                         frequency.equals("monthly") || frequency.equals("semimonthly"));
+    }
+
+    /** The client's per-tap UUID normalized to lowercase; a fresh one when absent; null when present but not a UUID. */
+    static String resolveClientUuid(Object raw) {
+        if (raw == null || raw.toString().isBlank()) {
+            return UUID.randomUUID().toString();
+        }
+        try {
+            return UUID.fromString(raw.toString().trim().toLowerCase(Locale.ROOT)).toString();
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

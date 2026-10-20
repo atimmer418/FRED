@@ -1,5 +1,6 @@
 package com.investingapp.backend.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -62,8 +63,13 @@ public class InvestmentExecution {
     private LocalDateTime updatedAt;
 
     // Paycheck Autopilot, Phase 0 (V6).
+    // JsonIgnore: InvestmentController serializes this entity directly (history list, dashboard).
+    // schedule.user is itself a lazy association, and the schedule carries achRequestId, so letting
+    // Jackson walk this edge would pull a second user object and a sensitive ACH id into the
+    // response the first time a recurring execution's row gets serialized.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "schedule_id")
+    @JsonIgnore
     private InvestmentSchedule schedule;
 
     /** SCHED:{scheduleId}:{dueDate} or LUMP:{userId}:{clientUuid}; UNIQUE in V6. */

@@ -4,12 +4,15 @@ import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface InvestmentExecutionRepository extends JpaRepository<InvestmentExecution, Long> {
@@ -129,5 +132,35 @@ public interface InvestmentExecutionRepository extends JpaRepository<InvestmentE
      * Funding completed, not merely initiated.
      */
     boolean existsByUserAndFundingCompletedAtIsNotNull(User user);
+
+    // --- Phase 0 idempotency (spec 3.8, 5.4, 5.5) -------------------------------------------
+
+    /** source_key pre-check: one row per MANUAL due date per schedule, one per lump-sum tap. */
+    boolean existsBySourceKey(String sourceKey);
+
+    /** night_key pre-check: one recurring execution per user per Eastern night. */
+    boolean existsByNightKey(String nightKey);
+
+    /** Lump-sum duplicate short-circuit on POST /api/investments/execute. */
+    Optional<InvestmentExecution> findBySourceKey(String sourceKey);
+
+    /** 11:59 selection: still SCHEDULED and created before the batch started (a 23:59:xx row runs the next night). */
+    List<InvestmentExecution> findByStatusAndCreatedAtBefore(ExecutionStatus status, LocalDateTime before);
+
+    /** Deferral guard (T10 bank change, T11 deletion): is money in flight for this user. */
+    boolean existsByUserAndStatus(User user, ExecutionStatus status);
+
+    /** Deferral guard (T11): the most recent settled transfer, for the 60-day window. */
+    Optional<InvestmentExecution> findTopByUserAndFundingCompletedAtIsNotNullOrderByFundingCompletedAtDesc(User user);
+
+    /**
+     * Compare-and-set claim before the Alpaca POST (spec 5.5 b). Only rows nobody attempted yet
+     * are claimed; the caller compares the row count with the batch size and skips the user when
+     * they differ. Run it in a REQUIRES_NEW TransactionTemplate so the claim commits before HTTP.
+     */
+    @Modifying
+    @Query("UPDATE InvestmentExecution e SET e.transferAttemptedAt = :at, e.batchNight = :night " +
+           "WHERE e.id IN :ids AND e.transferAttemptedAt IS NULL AND e.alpacaTransferId IS NULL")
+    int claimForBatch(@Param("ids") List<Long> ids, @Param("at") LocalDateTime at, @Param("night") LocalDate night);
 
 }

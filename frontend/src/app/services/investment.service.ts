@@ -151,10 +151,13 @@ export class InvestmentService {
   }
 
   /**
-   * Create a manual investment execution
+   * Create a manual investment execution. clientUuid is generated once per call: a retry of this
+   * request carries the same UUID and the backend returns the first row instead of queueing a
+   * second one (decision 18).
    */
   createManualInvestment(amount: number): Observable<any> {
-    return this.http.post(`${this.apiUrl}/execute`, { amount }, {
+    const clientUuid = crypto.randomUUID();
+    return this.http.post(`${this.apiUrl}/execute`, { amount, clientUuid }, {
       headers: this.getAuthHeaders()
     });
   }

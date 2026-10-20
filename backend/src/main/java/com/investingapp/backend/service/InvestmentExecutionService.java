@@ -3,6 +3,7 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.model.*;
 import com.investingapp.backend.repository.*;
+import com.investingapp.backend.service.ScheduledInvestmentProcessor.ProcessOutcome;
 import com.investingapp.backend.util.AnalyticsBands;
 import com.investingapp.backend.util.EasternTime;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
@@ -12,7 +13,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -80,6 +85,12 @@ public class InvestmentExecutionService {
 
     @Autowired
     private JobLockService jobLockService;
+
+    @Autowired
+    private ScheduledInvestmentProcessor scheduledInvestmentProcessor;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     /**
      * Check if markets are currently open (US Eastern Time)
@@ -217,9 +228,11 @@ public class InvestmentExecutionService {
     }
 
     /**
-     * Process all queued lump sum investments at end of day (11:59 PM ET)
-     * Runs daily to consolidate all pending investments into a single batch ACH
-     * transfer
+     * The 11:59 PM ET batch (spec 5.5, decision 15). Selection, grouping, summing, the marker
+     * match and the one-POST-per-user shape are unchanged. Hardening: (a) rows created before the
+     * batch started, so a 23:59:xx row runs the next night instead of never; (b) a conditional
+     * claim committed before the Alpaca POST, so a crash or a double run never sends two
+     * transfers; (c) a null relationship id fails fast with no POST.
      */
     @Scheduled(cron = "0 59 23 * * *", zone = "America/New_York")
     public void processEndOfDayBatchTransfers() {
@@ -229,162 +242,118 @@ public class InvestmentExecutionService {
                     JobLocks.EOD_BATCH);
             return;
         }
-        logger.info("Starting end-of-day batch transfer processing");
-
         try {
-            // Find all users with scheduled executions from today
-            LocalDate today = LocalDate.now(MARKET_TIMEZONE);
-            List<InvestmentExecution> scheduledExecutions = executionRepository
-                    .findByStatus(InvestmentExecution.ExecutionStatus.SCHEDULED)
-                    .stream()
-                    .filter(exec -> exec.getCreatedAt().toLocalDate().equals(today))
-                    .filter(exec -> exec.getErrorMessage() != null &&
-                            exec.getErrorMessage().contains("Queued for end-of-day"))
-                    .toList();
-
-            // Group by user
-            Map<User, List<InvestmentExecution>> executionsByUser = scheduledExecutions.stream()
-                    .collect(Collectors.groupingBy(InvestmentExecution::getUser));
-
-            logger.info("Found {} users with queued investments for end-of-day processing",
-                    executionsByUser.size());
-
-            // Process each user's batch
-            for (Map.Entry<User, List<InvestmentExecution>> entry : executionsByUser.entrySet()) {
-                User user = entry.getKey();
-                List<InvestmentExecution> userExecutions = entry.getValue();
-
-                try {
-                    logger.info("Processing {} queued investments for user {}",
-                            userExecutions.size(), user.getEmail());
-                    processBatchedInvestments(user, userExecutions);
-                } catch (Exception e) {
-                    logger.error("Failed to process end-of-day batch for user {}: {}",
-                            user.getEmail(), e.getMessage(), e);
-                }
-            }
-
-            logger.info("Completed end-of-day batch transfer processing");
-
-        } catch (Exception e) {
-            logger.error("Error in end-of-day batch transfer processing: {}", e.getMessage(), e);
+            runEndOfDayBatch(EasternTime.now());
         } finally {
             jobLockService.release(JobLocks.EOD_BATCH);
         }
     }
 
+    /** Package-private so the unit test drives one batch with a fixed batchStart, without gate or lock. */
+    void runEndOfDayBatch(LocalDateTime batchStart) {
+        logger.info("Starting end-of-day batch transfer processing at {}", batchStart);
+        LocalDate batchNight = batchStart.toLocalDate();
+
+        try {
+            // (a) every SCHEDULED row created before this batch started, still carrying the queue marker
+            List<InvestmentExecution> scheduledExecutions = executionRepository
+                    .findByStatusAndCreatedAtBefore(InvestmentExecution.ExecutionStatus.SCHEDULED, batchStart)
+                    .stream()
+                    .filter(exec -> exec.getErrorMessage() != null &&
+                            exec.getErrorMessage().contains("Queued for end-of-day"))
+                    .toList();
+
+            Map<User, List<InvestmentExecution>> executionsByUser = scheduledExecutions.stream()
+                    .collect(Collectors.groupingBy(InvestmentExecution::getUser));
+            logger.info("Found {} users with queued investments for end-of-day processing", executionsByUser.size());
+
+            for (Map.Entry<User, List<InvestmentExecution>> entry : executionsByUser.entrySet()) {
+                User user = entry.getKey();
+                List<InvestmentExecution> userExecutions = entry.getValue();
+                try {
+                    // (c) fail fast, tested BEFORE any decrypt: no relationship id means no POST
+                    if (user.getAlpacaAchRelationshipId() == null) {
+                        failBatchWithoutPost(user, userExecutions, "No ACH relationship on file");
+                        continue;
+                    }
+
+                    // (b) claim in its own committed transaction before the POST
+                    List<Long> ids = userExecutions.stream().map(InvestmentExecution::getId).toList();
+                    int claimed = claimInNewTransaction(ids, batchStart, batchNight);
+                    if (claimed != ids.size()) {
+                        logger.error("alert.batch_claim_short user={} expected={} claimed={}", user.getId(), ids.size(), claimed);
+                        continue;
+                    }
+                    // Mirror the claim on the managed entities: this runs inside the class-level
+                    // transaction and Hibernate writes every column on flush, so saving these rows
+                    // with a null transferAttemptedAt would erase the claim.
+                    for (InvestmentExecution execution : userExecutions) {
+                        execution.setTransferAttemptedAt(batchStart);
+                        execution.setBatchNight(batchNight);
+                    }
+
+                    logger.info("Processing {} queued investments for user {}", userExecutions.size(), user.getEmail());
+                    processBatchedInvestments(user, userExecutions);
+                } catch (Exception e) {
+                    logger.error("Failed to process end-of-day batch for user {}: {}", user.getEmail(), e.getMessage(), e);
+                }
+            }
+            logger.info("Completed end-of-day batch transfer processing");
+        } catch (Exception e) {
+            logger.error("Error in end-of-day batch transfer processing: {}", e.getMessage(), e);
+        }
+    }
+
+    /** The compare-and-set claim (spec 5.5 b), committed before the Alpaca POST. */
+    private int claimInNewTransaction(List<Long> ids, LocalDateTime batchStart, LocalDate batchNight) {
+        TransactionTemplate claimTx = new TransactionTemplate(transactionManager);
+        claimTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        Integer claimed = claimTx.execute(status -> executionRepository.claimForBatch(ids, batchStart, batchNight));
+        return claimed == null ? 0 : claimed;
+    }
+
+    /** Spec 5.5 (c): every row FUNDING_FAILED, the user told once with the total, nothing posted. */
+    private void failBatchWithoutPost(User user, List<InvestmentExecution> executions, String details) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (InvestmentExecution execution : executions) {
+            execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
+            execution.setErrorMessage(details);
+            executionRepository.save(execution);
+            total = total.add(execution.getAmount());
+        }
+        logger.error("alert.batch_no_relationship user={} rows={} total={}", user.getId(), executions.size(), total);
+        notifyUserOfFailure(user, total, "Funding Failed", details);
+    }
+
     /**
-     * Process all scheduled investments for the given Eastern calendar day.
-     *
-     * <p>{@code todayET} is computed once by InvestmentScheduler and passed down so a run that
-     * straddles midnight keeps one calendar day (spec 5.8).
+     * The 11:55 PM ET coordinator (spec 5.3). Lists tonight's eligible schedules, then hands each
+     * id to ScheduledInvestmentProcessor.processOne, which runs in its own REQUIRES_NEW transaction.
+     * NOT_SUPPORTED here is what makes that true: under the class-level @Transactional every
+     * schedule would share one transaction and one unique-key violation would roll back the night.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void processScheduledInvestments(LocalDate todayET) {
         logger.info("Starting scheduled investment processing for {}", todayET);
 
-        // Get all investment schedules that are ready for execution
-        // This includes schedules where either:
-        // 1. nextInvestmentDate is today or past due (recurring investments)
-        // 2. startDate is today (first-time investments starting today)
-        List<InvestmentSchedule> readySchedules = investmentScheduleService.getSchedulesReadyForInvestment(todayET);
+        List<Long> scheduleIds = investmentScheduleService.getSchedulesReadyForInvestment(todayET)
+                .stream()
+                .map(InvestmentSchedule::getId)
+                .toList();
+        logger.info("Found {} investment schedules ready for execution", scheduleIds.size());
 
-        logger.info("Found {} investment schedules ready for execution", readySchedules.size());
-
-        for (InvestmentSchedule schedule : readySchedules) {
+        Map<ProcessOutcome, Integer> tally = new EnumMap<>(ProcessOutcome.class);
+        for (Long scheduleId : scheduleIds) {
+            ProcessOutcome outcome;
             try {
-                User user = schedule.getUser();
-
-                // Check if this schedule should be processed today
-                boolean shouldProcessToday = false;
-                String reason = "";
-
-                if (schedule.getStartDate() != null && schedule.getStartDate().equals(todayET)) {
-                    shouldProcessToday = true;
-                    reason = "start date is today";
-                } else if (schedule.getNextInvestmentDate() != null &&
-                        !schedule.getNextInvestmentDate().isAfter(todayET)) {
-                    shouldProcessToday = true;
-                    reason = "next investment date is due";
-                }
-
-                if (!shouldProcessToday) {
-                    logger.debug("Skipping schedule {} for user {} - not due today",
-                            schedule.getId(), user.getEmail());
-                    continue;
-                }
-
-                logger.info("Queueing recurring investment schedule {} for user {} - {}",
-                        schedule.getId(), user.getEmail(), reason);
-
-                // Create new investment execution
-                InvestmentExecution execution = createInvestmentExecution(schedule);
-
-                // Queue for end-of-day batch processing
-                // This ensures recurring + lump sum investments are batched together
-                execution.setStatus(InvestmentExecution.ExecutionStatus.SCHEDULED);
-                execution.setErrorMessage("Queued for end-of-day batch processing (recurring investment)");
-                executionRepository.save(execution);
-
-                logger.info("Recurring investment {} queued for end-of-day processing", execution.getId());
-
-                // Update the schedule's next investment date for next cycle
-                updateScheduleAfterExecution(schedule, todayET);
-
+                outcome = scheduledInvestmentProcessor.processOne(scheduleId, todayET);
             } catch (Exception e) {
-                logger.error("Error processing investment schedule {} for user {}",
-                        schedule.getId(), schedule.getUser().getEmail(), e);
-
-                // Could add notification logic here for schedule processing failures
+                // One user's failure (a unique-key race, a broken row) never stops the night
+                logger.error("Error processing investment schedule {} for {}", scheduleId, todayET, e);
+                outcome = ProcessOutcome.FAILED;
             }
+            tally.merge(outcome, 1, Integer::sum);
         }
-
-        logger.info("Completed scheduled investment processing");
-    }
-
-    /**
-     * Create a new InvestmentExecution from an InvestmentSchedule
-     */
-    private InvestmentExecution createInvestmentExecution(InvestmentSchedule schedule) {
-        InvestmentExecution execution = new InvestmentExecution();
-        execution.setUser(schedule.getUser());
-        execution.setAmount(schedule.getInvestmentAmount());
-        execution.setScheduledDate(EasternTime.now());
-        execution.setStatus(InvestmentExecution.ExecutionStatus.SCHEDULED);
-        execution.setInvestmentType("recurring");
-        execution.setFundingSource("bank");
-        // Note: InvestmentExecution doesn't have a direct link back to schedule
-
-        return executionRepository.save(execution);
-    }
-
-    /**
-     * Update schedule's next investment date after successful execution, relative to todayET
-     */
-    private void updateScheduleAfterExecution(InvestmentSchedule schedule, LocalDate todayET) {
-        LocalDate currentNextDate = schedule.getNextInvestmentDate();
-        LocalDate newNextDate = schedule.calculateNextInvestmentDate(todayET);
-
-        schedule.setNextInvestmentDate(newNextDate);
-        // Note: We don't update startDate - it remains as the original start date
-
-        // Increment monthly streak if we have not already done so this calendar month
-        LocalDate lastIncrement = schedule.getLastStreakIncrementDate();
-        boolean alreadyIncrementedThisMonth = lastIncrement != null
-                && lastIncrement.getYear() == todayET.getYear()
-                && lastIncrement.getMonth() == todayET.getMonth();
-
-        if (!alreadyIncrementedThisMonth) {
-            int current = schedule.getMonthlyStreak() != null ? schedule.getMonthlyStreak() : 0;
-            schedule.setMonthlyStreak(current + 1);
-            schedule.setLastStreakIncrementDate(todayET);
-            logger.info("Monthly streak incremented to {} for schedule {}", current + 1, schedule.getId());
-        }
-
-        // Save the updated schedule
-        investmentScheduleRepository.save(schedule);
-
-        logger.info("Updated schedule {} next investment date from {} to {}",
-                schedule.getId(), currentNextDate, newNextDate);
+        logger.info("Completed scheduled investment processing for {}: {}", todayET, tally);
     }
 
     /**
@@ -481,8 +450,8 @@ public class InvestmentExecutionService {
             throw new RuntimeException("ACH transfer failed: " + transferResponse.errorMessage);
         }
 
-        // Note: Next investment date will be updated when the schedule is processed
-        // after successful execution via updateScheduleAfterExecution()
+        // Note: Next investment date is updated by ScheduledInvestmentProcessor, which already
+        // ran before this fallback path, so no schedule update happens here.
     }
 
     /**
@@ -1156,6 +1125,18 @@ public class InvestmentExecutionService {
             emailService.sendEmail(execution.getUser().getEmail(), subject, message);
         } catch (Exception e) {
             logger.error("Failed to send failure notification for execution {}", execution.getId(), e);
+        }
+    }
+
+    private void notifyUserOfFailure(User user, BigDecimal amount, String reason, String details) {
+        try {
+            String subject = "Investment Execution Failed";
+            String message = String.format(
+                    "Your scheduled investment of $%s could not be executed.\n\nReason: %s\n\nDetails: %s\n\nPlease check your account settings and ensure sufficient funds are available.",
+                    amount, reason, details);
+            emailService.sendEmail(user.getEmail(), subject, message);
+        } catch (Exception e) {
+            logger.error("Failed to send batch failure notification to user {}", user.getId(), e);
         }
     }
 

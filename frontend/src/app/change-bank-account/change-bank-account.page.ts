@@ -50,6 +50,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
   
   private plaidHandler: any;
   private plaidSubscription: any;
+  private currentLinkToken: string | null = null;
 
   constructor(
     private router: Router,
@@ -131,8 +132,10 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         if (!linkToken) {
           throw new Error('Failed to retrieve link_token from backend.');
         }
-        storePlaidLinkSession(linkToken, 'change-bank');
+        // Not stored yet: a stored token must only ever exist once openPlaid has passed the PIN
+        // step-up, so the OAuth return can trust it and skip the gate.
       }
+      this.currentLinkToken = linkToken;
 
       const config: any = {
         token: linkToken,
@@ -172,7 +175,10 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
       }
       this.plaidHandler = Plaid.create(config);
       if (resuming) {
-        // The PIN step-up already passed before Link left for the bank; Plaid requires open() straight away.
+        // A stored token only exists because openPlaid already passed the PIN step-up before Link
+        // left for the bank, so it is safe to reopen straight away. Consume it now so a stale
+        // oauth_state_id still in the URL cannot later pair with a fresh, different token.
+        clearPlaidLinkSession();
         this.plaidHandler.open();
       }
 
@@ -204,6 +210,11 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         }
       }
 
+      // The step-up gate (or its deliberate absence) just passed: only now is it true that a
+      // stored token proves Link really left for the bank after a verified step-up.
+      if (this.currentLinkToken) {
+        storePlaidLinkSession(this.currentLinkToken, 'change-bank');
+      }
       this.plaidHandler.open();
     } else {
       this.analytics.trackErrorShown('bank_link', 'portfolio', 'inline_banner', null, false);

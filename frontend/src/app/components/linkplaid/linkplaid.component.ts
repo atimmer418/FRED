@@ -150,6 +150,9 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
       }
       this.plaidHandler = Plaid.create(config);
       if (resuming) {
+        // The stored link_token is single-use for the OAuth round trip; consume it now so a stale
+        // oauth_state_id still in the URL cannot later pair with a fresh, different token.
+        clearPlaidLinkSession();
         // Plaid requires open() straight after an OAuth return so Link picks up where it left off.
         this.plaidHandler.open();
       }

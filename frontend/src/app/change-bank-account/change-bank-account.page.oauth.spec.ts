@@ -16,6 +16,7 @@ const RETURN_HREF = 'https://fredvested.com/change-bank-account?oauth_state_id=a
 describe('ChangeBankAccountPage OAuth round trip', () => {
   let http: jasmine.SpyObj<HttpClient>;
   let open: jasmine.Spy;
+  let pinService: jasmine.SpyObj<PinService>;
   let page: ChangeBankAccountPage;
   let plaidConfig: any;
 
@@ -27,13 +28,15 @@ describe('ChangeBankAccountPage OAuth round trip', () => {
     http = jasmine.createSpyObj<HttpClient>('HttpClient', ['get', 'post']);
     http.post.and.returnValue(of({ link_token: 'link-sandbox-token' }));
     http.get.and.returnValue(of({}));
+    pinService = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
+    pinService.hasPin.and.returnValue(Promise.resolve(false));
     page = new ChangeBankAccountPage(
       jasmine.createSpyObj<Router>('Router', ['navigate']),
       http,
       jasmine.createSpyObj<ToastService>('ToastService', ['showToast']),
       jasmine.createSpyObj<PlaidService>('PlaidService', ['refreshBankAccountData']),
       jasmine.createSpyObj<PasskeyService>('PasskeyService', ['startAuthentication']),
-      jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']),
+      pinService,
       jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
       jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown', 'screen']),
     );
@@ -44,15 +47,21 @@ describe('ChangeBankAccountPage OAuth round trip', () => {
     sessionStorage.clear();
   });
 
-  it('posts mode link and stores the token with the change-bank marker', async () => {
+  it('posts mode link on page load but does not store the session until openPlaid passes the step-up gate', async () => {
     await page['initializePlaidLink']();
 
     expect(http.post.calls.mostRecent().args[1]).toEqual({ mode: 'link' });
-    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-sandbox-token');
-    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBe('change-bank');
     expect(plaidConfig.token).toBe('link-sandbox-token');
     expect(plaidConfig.receivedRedirectUri).toBeUndefined();
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
     expect(open).not.toHaveBeenCalled();
+
+    await page.openPlaid();
+
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-sandbox-token');
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBe('change-bank');
+    expect(open).toHaveBeenCalled();
   });
 
   it('on the OAuth return it resumes Link with the stored token and opens it without a new token request', async () => {
@@ -67,13 +76,26 @@ describe('ChangeBankAccountPage OAuth round trip', () => {
     expect(open).toHaveBeenCalled();
   });
 
+  it('consumes the stored session as soon as it resumes, so a stale oauth_state_id cannot replay it', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'change-bank');
+    spyOn(page as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await page['initializePlaidLink']();
+
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
   it('success and exit both clear the stored link session', async () => {
     await page['initializePlaidLink']();
+    await page.openPlaid();
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-sandbox-token');
     plaidConfig.onExit(null, {});
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
 
     await page['initializePlaidLink']();
+    await page.openPlaid();
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-sandbox-token');
     plaidConfig.onSuccess('public-sandbox-token', {});
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();

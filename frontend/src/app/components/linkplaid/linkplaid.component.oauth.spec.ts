@@ -62,6 +62,17 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     expect(open).toHaveBeenCalled();
   });
 
+  it('consumes the stored session as soon as it resumes, so a stale oauth_state_id cannot replay it', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await component.initializePlaidLink();
+
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
   it('an OAuth return with no stored token starts Link over with a fresh token', async () => {
     spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
 

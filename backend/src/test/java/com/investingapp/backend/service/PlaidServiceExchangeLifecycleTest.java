@@ -2,8 +2,10 @@ package com.investingapp.backend.service;
 
 import com.investingapp.backend.controller.PlaidController;
 import com.investingapp.backend.dto.ErrorCodeResponse;
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.PlaidItemStatus;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
 import com.investingapp.backend.util.EasternTime;
@@ -56,6 +58,8 @@ class PlaidServiceExchangeLifecycleTest {
     private PlaidApi plaidApi;
     private UserRepository userRepository;
     private PlaidItemLifecycleService lifecycleService;
+    private InvestmentScheduleRepository investmentScheduleRepository;
+    private EncryptionService encryptionService;
     private final List<Runnable> submitted = new ArrayList<>();
 
     @BeforeEach
@@ -65,10 +69,12 @@ class PlaidServiceExchangeLifecycleTest {
         plaidApi = mock(PlaidApi.class);
         userRepository = mock(UserRepository.class);
         lifecycleService = mock(PlaidItemLifecycleService.class);
-        EncryptionService encryptionService = mock(EncryptionService.class);
+        investmentScheduleRepository = mock(InvestmentScheduleRepository.class);
+        encryptionService = mock(EncryptionService.class);
 
         ReflectionTestUtils.setField(plaidService, "plaidApi", plaidApi);
         ReflectionTestUtils.setField(plaidService, "userRepository", userRepository);
+        ReflectionTestUtils.setField(plaidService, "investmentScheduleRepository", investmentScheduleRepository);
         ReflectionTestUtils.setField(plaidService, "encryptionService", encryptionService);
         ReflectionTestUtils.setField(plaidService, "accountStatusService", mock(AccountStatusService.class));
         ReflectionTestUtils.setField(plaidService, "analyticsOutboxService", mock(AnalyticsOutboxService.class));
@@ -78,6 +84,7 @@ class PlaidServiceExchangeLifecycleTest {
 
         when(encryptionService.encrypt(RAW_ACCESS_TOKEN)).thenReturn("ENC:new");
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+        when(investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(any(User.class))).thenReturn(Optional.empty());
 
         Call<ItemPublicTokenExchangeResponse> exchange = mock(Call.class);
         when(exchange.execute()).thenReturn(Response.success(
@@ -164,6 +171,22 @@ class PlaidServiceExchangeLifecycleTest {
         assertThat(submitted).hasSize(1);
         submitted.get(0).run();
         verify(lifecycleService).recordConsentAfterLink(99L, RAW_ACCESS_TOKEN);
+    }
+
+    @Test
+    void legacySplitRowFallsBackToTheScheduleWhenTheUserFieldIsNull() throws IOException {
+        // Legacy split row: the deleted /update-ach-request-id endpoint wrote only the schedule's
+        // achRequestId; alpacaAchRelationshipId was never populated, so the direct copy
+        // (isPresent(appUser.getAlpacaAchRelationshipId())) has nothing to capture.
+        User user = lockedUser();
+        InvestmentSchedule schedule = new InvestmentSchedule();
+        schedule.setAchRequestId("rel-legacy");
+        when(investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user)).thenReturn(Optional.of(schedule));
+        when(encryptionService.encrypt("rel-legacy")).thenReturn("ENC:rel-legacy");
+
+        plaidService.exchangePublicTokenAndLinkUser(PUBLIC_TOKEN, user);
+
+        assertThat(user.getPreviousAchRelationshipId()).isEqualTo("ENC:rel-legacy");
     }
 
     @Test

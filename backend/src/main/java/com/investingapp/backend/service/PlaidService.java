@@ -1,7 +1,9 @@
 // src/main/java/com/investingapp/backend/service/PlaidService.java
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
@@ -54,6 +56,9 @@ public class PlaidService {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private InvestmentScheduleRepository investmentScheduleRepository;
 
     @Value("${plaid.client.name}")
     private String plaidClientName;
@@ -196,6 +201,14 @@ public class PlaidService {
         }
         if (isPresent(appUser.getAlpacaAchRelationshipId())) {
             appUser.setPreviousAchRelationshipId(appUser.getAlpacaAchRelationshipId());
+        } else {
+            // Legacy split row: the deleted /update-ach-request-id endpoint could write the
+            // schedule's achRequestId while saveAchRelationshipToUser silently swallowed a failure
+            // to write alpacaAchRelationshipId on the user. Without this fallback adopt's
+            // firstEverAdoption recognizer (previousAchRelationshipId null AND achRequestId null,
+            // both true here once resetForBankChange runs) would mistake this bank change for a
+            // first adoption and unpause a schedule the user may have paused themselves.
+            previousRelationshipIdFromSchedule(appUser).ifPresent(appUser::setPreviousAchRelationshipId);
         }
 
         String encryptedAccessToken = encryptionService.encrypt(rawAccessToken);
@@ -272,6 +285,18 @@ public class PlaidService {
 
     private static boolean isPresent(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /**
+     * Fallback for a legacy split row (achRequestId on the schedule, no alpacaAchRelationshipId on
+     * the user): the encrypted relationship id to remember as "previous", or empty when the
+     * schedule carries nothing to protect.
+     */
+    private Optional<String> previousRelationshipIdFromSchedule(User appUser) {
+        return investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(appUser)
+                .map(InvestmentSchedule::getAchRequestId)
+                .filter(id -> id != null && !id.isBlank())
+                .map(encryptionService::encrypt);
     }
 
     /**

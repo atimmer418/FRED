@@ -115,6 +115,29 @@ class AchRelationshipServiceTest {
     }
 
     @Test
+    void adoptNeverUnpausesLegacySplitRowAfterBankChange() {
+        // Legacy split row: the deleted /update-ach-request-id endpoint wrote only the schedule's
+        // achRequestId; alpacaAchRelationshipId was never populated, so the direct-copy capture had
+        // nothing to copy.
+        schedule.setAchRequestId("rel-legacy");
+        schedule.setIsPaused(true);
+
+        // The bank-change capture falls back to the schedule's achRequestId when
+        // alpacaAchRelationshipId is null (PlaidService.exchangePublicTokenAndLinkUser /
+        // AccountStatusService.handleBankAccountChange), then resetForBankChange nulls the schedule
+        // id and holds it.
+        user.setPreviousAchRelationshipId("rel-legacy");
+        schedule.setAchRequestId(null);
+        schedule.setHoldReason(HoldReason.BANK_CHANGE);
+
+        assertThat(service.adopt(user, rel("rel-new", "QUEUED", null))).isEqualTo(AdoptResult.ADOPTED);
+
+        assertThat(user.getPreviousAchRelationshipId()).isEqualTo("rel-legacy");
+        assertThat(schedule.getIsPaused()).isTrue();
+        assertThat(schedule.getAchRequestId()).isEqualTo("rel-new");
+    }
+
+    @Test
     void adoptRefusesMaskMismatch() {
         assertThat(service.adopt(user, rel("rel-new", "QUEUED", "****9999"))).isEqualTo(AdoptResult.REFUSED_MASK_MISMATCH);
 

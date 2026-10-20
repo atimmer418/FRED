@@ -1,5 +1,6 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -280,5 +282,22 @@ class AccountStatusServiceKycDecidedTest {
         service.attemptAchCreation(user);
 
         verify(achRelationshipService).ensureRelationship(user);
+    }
+
+    @Test
+    @DisplayName("a bank change falls back to the schedule's achRequestId when the user field was never populated (legacy split row)")
+    void bankChangeFallsBackToTheScheduleWhenTheUserFieldIsNull() {
+        // Legacy split row: the deleted /update-ach-request-id endpoint wrote only the schedule's
+        // achRequestId; alpacaAchRelationshipId was never populated, so the direct copy has nothing
+        // to capture.
+        InvestmentSchedule schedule = new InvestmentSchedule();
+        schedule.setAchRequestId("rel-legacy");
+        when(investmentScheduleService.getCurrentSchedule(user)).thenReturn(Optional.of(schedule));
+        when(encryptionService.encrypt("rel-legacy")).thenReturn("ENC:rel-legacy");
+
+        service.handleBankAccountChange(user);
+
+        assertThat(user.getPreviousAchRelationshipId()).isEqualTo("ENC:rel-legacy");
+        verify(investmentScheduleService).resetForBankChange(user);
     }
 }

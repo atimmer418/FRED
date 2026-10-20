@@ -2,6 +2,7 @@ package com.investingapp.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
@@ -203,6 +204,20 @@ public class AccountStatusService {
     public void handleBankAccountChange(User user) {
         if (user.getAlpacaAchRelationshipId() != null) {
             user.setPreviousAchRelationshipId(user.getAlpacaAchRelationshipId());
+        } else if (user.getPreviousAchRelationshipId() == null) {
+            // Legacy split row: the deleted /update-ach-request-id endpoint could write the
+            // schedule's achRequestId while saveAchRelationshipToUser silently swallowed a failure
+            // to write alpacaAchRelationshipId on the user. Without this fallback adopt's
+            // firstEverAdoption recognizer (previousAchRelationshipId null AND achRequestId null,
+            // both true here once resetForBankChange runs) would mistake this bank change for a
+            // first adoption and unpause a schedule the user may have paused themselves. Guarded on
+            // previousAchRelationshipId already being null so this stays a no-op on the exchange
+            // path, where PlaidService's own capture (direct copy or this same schedule fallback)
+            // already ran before calling here.
+            investmentScheduleService.getCurrentSchedule(user)
+                    .map(InvestmentSchedule::getAchRequestId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .ifPresent(id -> user.setPreviousAchRelationshipId(encryptionService.encrypt(id)));
         }
         investmentScheduleService.resetForBankChange(user);
         if (!achRelationshipService.cancelAllActive(user)) {

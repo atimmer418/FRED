@@ -20,7 +20,7 @@ Do not edit the three recovered files. If something in them needs a correction o
 
 It lives under `FREDdocs/`, outside every Gradle source set (`backend/build.gradle` declares no extra source directories), so `./gradlew compileJava` never sees it. Keep it here. Never copy it under `backend/src`. VS Code's Java extension may underline it if you open it in the editor; that is cosmetic and expected.
 
-One correction to the 2026 spec: section 4.4 names `PaycheckDetectionService.factorFor` as a fourth frequency-factor copy to fold into the `InvestmentFrequency` enum. The recovered class has no factorFor method. Its only frequency logic is `frequenciesMatch` (lines 239 to 260), which compares two frequency strings and never holds a monthly factor. The enum work touches only the three live readers.
+Note on frequency factors: spec section 4.4 already states that this recovered class has no factor method (the enum replaces three live copies). Its only frequency logic is `frequenciesMatch` (lines 239 to 260), which compares two frequency strings and is not a factor table.
 
 ## What the 2025 attempt did
 

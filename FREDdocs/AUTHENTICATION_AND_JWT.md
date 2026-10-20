@@ -164,6 +164,7 @@ Since there are no passwords, recovery uses **Biometric Identity Verification** 
 /api/passkey/**                      — passkey start/finish (used by lock screen)
 /api/dev/**                          — dev-only, and additionally profile-gated + X-Dev-Tools-Key gated
 /api/user/should-prompt-reauth       — smart re-auth check
+/api/plaid/webhook                   (POST only in practice) verified by the Plaid-Verification ES256 JWT filter, not by a JWT
 ```
 
 ### Authenticated (JWT required)

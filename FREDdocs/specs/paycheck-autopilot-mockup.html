@@ -1,0 +1,737 @@
+<title>Paycheck Autopilot Mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+<style>
+  /* ---------- surround (viewer theme aware) ---------- */
+  :root {
+    --sur-bg: #eef1f6;
+    --sur-text: #1e293b;
+    --sur-muted: #64748b;
+    --sur-line: #d7dde8;
+    --sur-chip: #ffffff;
+    --bezel: #0b1220;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --sur-bg: #0f172a;
+      --sur-text: #e2e8f0;
+      --sur-muted: #94a3b8;
+      --sur-line: #243049;
+      --sur-chip: #1b2439;
+      --bezel: #020617;
+    }
+  }
+  :root[data-theme="dark"] {
+    --sur-bg: #0f172a;
+    --sur-text: #e2e8f0;
+    --sur-muted: #94a3b8;
+    --sur-line: #243049;
+    --sur-chip: #1b2439;
+    --bezel: #020617;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--sur-bg);
+    color: var(--sur-text);
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    padding-inline: 16px;
+    padding-block: 28px 48px;
+  }
+  .wrap { max-width: 1320px; margin: 0 auto; }
+
+  .intro { display: flex; flex-direction: column; gap: 6px; margin-bottom: 26px; }
+  .intro h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  .intro p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--sur-muted); max-width: 62ch; }
+  .intro .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .chip {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    background: var(--sur-chip); border: 1px solid var(--sur-line); color: var(--sur-muted);
+    padding: 5px 10px; border-radius: 999px;
+  }
+
+  .stage { display: flex; flex-wrap: wrap; gap: 36px 44px; justify-content: center; align-items: flex-start; }
+  .frame-col { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 390px; }
+  .caption { font-size: 13px; line-height: 1.5; color: var(--sur-muted); padding: 0 6px; }
+  .caption strong { color: var(--sur-text); font-weight: 700; }
+  .step-tag {
+    align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--sur-muted); padding: 0 6px;
+  }
+
+  /* ---------- device ---------- */
+  .device {
+    width: 100%; max-width: 390px;
+    background: var(--bezel);
+    border-radius: 54px;
+    padding: 12px;
+    box-shadow: 0 30px 60px -24px rgba(2, 6, 23, 0.45), 0 0 0 1px rgba(255,255,255,0.06) inset;
+  }
+  .screen {
+    height: 820px;
+    border-radius: 42px;
+    overflow: hidden;
+    background: #f8fafc;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .statusbar {
+    height: 44px; flex-shrink: 0;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 28px 4px 30px;
+    font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em;
+  }
+  .statusbar .material-symbols-outlined { font-size: 17px; }
+  .statusbar .right { display: flex; gap: 5px; align-items: center; }
+  .island {
+    position: absolute; top: 11px; left: 50%; transform: translateX(-50%);
+    width: 118px; height: 34px; border-radius: 20px; background: #0b1220;
+  }
+
+  /* ---------- ported from investment-schedule.component.scss ---------- */
+  .ios-page {
+    --schedule-primary: #2563EB;
+    --schedule-bg: #f8fafc;
+    --schedule-text: #0f172a;
+    --schedule-gray: #6b7280;
+    --schedule-border: #e5e7eb;
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+    font-family: 'Manrope', sans-serif;
+    color: var(--schedule-text);
+    background: var(--schedule-bg);
+  }
+  .material-symbols-outlined {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal; font-style: normal; font-size: 24px; line-height: 1;
+    letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap;
+    direction: ltr; -webkit-font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  .toolbar { min-height: 52px; background: #f8fafc; display: flex; align-items: center; flex-shrink: 0; }
+  .header-inner { display: flex; align-items: center; padding: 0 4px; width: 100%; }
+  .header-title {
+    font-size: 18px; font-weight: 800; letter-spacing: -0.015em; text-align: center; flex: 1; margin: 0;
+    color: var(--schedule-text);
+  }
+  .header-inner--back .header-title { padding-right: 40px; }
+  .back-btn {
+    display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%;
+    background: transparent; border: none; cursor: pointer; color: var(--schedule-text); flex-shrink: 0;
+  }
+  .back-btn .material-symbols-outlined { font-size: 20px; }
+  .back-btn:focus-visible { outline: 2px solid rgba(37,99,235,0.45); outline-offset: 2px; }
+
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .scroll::-webkit-scrollbar { width: 0; }
+  .content-inner { display: flex; flex-direction: column; padding: 16px 18px 16px; min-height: 100%; }
+  .content-inner--tight .hero-section { margin-bottom: 20px; }
+  .content-inner--tight .form-section { margin-bottom: 20px; }
+
+  .hero-section { flex-shrink: 0; margin-bottom: 28px; }
+  .hero-title {
+    font-size: 32px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.2; text-align: center; margin: 0;
+    color: var(--schedule-text); text-wrap: balance;
+  }
+  .hero-subtitle { font-size: 14px; color: var(--schedule-gray); margin: 8px 0 0; line-height: 1.4; text-align: center; padding: 0 28px; }
+  .hero-subtitle .line { display: block; }
+
+  .field-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--schedule-gray); margin: 0 0 10px;
+  }
+  .form-section { margin-bottom: 28px; }
+
+  .form-row-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+  .form-row-pair .form-section { margin-bottom: 0; display: flex; flex-direction: column; }
+  .form-row-pair .field-row { margin-top: auto; }
+  .info-tip--below-pair { margin-top: 0; margin-bottom: 16px; }
+
+  .field-row { display: flex; align-items: center; border-bottom: 2px solid var(--schedule-primary); padding-bottom: 6px; }
+  .field-row--static { border-bottom-color: var(--schedule-border); }
+  .field-prefix { font-size: 17px; font-weight: 500; color: var(--schedule-gray); margin-right: 4px; flex-shrink: 0; }
+  .field-input {
+    font-family: 'Manrope', sans-serif; font-size: 17px; font-weight: 500; color: var(--schedule-text);
+    background: transparent; border: none; outline: none; width: 100%; -webkit-appearance: none; appearance: none;
+    padding: 0; min-width: 0;
+  }
+  .field-input:focus-visible { outline: 2px solid rgba(37,99,235,0.35); outline-offset: 4px; border-radius: 4px; }
+  .field-input::placeholder { color: #cbd5e1; font-weight: 400; }
+  .field-static { font-size: 17px; font-weight: 500; color: var(--schedule-text); flex: 1; }
+  .field-static--muted { color: #cbd5e1; font-weight: 400; }
+  .field-trail { font-size: 16px; color: var(--schedule-gray); flex-shrink: 0; font-variation-settings: 'FILL' 1; }
+
+  .info-tip {
+    display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 12px;
+    background: rgba(37, 99, 235, 0.07); border: 1px solid rgba(37, 99, 235, 0.18); margin-top: 12px;
+  }
+  .info-tip-icon { color: var(--schedule-primary); font-size: 18px; flex-shrink: 0; font-variation-settings: 'FILL' 1; margin-top: 1px; }
+  .info-tip-text { font-size: 13px; color: var(--schedule-primary); margin: 0; line-height: 1.5; font-weight: 500; }
+
+  .projection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .projection-card { background: white; border: 1px solid var(--schedule-border); border-radius: 12px; padding: 12px 16px; text-align: center; }
+  .projection-value { font-size: 20px; font-weight: 700; color: var(--schedule-primary); margin: 0 0 4px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .projection-label { font-size: 12px; color: var(--schedule-gray); margin: 0; font-weight: 500; }
+  .projection-card--compact { padding: 10px 12px; }
+  .projection-card--compact .projection-value { margin: 0; font-size: 18px; line-height: 1.2; }
+  .projection-suffix { font-size: 13px; font-weight: 600; color: var(--schedule-gray); margin-left: 2px; letter-spacing: 0; }
+  .goal-comparison { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+  .goal-comparison .material-symbols-outlined { font-size: 17px; flex-shrink: 0; font-variation-settings: 'FILL' 1; }
+  .goal-comparison.on-track { color: #16a34a; }
+  .goal-comparison.short { color: #b45309; }
+
+  .transfer-section { border-top: 1px solid var(--schedule-border); padding-top: 16px; }
+  .disclosure-row { display: flex; align-items: center; gap: 16px; }
+  .disclosure-text { flex: 1; }
+  .disclosure-text h3 { font-size: 15px; font-weight: 600; color: var(--schedule-text); margin: 0 0 3px; }
+  .disclosure-text p { font-size: 13px; color: var(--schedule-gray); margin: 0; line-height: 1.4; }
+  .toggle-btn {
+    flex-shrink: 0; min-width: 52px; height: 30px; border-radius: 15px; border: 1.5px solid var(--schedule-border);
+    background: #f1f5f9; font-family: 'Manrope', sans-serif; font-size: 12px; font-weight: 700; color: var(--schedule-gray);
+    cursor: pointer; padding: 0 12px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s ease;
+  }
+  .toggle-btn:active { transform: scale(0.96); }
+  .toggle-btn:focus-visible { outline: 2px solid rgba(37,99,235,0.45); outline-offset: 2px; }
+
+  .cta-footer {
+    flex-shrink: 0;
+    padding: 10px 34px 26px;
+    background: white; border-top: 1px solid #f1f5f9;
+    box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.07);
+  }
+  .cta-btn {
+    width: 100%; height: 52px; border-radius: 12px; border: none; font-family: 'Manrope', sans-serif;
+    font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: all 0.25s ease; cursor: pointer;
+  }
+  .cta-btn:not(:disabled) { background: #2563EB; color: white; box-shadow: 0 8px 20px -4px rgba(37, 99, 235, 0.4); }
+  .cta-btn:not(:disabled):active { transform: scale(0.99); background: #1d4ed8; }
+  .cta-btn:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; box-shadow: none; }
+  .cta-btn .material-symbols-outlined { font-size: 20px; }
+  .cta-btn:focus-visible { outline: 2px solid rgba(37,99,235,0.45); outline-offset: 3px; }
+
+  /* ---------- new blocks, composed from the same primitives ---------- */
+  .pay-card {
+    background: #eff6ff;
+    border: 2px solid var(--schedule-primary);
+    border-radius: 12px;
+    padding: 14px 14px 12px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .pay-head { display: flex; align-items: flex-start; gap: 10px; }
+  .pay-name { flex: 1; min-width: 0; }
+  .pay-name .freq-pill-title { font-size: 16px; font-weight: 700; color: var(--schedule-primary); margin: 0 0 3px; }
+  .pay-name .freq-pill-desc { font-size: 11px; color: var(--schedule-primary); opacity: 0.8; margin: 0; line-height: 1.35; }
+  .pay-chip {
+    flex-shrink: 0; font-size: 12px; font-weight: 700; background: var(--schedule-primary); color: white;
+    padding: 4px 10px; border-radius: 20px; white-space: nowrap;
+  }
+  .pay-stats {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+    border-top: 1px solid rgba(37, 99, 235, 0.18); padding-top: 12px;
+  }
+  .pay-stat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .pay-stat:nth-child(2) { text-align: center; }
+  .pay-stat:nth-child(3) { text-align: right; }
+  .pay-stat .field-label { font-size: 10px; margin: 0; color: var(--schedule-primary); opacity: 0.8; }
+  .pay-stat .pay-val { font-size: 13px; font-weight: 700; color: var(--schedule-text); font-variant-numeric: tabular-nums; }
+  .pay-source { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--schedule-gray); min-width: 0; }
+  .pay-source .material-symbols-outlined { font-size: 15px; color: var(--schedule-gray); flex-shrink: 0; }
+
+  .manual-section { margin-top: 0; margin-bottom: 0; }
+
+  /* Screen 2: recap pills, one line */
+  .recap-row { display: flex; align-items: center; gap: 6px; justify-content: center; flex-wrap: nowrap; margin: 12px 0 0; }
+  .recap-pill {
+    font-size: 12px; font-weight: 700; background: #eff6ff; color: var(--schedule-primary);
+    padding: 5px 10px; border-radius: 20px; white-space: nowrap;
+  }
+
+  /* Screen 2: pager (How it works / What you're authorizing) */
+  .pager-tabs { display: flex; border-bottom: 1px solid var(--schedule-border); margin-bottom: 14px; }
+  .pager-tab {
+    flex: 1; background: transparent; border: none; cursor: pointer; padding: 0 0 8px;
+    font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--schedule-gray); position: relative; display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .pager-tab::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--schedule-primary);
+    opacity: 0; transition: opacity 0.2s ease;
+  }
+  .pager-tab.active { color: var(--schedule-primary); }
+  .pager-tab.active::after { opacity: 1; }
+  .pager-tab:focus-visible { outline: 2px solid rgba(37,99,235,0.45); outline-offset: -2px; border-radius: 4px; }
+  .pager-tab .material-symbols-outlined { font-size: 14px; }
+  .pager {
+    display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; margin: 0 -18px; padding: 0 18px;
+    scroll-padding: 0 18px;
+  }
+  .pager::-webkit-scrollbar { display: none; }
+  .pager-panel { flex: 0 0 100%; scroll-snap-align: start; scroll-snap-stop: always; min-width: 0; padding-right: 0; }
+  .pager-panel + .pager-panel { margin-left: 36px; }
+  .pager-dots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
+  .pager-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; transition: background 0.2s ease; }
+  .pager-dot.active { background: var(--schedule-primary); }
+
+  .how-list { display: flex; flex-direction: column; gap: 10px; }
+  .how-row { display: flex; align-items: flex-start; gap: 12px; }
+  .how-icon {
+    width: 36px; height: 36px; border-radius: 10px; background: #eff6ff; color: var(--schedule-primary);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 19px;
+    font-variation-settings: 'FILL' 1;
+  }
+  .how-row .disclosure-text h3 { font-size: 14px; }
+  .how-row .disclosure-text p { font-size: 12.5px; }
+  .swipe-hint {
+    display: flex; align-items: center; justify-content: flex-end; gap: 2px; margin-top: 8px;
+    font-size: 12px; font-weight: 700; color: var(--schedule-primary);
+  }
+  .swipe-hint .material-symbols-outlined { font-size: 16px; }
+
+  .auth-copy p { font-size: 12px; color: var(--schedule-gray); line-height: 1.55; margin: 0 0 8px; }
+  .auth-copy p:last-child { margin-bottom: 0; }
+  .auth-copy strong { color: var(--schedule-text); font-weight: 700; }
+  .auth-ready {
+    display: flex; align-items: center; gap: 7px; margin-top: 12px;
+    font-size: 12.5px; font-weight: 600; color: #16a34a;
+  }
+  .auth-ready .material-symbols-outlined { font-size: 16px; font-variation-settings: 'FILL' 1; }
+
+  .projections-section { margin-top: auto; margin-bottom: 0; }
+
+  /* Searching state */
+  .pay-card--pending { background: white; border-color: var(--schedule-border); }
+  .pending-row { display: flex; align-items: center; gap: 10px; }
+  .spinner {
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+    border: 2px solid rgba(37,99,235,0.2); border-top-color: var(--schedule-primary);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pending-row .freq-pill-title { font-size: 14px; font-weight: 700; color: var(--schedule-text); margin: 0 0 2px; }
+  .pending-row .freq-pill-desc { font-size: 11px; color: var(--schedule-gray); margin: 0; }
+  .skel { height: 10px; border-radius: 6px; background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%); background-size: 200% 100%; animation: shimmer 1.4s ease infinite; }
+  .skel--w60 { width: 60%; } .skel--w40 { width: 40%; } .skel--w75 { width: 75%; }
+  .skel-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; border-top: 1px solid var(--schedule-border); padding-top: 12px; }
+  .skel-grid > div { display: flex; flex-direction: column; gap: 6px; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spinner, .skel { animation: none; }
+    .cta-btn, .toggle-btn, .pager-tab::after, .pager-dot { transition: none; }
+    .pager { scroll-behavior: auto; }
+  }
+  @media (max-width: 440px) {
+    .device { border-radius: 40px; padding: 8px; }
+    .screen { border-radius: 32px; height: 780px; }
+    .pay-stats { grid-template-columns: 1fr 1fr; }
+    .pay-stat:nth-child(2) { text-align: right; }
+    .pay-stat:nth-child(3) { text-align: left; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>Investment Schedule, after Plaid finds the paycheck</h1>
+    <p>Two screens in the investment-schedule page's current styling, each sized to fit without scrolling. Screen 1 shows what Plaid found and the pre-filled amount. Screen 2 pages between "How it works" and "What you're authorizing"; Authorize unlocks once the second panel has been seen.</p>
+    <div class="meta">
+      <span class="chip">Mockup</span>
+      <span class="chip">Example data</span>
+      <span class="chip">Styles from investment-schedule.component.scss</span>
+    </div>
+  </header>
+
+  <div class="stage">
+
+    <!-- ================= SCREEN 1: PAYCHECK FOUND ================= -->
+    <div class="frame-col">
+      <span class="step-tag">Screen 1 of 2</span>
+      <div class="device">
+        <div class="screen">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right">
+              <span class="material-symbols-outlined">signal_cellular_alt</span>
+              <span class="material-symbols-outlined">wifi</span>
+              <span class="material-symbols-outlined">battery_full</span>
+            </span>
+          </div>
+
+          <div class="ios-page">
+            <div class="toolbar">
+              <div class="header-inner"><h2 class="header-title">Investment Schedule</h2></div>
+            </div>
+
+            <div class="scroll">
+              <div class="content-inner">
+
+                <div class="hero-section">
+                  <h1 class="hero-title">Found your paycheck.</h1>
+                  <p class="hero-subtitle">
+                    <span class="line">FRED will invest each time it lands.</span>
+                    <span class="line">Nothing moves until it does.</span>
+                  </p>
+                </div>
+
+                <div class="form-section">
+                  <p class="field-label">Your paycheck</p>
+                  <div class="pay-card">
+                    <div class="pay-head">
+                      <div class="pay-name">
+                        <p class="freq-pill-title">Acme Corp</p>
+                        <p class="freq-pill-desc">Shows up as ACME CORP PAYROLL · 6 deposits found</p>
+                      </div>
+                      <span class="pay-chip">Every other Friday</span>
+                    </div>
+                    <div class="pay-stats">
+                      <div class="pay-stat">
+                        <span class="field-label">Last deposit</span>
+                        <span class="pay-val">$2,418 · Oct 9</span>
+                      </div>
+                      <div class="pay-stat">
+                        <span class="field-label">Next expected</span>
+                        <span class="pay-val">Fri, Oct 23</span>
+                      </div>
+                      <div class="pay-stat">
+                        <span class="field-label">Per year</span>
+                        <span class="pay-val">26 paychecks</span>
+                      </div>
+                    </div>
+                    <div class="pay-source">
+                      <span class="material-symbols-outlined">account_balance</span>
+                      <span>Chase Checking ••••4821</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-row-pair">
+                  <div class="form-section">
+                    <p class="field-label">Invest per paycheck</p>
+                    <div class="field-row">
+                      <span class="field-prefix">$</span>
+                      <input id="amt-found" class="field-input" type="number" inputmode="numeric" value="300" min="1" maxlength="5" aria-label="Investment amount per paycheck">
+                    </div>
+                  </div>
+                  <div class="form-section">
+                    <p class="field-label">First investment</p>
+                    <div class="field-row field-row--static">
+                      <span class="field-static">Fri, Oct 23</span>
+                      <span class="material-symbols-outlined field-trail" title="Detected from your paycheck">auto_awesome</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="info-tip info-tip--below-pair">
+                  <span class="material-symbols-outlined info-tip-icon">info</span>
+                  <p class="info-tip-text">Set from your <strong>$650/mo</strong> goal: <strong><span data-amt-fmt>$300</span></strong> each payday. Change it anytime.</p>
+                </div>
+
+                <div class="form-section transfer-section manual-section">
+                  <div class="disclosure-row">
+                    <div class="disclosure-text">
+                      <h3>Not exactly right?</h3>
+                      <p>Pick your own pay frequency, date, and amount instead.</p>
+                    </div>
+                    <button type="button" class="toggle-btn">Set manually</button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="cta-footer">
+              <button class="cta-btn" type="button">
+                <span>Looks good</span>
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><strong>Paycheck found.</strong> What Plaid detected, the pre-filled per-paycheck amount, and "Not exactly right?" as the single way out to the manual page. The amount is live: edit it here and screen 2 updates.</p>
+    </div>
+
+    <!-- ================= SCREEN 2: AUTHORIZE ================= -->
+    <div class="frame-col">
+      <span class="step-tag">Screen 2 of 2</span>
+      <div class="device">
+        <div class="screen">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right">
+              <span class="material-symbols-outlined">signal_cellular_alt</span>
+              <span class="material-symbols-outlined">wifi</span>
+              <span class="material-symbols-outlined">battery_full</span>
+            </span>
+          </div>
+
+          <div class="ios-page">
+            <div class="toolbar">
+              <div class="header-inner header-inner--back">
+                <button class="back-btn" type="button" aria-label="Back"><span class="material-symbols-outlined">arrow_back_ios_new</span></button>
+                <h2 class="header-title">Authorize Investing</h2>
+              </div>
+            </div>
+
+            <div class="scroll">
+              <div class="content-inner content-inner--tight">
+
+                <div class="hero-section">
+                  <h1 class="hero-title">Put it on autopilot.</h1>
+                  <p class="hero-subtitle"><span class="line">Here's exactly what happens every payday.</span></p>
+                  <div class="recap-row">
+                    <span class="recap-pill" data-amt-fmt>$300</span>
+                    <span class="recap-pill">Every other Friday</span>
+                    <span class="recap-pill">Starts Oct 23</span>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <div class="pager-tabs" role="tablist">
+                    <button class="pager-tab active" type="button" role="tab" id="tab-how" data-index="0" aria-selected="true">How it works</button>
+                    <button class="pager-tab" type="button" role="tab" id="tab-auth" data-index="1" aria-selected="false">What you're authorizing</button>
+                  </div>
+                  <div class="pager" id="pager">
+                    <div class="pager-panel" role="tabpanel" aria-labelledby="tab-how">
+                      <div class="how-list">
+                        <div class="how-row">
+                          <span class="material-symbols-outlined how-icon">account_balance</span>
+                          <div class="disclosure-text">
+                            <h3>Your paycheck lands</h3>
+                            <p>FRED spots the Acme Corp deposit in your Chase checking account.</p>
+                          </div>
+                        </div>
+                        <div class="how-row">
+                          <span class="material-symbols-outlined how-icon">sync_alt</span>
+                          <div class="disclosure-text">
+                            <h3>That night, FRED starts the transfer</h3>
+                            <p><span data-amt-fmt>$300</span> leaves the same account by bank transfer. It clears in 1 to 3 business days, then it's invested.</p>
+                          </div>
+                        </div>
+                        <div class="how-row">
+                          <span class="material-symbols-outlined how-icon">shield</span>
+                          <div class="disclosure-text">
+                            <h3>No paycheck, no transfer</h3>
+                            <p>Late or smaller paycheck? FRED skips that one and lets you know.</p>
+                          </div>
+                        </div>
+                        <div class="how-row">
+                          <span class="material-symbols-outlined how-icon">work</span>
+                          <div class="disclosure-text">
+                            <h3>New job? FRED follows it</h3>
+                            <p>The first paycheck from a new employer is skipped while FRED confirms it. From the second on, FRED invests automatically.</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="swipe-hint">Swipe to see what you're authorizing <span class="material-symbols-outlined">chevron_right</span></div>
+                    </div>
+                    <div class="pager-panel auth-copy" role="tabpanel" aria-labelledby="tab-auth">
+                      <p>By tapping Authorize, you allow FRED to transfer <strong><span data-amt-fmt>$300</span></strong> from <strong>Chase Checking ••••4821</strong> to your FRED investment account the night each Acme Corp paycheck is deposited, about 26 times a year. The money is invested once the transfer clears, usually within 1 to 3 business days. The amount never goes up without your OK.</p>
+                      <p>Stop or change this anytime in Settings. Changes made before 11:55 PM ET apply that same night. We'll email you a copy of this authorization.</p>
+                      <p>FRED finds your paycheck using transaction history you shared through Plaid. We never see your bank login.</p>
+                      <div class="auth-ready"><span class="material-symbols-outlined">check_circle</span>You've seen everything. Authorize when ready.</div>
+                    </div>
+                  </div>
+                  <div class="pager-dots" aria-hidden="true">
+                    <span class="pager-dot active" data-index="0"></span>
+                    <span class="pager-dot" data-index="1"></span>
+                  </div>
+                </div>
+
+                <div class="form-section transfer-section projections-section">
+                  <p class="field-label">Projections</p>
+                  <div class="projection-grid">
+                    <div class="projection-card projection-card--compact">
+                      <p class="projection-value"><span id="proj-month">$651</span><span class="projection-suffix">/mo</span></p>
+                    </div>
+                    <div class="projection-card projection-card--compact">
+                      <p class="projection-value"><span id="proj-year">$7,812</span><span class="projection-suffix">/yr</span></p>
+                    </div>
+                  </div>
+                  <div class="goal-comparison on-track" id="goal-line">
+                    <span class="material-symbols-outlined">check_circle</span>
+                    <span id="goal-text">You're on track to meet your goal!</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="cta-footer">
+              <button class="cta-btn" type="button" id="authorize-btn" disabled>
+                <span>Authorize</span>
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><strong>Authorize.</strong> Reached from "Looks good". One-line recap pills, then a pager: "How it works" on the first panel, "What you're authorizing" on the second. Authorize stays disabled until the user swipes (or taps) to the second panel. Projections sit below. Nothing scrolls.</p>
+    </div>
+
+    <!-- ================= SCREEN 1 VARIANT: STILL LOOKING ================= -->
+    <div class="frame-col">
+      <span class="step-tag">Screen 1, before detection finishes</span>
+      <div class="device">
+        <div class="screen">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right">
+              <span class="material-symbols-outlined">signal_cellular_alt</span>
+              <span class="material-symbols-outlined">wifi</span>
+              <span class="material-symbols-outlined">battery_full</span>
+            </span>
+          </div>
+
+          <div class="ios-page">
+            <div class="toolbar">
+              <div class="header-inner"><h2 class="header-title">Investment Schedule</h2></div>
+            </div>
+
+            <div class="scroll">
+              <div class="content-inner">
+
+                <div class="hero-section">
+                  <h1 class="hero-title">Looking for your paycheck.</h1>
+                  <p class="hero-subtitle">
+                    <span class="line">Plaid is pulling your recent deposits.</span>
+                    <span class="line">This usually takes under a minute.</span>
+                  </p>
+                </div>
+
+                <div class="form-section">
+                  <p class="field-label">Your paycheck</p>
+                  <div class="pay-card pay-card--pending">
+                    <div class="pending-row">
+                      <span class="spinner" aria-hidden="true"></span>
+                      <div>
+                        <p class="freq-pill-title">Scanning Chase Checking ••••4821</p>
+                        <p class="freq-pill-desc">Looking for a regular deposit from an employer</p>
+                      </div>
+                    </div>
+                    <div class="skel-grid" aria-hidden="true">
+                      <div><span class="skel skel--w60"></span><span class="skel skel--w75"></span></div>
+                      <div><span class="skel skel--w60"></span><span class="skel skel--w75"></span></div>
+                      <div><span class="skel skel--w40"></span><span class="skel skel--w75"></span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-row-pair">
+                  <div class="form-section">
+                    <p class="field-label">Invest per paycheck</p>
+                    <div class="field-row field-row--static">
+                      <span class="field-prefix">$</span>
+                      <span class="field-static field-static--muted">0</span>
+                    </div>
+                  </div>
+                  <div class="form-section">
+                    <p class="field-label">First investment</p>
+                    <div class="field-row field-row--static">
+                      <span class="field-static field-static--muted">Pending</span>
+                      <span class="material-symbols-outlined field-trail">auto_awesome</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="info-tip info-tip--below-pair">
+                  <span class="material-symbols-outlined info-tip-icon">info</span>
+                  <p class="info-tip-text">Your goal is <strong>$650/mo</strong>. Once we know how often you're paid, we'll suggest a per-paycheck amount.</p>
+                </div>
+
+                <div class="form-section transfer-section manual-section">
+                  <div class="disclosure-row">
+                    <div class="disclosure-text">
+                      <h3>Don't want to wait?</h3>
+                      <p>Pick your own pay frequency, date, and amount instead.</p>
+                    </div>
+                    <button type="button" class="toggle-btn">Set manually</button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="cta-footer">
+              <button class="cta-btn" type="button" disabled>
+                <span>Looks good</span>
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><strong>Still looking.</strong> Screen 1 for the first minute after the bank link, while Plaid finishes its first pull. "Looks good" stays disabled until a paycheck is confirmed. If nothing turns up, this becomes today's manual page.</p>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  (function () {
+    var GOAL = 650;            // survey monthly goal (example)
+    var PER_MONTH = 2.17;      // biweekly factor, same as the component
+    var input = document.getElementById('amt-found');
+    var month = document.getElementById('proj-month');
+    var year = document.getElementById('proj-year');
+    var goalLine = document.getElementById('goal-line');
+    var goalText = document.getElementById('goal-text');
+    var fmt = function (n) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+    };
+    function render() {
+      var amt = Math.max(0, parseInt(input.value, 10) || 0);
+      var monthly = amt * PER_MONTH;
+      month.textContent = fmt(monthly);
+      year.textContent = fmt(monthly * 12);
+      var shortfall = Math.max(0, Math.round(GOAL - monthly));
+      if (amt > 0 && shortfall === 0) {
+        goalLine.className = 'goal-comparison on-track';
+        goalLine.firstElementChild.textContent = 'check_circle';
+        goalText.textContent = "You're on track to meet your goal!";
+      } else {
+        goalLine.className = 'goal-comparison short';
+        goalLine.firstElementChild.textContent = 'warning';
+        goalText.textContent = fmt(shortfall) + ' short of your monthly goal';
+      }
+      var nodes = document.querySelectorAll('[data-amt-fmt]');
+      for (var i = 0; i < nodes.length; i++) nodes[i].textContent = fmt(amt);
+    }
+    input.addEventListener('input', render);
+    render();
+
+    // Screen 2 pager: tabs + swipe, Authorize unlocks once panel 2 has been seen
+    var pager = document.getElementById('pager');
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.pager-tab'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.pager-dot'));
+    var authorize = document.getElementById('authorize-btn');
+    var seenAuth = false;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function setActive(i) {
+      tabs.forEach(function (t, j) { t.classList.toggle('active', j === i); t.setAttribute('aria-selected', j === i ? 'true' : 'false'); });
+      dots.forEach(function (d, j) { d.classList.toggle('active', j === i); });
+      if (i === 1 && !seenAuth) { seenAuth = true; authorize.disabled = false; }
+    }
+    function goTo(i) {
+      var panel = pager.children[i];
+      pager.scrollTo({ left: panel.offsetLeft - pager.offsetLeft - 18, behavior: reduce ? 'auto' : 'smooth' });
+      setActive(i);
+    }
+    tabs.forEach(function (t) { t.addEventListener('click', function () { goTo(parseInt(t.dataset.index, 10)); }); });
+    var raf = null;
+    pager.addEventListener('scroll', function () {
+      if (raf) return;
+      raf = requestAnimationFrame(function () {
+        raf = null;
+        var w = pager.clientWidth;
+        var i = Math.round(pager.scrollLeft / w);
+        setActive(Math.max(0, Math.min(1, i)));
+      });
+    });
+  })();
+</script>

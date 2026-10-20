@@ -210,6 +210,92 @@ and risks nothing.
 persists, and some surfaces offer a retry. There is no global error handler or HTTP interceptor in
 the app, so this event has to be fired at each call site, and it is, at every visible failure.
 
+## Server-side events
+
+Everything above is sent **from the device**. The events below are sent **by the backend**, and
+they are the ones the funnel and the retention maths actually depend on: money moving, and
+compliance decisions. A phone cannot be trusted to report those. It can be offline, be closed
+mid-flow, or simply be wrong about what the broker decided.
+
+### How they get out: a transactional outbox
+
+Each event is written to `analytics_outbox` **inside the same database transaction as the state
+change it describes**. If the KYC submission commits, its event commits with it; if the submission
+rolls back, there is no event claiming something that never happened. A scheduled publisher drains
+the table afterwards.
+
+The table, not PostHog, is the source of truth. Rows are never deleted, and Checkpoint G's SQL
+metrics read this same table, so the money funnel can be recomputed from our own database whatever
+happens to the vendor's copy.
+
+Every row carries its own `event_id` uuid, assigned when it is written and sent to PostHog as the
+event's uuid. A resend after a timeout that actually succeeded is de-duplicated there rather than
+counted twice here. A failure backs off (2, 4, 8 … minutes, capped at an hour) and a row that
+cannot be sent as it stands is parked for a human rather than retried forever.
+
+**Consent.** The row is always written: it is our own ledger. Immediately before publishing, the
+publisher reads the live `users.analytics_opt_out`. An opted-out user's row is kept, marked
+`SUPPRESSED`, and never sent. One case cannot be read live: a rejected KYC hard-deletes the user in
+the same transaction that records the decision, so the row also carries the consent that applied
+when it was written, used only when the user is gone.
+
+### The events
+
+| Event | Properties | When |
+|---|---|---|
+| `freedom_plan_created` | `strategy`, `monthly_income_band`, `monthly_invest_band`, `years_to_freedom` | The plan and its strategy were first persisted. |
+| `passkey_created` | `is_first_passkey` | A passkey was registered. |
+| `kyc_submitted` | `attempt` | A KYC submission was persisted and sent to the broker. |
+| `plaid_linked` | `is_first_link` | A bank was linked through Plaid. |
+| `investment_schedule_created` | `frequency`, `amount_band`, `days_since_signup_band` | A recurring schedule was created. |
+| `trial_started` | `tier`, `trial_length_days` | A trial began. **Not emitted yet: billing owns it.** |
+| `kyc_decided` | `outcome`, `days_to_decision_band` | The broker decided on a submission. |
+| `first_ach_transfer_completed` | `amount_band`, `days_since_schedule_band` | The user's first ACH transfer **settled**. |
+| `ach_transfer_completed` | `transfer_number_band` | Every transfer after the first, once settled. |
+| `subscription_billed` | `tier`, `is_first_billing` | A fee was collected. **Not emitted yet: billing owns it.** |
+| `subscription_cancelled` | `tier`, `days_since_trial_start_band` | A subscription was cancelled. **Not emitted yet: billing owns it.** |
+
+Outcomes for `kyc_decided`: `approved`, `rejected`, `needs_more_info`. Attempts for
+`kyc_submitted`: `1`, `2`, `3_plus`, because the question is "did this take more than one go" and a
+long tail of exact counts identifies people. Day spans are banded: `same_day`, `1_3`, `4_7`,
+`8_14`, `15_30`, `31_90`, `over_90`, `unknown`.
+
+`strategy` is the drawdown strategy from the onboarding plan screen, narrowed to the same four
+values the client uses; the column it comes from is unvalidated client text, so anything else is
+sent as null rather than as a new dimension nobody can interpret.
+
+`monthly_income_band` deserves a note: the server stores the retirement income **annually** (the
+client sends monthly × 12), while the client's own `freedom_plan_changed` bands the **monthly**
+figure. The server divides by twelve before banding, so the two sides are comparable.
+
+### Person properties
+
+Every server event carries a `$set` with `tier`, `kyc_status`, `has_linked_bank`, `has_schedule`
+and `has_funded`. Booleans and enums only. `tier` is narrowed to `core`, `plus`, `pro` or null (the
+legacy stored value `piggy` maps to `core`). `kyc_status` collapses the broker's richer statuses to
+`not_started`, `pending`, `approved`, `rejected`, `action_required` or `other`.
+
+### What is deliberately missing, and why
+
+- **`trial_started`, `subscription_billed`, `subscription_cancelled` are defined but emitted by
+  nothing.** Billing does not exist in this repository: the advisory fee is collected outside
+  Apple, by ACH from the Plaid-linked bank, and a separate billing session owns it. The event
+  names, their exact properties and an emitter interface exist, with tests against a fake, so that
+  work has a contract to call. A test fails if anything other than the emitter references them.
+- **`kyc_decided` fires on `ACTIVE`, not on the broker's intermediate `APPROVED`.** Accounts pass
+  through `APPROVED` on the way to `ACTIVE`, which is the state where the account is actually
+  usable, and only `ACTIVE`, `REJECTED` and `ACTION_REQUIRED` reach a handler today. An account
+  that stalled at `APPROVED` would be a late event, not a lost one.
+- **A repeated `needs_more_info` is possible.** The status poller re-selects `ACTION_REQUIRED`
+  users every five minutes; the only thing suppressing a second event is the equality check that
+  skips a status which has not changed. A document upload that leads to a second review can
+  legitimately produce a second event.
+- **ACH ordinals start from the outbox.** A user whose transfers settled before this table existed
+  will have their next settled transfer reported as their first. `transfer_number_band` counts
+  reported transfers, not historical ones.
+- **Buying-power funding emits nothing.** It completes an investment with cash already at the
+  broker and no bank transfer at all, so counting it would inflate the ACH funnel.
+
 ## Bands
 
 All money goes through `toAmountBand()`. One vocabulary across the whole app, because two screens

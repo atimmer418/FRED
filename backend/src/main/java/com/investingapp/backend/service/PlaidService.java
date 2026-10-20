@@ -4,6 +4,7 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.EncryptionService;
+import com.investingapp.backend.util.ServerAnalyticsEvent;
 // Import for frequency enum
 import com.plaid.client.model.*;
 import com.plaid.client.request.PlaidApi;
@@ -22,6 +23,7 @@ import java.time.LocalDateTime; // For expiry
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +53,9 @@ public class PlaidService {
     @Autowired
     private AccountStatusService accountStatusService;
 
+    @Autowired
+    private AnalyticsOutboxService analyticsOutboxService;
+
     public LinkTokenCreateResponse createLinkTokenForAuthenticatedUser(String clientUserId) throws IOException {
         logger.info("Creating Plaid Link token for authenticated user ID: {}", clientUserId);
         LinkTokenCreateRequestUser user = new LinkTokenCreateRequestUser().clientUserId(clientUserId);
@@ -78,6 +83,12 @@ public class PlaidService {
     @Transactional // Add transactional if multiple DB operations
     public ItemPublicTokenExchangeResponse exchangePublicTokenAndLinkUser(String publicToken, User appUser) throws IOException {
         logger.info("Exchanging public token for user ID: {}", appUser.getId());
+
+        // Read BEFORE anything is overwritten. One endpoint serves the first link, a relink after
+        // Plaid revoked the item, and a deliberate bank change; once the new token is stored the
+        // three are indistinguishable, so this boolean is the only thing that separates them.
+        boolean isFirstLink = !hasExistingPlaidLink(appUser);
+
         ItemPublicTokenExchangeRequest request = new ItemPublicTokenExchangeRequest().publicToken(publicToken);
         Response<ItemPublicTokenExchangeResponse> response = plaidApi.itemPublicTokenExchange(request).execute();
 
@@ -117,12 +128,35 @@ public class PlaidService {
         userRepository.save(appUser);
         logger.info("Plaid item linked to user ID: {} with account details", appUser.getId());
 
+        // Inside this method's own @Transactional boundary, which is also the boundary the token
+        // above is saved in: the event and the link commit together or neither does.
+        //
+        // Nothing here says WHICH bank. No institution name, no item id, no access token, no
+        // account id, name, type or mask. "A bank was linked, and it was/was not their first".
+        Map<String, Object> analyticsProperties = new LinkedHashMap<>();
+        analyticsProperties.put("is_first_link", isFirstLink);
+        analyticsOutboxService.record(ServerAnalyticsEvent.PLAID_LINKED, appUser, analyticsProperties);
+
         // Reset investment schedule and trigger ACH creation if account is already ACTIVE
         accountStatusService.handleBankAccountChange(appUser);
 
         return exchangeResponse;
     }
     
+    /**
+     * Whether this user already had a Plaid link before the current exchange.
+     *
+     * Blank counts as absent: an empty string is not a link, and treating one as a link would
+     * report a genuine first link as a relink.
+     */
+    private static boolean hasExistingPlaidLink(User appUser) {
+        return isPresent(appUser.getPlaidAccessToken()) || isPresent(appUser.getPlaidItemId());
+    }
+
+    private static boolean isPresent(String value) {
+        return value != null && !value.isBlank();
+    }
+
     /**
      * Fetch and populate account details and institution information
      */

@@ -124,4 +124,10 @@ public interface InvestmentExecutionRepository extends JpaRepository<InvestmentE
      */
     @Query("SELECT ie FROM InvestmentExecution ie WHERE FUNCTION('DATE', ie.scheduledDate) = :date")
     List<InvestmentExecution> findByScheduledDate(@Param("date") java.time.LocalDate date);
+    /**
+     * Person-property signal for analytics: has any money of this user's actually landed.
+     * Funding completed, not merely initiated.
+     */
+    boolean existsByUserAndFundingCompletedAtIsNotNull(User user);
+
 }

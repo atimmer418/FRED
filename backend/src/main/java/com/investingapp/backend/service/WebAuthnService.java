@@ -13,6 +13,8 @@ import com.investingapp.backend.repository.UserProgressRepository;
 import com.investingapp.backend.repository.UserSessionRepository;
 import com.investingapp.backend.security.jwt.JwtUtils;
 import com.investingapp.backend.security.services.UserDetailsServiceImpl;
+import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.ServerAnalyticsEvent;
 import com.yubico.webauthn.*;
 import com.yubico.webauthn.data.*;
 import com.yubico.webauthn.exception.AssertionFailedException;
@@ -31,6 +33,10 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class WebAuthnService {
@@ -47,6 +53,7 @@ public class WebAuthnService {
     private final PlaidService plaidService;
     private final EncryptionService encryptionService;
     private final UserService userService;
+    private final AnalyticsOutboxService analyticsOutboxService;
 
     @Autowired
     public WebAuthnService(RelyingParty relyingParty,
@@ -57,7 +64,8 @@ public class WebAuthnService {
                            UserDetailsServiceImpl userDetailsService,
                            PlaidService plaidService,
                            EncryptionService encryptionService,
-                           UserService userService) {
+                           UserService userService,
+                           AnalyticsOutboxService analyticsOutboxService) {
         this.relyingParty = relyingParty;
         this.userRepository = userRepository;
         this.passkeyCredentialRepository = passkeyCredentialRepository;
@@ -67,6 +75,7 @@ public class WebAuthnService {
         this.plaidService = plaidService;
         this.encryptionService = encryptionService;
         this.userService = userService;
+        this.analyticsOutboxService = analyticsOutboxService;
     }
 
     @Transactional
@@ -104,6 +113,18 @@ public class WebAuthnService {
         
         user = userRepository.save(user);
         logger.info("New user created successfully for email: {}", email);
+
+        // freedom_plan_created, inside the @Transactional boundary that just wrote the user and its
+        // plan: the event and the fact it describes commit together or not at all. It fires once
+        // per user because the duplicate-email check above throws before anything is written, and
+        // this is the only path that creates a plan row.
+        Map<String, Object> planProps = new LinkedHashMap<>();
+        planProps.put("strategy", strategySlug(user.getPlanId()));
+        planProps.put("monthly_income_band",
+                AnalyticsBands.amount(monthlyFromAnnual(user.getRetirementIncome())));
+        planProps.put("monthly_invest_band", AnalyticsBands.amount(user.getMonthlyInvestment()));
+        planProps.put("years_to_freedom", AnalyticsBands.years(yearsToFreedom(user.getTimeToFI())));
+        analyticsOutboxService.record(ServerAnalyticsEvent.FREEDOM_PLAN_CREATED, user, planProps);
 
         UserIdentity userIdentity = UserIdentity.builder()
                 .name(user.getEmail())
@@ -179,8 +200,19 @@ public class WebAuthnService {
             );
             newCredential.setFriendlyName("Passkey - " + LocalDateTime.now().withNano(0));
             newCredential.setLastUsedDate(LocalDateTime.now());
+
+            // Counted BEFORE the save, because afterwards the new credential is in the table and
+            // every registration would look like the user's first.
+            Long passkeysBefore = countPasskeysBeforeSave(user);
+
             passkeyCredentialRepository.save(newCredential);
             logger.info("Passkey successfully registered for user {} with credential ID: {}", userEmail, newCredential.getExternalId());
+
+            // passkey_created, inside the @Transactional boundary that just saved the credential.
+            // Both helpers swallow their own failures on purpose: the catch blocks at the bottom of
+            // this method turn any exception into success=false, and a lost analytics row must
+            // never be able to fail a registration that actually worked.
+            recordPasskeyCreated(user, passkeysBefore);
 
             // Mark authFinalize complete transactionally with credential save so the
             // client-side progress GET always sees the flag set, even if the separate
@@ -220,6 +252,126 @@ public class WebAuthnService {
         } catch (Exception e) { // Catch any other unexpected errors during the process
             logger.error("Unexpected error during passkey registration finish for user {}: {}", userEmail, e.getMessage(), e);
             return new RegistrationFinishResponse(false, "An unexpected error occurred during registration.", null, null, userEmail);
+        }
+    }
+
+    // --- Analytics -------------------------------------------------------------------------------
+    // The two registration events, next to the methods that emit them. Both call sites sit inside a
+    // method that was ALREADY @Transactional, so each event is written in the same transaction as
+    // the row it describes and no transaction boundary had to be added or widened.
+
+    /** The first number in a string, for reading the formatted time-to-freedom. */
+    private static final Pattern FIRST_NUMBER = Pattern.compile("\\d+(?:\\.\\d+)?");
+
+    /**
+     * The drawdown strategy as a closed vocabulary.
+     *
+     * <p>users.plan_id is an unvalidated varchar fed straight from the registration body, which
+     * carries only {@code @NotBlank}, so any string a client sends can reach it. These four are the
+     * four strategy cards the client offers (fi-plan-results.component.ts, and PlanStrategy in
+     * analytics-events.ts). Anything else becomes null rather than arriving in PostHog as a new
+     * dimension value nobody can interpret: client-supplied free text must never be sent.
+     */
+    static String strategySlug(String planId) {
+        if (planId == null) {
+            return null;
+        }
+        switch (planId.trim().toLowerCase()) {
+            case "yield":
+                return "yield";
+            case "guardrails":
+                return "guardrails";
+            case "sbloc":
+                return "sbloc";
+            case "annuity":
+                return "annuity";
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * The monthly equivalent of the stored retirement income.
+     *
+     * <p>users.retirement_income is stored ANNUAL: the client collects a monthly figure and sends
+     * monthly * 12 (surveyinitial.component.ts sends {@code rI: this.retirementIncome * 12}). The
+     * client's own freedom_plan_changed bands the MONTHLY figure, so the monthly equivalent is what
+     * goes on the wire here. Banding the annual number instead would put the same user in a
+     * different bucket on each side of the funnel, and the point of the funnel is to read both
+     * sides together.
+     */
+    static Double monthlyFromAnnual(Double annualIncome) {
+        return annualIncome == null ? null : annualIncome / 12.0;
+    }
+
+    /**
+     * Years to freedom, read out of the formatted string the client sends.
+     *
+     * <p>users.time_tofi is display text, not a number: the client writes {@code
+     * years.toFixed(1)}, e.g. "22.8", and an infinity glyph when the plan never reaches freedom at
+     * the current contribution (fi-plan-results.component.ts). Parse leniently and report anything
+     * unreadable as null, which {@link AnalyticsBands#years(Double)} bands as 'never': unreachable
+     * is a fact worth keeping, not a missing value.
+     */
+    static Double yearsToFreedom(String timeToFI) {
+        if (timeToFI == null) {
+            return null;
+        }
+        Matcher matcher = FIRST_NUMBER.matcher(timeToFI.replace(",", ""));
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return Double.valueOf(matcher.group());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * How many passkeys the user had BEFORE the credential save in
+     * {@link #finishRegistrationFlow}.
+     *
+     * <p>Counted before, because afterwards the new credential is in the table and every
+     * registration would look like the user's first. Null means the count itself failed:
+     * is_first_passkey is a boolean with no room for 'unknown', so an unanswerable question sends
+     * no event rather than a guess.
+     *
+     * <p>Never throws. finishRegistrationFlow turns any exception into a failed registration, and
+     * an analytics read must not be able to do that.
+     */
+    Long countPasskeysBeforeSave(User user) {
+        try {
+            return (long) passkeyCredentialRepository.findAllByUser(user).size();
+        } catch (RuntimeException e) {
+            logger.error("analytics: could not count existing passkeys for {}; passkey_created will "
+                    + "not be recorded", user != null ? user.getEmail() : null, e);
+            return null;
+        }
+    }
+
+    /**
+     * Records passkey_created, next to the credential save and inside the same transaction.
+     *
+     * <p>is_first_passkey answers "is this their first passkey right now", from the live credential
+     * count. Account recovery clears a user's passkeys and makes them register again
+     * ({@code RecoveryController.verifyOtp}), so a recovered user reports true a second time. That
+     * is the honest answer to the question the property asks, and the count is the only source of
+     * truth for it.
+     *
+     * <p>Never throws, for the same reason as {@link #countPasskeysBeforeSave}.
+     */
+    void recordPasskeyCreated(User user, Long passkeysBefore) {
+        if (passkeysBefore == null) {
+            return;
+        }
+        try {
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("is_first_passkey", passkeysBefore == 0L);
+            analyticsOutboxService.record(ServerAnalyticsEvent.PASSKEY_CREATED, user, props);
+        } catch (RuntimeException e) {
+            logger.error("analytics: passkey_created not recorded for {}",
+                    user != null ? user.getEmail() : null, e);
         }
     }
 

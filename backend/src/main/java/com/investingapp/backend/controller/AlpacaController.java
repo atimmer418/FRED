@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.investingapp.backend.service.AlpacaApiService;
 import com.investingapp.backend.service.EncryptionService;
+import com.investingapp.backend.service.KycSubmissionService;
 import com.investingapp.backend.service.PlaidToAlpacaService;
 import com.investingapp.backend.security.services.UserDetailsImpl;
 import java.util.Map;
@@ -32,15 +33,18 @@ public class AlpacaController {
     private final PlaidToAlpacaService plaidToAlpacaService;
     private final com.investingapp.backend.repository.UserRepository userRepository;
     private final EncryptionService encryptionService;
+    private final KycSubmissionService kycSubmissionService;
 
     public AlpacaController(AlpacaApiService alpacaApiService, AlpacaService alpacaService, PlaidToAlpacaService plaidToAlpacaService,
             com.investingapp.backend.repository.UserRepository userRepository,
-            EncryptionService encryptionService) {
+            EncryptionService encryptionService,
+            KycSubmissionService kycSubmissionService) {
         this.alpacaApiService = alpacaApiService;
         this.alpacaService = alpacaService;
         this.plaidToAlpacaService = plaidToAlpacaService;
         this.userRepository = userRepository;
         this.encryptionService = encryptionService;
+        this.kycSubmissionService = kycSubmissionService;
     }
 
     @GetMapping("/account")
@@ -64,6 +68,19 @@ public class AlpacaController {
         return null;
     }
 
+    /**
+     * The authenticated user's id, straight from the JWT principal and with no database read.
+     * Used where the row is loaded inside a transaction instead of here, so the entity is managed
+     * by the transaction that writes it and is not loaded twice.
+     */
+    private Long getCurrentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof UserDetailsImpl) {
+            return ((UserDetailsImpl) authentication.getPrincipal()).getId();
+        }
+        return null;
+    }
+
     @PostMapping("/create-account")
     public ResponseEntity<Map<String, Object>> createAccount(
             @Valid @RequestBody CreateAlpacaAccountRequest request,
@@ -83,28 +100,13 @@ public class AlpacaController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
             }
 
-            // Persist Alpaca Account ID, Number, encrypted SSN, and account status
+            // Persist Alpaca Account ID, Number, encrypted SSN, and account status, and record
+            // kyc_submitted in the same transaction. The persistence moved to KycSubmissionService
+            // because this method is not transactional: the analytics event has to commit with the
+            // state change or not at all, and the Alpaca call above must stay outside that
+            // transaction.
             // SECURITY: Use authenticated user from JWT, NOT request body email (prevents privilege escalation)
-            User user = getCurrentUser();
-            if (user != null) {
-                if (result.containsKey("account_id")) {
-                    user.setAlpacaAccountId(encryptionService.encrypt((String) result.get("account_id")));
-                }
-                if (result.containsKey("account_number")) {
-                    user.setAlpacaAccountNumber(encryptionService.encrypt((String) result.get("account_number")));
-                }
-                if (request.getTaxId() != null && !request.getTaxId().isEmpty()) {
-                    user.setSsn(encryptionService.encrypt(request.getTaxId()));
-                    user.setSsnHash(encryptionService.hashSsn(request.getTaxId()));
-                }
-                if (request.getGivenName() != null) {
-                    user.setFirstName(request.getGivenName());
-                }
-                if (request.getFamilyName() != null) {
-                    user.setLastName(request.getFamilyName());
-                }
-                user.setAccountStatus("SUBMITTED");
-                userRepository.save(user);
+            if (kycSubmissionService.persistSubmission(getCurrentUserId(), result, request)) {
                 logger.info("Saved Alpaca account details and set accountStatus=SUBMITTED for user: {}",
                         request.getEmailAddress());
             } else {

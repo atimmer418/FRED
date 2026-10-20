@@ -380,19 +380,37 @@ export const EVENT_NAMES_ARE_COMPLETE: [MissingFromList, ExtraInList] extends [n
   : never = true;
 
 // ---------------------------------------------------------------------------------------------
-// Reserved for the server. Listed so the client cannot accidentally define a second, conflicting
-// version of the same fact, and so a reader can see where the rest of the funnel lives.
-//
-// Activation and money movement: account_created, kyc_submitted, kyc_approved, kyc_rejected,
-// kyc_action_required, bank_link_completed, recurring_created, recurring_paused, recurring_resumed,
-// recurring_amount_changed, deposit_initiated, deposit_settled, deposit_failed, deposit_returned,
-// order_filled, withdrawal_requested, account_closed.
-//
-// Email, from the Resend webhook: email_sent, email_delivered, email_bounced, email_complained,
-// email_clicked. Deliberately not email_opened, which fires without a human.
-//
-// Subscriptions and billing are a separate workstream and appear in neither taxonomy.
+// Reserved for the server.
 // ---------------------------------------------------------------------------------------------
+
+/**
+ * The events the BACKEND emits, listed here so the client cannot define a second, conflicting
+ * version of the same fact, and so a reader of this file can see where the rest of the funnel
+ * lives. The client must never send one of these: they are facts about money moving and about
+ * compliance, which the server knows and the device can only guess at.
+ *
+ * Each is written to the `analytics_outbox` table inside the same database transaction as the
+ * state change it describes, and published from there. The table, not PostHog, is the source of
+ * truth; see FREDdocs/analytics-events.md.
+ *
+ * Email events (from the Resend webhook) are a later checkpoint and are deliberately absent until
+ * that work exists, rather than being promised here.
+ */
+export const SERVER_EVENT_NAMES = [
+  'freedom_plan_created',
+  'passkey_created',
+  'kyc_submitted',
+  'plaid_linked',
+  'investment_schedule_created',
+  'trial_started',
+  'kyc_decided',
+  'first_ach_transfer_completed',
+  'ach_transfer_completed',
+  'subscription_billed',
+  'subscription_cancelled',
+] as const;
+
+export type ServerEventName = (typeof SERVER_EVENT_NAMES)[number];
 
 /**
  * Person properties. Safe, low-cardinality facts about a user, set at identify time.

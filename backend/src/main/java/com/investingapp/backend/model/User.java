@@ -178,6 +178,22 @@ public class User {
     @Column(name = "account_status", length = 30)
     private String accountStatus; // SUBMITTED, APPROVAL_PENDING, APPROVED, ACTIVE, REJECTED, ACTION_REQUIRED
 
+    /**
+     * When the most recent KYC submission was sent to the broker. Stamped on every submission, and
+     * the anchor kyc_decided measures the broker's decision time from: create_date cannot stand in
+     * for it, because that includes all the onboarding drift before KYC.
+     */
+    @Column(name = "kyc_submitted_at")
+    private LocalDateTime kycSubmittedAt;
+
+    /**
+     * How many KYC submissions this user has made. Incremented on each one, and banded to
+     * "1"/"2"/"3_plus" before it ever leaves the server: an exact count on a small user base
+     * identifies the handful of people who had to try many times.
+     */
+    @Column(name = "kyc_attempts", nullable = false, columnDefinition = "INT DEFAULT 0")
+    private Integer kycAttempts = 0;
+
     // IP address tracking for security purposes
     @Column(length = 45) // IPv6 addresses can be up to 45 characters
     private String registrationIpAddress;

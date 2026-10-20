@@ -2,6 +2,8 @@ package com.investingapp.backend.service;
 
 import com.investingapp.backend.model.*;
 import com.investingapp.backend.repository.*;
+import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,6 +68,9 @@ public class InvestmentExecutionService {
 
     @Autowired
     private WashSaleGuardService washSaleGuardService;
+
+    @Autowired
+    private AnalyticsOutboxService analyticsOutboxService;
 
     /**
      * Check if markets are currently open (US Eastern Time)
@@ -390,6 +395,9 @@ public class InvestmentExecutionService {
             logger.info("User has sufficient buying power (${}) for execution {} (${})",
                     buyingPower, execution.getId(), execution.getAmount());
 
+            // No analytics event here on purpose: this path funds from cash already sitting at the
+            // broker, so no ACH transfer settled and no money left a bank. Counting it would
+            // inflate the ACH funnel and corrupt the per-user transfer ordinal.
             execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_COMPLETED);
             execution.setFundingCompletedAt(LocalDateTime.now(MARKET_TIMEZONE));
             execution.setAlpacaAccountId(encryptionService.encrypt(alpacaAccountId)); // snapshot: encrypted at rest
@@ -512,6 +520,16 @@ public class InvestmentExecutionService {
             logger.info("Funding completed for transfer {}. Updating {} associated executions.",
                 execution.getAlpacaTransferId(), batchedExecutions.size());
 
+            // Analytics, read BEFORE anything is marked: one ACH transfer can fund several
+            // executions, and the event describes the TRANSFER, so only the first sibling to
+            // settle reports it. A sibling that already carries fundingCompletedAt means this
+            // transfer has been reported once already and this pass is a retry, or a continuation
+            // after a trading call abandoned an earlier pass part-way through the batch.
+            boolean transferAlreadyReported = batchedExecutions.stream()
+                    .anyMatch(sibling -> sibling.getFundingCompletedAt() != null);
+            BigDecimal settledAmount = settledTransferAmount(transferStatus, batchedExecutions);
+            boolean reportedThisPass = false;
+
             // Mark ALL executions in this batch as funded
             for (InvestmentExecution batchedExec : batchedExecutions) {
                 // Double check status to avoid re-triggering logic if already processed by a parallel check
@@ -519,6 +537,13 @@ public class InvestmentExecutionService {
                     batchedExec.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_COMPLETED);
                     batchedExec.setFundingCompletedAt(LocalDateTime.now(MARKET_TIMEZONE));
                     executionRepository.save(batchedExec);
+
+                    // Emitted here, after a real state change and before initiateTradingForExecution
+                    // can throw, so a mid-batch trading failure cannot cost us the event.
+                    if (!transferAlreadyReported && !reportedThisPass) {
+                        recordAchTransferSettled(execution.getUser(), settledAmount);
+                        reportedThisPass = true;
+                    }
 
                     logger.info("Funding confirmed for execution {}, initiating trading logic", batchedExec.getId());
                     initiateTradingForExecution(batchedExec);
@@ -573,6 +598,90 @@ public class InvestmentExecutionService {
     }
 
     /**
+     * The dollar figure this ACH transfer actually settled for.
+     *
+     * Alpaca's own number is preferred: it is the authority on what moved, and a batch transfer is
+     * raised for the total of the executions it funds. The sum of those executions is the local
+     * fallback for a response that omits the amount, which is the same number computed from our
+     * side of the ledger.
+     */
+    private BigDecimal settledTransferAmount(AlpacaService.AlpacaTransferResponse transferStatus,
+                                             List<InvestmentExecution> batchedExecutions) {
+        if (transferStatus != null && transferStatus.amount != null && transferStatus.amount.signum() > 0) {
+            return transferStatus.amount;
+        }
+        return batchedExecutions.stream()
+                .map(InvestmentExecution::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * Records that one ACH transfer settled, for analytics.
+     *
+     * Called from inside checkExecutionFundingStatus, which runs in the transaction opened by the
+     * public checkFundingStatus() on this @Transactional class, so the event row commits with the
+     * FUNDING_COMPLETED status change or not at all.
+     *
+     * "First" is read from the outbox itself rather than from a new flag: the outbox is never
+     * deleted from and is the ledger the funnel is built on, so it is the one place that can answer
+     * the question durably. The alternative local signal, "has this user any execution with
+     * fundingCompletedAt set", cannot work here: the execution we just marked is already one, and
+     * it would count buying-power fundings, which move no money through a bank.
+     *
+     * Nothing here may break the money path, so every lookup is guarded. record() already swallows
+     * its own failures; the reads around it do not.
+     */
+    private void recordAchTransferSettled(User user, BigDecimal settledAmount) {
+        try {
+            Map<String, Object> properties = new LinkedHashMap<>();
+
+            if (!analyticsOutboxService.hasRecorded(user, ServerAnalyticsEvent.FIRST_ACH_TRANSFER_COMPLETED)) {
+                properties.put("amount_band", AnalyticsBands.amount(settledAmount));
+                // LocalDateTime.now() and not MARKET_TIMEZONE on purpose: this is compared against
+                // InvestmentSchedule.createdAt, which is written with the system default zone, and
+                // two different clock bases can make a same-day settlement look negative.
+                properties.put("days_since_schedule_band",
+                        AnalyticsBands.daysBetween(firstScheduleCreatedAt(user), LocalDateTime.now()));
+                analyticsOutboxService.record(
+                        ServerAnalyticsEvent.FIRST_ACH_TRANSFER_COMPLETED, user, properties);
+                return;
+            }
+
+            // The ordinal of this transfer, counted from the ledger: one first_ach_transfer_completed
+            // plus every ach_transfer_completed after it, plus this one.
+            long transferNumber =
+                    analyticsOutboxService.countRecorded(user, ServerAnalyticsEvent.FIRST_ACH_TRANSFER_COMPLETED)
+                            + analyticsOutboxService.countRecorded(user, ServerAnalyticsEvent.ACH_TRANSFER_COMPLETED)
+                            + 1;
+            properties.put("transfer_number_band", AnalyticsBands.count(transferNumber));
+            analyticsOutboxService.record(ServerAnalyticsEvent.ACH_TRANSFER_COMPLETED, user, properties);
+
+        } catch (RuntimeException e) {
+            logger.error("analytics: failed to record the settled ACH transfer for user {}",
+                    user != null ? user.getId() : null, e);
+        }
+    }
+
+    /**
+     * When this user first committed to a recurring plan, which is what days_since_schedule
+     * measures from: the question is how long it took from setting up a plan to the first money
+     * actually landing, so the OLDEST schedule is the anchor and a later edit must not shorten it.
+     * The schedule's user column is unique today, so there is only ever one row; taking the oldest
+     * keeps the number honest if that ever stops being true.
+     *
+     * Null for a user with no schedule at all, such as a one-off lump sum. AnalyticsBands reports
+     * that as "unknown", which is the truth, rather than as zero days.
+     */
+    private LocalDateTime firstScheduleCreatedAt(User user) {
+        List<InvestmentSchedule> schedules = investmentScheduleRepository.findByUserOrderByCreatedAtDesc(user);
+        if (schedules == null || schedules.isEmpty()) {
+            return null;
+        }
+        return schedules.get(schedules.size() - 1).getCreatedAt();
+    }
+
+    /**
      * Process any queued executions for a user (called when ACH funding completes)
      */
     private void processQueuedExecutionsForUser(User user) {
@@ -604,7 +713,10 @@ public class InvestmentExecutionService {
                 // (it might have been modified during batching)
                 restoreOriginalInvestmentAmount(queuedExecution);
 
-                // Clear the queue message and process directly to trading
+                // Clear the queue message and process directly to trading.
+                // No analytics event here on purpose: these executions ride the transfer that just
+                // settled in checkExecutionFundingStatus, which already reported it. No second
+                // transfer completed, so a second event would double count the same money.
                 queuedExecution.setErrorMessage(null);
                 queuedExecution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_COMPLETED);
                 queuedExecution.setFundingCompletedAt(LocalDateTime.now(MARKET_TIMEZONE));

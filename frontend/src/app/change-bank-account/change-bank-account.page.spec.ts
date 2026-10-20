@@ -19,7 +19,7 @@ interface PlaidConfig {
  * Analytics call sites on change-bank-account.
  *
  * Only errors are tracked here. The exchange that actually re-points the bank is a server event
- * (`bank_link_completed`), so nothing on the success path fires. The failures split three ways:
+ * (`plaid_linked`), so nothing on the success path fires. The failures split three ways:
  * the CDN script (network), the Plaid flow itself (bank_link) and the step-up gate
  * (auth_required), and the display differs because some of them are an inline banner rather than
  * a toast.

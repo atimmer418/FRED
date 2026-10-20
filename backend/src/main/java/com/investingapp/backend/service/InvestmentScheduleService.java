@@ -4,6 +4,8 @@ import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.service.PortfolioService;
+import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,8 +13,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Service
@@ -24,13 +29,16 @@ public class InvestmentScheduleService {
     private final InvestmentScheduleRepository investmentScheduleRepository;
     private final PortfolioService portfolioService;
     private final StreakService streakService;
+    private final AnalyticsOutboxService analyticsOutboxService;
 
     @Autowired
     public InvestmentScheduleService(InvestmentScheduleRepository investmentScheduleRepository,
-            PortfolioService portfolioService, StreakService streakService) {
+            PortfolioService portfolioService, StreakService streakService,
+            AnalyticsOutboxService analyticsOutboxService) {
         this.investmentScheduleRepository = investmentScheduleRepository;
         this.portfolioService = portfolioService;
         this.streakService = streakService;
+        this.analyticsOutboxService = analyticsOutboxService;
     }
 
     /**
@@ -43,6 +51,10 @@ public class InvestmentScheduleService {
 
         // Check if user already has an investment schedule
         Optional<InvestmentSchedule> existingScheduleOpt = getCurrentSchedule(user);
+
+        // Which branch this call took, remembered before the branch mutates anything. Analytics
+        // emits on CREATE only; see the emit block at the end of the method.
+        boolean isNewSchedule = existingScheduleOpt.isEmpty();
 
         InvestmentSchedule schedule;
         if (existingScheduleOpt.isPresent()) {
@@ -167,7 +179,58 @@ public class InvestmentScheduleService {
 
         logger.info("Successfully saved investment schedule with ID: {} for user: {} (Next investment: {})",
                 savedSchedule.getId(), user.getEmail(), savedSchedule.getNextInvestmentDate());
+
+        // Analytics, CREATE branch only.
+        //
+        // Transaction boundary: this class carries a type-level @Transactional and this method is
+        // public, so the call arrives through the Spring proxy inside one REQUIRED transaction that
+        // also commits the schedule row. Nothing was added to create that boundary; the event and
+        // the schedule therefore land together or not at all.
+        //
+        // Why only the create branch: /api/investment-schedule/create doubles as the edit endpoint,
+        // and investment_schedules has a UNIQUE key on user_id, so a second call updates the one
+        // schedule the user already has. There is no schedule_updated event in the taxonomy and
+        // this must not invent one, so an edit emits nothing.
+        if (isNewSchedule) {
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("frequency", frequencySlug(savedSchedule.getFrequency()));
+            props.put("amount_band", AnalyticsBands.amount(savedSchedule.getInvestmentAmount()));
+            props.put("days_since_signup_band",
+                    AnalyticsBands.daysBetween(user.getCreateDate(), LocalDateTime.now()));
+            analyticsOutboxService.record(ServerAnalyticsEvent.INVESTMENT_SCHEDULE_CREATED, user, props);
+        }
+
         return savedSchedule;
+    }
+
+    /**
+     * The schedule frequency as a closed, lowercase snake_case vocabulary for analytics.
+     *
+     * <p>The column is an unvalidated varchar(20) fed straight from the request body, which only
+     * carries {@code @NotBlank}, so any string a client sends can reach it. Narrowing here follows
+     * the precedent of {@link AnalyticsOutboxService#tier(User)}: a value this application does not
+     * act on becomes null rather than arriving in PostHog as a new dimension value nobody can
+     * interpret, and free text must never be sent at all.
+     *
+     * <p>The four handled values are the four every switch in this service and in
+     * {@link InvestmentSchedule} acts on: WEEKLY, BIWEEKLY, SEMI_MONTHLY and MONTHLY.
+     */
+    static String frequencySlug(String frequency) {
+        if (frequency == null) {
+            return null;
+        }
+        switch (frequency.trim().toUpperCase()) {
+            case "WEEKLY":
+                return "weekly";
+            case "BIWEEKLY":
+                return "biweekly";
+            case "SEMI_MONTHLY":
+                return "semi_monthly";
+            case "MONTHLY":
+                return "monthly";
+            default:
+                return null;
+        }
     }
 
     /**

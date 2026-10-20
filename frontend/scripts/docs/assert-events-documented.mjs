@@ -2,9 +2,14 @@
 /**
  * Fails if the taxonomy and its documentation disagree, in either direction, about:
  *
- *   1. which events exist,
+ *   1. which events exist, client AND server,
  *   2. which properties each event carries,
  *   3. the members of a closed vocabulary (Surface, ErrorCategory, SettingKey, ...).
+ *
+ * The server events are listed in the client taxonomy as SERVER_EVENT_NAMES so the client can
+ * never define a competing version of the same fact. The backend holds the same list in
+ * ServerAnalyticsEvent.java, and a Java test pins those two together; this script is what pins
+ * them to the document.
  *
  * A taxonomy document rots the moment someone adds an event in a hurry, and a stale one is worse
  * than none: it is read as authoritative. Checking the event names alone was not enough. Adding a
@@ -58,11 +63,44 @@ for (const name of eventNames) {
   }
 }
 
-// And the reverse: a documented event that no longer exists is a lie about what the app sends.
-for (const documented of rows.keys()) {
-  if (!eventNames.includes(documented)) {
+// ---------------------------------------------------------------------------------------------
+// 1b. Server event names. Same rule, different list: these are emitted by the backend through the
+// transactional outbox, and a reader of the document must be able to find every one of them.
+// ---------------------------------------------------------------------------------------------
+
+const serverListMatch = taxonomySource.match(
+  /export const SERVER_EVENT_NAMES = \[([\s\S]*?)\] as const;/,
+);
+if (!serverListMatch) {
+  console.error('FAIL: could not find SERVER_EVENT_NAMES in', path.relative(repoRoot, TAXONOMY));
+  process.exit(1);
+}
+
+const serverEventNames = [...serverListMatch[1].matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]);
+if (serverEventNames.length === 0) {
+  console.error('FAIL: SERVER_EVENT_NAMES is empty');
+  process.exit(1);
+}
+
+for (const name of serverEventNames) {
+  if (!rows.has(name)) {
     failures.push(
-      `${documented} has a row in FREDdocs/analytics-events.md but is not in CLIENT_EVENT_NAMES (renamed or removed?)`,
+      `${name} is a server event but has no row in FREDdocs/analytics-events.md`,
+    );
+  }
+  if (eventNames.includes(name)) {
+    failures.push(`${name} is on BOTH the client and the server list; one fact, one emitter`);
+  }
+}
+
+// A documented row that is on neither list is a lie in the other direction. Checked here rather
+// than in the client loop above, which cannot see the server names.
+const allEventNames = new Set([...eventNames, ...serverEventNames]);
+for (const documented of rows.keys()) {
+  if (!allEventNames.has(documented)) {
+    failures.push(
+      `${documented} has a row in FREDdocs/analytics-events.md but is in neither ` +
+        'CLIENT_EVENT_NAMES nor SERVER_EVENT_NAMES (renamed or removed?)',
     );
   }
 }
@@ -123,6 +161,9 @@ function taxonomyPropertiesFor(eventName) {
     .map((m) => m[1]);
 }
 
+// Only the CLIENT events have a typed props block to compare against. A server event's properties
+// are defined in Java, pinned by the backend's own tests, and documented here; the names check
+// above is what keeps this document honest about them.
 for (const name of eventNames) {
   const documented = documentedPropertiesFor(name);
   const defined = taxonomyPropertiesFor(name);
@@ -222,6 +263,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `PASS: ${eventNames.length} events, their properties, and ${VOCABULARIES.length} vocabularies ` +
-    'all match FREDdocs/analytics-events.md',
+  `PASS: ${eventNames.length} client events and their properties, ${serverEventNames.length} ` +
+    `server events, and ${VOCABULARIES.length} vocabularies all match ` +
+    'FREDdocs/analytics-events.md',
 );

@@ -22,6 +22,9 @@ public interface InvestmentScheduleRepository extends JpaRepository<InvestmentSc
      * Find all investment schedules for a user ordered by creation date
      */
     List<InvestmentSchedule> findByUserOrderByCreatedAtDesc(User user);
+
+    /** Person-property signal for analytics: does this user have a schedule at all. */
+    boolean existsByUser(User user);
     
     /**
      * Find investment schedule by user and achRequestId

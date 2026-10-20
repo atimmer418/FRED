@@ -1,4 +1,4 @@
-import { CLIENT_EVENT_NAMES, EVENT_NAMES_ARE_COMPLETE } from './analytics-events';
+import { CLIENT_EVENT_NAMES, EVENT_NAMES_ARE_COMPLETE, SERVER_EVENT_NAMES } from './analytics-events';
 import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from './analytics-bands';
 
 /**
@@ -62,6 +62,32 @@ describe('client event taxonomy', () => {
           .withContext(`${name} contains "${word}", which belongs to the server-side taxonomy`)
           .toBeFalse();
       }
+    }
+  });
+});
+
+describe('server event names', () => {
+  it('never collides with a client event name', () => {
+    // The whole point of two lists: one fact, one emitter. A name on both sides would be counted
+    // twice, by two systems that disagree about what it means.
+    const client = new Set<string>(CLIENT_EVENT_NAMES);
+    for (const name of SERVER_EVENT_NAMES) {
+      expect(client.has(name)).withContext(`${name} is on both lists`).toBeFalse();
+    }
+  });
+
+  it('has no duplicates and uses the same naming rules as the client', () => {
+    expect(new Set(SERVER_EVENT_NAMES).size).toBe(SERVER_EVENT_NAMES.length);
+    for (const name of SERVER_EVENT_NAMES) {
+      expect(name).withContext(name).toMatch(/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/);
+    }
+  });
+
+  it('is where the money and compliance words are allowed to live', () => {
+    // The mirror of the client rule above: these words belong on this list and nowhere else.
+    const joined = SERVER_EVENT_NAMES.join(' ');
+    for (const word of ['kyc', 'transfer', 'subscription', 'plaid', 'passkey']) {
+      expect(joined.includes(word)).withContext(`no server event mentions ${word}`).toBeTrue();
     }
   });
 });

@@ -143,13 +143,16 @@ class MonthlyFreedomUpdateServiceTest {
 
     @Test
     void monthlyEquivalentFactorsMatchFrontendUtil() {
-        // PARITY: mirrored in frontend/src/app/utils/investment-frequency.utils.spec.ts.
-        // If you change one, change both. (WEEKLY x4.33, BIWEEKLY x2.17, SEMI_MONTHLY x2)
+        // PARITY: the factors live in InvestmentFrequency and are pinned against
+        // frontend/src/app/utils/investment-frequency.utils.ts by FrequencyFactorParityTest.
+        // Every result comes back at scale 2, MONTHLY included.
         assertEquals(new BigDecimal("433.00"), service.calculateMonthlyEquivalent(new BigDecimal("100"), "WEEKLY"));
         assertEquals(new BigDecimal("217.00"), service.calculateMonthlyEquivalent(new BigDecimal("100"), "BIWEEKLY"));
         assertEquals(new BigDecimal("499.99"), service.calculateMonthlyEquivalent(new BigDecimal("115.47"), "WEEKLY"));
         assertEquals(new BigDecimal("500.00"), service.calculateMonthlyEquivalent(new BigDecimal("250"), "SEMI_MONTHLY"));
         assertEquals(new BigDecimal("500.00"), service.calculateMonthlyEquivalent(new BigDecimal("250"), "SEMIMONTHLY"));
-        assertEquals(0, new BigDecimal("500").compareTo(service.calculateMonthlyEquivalent(new BigDecimal("500"), "MONTHLY")));
+        assertEquals(new BigDecimal("500.00"), service.calculateMonthlyEquivalent(new BigDecimal("500"), "MONTHLY"));
+        assertEquals(BigDecimal.ZERO, service.calculateMonthlyEquivalent(null, "WEEKLY"));
+        assertEquals(new BigDecimal("500"), service.calculateMonthlyEquivalent(new BigDecimal("500"), "QUARTERLY"));
     }
 }

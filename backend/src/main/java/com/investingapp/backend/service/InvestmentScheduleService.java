@@ -1,5 +1,6 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.InvestmentFrequency;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -213,25 +215,13 @@ public class InvestmentScheduleService {
      * act on becomes null rather than arriving in PostHog as a new dimension value nobody can
      * interpret, and free text must never be sent at all.
      *
-     * <p>The four handled values are the four every switch in this service and in
-     * {@link InvestmentSchedule} acts on: WEEKLY, BIWEEKLY, SEMI_MONTHLY and MONTHLY.
+     * <p>The handled values are the members of {@link InvestmentFrequency}: WEEKLY, BIWEEKLY,
+     * SEMI_MONTHLY (also under its legacy SEMIMONTHLY spelling) and MONTHLY.
      */
     static String frequencySlug(String frequency) {
-        if (frequency == null) {
-            return null;
-        }
-        switch (frequency.trim().toUpperCase()) {
-            case "WEEKLY":
-                return "weekly";
-            case "BIWEEKLY":
-                return "biweekly";
-            case "SEMI_MONTHLY":
-                return "semi_monthly";
-            case "MONTHLY":
-                return "monthly";
-            default:
-                return null;
-        }
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.name().toLowerCase(Locale.ROOT))
+                .orElse(null);
     }
 
     /**
@@ -321,19 +311,17 @@ public class InvestmentScheduleService {
     }
 
     /**
-     * Calculate monthly amount from investment amount and frequency
+     * Monthly amount from the per-paycheck amount, through {@link InvestmentFrequency} so the row
+     * holds the same cents the client computes. An unknown frequency keeps the old lenient default
+     * and stores the per-paycheck amount unchanged.
      */
     private BigDecimal calculateMonthlyAmountFromInvestment(BigDecimal investmentAmount, String frequency) {
         if (investmentAmount == null)
             return BigDecimal.ZERO;
 
-        return switch (frequency.toUpperCase()) {
-            case "WEEKLY" -> investmentAmount.multiply(new BigDecimal("4.33")); // ~4.33 weeks per month
-            case "BIWEEKLY" -> investmentAmount.multiply(new BigDecimal("2.17")); // ~2.17 biweekly periods per month
-            case "SEMI_MONTHLY" -> investmentAmount.multiply(new BigDecimal("2")); // Exactly 2 times per month
-            case "MONTHLY" -> investmentAmount;
-            default -> investmentAmount;
-        };
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.toMonthly(investmentAmount))
+                .orElse(investmentAmount);
     }
 
     /**

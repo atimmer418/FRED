@@ -317,23 +317,16 @@ public class InvestmentSchedule {
     }
 
     /**
-     * Calculate investment amount based on frequency relative to monthly amount
+     * Per-paycheck amount from the monthly amount, through {@link InvestmentFrequency}. An unknown
+     * frequency keeps the old lenient default and returns the monthly amount unchanged.
      */
     public BigDecimal calculateInvestmentAmountFromMonthly() {
         if (monthlyAmount == null)
             return BigDecimal.ZERO;
 
-        return switch (frequency.toUpperCase()) {
-            case "WEEKLY" -> monthlyAmount.divide(new BigDecimal("4.33"), 2, java.math.RoundingMode.HALF_UP);
-            case "BIWEEKLY" -> monthlyAmount.divide(new BigDecimal("2.17"), 2, java.math.RoundingMode.HALF_UP);
-            case "SEMI_MONTHLY" -> monthlyAmount.divide(new BigDecimal("2"), 2, java.math.RoundingMode.HALF_UP); // Exactly
-                                                                                                                 // 2
-                                                                                                                 // times
-                                                                                                                 // per
-                                                                                                                 // month
-            case "MONTHLY" -> monthlyAmount;
-            default -> monthlyAmount;
-        };
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.fromMonthly(monthlyAmount))
+                .orElse(monthlyAmount);
     }
 
     /**

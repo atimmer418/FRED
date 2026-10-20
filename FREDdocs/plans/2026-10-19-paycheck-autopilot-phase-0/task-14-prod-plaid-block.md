@@ -18,7 +18,7 @@ Scope, read against spec 12.1 and 2.10 before starting:
 **Interfaces:**
 - Consumes (T07): bean name `ciBypassPlaidWebhookVerifier` (`@Component("ciBypassPlaidWebhookVerifier") @Profile("ci") CiBypassPlaidWebhookVerifier`); property `plaid.webhook.url` present in local/dev/test (`${PLAID_WEBHOOK_URL}`) and ci (`https://ci.invalid/api/plaid/webhook`).
 - Consumes (T08): property keys `plaid.redirect.uri`, `plaid.link.customization` and the `@Value` fields `plaidWebhookUrl`, `plaidRedirectUri`, `plaidLinkCustomization` on `PlaidService` (prod must now supply them).
-- Produces: `BrokerEnvironmentGuard`: `static final String PLAID_ENV_SANDBOX = "sandbox"`, `PLAID_ENV_PRODUCTION = "production"`, `KNOWN_SANDBOX_SECRET = "14256c166ee8a12a370a6ccf90abbf"`, `CI_BYPASS_VERIFIER_BEAN = "ciBypassPlaidWebhookVerifier"` (all package-private, like `PROD_PROFILE` at :41); `static boolean isTunnelUrl(String value)` (true when the lowercased value contains `trycloudflare.com` or `ngrok`); prod violations: `plaid.env` not exactly `production`, `plaid.webhook.url` blank / not `https://` / loopback / tunnel, `beanFactory.containsBeanDefinition(CI_BYPASS_VERIFIER_BEAN)`, `plaid.secret` equal to `KNOWN_SANDBOX_SECRET`; non-prod violation: `plaid.env` not exactly `sandbox`. Alpaca checks (:72-90) untouched. The webhook URL and secret are read only inside the prod branch, so an unresolved `${PLAID_WEBHOOK_URL}` in dev never fails inside the guard.
+- Produces: `BrokerEnvironmentGuard`: `static final String PLAID_ENV_SANDBOX = "sandbox"`, `PLAID_ENV_PRODUCTION = "production"`, `KNOWN_SANDBOX_SECRET = "<redacted sandbox secret, rotate it at the Plaid dashboard>"`, `CI_BYPASS_VERIFIER_BEAN = "ciBypassPlaidWebhookVerifier"` (all package-private, like `PROD_PROFILE` at :41); `static boolean isTunnelUrl(String value)` (true when the lowercased value contains `trycloudflare.com` or `ngrok`); prod violations: `plaid.env` not exactly `production`, `plaid.webhook.url` blank / not `https://` / loopback / tunnel, `beanFactory.containsBeanDefinition(CI_BYPASS_VERIFIER_BEAN)`, `plaid.secret` equal to `KNOWN_SANDBOX_SECRET`; non-prod violation: `plaid.env` not exactly `sandbox`. Alpaca checks (:72-90) untouched. The webhook URL and secret are read only inside the prod branch, so an unresolved `${PLAID_WEBHOOK_URL}` in dev never fails inside the guard.
 - Produces: `application-prod.properties` block `plaid.client.id=${PLAID_CLIENT_ID}`, `plaid.secret=${PLAID_SECRET_PRODUCTION}`, `plaid.env=production`, `plaid.client.name=FRED`, `plaid.webhook.url=${PLAID_WEBHOOK_URL}`, `plaid.link.customization=${PLAID_LINK_CUSTOMIZATION}`, `plaid.redirect.uri=${PLAID_REDIRECT_URI}`.
 - Produces: `FREDdocs/plaid-sandbox-secret-rotation.md` (manual steps, no code).
 
@@ -35,7 +35,7 @@ In `backend/src/main/java/com/investingapp/backend/config/BrokerEnvironmentGuard
     static final String PLAID_ENV_PRODUCTION = "production";
 
     /** The sandbox secret that sat in application-prod.properties from b08d9e3 (2025-06-28) until Phase 0. Git history keeps it, so prod refuses it. */
-    static final String KNOWN_SANDBOX_SECRET = "14256c166ee8a12a370a6ccf90abbf";
+    static final String KNOWN_SANDBOX_SECRET = "<redacted sandbox secret, rotate it at the Plaid dashboard>";
 
     /** The @Profile("ci") webhook verifier that accepts any Plaid-Verification header (T07). Never in prod. */
     static final String CI_BYPASS_VERIFIER_BEAN = "ciBypassPlaidWebhookVerifier";
@@ -448,7 +448,7 @@ In `backend/src/main/resources/application-prod.properties`, replace lines 16-18
 
 ```properties
 plaid.client.id=6844e93b7fcffa0021bcfbb5
-plaid.secret=14256c166ee8a12a370a6ccf90abbf
+plaid.secret=<redacted sandbox secret, rotate it at the Plaid dashboard>
 plaid.env=sandbox
 ```
 
@@ -503,8 +503,8 @@ before beta, because the same dashboard holds the production keys.
 | Place | Key | Tracked by git |
 |---|---|---|
 | `application-local.properties:18` | `plaid.secret=<literal>` | No (gitignored, `.gitignore:44`) |
-| `application-dev.properties:38` | `plaid.secret=<plaid sandbox secret, see application-dev.properties>` | Yes; the value lives on the Railway dev service |
-| `application-test.properties:32` | `plaid.secret=<plaid sandbox secret, see application-dev.properties>` | Yes; the value lives on the Railway test service |
+| `application-dev.properties:38` | `plaid.secret=${PLAID_SECRET_SANDBOX}` | Yes; the value lives on the Railway dev service |
+| `application-test.properties:32` | `plaid.secret=${PLAID_SECRET_SANDBOX}` | Yes; the value lives on the Railway test service |
 | `application-ci.properties:51` | `plaid.secret=ci-disabled` | Yes; no real secret |
 | `application-prod.properties` | `plaid.secret=${PLAID_SECRET_PRODUCTION}` | Yes; production key, separate from this rotation |
 
@@ -531,7 +531,7 @@ before beta, because the same dashboard holds the production keys.
 ## Never commit the new value
 
 - No tracked file gets a Plaid secret literal, ever. The dev, test and prod profiles read
-  `<plaid sandbox secret, see application-dev.properties>` or `${PLAID_SECRET_PRODUCTION}` from the environment.
+  `${PLAID_SECRET_SANDBOX}` or `${PLAID_SECRET_PRODUCTION}` from the environment.
 - `application-local.properties` is the only place a literal belongs, and it is gitignored.
 - Do not update `KNOWN_SANDBOX_SECRET` to the new value. It exists to catch the leaked one.
 
@@ -573,7 +573,7 @@ Run (expect no output from either command):
 
 ```bash
 grep -n "—" backend/src/main/java/com/investingapp/backend/config/BrokerEnvironmentGuard.java backend/src/test/java/com/investingapp/backend/config/BrokerEnvironmentGuardTest.java backend/src/test/java/com/investingapp/backend/config/ProdPlaidPropertiesTest.java backend/src/main/resources/application-prod.properties FREDdocs/plaid-sandbox-secret-rotation.md
-git grep -n "14256c166ee8a12a370a6ccf90abbf" -- backend/src/main/resources
+git grep -n "<redacted sandbox secret, rotate it at the Plaid dashboard>" -- backend/src/main/resources
 ```
 
 The second command searches tracked files only, so the gitignored `application-local.properties` is excluded by design; after Step 11 the literal lives only in `BrokerEnvironmentGuard.java` and that untracked local file. Then hunk-verify on the shared dirty tree (another session edits this checkout; never checkout/stash/reset):

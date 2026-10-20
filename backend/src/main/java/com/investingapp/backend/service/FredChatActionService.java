@@ -8,6 +8,7 @@ import com.investingapp.backend.model.ChatActionAudit;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.ChatActionAuditRepository;
+import com.investingapp.backend.util.EasternTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +17,6 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
-import java.time.LocalDate;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -190,7 +190,7 @@ public class FredChatActionService {
         // A long pause can leave nextInvestmentDate in the past — the scheduler
         // picks those up on its next pass, so don't report a stale date
         String nextRun = "with the next scheduler pass (within about a day)";
-        if (resumed.getNextInvestmentDate() != null && !resumed.getNextInvestmentDate().isBefore(LocalDate.now())) {
+        if (resumed.getNextInvestmentDate() != null && !resumed.getNextInvestmentDate().isBefore(EasternTime.today())) {
             nextRun = resumed.getNextInvestmentDate().toString();
         }
         return new ActionResult(true, "Done. Automatic investing is back on. Next run: " + nextRun + ".");

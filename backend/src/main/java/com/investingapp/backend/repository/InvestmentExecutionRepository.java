@@ -144,8 +144,14 @@ public interface InvestmentExecutionRepository extends JpaRepository<InvestmentE
     /** Lump-sum duplicate short-circuit on POST /api/investments/execute. */
     Optional<InvestmentExecution> findBySourceKey(String sourceKey);
 
-    /** 11:59 selection: still SCHEDULED and created before the batch started (a 23:59:xx row runs the next night). */
-    List<InvestmentExecution> findByStatusAndCreatedAtBefore(ExecutionStatus status, LocalDateTime before);
+    /**
+     * 11:59 selection: still SCHEDULED, never claimed, and created before the batch started (a
+     * 23:59:xx row runs the next night). Excluding an already-claimed row (transferAttemptedAt IS
+     * NOT NULL) is load-bearing: without it, a row stranded by a crash between the claim and the
+     * status write would be selected again every night, its claim would always come up short
+     * against the fresh rows beside it, and the whole user would be skipped forever.
+     */
+    List<InvestmentExecution> findByStatusAndTransferAttemptedAtIsNullAndCreatedAtBefore(ExecutionStatus status, LocalDateTime before);
 
     /** Deferral guard (T10 bank change, T11 deletion): is money in flight for this user. */
     boolean existsByUserAndStatus(User user, ExecutionStatus status);

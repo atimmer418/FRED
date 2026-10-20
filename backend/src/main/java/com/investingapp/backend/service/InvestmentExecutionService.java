@@ -29,6 +29,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Service
@@ -168,7 +169,17 @@ public class InvestmentExecutionService {
     }
 
     /**
-     * Process batched investments with a single ACH transfer for the total amount
+     * Process batched investments with a single ACH transfer for the total amount (spec 5.5).
+     *
+     * <p>The Alpaca POST never runs inside an open database transaction: this method is reached
+     * from runEndOfDayBatch, which inherits processEndOfDayBatchTransfers' NOT_SUPPORTED
+     * propagation, so nothing here holds a connection open across the HTTP call. The status write
+     * that follows the POST runs afterward in its own committed REQUIRES_NEW unit
+     * (applyToFreshRows), re-loading the rows by id: the claim already changed transferAttemptedAt
+     * and batchNight on the DB row since these in-memory entities were selected, so a reload is
+     * what makes the row current rather than copying those two fields onto a stale object. Because
+     * each user's write is its own transaction, a failure writing one user's status can never undo
+     * another user's already-committed write.
      */
     private void processBatchedInvestments(User user, List<InvestmentExecution> batchExecutions) {
         logger.info("Processing {} batched investments for user {}", batchExecutions.size(), user.getEmail());
@@ -179,6 +190,8 @@ public class InvestmentExecutionService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         logger.info("Total amount for batched investments: {}", totalAmount);
+
+        List<Long> ids = batchExecutions.stream().map(InvestmentExecution::getId).toList();
 
         try {
             // Decrypt sensitive IDs before passing to Alpaca API
@@ -193,28 +206,27 @@ public class InvestmentExecutionService {
 
             if (transferResponse.isSuccess()) {
                 LocalDateTime now = LocalDateTime.now(MARKET_TIMEZONE);
+                String encryptedAccountId = encryptionService.encrypt(alpacaAccountId); // snapshot: encrypted at rest
 
                 // Update ALL executions in the batch with the SAME transfer ID
                 // This links them all to the single ACH event
-                for (InvestmentExecution execution : batchExecutions) {
+                applyToFreshRows(ids, execution -> {
                     execution.setAlpacaTransferId(transferResponse.id);
                     execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_INITIATED);
                     execution.setExecutionDate(now);
-                    execution.setAlpacaAccountId(encryptionService.encrypt(alpacaAccountId)); // snapshot: encrypted at rest
+                    execution.setAlpacaAccountId(encryptedAccountId);
                     // Clear the "queued" error message
                     execution.setErrorMessage(null);
-                    executionRepository.save(execution);
-                }
+                });
 
                 logger.info("Successfully initiated batch ACH transfer {} for total amount {} covering {} investments",
                         transferResponse.id, totalAmount, batchExecutions.size());
             } else {
                 // Mark all batched executions as failed
-                for (InvestmentExecution batchExec : batchExecutions) {
-                    batchExec.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
-                    batchExec.setErrorMessage("Batch ACH transfer failed: " + transferResponse.errorMessage);
-                    executionRepository.save(batchExec);
-                }
+                applyToFreshRows(ids, execution -> {
+                    execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
+                    execution.setErrorMessage("Batch ACH transfer failed: " + transferResponse.errorMessage);
+                });
 
                 logger.error("Batch ACH transfer failed for user {}: {}", user.getEmail(),
                         transferResponse.errorMessage);
@@ -228,13 +240,38 @@ public class InvestmentExecutionService {
     }
 
     /**
+     * Re-loads the given rows fresh and applies the writer to each, all inside one committed
+     * REQUIRES_NEW transaction. Always called after the Alpaca POST has already returned, so the
+     * HTTP call itself never sits inside an open database transaction; this unit commits (or rolls
+     * back) independently of every other user's write.
+     */
+    private void applyToFreshRows(List<Long> ids, Consumer<InvestmentExecution> writer) {
+        TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
+        writeTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        writeTx.executeWithoutResult(status -> {
+            for (InvestmentExecution execution : executionRepository.findAllById(ids)) {
+                writer.accept(execution);
+                executionRepository.save(execution);
+            }
+        });
+    }
+
+    /**
      * The 11:59 PM ET batch (spec 5.5, decision 15). Selection, grouping, summing, the marker
      * match and the one-POST-per-user shape are unchanged. Hardening: (a) rows created before the
      * batch started, so a 23:59:xx row runs the next night instead of never; (b) a conditional
      * claim committed before the Alpaca POST, so a crash or a double run never sends two
      * transfers; (c) a null relationship id fails fast with no POST.
+     *
+     * <p>NOT_SUPPORTED here is what keeps the Alpaca POST out of an open database transaction:
+     * under the class-level @Transactional, every user's claim, POST and status write would share
+     * one connection that commits only after the very last user, so one user's failure could roll
+     * back an earlier user's already-sent transfer status. The claim (claimInNewTransaction) and
+     * the post-POST status write (applyToFreshRows) each open their own committed REQUIRES_NEW
+     * unit instead, so every user's work commits independently of every other user's.
      */
     @Scheduled(cron = "0 59 23 * * *", zone = "America/New_York")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void processEndOfDayBatchTransfers() {
         if (!schedulerGate.isEnabled()) return;
         if (!jobLockService.tryAcquire(JobLocks.EOD_BATCH, Duration.ofMinutes(30))) {
@@ -255,9 +292,11 @@ public class InvestmentExecutionService {
         LocalDate batchNight = batchStart.toLocalDate();
 
         try {
-            // (a) every SCHEDULED row created before this batch started, still carrying the queue marker
+            // (a) every SCHEDULED row created before this batch started, never claimed, still
+            // carrying the queue marker. Excluding an already-claimed row keeps a row stranded by
+            // a prior crash from being selected again (and shorting every claim after it).
             List<InvestmentExecution> scheduledExecutions = executionRepository
-                    .findByStatusAndCreatedAtBefore(InvestmentExecution.ExecutionStatus.SCHEDULED, batchStart)
+                    .findByStatusAndTransferAttemptedAtIsNullAndCreatedAtBefore(InvestmentExecution.ExecutionStatus.SCHEDULED, batchStart)
                     .stream()
                     .filter(exec -> exec.getErrorMessage() != null &&
                             exec.getErrorMessage().contains("Queued for end-of-day"))
@@ -277,19 +316,14 @@ public class InvestmentExecutionService {
                         continue;
                     }
 
-                    // (b) claim in its own committed transaction before the POST
+                    // (b) claim in its own committed transaction before the POST. The exclusion in
+                    // the selection query above means a short claim here is always a genuine
+                    // concurrent race, never a previously-stranded row being re-selected.
                     List<Long> ids = userExecutions.stream().map(InvestmentExecution::getId).toList();
                     int claimed = claimInNewTransaction(ids, batchStart, batchNight);
                     if (claimed != ids.size()) {
                         logger.error("alert.batch_claim_short user={} expected={} claimed={}", user.getId(), ids.size(), claimed);
                         continue;
-                    }
-                    // Mirror the claim on the managed entities: this runs inside the class-level
-                    // transaction and Hibernate writes every column on flush, so saving these rows
-                    // with a null transferAttemptedAt would erase the claim.
-                    for (InvestmentExecution execution : userExecutions) {
-                        execution.setTransferAttemptedAt(batchStart);
-                        execution.setBatchNight(batchNight);
                     }
 
                     logger.info("Processing {} queued investments for user {}", userExecutions.size(), user.getEmail());

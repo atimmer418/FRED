@@ -3,6 +3,7 @@ package com.investingapp.backend.config;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.mock.env.MockEnvironment;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -18,22 +19,49 @@ class BrokerEnvironmentGuardTest {
     private static final String LIVE_TRADING = "https://api.alpaca.markets/v2";
     private static final String SANDBOX_BROKER = "https://broker-api.sandbox.alpaca.markets/v1";
     private static final String PAPER_TRADING = "https://paper-api.alpaca.markets/v2";
+    private static final String PROD_WEBHOOK = "https://api.fredvested.com/api/plaid/webhook";
+    private static final String LOCAL_WEBHOOK = "https://local.fredvested.com/api/plaid/webhook";
+    private static final String PROD_SECRET = "prod-secret-not-the-sandbox-one";
+    private static final String CI_SECRET = "ci-disabled";
 
     private void run(MockEnvironment env) {
-        BrokerEnvironmentGuard guard = new BrokerEnvironmentGuard();
-        guard.setEnvironment(env);
-        guard.postProcessBeanFactory(new DefaultListableBeanFactory());
+        run(env, new DefaultListableBeanFactory());
     }
 
+    private void run(MockEnvironment env, DefaultListableBeanFactory beanFactory) {
+        BrokerEnvironmentGuard guard = new BrokerEnvironmentGuard();
+        guard.setEnvironment(env);
+        guard.postProcessBeanFactory(beanFactory);
+    }
+
+    /** The 4-arg form keeps the original tests readable: prod gets a public https webhook and a non-sandbox secret. */
     private MockEnvironment env(String profile, String broker, String trading, String plaidEnv) {
+        boolean prod = BrokerEnvironmentGuard.PROD_PROFILE.equals(profile);
+        return env(profile, broker, trading, plaidEnv,
+                prod ? PROD_WEBHOOK : LOCAL_WEBHOOK,
+                prod ? PROD_SECRET : CI_SECRET);
+    }
+
+    private MockEnvironment env(String profile, String broker, String trading, String plaidEnv,
+            String webhookUrl, String plaidSecret) {
         MockEnvironment env = new MockEnvironment();
         if (profile != null) {
             env.setActiveProfiles(profile);
         }
         env.withProperty("alpaca.broker.base-url", broker)
                 .withProperty("alpaca.trading.base-url", trading)
-                .withProperty("plaid.env", plaidEnv);
+                .withProperty("plaid.env", plaidEnv)
+                .withProperty("plaid.webhook.url", webhookUrl)
+                .withProperty("plaid.secret", plaidSecret);
         return env;
+    }
+
+    /** A bean factory carrying the ci bypass verifier definition, to prove prod refuses it. */
+    private DefaultListableBeanFactory withCiBypassBean() {
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerBeanDefinition(BrokerEnvironmentGuard.CI_BYPASS_VERIFIER_BEAN,
+                new RootBeanDefinition(Object.class));
+        return beanFactory;
     }
 
     @Test
@@ -120,6 +148,105 @@ class BrokerEnvironmentGuardTest {
 
         assertThatCode(() -> run(env)).doesNotThrowAnyException();
         assertThatCode(() -> BrokerEnvironmentGuard.isSandboxLike(BrokerEnvironmentGuard.DEFAULT_BROKER_URL))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("non-prod plaid.env must be exactly sandbox: a look-alike value refuses to start")
+    void devPlaidEnvLookalikeRefuses() {
+        assertThatThrownBy(() -> run(env("dev", SANDBOX_BROKER, PAPER_TRADING, "sandbox-v2")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("plaid.env=sandbox-v2")
+                .hasMessageContaining("must be exactly sandbox");
+    }
+
+    @Test
+    @DisplayName("prod plaid.env must be exactly production: any other non-sandbox word refuses to start")
+    void prodPlaidEnvLiveRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "live")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("plaid.env=live")
+                .hasMessageContaining("must be exactly production");
+    }
+
+    @Test
+    @DisplayName("prod with no webhook URL refuses to start")
+    void prodBlankWebhookRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production", "", PROD_SECRET)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("plaid.webhook.url is not set");
+    }
+
+    @Test
+    @DisplayName("prod with a plain-http webhook URL refuses to start")
+    void prodHttpWebhookRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production",
+                "http://api.fredvested.com/api/plaid/webhook", PROD_SECRET)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must start with https://");
+    }
+
+    @Test
+    @DisplayName("prod with a loopback webhook URL refuses to start")
+    void prodLoopbackWebhookRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production",
+                "https://localhost:8443/api/plaid/webhook", PROD_SECRET)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("plaid.webhook.url=https://localhost:8443")
+                .hasMessageContaining("points at this machine");
+    }
+
+    @Test
+    @DisplayName("prod with a trycloudflare or ngrok webhook URL refuses to start")
+    void prodTunnelWebhookRefuses() {
+        for (String tunnel : new String[] {
+                "https://tidy-lamps-sing.trycloudflare.com/api/plaid/webhook",
+                "https://37de-2600-4040.ngrok-free.app/api/plaid/webhook"}) {
+            assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production", tunnel, PROD_SECRET)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("is a dev tunnel");
+        }
+    }
+
+    @Test
+    @DisplayName("outside prod the webhook URL is not judged: the local Cloudflare tunnel is the receiver")
+    void devTunnelWebhookStarts() {
+        assertThatCode(() -> run(env("dev", SANDBOX_BROKER, PAPER_TRADING, "sandbox",
+                "https://tidy-lamps-sing.trycloudflare.com/api/plaid/webhook", CI_SECRET)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("prod refuses to start while the ci webhook-verifier bypass bean is registered")
+    void prodCiBypassVerifierRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production"), withCiBypassBean()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(BrokerEnvironmentGuard.CI_BYPASS_VERIFIER_BEAN)
+                .hasMessageContaining("signatures would not be checked");
+    }
+
+    @Test
+    @DisplayName("ci keeps its bypass verifier bean")
+    void ciBypassVerifierStarts() {
+        assertThatCode(() -> run(env("ci", "http://127.0.0.1:9", "http://127.0.0.1:9", "sandbox"), withCiBypassBean()))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("prod refuses the sandbox secret that was once committed, and never prints it")
+    void prodKnownSandboxSecretRefuses() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production",
+                PROD_WEBHOOK, BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("plaid.secret is the sandbox secret")
+                .hasMessageNotContaining(BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET);
+    }
+
+    @Test
+    @DisplayName("local keeps working on the old sandbox secret until it is rotated")
+    void localKnownSandboxSecretStarts() {
+        assertThatCode(() -> run(env("local", SANDBOX_BROKER, PAPER_TRADING, "sandbox",
+                LOCAL_WEBHOOK, BrokerEnvironmentGuard.KNOWN_SANDBOX_SECRET)))
                 .doesNotThrowAnyException();
     }
 }

@@ -84,7 +84,9 @@ SELECT
     -- Snapshot columns. Accurate for the month in progress, approximate for history.
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
-        AND s.is_paused = 0) AS active_at_month_end,
+        AND s.is_paused = 0
+        -- A hold (bank change, manual review) stops a schedule just as a pause does (Phase 0, V6).
+        AND s.hold_reason IS NULL) AS active_at_month_end,
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH) AS schedules_existing_at_month_end
 FROM months m

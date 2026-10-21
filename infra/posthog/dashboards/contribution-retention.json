@@ -1,0 +1,57 @@
+{
+  "name": "FRED — Contribution retention",
+  "description": "Do people keep contributing after the first time. NOTE: v_contribution_retention in MySQL is the authority for this number, because it gives every month its own denominator and excludes cohorts too young to answer. This dashboard is for shape and for spotting a change quickly.",
+  "tiles": [
+    {
+      "name": "Monthly contribution retention",
+      "description": "Cohorted on the first settled transfer, returning on any later settled transfer. PostHog's retention counts every cohort including ones too young for the later periods, so read the right-hand columns of recent rows with suspicion and check v_contribution_retention before acting.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "RetentionQuery",
+          "retentionFilter": {
+            "period": "Month",
+            "totalIntervals": 7,
+            "retentionType": "retention_first_time",
+            "targetEntity": { "id": "first_ach_transfer_completed", "type": "events" },
+            "returningEntity": { "id": "ach_transfer_completed", "type": "events" }
+          },
+          "dateRange": { "date_from": "-180d" }
+        }
+      }
+    },
+    {
+      "name": "Settled transfers per week",
+      "description": "The raw volume behind the retention grid. A flat retention percentage on a falling volume is not good news.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "first_ach_transfer_completed", "name": "First transfers" },
+            { "kind": "EventsNode", "event": "ach_transfer_completed", "name": "Repeat transfers" }
+          ],
+          "dateRange": { "date_from": "-180d" },
+          "interval": "week"
+        }
+      }
+    },
+    {
+      "name": "Schedule churn, user-initiated only",
+      "description": "Pauses, resumes and cancellations the USER caused. System transitions (a bank change, an ACH landing) are not emitted as pauses at all, so everything here is a decision somebody made.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "schedule_paused", "name": "Paused" },
+            { "kind": "EventsNode", "event": "schedule_resumed", "name": "Resumed" },
+            { "kind": "EventsNode", "event": "schedule_cancelled", "name": "Cancelled" }
+          ],
+          "dateRange": { "date_from": "-180d" },
+          "interval": "week"
+        }
+      }
+    }
+  ]
+}

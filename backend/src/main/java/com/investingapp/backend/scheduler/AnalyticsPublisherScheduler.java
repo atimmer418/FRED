@@ -31,6 +31,12 @@ public class AnalyticsPublisherScheduler {
             if (sent > 0) {
                 logger.info("analytics: published {} outbox row(s)", sent);
             }
+            // Deletions ride the same pass, so a promise to delete is honoured on the same clock
+            // as everything else, and a failure here cannot stop the events draining.
+            int deleted = publisher.publishPendingDeletions();
+            if (deleted > 0) {
+                logger.info("analytics: completed {} person deletion(s)", deleted);
+            }
         } catch (Exception e) {
             // Same posture as the other schedulers: log and let the next tick retry. The rows are
             // still PENDING, so nothing is lost by failing here.

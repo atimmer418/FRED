@@ -1,0 +1,69 @@
+{
+  "name": "FRED — Onboarding funnel",
+  "description": "Signup through first settled transfer, built from SERVER events. These are written in the same transaction as the state change they describe, so a step cannot be missing because a phone was offline.",
+  "tiles": [
+    {
+      "name": "Signup to first transfer",
+      "description": "Each step is a server event. The conversion between kyc_submitted and plaid_linked is usually the widest gap.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "FunnelsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "freedom_plan_created", "name": "Plan created" },
+            { "kind": "EventsNode", "event": "passkey_created", "name": "Passkey created" },
+            { "kind": "EventsNode", "event": "kyc_submitted", "name": "KYC submitted" },
+            { "kind": "EventsNode", "event": "kyc_decided", "name": "KYC decided" },
+            { "kind": "EventsNode", "event": "plaid_linked", "name": "Bank linked" },
+            { "kind": "EventsNode", "event": "investment_schedule_created", "name": "Schedule created" },
+            { "kind": "EventsNode", "event": "first_ach_transfer_completed", "name": "First transfer settled" }
+          ],
+          "dateRange": { "date_from": "-90d" },
+          "funnelsFilter": { "funnelVizType": "steps", "funnelWindowInterval": 30, "funnelWindowIntervalUnit": "day" }
+        }
+      }
+    },
+    {
+      "name": "KYC outcomes",
+      "description": "Approved, rejected and needs_more_info over time. Rejections matter most: a rejected user is deleted from our database, so this is the only place in PostHog they appear at all.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{ "kind": "EventsNode", "event": "kyc_decided", "name": "Decisions" }],
+          "breakdownFilter": { "breakdown_type": "event", "breakdown": "outcome" },
+          "dateRange": { "date_from": "-90d" },
+          "interval": "week"
+        }
+      }
+    },
+    {
+      "name": "KYC attempts",
+      "description": "How often a submission takes more than one go. A rising share of attempt 2 and 3_plus usually means the form is wrong, not the user.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{ "kind": "EventsNode", "event": "kyc_submitted", "name": "Submissions" }],
+          "breakdownFilter": { "breakdown_type": "event", "breakdown": "attempt" },
+          "dateRange": { "date_from": "-90d" },
+          "interval": "week"
+        }
+      }
+    },
+    {
+      "name": "First bank link vs relink",
+      "description": "is_first_link false means an existing user changed bank. A rise usually follows a Plaid problem rather than a user decision.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{ "kind": "EventsNode", "event": "plaid_linked", "name": "Bank links" }],
+          "breakdownFilter": { "breakdown_type": "event", "breakdown": "is_first_link" },
+          "dateRange": { "date_from": "-90d" },
+          "interval": "week"
+        }
+      }
+    }
+  ]
+}

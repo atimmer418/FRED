@@ -3,6 +3,7 @@ package com.investingapp.backend.controller;
 import com.investingapp.backend.service.AlpacaService;
 import com.investingapp.backend.service.AlpacaApiService;
 import com.investingapp.backend.service.AnalyticsOutboxService;
+import com.investingapp.backend.service.AnalyticsPersonDeletionService;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -59,6 +60,9 @@ public class TradingController {
 
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
+
+    @Autowired
+    private AnalyticsPersonDeletionService analyticsPersonDeletionService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -336,6 +340,12 @@ public class TradingController {
 
             // Delete portfolio and its items (FK not covered by JPA cascade; items cascade from portfolio)
             portfolioRepository.findByUser(user).ifPresent(portfolioRepository::delete);
+
+            // Ask the analytics vendor to delete their person record too, BEFORE the user row
+            // goes, while there is still a public_id to copy. In the same transaction as the
+            // deletion itself, so "we deleted your account" is either true of both sides or of
+            // neither. See FREDdocs/what-we-send.md.
+            analyticsPersonDeletionService.request(user);
 
             // Delete the user from our database (cascades to passkey credentials, user progress, etc.)
             userRepository.delete(user);

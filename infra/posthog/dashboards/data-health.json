@@ -1,0 +1,78 @@
+{
+  "name": "FRED — Data health",
+  "description": "Is the measurement itself working. READ THE CAVEAT: two of the three things worth watching cannot be answered from PostHog at all, by construction. An opted-out user sends NOTHING, so PostHog cannot know the opt-out share; a suppressed or parked outbox row is never sent, so PostHog cannot see it either. Those come from the MySQL views v_consent and v_outbox_reconciliation, and the tiles here are what PostHog genuinely can answer.",
+  "tiles": [
+    {
+      "name": "Events per day, by name",
+      "description": "The first place a broken emitter shows up. A line that goes flat at zero is a wiring regression; a line that doubles overnight is usually a retry loop.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{ "kind": "EventsNode", "event": null, "name": "All events" }],
+          "breakdownFilter": { "breakdown_type": "event_metadata", "breakdown": "event" },
+          "dateRange": { "date_from": "-30d" },
+          "interval": "day"
+        }
+      }
+    },
+    {
+      "name": "Server events per day",
+      "description": "The money and compliance spine. These come through the outbox, so a gap here means the publisher stopped, not that users stopped: check pending_count in v_outbox_reconciliation.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "freedom_plan_created", "name": "Plan created" },
+            { "kind": "EventsNode", "event": "kyc_submitted", "name": "KYC submitted" },
+            { "kind": "EventsNode", "event": "kyc_decided", "name": "KYC decided" },
+            { "kind": "EventsNode", "event": "plaid_linked", "name": "Bank linked" },
+            { "kind": "EventsNode", "event": "investment_schedule_created", "name": "Schedule created" },
+            { "kind": "EventsNode", "event": "first_ach_transfer_completed", "name": "First transfer" },
+            { "kind": "EventsNode", "event": "ach_transfer_completed", "name": "Repeat transfer" }
+          ],
+          "dateRange": { "date_from": "-30d" },
+          "interval": "day"
+        }
+      }
+    },
+    {
+      "name": "Client events per day",
+      "description": "Device-side events. Unlike the server ones these depend on a phone being awake and on consent, so a dip here can be real behaviour, a release problem, or more people opting out.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "app_opened", "name": "App opened" },
+            { "kind": "EventsNode", "event": "onboarding_step_viewed", "name": "Onboarding viewed" },
+            { "kind": "EventsNode", "event": "error_shown", "name": "Errors shown" },
+            { "kind": "EventsNode", "event": "setting_changed", "name": "Settings changed" }
+          ],
+          "dateRange": { "date_from": "-30d" },
+          "interval": "day"
+        }
+      }
+    },
+    {
+      "name": "Consent changes",
+      "description": "setting_changed where setting = analytics_consent. This is the nearest PostHog can get to an opt-out rate, and it is NOT one: a user who opts out stops sending, so their later behaviour is invisible and the opt-out itself is the last thing you see from them. v_consent in MySQL has the real share.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{
+            "kind": "EventsNode",
+            "event": "setting_changed",
+            "name": "Consent toggled",
+            "properties": [{ "key": "setting", "value": "analytics_consent", "operator": "exact", "type": "event" }]
+          }],
+          "breakdownFilter": { "breakdown_type": "event", "breakdown": "enabled" },
+          "dateRange": { "date_from": "-90d" },
+          "interval": "week"
+        }
+      }
+    }
+  ]
+}

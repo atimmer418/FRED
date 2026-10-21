@@ -28,6 +28,8 @@ import static org.mockito.Mockito.*;
 class AnalyticsPublisherServiceTest {
 
     private AnalyticsOutboxRepository outbox;
+    private com.investingapp.backend.repository.AnalyticsPersonDeletionRepository deletions;
+    private AnalyticsPersonGateway personGateway;
     private UserRepository users;
     private RecordingTransport transport;
     private AnalyticsPublisherService publisher;
@@ -49,9 +51,14 @@ class AnalyticsPublisherServiceTest {
     @BeforeEach
     void setUp() {
         outbox = mock(AnalyticsOutboxRepository.class);
+        // Person deletions have their own test; here they are simply never queued, so the event
+        // assertions cannot be disturbed by them.
+        deletions = mock(com.investingapp.backend.repository.AnalyticsPersonDeletionRepository.class);
+        personGateway = mock(AnalyticsPersonGateway.class);
         users = mock(UserRepository.class);
         transport = new RecordingTransport();
-        publisher = new AnalyticsPublisherService(outbox, users, transport, new ObjectMapper(), true, 100);
+        publisher = new AnalyticsPublisherService(outbox, deletions, users, transport,
+                personGateway, new ObjectMapper(), true, 100);
         when(outbox.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -240,8 +247,8 @@ class AnalyticsPublisherServiceTest {
     @Test
     @DisplayName("disabled means nothing leaves, and nothing is marked")
     void disabledPublishesNothing() {
-        AnalyticsPublisherService off =
-                new AnalyticsPublisherService(outbox, users, transport, new ObjectMapper(), false, 100);
+        AnalyticsPublisherService off = new AnalyticsPublisherService(outbox, deletions, users,
+                transport, personGateway, new ObjectMapper(), false, 100);
 
         assertEquals(0, off.publishPending());
 

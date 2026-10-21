@@ -2,7 +2,9 @@ package com.investingapp.backend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.investingapp.backend.model.AnalyticsOutboxEntry;
+import com.investingapp.backend.model.AnalyticsPersonDeletion;
 import com.investingapp.backend.repository.AnalyticsOutboxRepository;
+import com.investingapp.backend.repository.AnalyticsPersonDeletionRepository;
 import com.investingapp.backend.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,22 +47,28 @@ public class AnalyticsPublisherService {
     static final int MAX_BACKOFF_MINUTES = 60;
 
     private final AnalyticsOutboxRepository outboxRepository;
+    private final AnalyticsPersonDeletionRepository deletionRepository;
     private final UserRepository userRepository;
     private final AnalyticsTransport transport;
+    private final AnalyticsPersonGateway personGateway;
     private final ObjectMapper objectMapper;
 
     private final boolean enabled;
     private final int batchSize;
 
     public AnalyticsPublisherService(AnalyticsOutboxRepository outboxRepository,
+                                     AnalyticsPersonDeletionRepository deletionRepository,
                                      UserRepository userRepository,
                                      AnalyticsTransport transport,
+                                     AnalyticsPersonGateway personGateway,
                                      ObjectMapper objectMapper,
                                      @Value("${app.analytics.publisher.enabled:false}") boolean enabled,
                                      @Value("${app.analytics.publisher.batch-size:100}") int batchSize) {
         this.outboxRepository = outboxRepository;
+        this.deletionRepository = deletionRepository;
         this.userRepository = userRepository;
         this.transport = transport;
+        this.personGateway = personGateway;
         this.objectMapper = objectMapper;
         this.enabled = enabled;
         this.batchSize = batchSize;
@@ -115,6 +123,55 @@ public class AnalyticsPublisherService {
             markFailed(sendable, e);
             return 0;
         }
+    }
+
+    /**
+     * Sends the person deletions we owe the vendor. Same batching, same backoff curve and same
+     * parking as the events, and deliberately NO consent check: a deletion is an obligation, and
+     * an opted-out user is exactly the one whose older person record needs removing.
+     *
+     * Each is sent on its own rather than as a batch, because one person who cannot be deleted
+     * must not stop the rest, and because the vendor has no bulk endpoint for this.
+     *
+     * @return how many were completed
+     */
+    public int publishPendingDeletions() {
+        if (!enabled) {
+            return 0;
+        }
+        List<AnalyticsPersonDeletion> batch = deletionRepository.findSendable(
+                AnalyticsPersonDeletion.STATUS_PENDING, LocalDateTime.now(),
+                PageRequest.of(0, batchSize));
+
+        int completed = 0;
+        for (AnalyticsPersonDeletion deletion : batch) {
+            try {
+                personGateway.deletePerson(deletion.getPublicId());
+                deletion.setStatus(AnalyticsPersonDeletion.STATUS_COMPLETED);
+                deletion.setCompletedAt(LocalDateTime.now());
+                deletion.setAttempts(deletion.getAttempts() + 1);
+                deletion.setNextAttemptAt(null);
+                deletion.setLastError(null);
+                completed += 1;
+            } catch (Exception e) {
+                int attempts = deletion.getAttempts() + 1;
+                deletion.setAttempts(attempts);
+                deletion.setLastError(describe(e));
+                if (attempts >= MAX_ATTEMPTS) {
+                    // Parked, not abandoned: the row stays as the record that we owe this, and a
+                    // person who asked to be forgotten deserves a human looking at it.
+                    deletion.setStatus(AnalyticsPersonDeletion.STATUS_PARKED);
+                    deletion.setNextAttemptAt(null);
+                    logger.error("analytics: parking a person deletion after {} attempts", attempts, e);
+                } else {
+                    deletion.setNextAttemptAt(LocalDateTime.now().plusMinutes(backoffMinutes(attempts)));
+                }
+            }
+        }
+        if (!batch.isEmpty()) {
+            deletionRepository.saveAll(batch);
+        }
+        return completed;
     }
 
     /**

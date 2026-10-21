@@ -1,0 +1,69 @@
+{
+  "name": "FRED — Activation",
+  "description": "First open through funded. Mixes CLIENT events (the app opening, onboarding steps) with SERVER events (the money), which is the only way to see the whole path.",
+  "tiles": [
+    {
+      "name": "First open to funded",
+      "description": "The full path. The first three steps come from the device and the last two from the server, so a drop between step 3 and 4 can also mean a user who never came back rather than one who failed.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "FunnelsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "app_first_opened", "name": "First open" },
+            { "kind": "EventsNode", "event": "onboarding_step_completed", "name": "An onboarding step finished" },
+            { "kind": "EventsNode", "event": "freedom_plan_created", "name": "Plan created" },
+            { "kind": "EventsNode", "event": "investment_schedule_created", "name": "Schedule created" },
+            { "kind": "EventsNode", "event": "first_ach_transfer_completed", "name": "Funded" }
+          ],
+          "dateRange": { "date_from": "-90d" },
+          "funnelsFilter": { "funnelVizType": "steps", "funnelWindowInterval": 30, "funnelWindowIntervalUnit": "day" }
+        }
+      }
+    },
+    {
+      "name": "Time to funded",
+      "description": "Distribution of how long the full funnel takes to complete, from first open to the first settled transfer. The MySQL view v_time_to_funded is the authority on the median; this is for shape.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "FunnelsQuery",
+          "series": [
+            { "kind": "EventsNode", "event": "app_first_opened", "name": "First open" },
+            { "kind": "EventsNode", "event": "first_ach_transfer_completed", "name": "Funded" }
+          ],
+          "dateRange": { "date_from": "-180d" },
+          "funnelsFilter": { "funnelVizType": "time_to_convert", "funnelWindowInterval": 60, "funnelWindowIntervalUnit": "day" }
+        }
+      }
+    },
+    {
+      "name": "Where onboarding stops",
+      "description": "Steps viewed but not completed. Read with the funnel above: a step with many views and few completions is a screen problem.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{ "kind": "EventsNode", "event": "onboarding_step_viewed", "name": "Steps viewed" }],
+          "breakdownFilter": { "breakdown_type": "event", "breakdown": "step" },
+          "dateRange": { "date_from": "-30d" },
+          "interval": "week"
+        }
+      }
+    },
+    {
+      "name": "Errors shown, by category",
+      "description": "Never the message, only the category. A spike here beside a funnel drop usually explains it.",
+      "query": {
+        "kind": "InsightVizNode",
+        "source": {
+          "kind": "TrendsQuery",
+          "series": [{ "kind": "EventsNode", "event": "error_shown", "name": "Errors" }],
+          "breakdownFilter": { "breakdown_type": "event", "breakdown": "category" },
+          "dateRange": { "date_from": "-30d" },
+          "interval": "day"
+        }
+      }
+    }
+  ]
+}

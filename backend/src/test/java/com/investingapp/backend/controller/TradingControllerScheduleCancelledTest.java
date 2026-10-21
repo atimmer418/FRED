@@ -7,6 +7,7 @@ import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.repository.UserSessionRepository;
 import com.investingapp.backend.service.AlpacaService;
 import com.investingapp.backend.service.AnalyticsOutboxService;
+import com.investingapp.backend.service.AnalyticsPersonDeletionService;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +72,7 @@ class TradingControllerScheduleCancelledTest {
     private PortfolioRepository portfolioRepository;
     private EncryptionService encryptionService;
     private AnalyticsOutboxService analyticsOutboxService;
+    private AnalyticsPersonDeletionService analyticsPersonDeletionService;
 
     private TradingController controller;
     private Authentication authentication;
@@ -85,6 +87,7 @@ class TradingControllerScheduleCancelledTest {
         portfolioRepository = mock(PortfolioRepository.class);
         encryptionService = mock(EncryptionService.class);
         analyticsOutboxService = mock(AnalyticsOutboxService.class);
+        analyticsPersonDeletionService = mock(AnalyticsPersonDeletionService.class);
 
         controller = new TradingController();
         ReflectionTestUtils.setField(controller, "alpacaService", alpacaService);
@@ -94,6 +97,8 @@ class TradingControllerScheduleCancelledTest {
         ReflectionTestUtils.setField(controller, "userSessionRepository", userSessionRepository);
         ReflectionTestUtils.setField(controller, "portfolioRepository", portfolioRepository);
         ReflectionTestUtils.setField(controller, "encryptionService", encryptionService);
+        ReflectionTestUtils.setField(controller, "analyticsPersonDeletionService",
+                analyticsPersonDeletionService);
         ReflectionTestUtils.setField(controller, "analyticsOutboxService", analyticsOutboxService);
 
         user = new User(EMAIL);
@@ -137,6 +142,18 @@ class TradingControllerScheduleCancelledTest {
         assertThat(properties.getValue()).containsExactly(
                 entry("initiator", "user"),
                 entry("reason", "account_closed"));
+    }
+
+    @Test
+    @DisplayName("closing an account also asks the vendor to delete the person record")
+    void closingAlsoRequestsThePersonDeletion() {
+        givenTheUserHasASchedule();
+
+        controller.closeAccount(authentication);
+
+        // Requested with the user still intact, so there is a public_id to copy. Deleting our
+        // rows without asking the vendor would make "we deleted your account" only half true.
+        verify(analyticsPersonDeletionService).request(user);
     }
 
     @Test

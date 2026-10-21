@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -348,9 +349,33 @@ public class TradingController {
 
         } catch (Exception e) {
             logger.error("Error closing account: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Failed to close account. Please ensure all positions are sold and all cash is withdrawn."));
+            // RETHROW. This method is @Transactional, and a @Transactional method that RETURNS
+            // commits whatever it has already written. Swallowing here left the account half
+            // closed: the schedules could be gone, the analytics row committed, and the user row
+            // still present, with the caller told only that it failed. Throwing rolls the whole
+            // thing back, and the handler below turns it into the same response the caller used
+            // to get, after the rollback has happened.
+            throw new AccountCloseFailedException(e);
         }
+    }
+
+    /** Signals a failed account closure after the transaction has been rolled back. */
+    static class AccountCloseFailedException extends RuntimeException {
+        AccountCloseFailedException(Throwable cause) {
+            super("Failed to close account", cause);
+        }
+    }
+
+    /**
+     * Runs after the transactional proxy has unwound, so the rollback is already done by the time
+     * the caller is answered. The body is unchanged from when this was a swallowed exception.
+     */
+    @ExceptionHandler(AccountCloseFailedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccountCloseFailure(
+            AccountCloseFailedException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error",
+                        "Failed to close account. Please ensure all positions are sold and all cash is withdrawn."));
     }
 
     /**

@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -195,9 +196,13 @@ class TradingControllerScheduleCancelledTest {
         givenTheUserHasASchedule();
         doThrow(new RuntimeException("alpaca unreachable")).when(alpacaService).closeAccount(ALPACA_ACCOUNT);
 
-        ResponseEntity<Map<String, Object>> response = controller.closeAccount(authentication);
+        // The failure now PROPAGATES rather than being swallowed into a 500 body. That is the
+        // point: this method is @Transactional, and one that returns commits whatever it has
+        // already written. An @ExceptionHandler turns this into the same 500 the caller used to
+        // get, after the rollback.
+        assertThatThrownBy(() -> controller.closeAccount(authentication))
+                .isInstanceOf(TradingController.AccountCloseFailedException.class);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         // Nothing was closed and nothing was deleted, so there is no cancellation to describe.
         verify(investmentScheduleRepository, never()).deleteAllByUser(any());
         verify(userRepository, never()).delete(any(User.class));

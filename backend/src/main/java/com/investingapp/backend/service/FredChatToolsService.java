@@ -192,8 +192,12 @@ public class FredChatToolsService {
             out.put("note", "No automated investing schedule set up yet.");
         } else {
             InvestmentSchedule s = schedule.get();
-            out.put("active", !Boolean.TRUE.equals(s.getIsPaused()));
-            out.put("paused", Boolean.TRUE.equals(s.getIsPaused()));
+            // Three states, not two: "paused" alone would describe a schedule that is simply
+            // waiting for its bank, and FRED would then tell the user they had paused something
+            // they never started.
+            out.put("active", s.getStatus() == InvestmentSchedule.Status.ACTIVE);
+            out.put("paused", s.getStatus() == InvestmentSchedule.Status.PAUSED_BY_USER);
+            out.put("waiting_for_bank", s.getStatus() == InvestmentSchedule.Status.PENDING_BANK);
             // Money at 2dp — schedule math carries scale-4 internally, and the
             // model echoes whatever it sees (e.g. "$2054.9900")
             out.put("amountPerRun", money2(s.getInvestmentAmount()));

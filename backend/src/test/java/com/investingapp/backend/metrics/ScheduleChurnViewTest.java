@@ -137,7 +137,7 @@ class ScheduleChurnViewTest {
 
     private long foreignActive(String monthStart) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM investment_schedules "
-                + "WHERE created_at < ? + INTERVAL 1 MONTH AND is_paused = 0",
+                + "WHERE created_at < ? + INTERVAL 1 MONTH AND status = 'ACTIVE'",
                 Long.class, monthStart);
     }
 
@@ -212,7 +212,7 @@ class ScheduleChurnViewTest {
         assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 1);
 
         // Pause it now. Nothing about June 2024 changed, but June's answer does.
-        jdbc.update("UPDATE investment_schedules SET is_paused = 1 WHERE user_id = ?", user);
+        jdbc.update("UPDATE investment_schedules SET status = 'PAUSED_BY_USER' WHERE user_id = ?", user);
 
         Map<String, Object> june = row(JUNE);
         assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune); // + 0: 1 - 1 = 0

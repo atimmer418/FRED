@@ -168,7 +168,7 @@ public class InvestmentScheduleService {
             // method) already records it. Emitting a pause here would make every new user look
             // like immediate churn in v_schedule_churn. The real pause transitions are in
             // pauseSchedule (user) and resetForBankChange (system).
-            schedule.setIsPaused(true);
+            schedule.setStatus(InvestmentSchedule.Status.PENDING_BANK);
 
             logger.info("Creating new investment schedule for user: {}", user.getEmail());
         }
@@ -254,20 +254,22 @@ public class InvestmentScheduleService {
         InvestmentSchedule schedule = scheduleOpt.get();
         // Read the current state BEFORE the flip: only a schedule that was actually running is
         // being paused by this call.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        // A bank change takes a RUNNING schedule back to waiting for its bank. A schedule the
+        // user paused stays paused: their intent outlives a bank change, and this is what stops
+        // the ACH path from quietly restarting it.
+        boolean wasActive = schedule.getStatus() == InvestmentSchedule.Status.ACTIVE;
 
         schedule.setAchRequestId(null);
-        schedule.setIsPaused(true);
+        if (wasActive) {
+            schedule.setStatus(InvestmentSchedule.Status.PENDING_BANK);
+        }
         investmentScheduleRepository.save(schedule);
         logger.info("Investment schedule re-paused for bank account change — user {}", user.getEmail());
 
-        // Analytics: a SYSTEM pause, on a real transition only. A schedule that was already paused
-        // (the bank changed twice, or changed before ACH ever landed) has not stopped anything, and
-        // counting it would inflate the pause count this event exists to measure.
-        if (!wasPaused) {
-            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
-                    ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_BANK_CHANGE);
-        }
+        // No analytics event. Under the status model this is not a pause: the schedule has gone
+        // back to waiting for a bank, which is a lifecycle step, and schedule_paused now means
+        // exactly one thing, a user switching a running schedule off. Emitting here would put
+        // Plaid outages back into the churn number.
     }
 
     /**
@@ -289,21 +291,22 @@ public class InvestmentScheduleService {
         // path (AccountStatusService.attemptAchCreation calls it with an existing relationship id)
         // and the ACH-retry scheduler reaches it too, so it can run against a schedule that is
         // already live.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        // The ACH path does ONE thing: it starts a schedule that was waiting for a bank. It must
+        // never touch PAUSED_BY_USER, or the retry scheduler would override a deliberate pause.
+        boolean wasPendingBank = schedule.getStatus() == InvestmentSchedule.Status.PENDING_BANK;
 
         schedule.setAchRequestId(achRequestId);
-        schedule.setIsPaused(false); // Unpause when ACH is confirmed
+        if (wasPendingBank) {
+            schedule.setStatus(InvestmentSchedule.Status.ACTIVE);
+        }
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully updated investment schedule ID: {} with ACH request ID: {} and unpaused it",
                 updatedSchedule.getId(), achRequestId);
 
-        // Analytics: a SYSTEM resume, on a real transition only. A schedule that was already
-        // running and merely had its ACH id rewritten has not resumed anything.
-        if (wasPaused) {
-            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_RESUMED,
-                    ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_ACH_CONFIRMED);
-        }
+        // No analytics event. This is a schedule starting for the first time, not resuming, and
+        // investment_schedule_created already records that it exists. schedule_resumed means a
+        // user turning their own schedule back on.
 
         return updatedSchedule;
     }
@@ -377,9 +380,13 @@ public class InvestmentScheduleService {
         InvestmentSchedule schedule = scheduleOpt.get();
         // Read the current state BEFORE the flip. Both callers of this method (the REST endpoint
         // and FredChatActionService) can be asked to pause a schedule that is already paused.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        // Only a RUNNING schedule can be paused by the user. Pausing one that is waiting for its
+        // bank is not churn and must not be counted as such.
+        boolean wasActive = schedule.getStatus() == InvestmentSchedule.Status.ACTIVE;
 
-        schedule.setIsPaused(true);
+        if (wasActive) {
+            schedule.setStatus(InvestmentSchedule.Status.PAUSED_BY_USER);
+        }
         schedule.setMonthlyStreak(0);
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
@@ -387,7 +394,7 @@ public class InvestmentScheduleService {
 
         // Analytics: the genuine user pause, on a real transition only. Pausing an already-paused
         // schedule is a no-op, and emitting for it would inflate the churn count.
-        if (!wasPaused) {
+        if (wasActive) {
             recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
                     ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.REASON_USER_REQUEST);
         }
@@ -425,16 +432,20 @@ public class InvestmentScheduleService {
         InvestmentSchedule schedule = scheduleOpt.get();
         // Read the current state BEFORE the flip. Nothing above this line has changed state, so
         // the ACCOUNT_NOT_ACTIVE throw and the not-found throw both leave without emitting.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        // Only a schedule the user paused can be resumed by them. One waiting for its bank is
+        // started by the ACH path, not by this.
+        boolean wasPausedByUser = schedule.getStatus() == InvestmentSchedule.Status.PAUSED_BY_USER;
 
-        schedule.setIsPaused(false);
+        if (wasPausedByUser) {
+            schedule.setStatus(InvestmentSchedule.Status.ACTIVE);
+        }
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully resumed investment schedule ID: {}", scheduleId);
 
         // Analytics: the genuine user resume, on a real transition only. Resuming a schedule that
         // is already running is a no-op.
-        if (wasPaused) {
+        if (wasPausedByUser) {
             recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_RESUMED,
                     ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.REASON_USER_REQUEST);
         }

@@ -122,12 +122,18 @@ public class MetricsViewSeed {
         jdbc.update("UPDATE users SET plaid_access_token = 'ENC:token' WHERE id = ?", userId);
     }
 
+    /** @param paused true seeds PAUSED_BY_USER, false seeds ACTIVE. See scheduleWithStatus. */
     public void schedule(long userId, LocalDateTime createdAt, boolean paused) {
+        scheduleWithStatus(userId, createdAt, paused ? "PAUSED_BY_USER" : "ACTIVE");
+    }
+
+    /** PENDING_BANK, ACTIVE or PAUSED_BY_USER. */
+    public void scheduleWithStatus(long userId, LocalDateTime createdAt, String status) {
         jdbc.update("INSERT INTO investment_schedules "
                 + "(user_id, created_at, frequency, investment_amount, monthly_amount, "
-                + " monthly_streak, next_investment_date, start_date, is_paused) "
+                + " monthly_streak, next_investment_date, start_date, status) "
                 + "VALUES (?, ?, 'BIWEEKLY', 100.00, 200.00, 0, ?, ?, ?)",
-                userId, createdAt, createdAt.toLocalDate(), createdAt.toLocalDate(), paused);
+                userId, createdAt, createdAt.toLocalDate(), createdAt.toLocalDate(), status);
     }
 
     /**

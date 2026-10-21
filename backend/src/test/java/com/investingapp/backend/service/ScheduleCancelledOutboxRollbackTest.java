@@ -145,7 +145,7 @@ class ScheduleCancelledOutboxRollbackTest {
         schedule.setInvestmentAmount(new BigDecimal("100.00"));
         schedule.setMonthlyAmount(new BigDecimal("200.00"));
         schedule.setFrequency("BIWEEKLY");
-        schedule.setIsPaused(false);
+        schedule.setStatus(com.investingapp.backend.model.InvestmentSchedule.Status.ACTIVE);
         investmentScheduleRepository.save(schedule);
         assertThat(countSchedules()).isEqualTo(1);
     }

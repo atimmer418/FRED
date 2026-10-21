@@ -38,8 +38,25 @@ public class InvestmentSchedule {
     @Column(name = "frequency", length = 20, nullable = false)
     private String frequency; // "WEEKLY", "BIWEEKLY", "MONTHLY"
 
-    @Column(name = "is_paused", nullable = false)
-    private Boolean isPaused = true;
+    /**
+     * Why this schedule is or is not running. Replaced a boolean that could not tell a schedule
+     * waiting for its bank from one the user switched off, which made churn uncountable and let
+     * the ACH machinery restart a schedule the user had deliberately paused.
+     *
+     * Transitions are enforced in InvestmentScheduleService and nowhere else.
+     */
+    public enum Status {
+        /** Created, waiting for an ACH relationship. Has never run. */
+        PENDING_BANK,
+        /** Running. */
+        ACTIVE,
+        /** Was running; the user turned it off. This, and only this, is churn. */
+        PAUSED_BY_USER
+    }
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", length = 20, nullable = false)
+    private Status status = Status.PENDING_BANK;
 
     @Column(name = "day_of_week")
     private String dayOfWeek; // Stores the preferred day of week (e.g., "THURSDAY")
@@ -295,13 +312,30 @@ public class InvestmentSchedule {
     }
 
     /**
+     * Whether the schedule is stopped, for any reason. Derived from the status rather than stored:
+     * callers that only need "is it running" keep working, while the ones that have to tell a
+     * pending bank from a user pause read the status itself.
+     */
+    @Transient
+    public boolean isPausedForAnyReason() {
+        return status != Status.ACTIVE;
+    }
+
+    /** @deprecated read {@link #getStatus()}; this cannot tell a pending bank from a user pause. */
+    @Deprecated
+    @Transient
+    public Boolean getIsPaused() {
+        return isPausedForAnyReason();
+    }
+
+    /**
      * Check if this schedule is ready for investment execution
      */
     public boolean isReadyForInvestment() {
         LocalDate today = LocalDate.now();
 
-        // Must not be paused and must have ACH linked
-        boolean basicRequirements = !isPaused && achRequestId != null;
+        // Must be running and must have ACH linked
+        boolean basicRequirements = status == Status.ACTIVE && achRequestId != null;
 
         if (!basicRequirements) {
             return false;

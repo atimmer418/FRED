@@ -9,10 +9,15 @@
 --
 -- CHURN IS NOT LIFECYCLE, and the split is the point of this view. Each event carries why it
 -- happened:
---   user_request    the user pressed pause, resume, or closed their account      -> CHURN
---   bank_change     we paused it ourselves while a new bank was linked           -> lifecycle
---   ach_confirmed   we started it ourselves once the ACH relationship landed     -> lifecycle
+--   user_request    the user pressed pause or resume                            -> CHURN
+--   account_closed  the user closed their account                                -> CHURN
 --   kyc_rejected    the broker rejected them and we deleted everything           -> not their doing
+--
+-- schedule_paused and schedule_resumed are now USER-ONLY BY CONSTRUCTION. Under the status model a
+-- bank change moves a schedule to PENDING_BANK and the ACH landing moves it to ACTIVE; neither is
+-- a pause or a resume, and neither emits. The only system event left is a kyc_rejected
+-- cancellation. The *_by_user columns are kept because cancellations still split two ways, and so
+-- a future system pause, if one is ever introduced, cannot silently land in the churn number.
 -- The *_by_user columns are the ones to read as churn. The totals are there so the two can be
 -- reconciled, and so a surge of system pauses (a Plaid outage, say) is visible rather than hidden
 -- inside a churn number.
@@ -84,7 +89,7 @@ SELECT
     -- Snapshot columns. Accurate for the month in progress, approximate for history.
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
-        AND s.is_paused = 0) AS active_at_month_end,
+        AND s.status = 'ACTIVE') AS active_at_month_end,
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH) AS schedules_existing_at_month_end
 FROM months m

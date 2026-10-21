@@ -170,7 +170,12 @@ public class FredChatActionService {
         if (current.isEmpty()) {
             return new ActionResult(false, "There's no investing schedule to pause.");
         }
-        if (Boolean.TRUE.equals(current.get().getIsPaused())) {
+        InvestmentSchedule.Status status = current.get().getStatus();
+        if (status == InvestmentSchedule.Status.PENDING_BANK) {
+            return new ActionResult(false,
+                    "Your investing hasn't started yet; it's waiting on your bank connection, so there's nothing to pause.");
+        }
+        if (status == InvestmentSchedule.Status.PAUSED_BY_USER) {
             return new ActionResult(false, "Your investing is already paused, so there's nothing to change.");
         }
         scheduleService.pauseSchedule(user, current.get().getId());
@@ -183,8 +188,16 @@ public class FredChatActionService {
         if (current.isEmpty()) {
             return new ActionResult(false, "There's no investing schedule to resume.");
         }
-        if (!Boolean.TRUE.equals(current.get().getIsPaused())) {
+        // Read the status, not the derived "is it stopped": a schedule waiting for its bank is
+        // stopped but cannot be resumed, and resumeSchedule is correctly a no-op for it. Reporting
+        // success there would tell the user investing was back on when nothing had changed.
+        InvestmentSchedule.Status status = current.get().getStatus();
+        if (status == InvestmentSchedule.Status.ACTIVE) {
             return new ActionResult(false, "Your investing is already active, so there's nothing to change.");
+        }
+        if (status == InvestmentSchedule.Status.PENDING_BANK) {
+            return new ActionResult(false,
+                    "Your investing hasn't started yet; it begins automatically once your bank connection is ready.");
         }
         InvestmentSchedule resumed = scheduleService.resumeSchedule(user, current.get().getId());
         // A long pause can leave nextInvestmentDate in the past — the scheduler

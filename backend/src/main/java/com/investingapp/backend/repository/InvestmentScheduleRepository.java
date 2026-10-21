@@ -34,13 +34,13 @@ public interface InvestmentScheduleRepository extends JpaRepository<InvestmentSc
     /**
      * Find active (non-paused) investment schedules for a user
      */
-    @Query("SELECT is FROM InvestmentSchedule is WHERE is.user = :user AND is.isPaused = false ORDER BY is.createdAt DESC")
+    @Query("SELECT is FROM InvestmentSchedule is WHERE is.user = :user AND is.status = com.investingapp.backend.model.InvestmentSchedule.Status.ACTIVE ORDER BY is.createdAt DESC")
     List<InvestmentSchedule> findActiveSchedulesByUser(@Param("user") User user);
     
     /**
      * Check if user has any active investment schedules
      */
-    @Query("SELECT COUNT(is) > 0 FROM InvestmentSchedule is WHERE is.user = :user AND is.isPaused = false")
+    @Query("SELECT COUNT(is) > 0 FROM InvestmentSchedule is WHERE is.user = :user AND is.status = com.investingapp.backend.model.InvestmentSchedule.Status.ACTIVE")
     boolean hasActiveSchedules(@Param("user") User user);
     
     /**
@@ -62,6 +62,6 @@ public interface InvestmentScheduleRepository extends JpaRepository<InvestmentSc
      * Find active (non-paused) schedules whose next investment date matches the given date.
      * Used for D-1 payday notifications.
      */
-    @Query("SELECT s FROM InvestmentSchedule s WHERE s.nextInvestmentDate = :date AND s.isPaused = false")
+    @Query("SELECT s FROM InvestmentSchedule s WHERE s.nextInvestmentDate = :date AND s.status = com.investingapp.backend.model.InvestmentSchedule.Status.ACTIVE")
     List<InvestmentSchedule> findActiveByNextInvestmentDate(@Param("date") java.time.LocalDate date);
 }

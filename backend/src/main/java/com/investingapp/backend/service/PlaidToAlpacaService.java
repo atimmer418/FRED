@@ -12,14 +12,12 @@ import com.plaid.client.model.AccountBase;
 import com.plaid.client.model.NumbersACH;
 
 import com.investingapp.backend.model.User;
-import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.EncryptionService;
 
 import retrofit2.Response;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.Optional;
 
 @Service
 public class PlaidToAlpacaService {
@@ -31,10 +29,7 @@ public class PlaidToAlpacaService {
     
     @Autowired
     private AlpacaApiService alpacaApiService;
-    
-    @Autowired
-    private UserRepository userRepository;
-    
+
     @Autowired
     private EncryptionService encryptionService;
 
@@ -49,8 +44,6 @@ public class PlaidToAlpacaService {
                                                             User user) {
         logger.info("Creating ACH relationship for Alpaca account {} using Plaid account {}",
                    alpacaAccountId, plaidAccountId);
-
-        String userEmail = user.getEmail();
 
         try {
             // Load the encrypted Plaid access token from the User entity and decrypt it
@@ -80,18 +73,7 @@ public class PlaidToAlpacaService {
                 bankAccount.getRoutingNumber(),
                 bankAccount.getNickname()
             );
-            
-            // If ACH creation was successful, save the relationship ID to user profile
-            if (achResult != null && !achResult.containsKey("error")) {
-                String achRelationshipId = (String) achResult.get("id");
-                String achStatus = (String) achResult.get("status");
-                
-                if (achRelationshipId != null) {
-                    saveAchRelationshipToUser(userEmail, alpacaAccountId, achRelationshipId, achStatus);
-                    logger.info("Saved ACH relationship {} to user profile {}", achRelationshipId, userEmail);
-                }
-            }
-            
+
             return achResult;
             
         } catch (Exception e) {
@@ -99,29 +81,6 @@ public class PlaidToAlpacaService {
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("error", "Failed to create ACH relationship from Plaid: " + e.getMessage());
             return errorResult;
-        }
-    }
-
-    /**
-     * Save ACH relationship information to user profile for future funding operations
-     */
-    private void saveAchRelationshipToUser(String userEmail, String alpacaAccountId,
-                                         String achRelationshipId, String achStatus) {
-        try {
-            Optional<User> userOpt = userRepository.findByEmail(userEmail);
-            if (userOpt.isPresent()) {
-                User user = userOpt.get();
-                // Encrypt sensitive IDs before storing
-                user.setAlpacaAccountId(encryptionService.encrypt(alpacaAccountId));
-                user.setAlpacaAchRelationshipId(encryptionService.encrypt(achRelationshipId));
-                user.setAlpacaAchStatus(achStatus); // status is not sensitive (e.g. "QUEUED", "APPROVED")
-                userRepository.save(user);
-                logger.info("Successfully saved encrypted ACH relationship data for user: {}", userEmail);
-            } else {
-                logger.error("User not found when trying to save ACH relationship: {}", userEmail);
-            }
-        } catch (Exception e) {
-            logger.error("Error saving ACH relationship to user profile: {}", e.getMessage(), e);
         }
     }
 

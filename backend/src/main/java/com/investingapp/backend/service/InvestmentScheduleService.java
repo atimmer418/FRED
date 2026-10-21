@@ -1,10 +1,14 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.HoldReason;
+import com.investingapp.backend.model.InvestmentFrequency;
 import com.investingapp.backend.model.InvestmentSchedule;
+import com.investingapp.backend.model.ScheduleMode;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.service.PortfolioService;
 import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.EasternTime;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -74,11 +79,11 @@ public class InvestmentScheduleService {
             if (startDate != null) {
                 // Only update start date if it's not already set OR if the schedule hasn't
                 // started yet (brand new)
-                if (schedule.getStartDate() == null || LocalDate.now().isBefore(schedule.getStartDate())) {
+                if (schedule.getStartDate() == null || EasternTime.today().isBefore(schedule.getStartDate())) {
                     schedule.setStartDate(startDate);
                 }
 
-                LocalDate today = LocalDate.now();
+                LocalDate today = EasternTime.today();
                 LocalDate anchorDate = schedule.getStartDate();
                 LocalDate intendedDate = null;
 
@@ -130,10 +135,10 @@ public class InvestmentScheduleService {
             schedule.setMonthlyAmount(calculateMonthlyAmountFromInvestment(investmentAmount, frequency));
 
             // Set dates
-            LocalDate effectiveStartDate = startDate != null ? startDate : LocalDate.now();
+            LocalDate effectiveStartDate = startDate != null ? startDate : EasternTime.today();
             schedule.setStartDate(effectiveStartDate);
 
-            LocalDate today = LocalDate.now();
+            LocalDate today = EasternTime.today();
             LocalDate preferenceSourceDate;
 
             // Rule: Derive from nextInvestmentDate, unless today is before start day
@@ -220,92 +225,41 @@ public class InvestmentScheduleService {
      * act on becomes null rather than arriving in PostHog as a new dimension value nobody can
      * interpret, and free text must never be sent at all.
      *
-     * <p>The four handled values are the four every switch in this service and in
-     * {@link InvestmentSchedule} acts on: WEEKLY, BIWEEKLY, SEMI_MONTHLY and MONTHLY.
+     * <p>The handled values are the members of {@link InvestmentFrequency}: WEEKLY, BIWEEKLY,
+     * SEMI_MONTHLY (also under its legacy SEMIMONTHLY spelling) and MONTHLY.
      */
     static String frequencySlug(String frequency) {
-        if (frequency == null) {
-            return null;
-        }
-        switch (frequency.trim().toUpperCase()) {
-            case "WEEKLY":
-                return "weekly";
-            case "BIWEEKLY":
-                return "biweekly";
-            case "SEMI_MONTHLY":
-                return "semi_monthly";
-            case "MONTHLY":
-                return "monthly";
-            default:
-                return null;
-        }
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.name().toLowerCase(Locale.ROOT))
+                .orElse(null);
     }
 
     /**
-     * Clear ACH data and re-pause the schedule when a user changes their bank account.
-     * A new ACH relationship will be created by attemptAchCreation after this.
+     * Bank change step 2 (spec 7.8): drop the old relationship id and hold the schedule. is_paused is
+     * not written; the hold is cleared by AchRelationshipService.adopt when the new relationship lands.
      */
     public void resetForBankChange(User user) {
-        Optional<InvestmentSchedule> scheduleOpt = investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
-        if (scheduleOpt.isEmpty()) {
-            logger.info("No investment schedule found for user {} — nothing to reset", user.getEmail());
-            return;
-        }
-        InvestmentSchedule schedule = scheduleOpt.get();
-        // Read the current state BEFORE the flip: only a schedule that was actually running is
-        // being paused by this call.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user).ifPresent(schedule -> {
+            // Read the current state BEFORE the hold goes on: only a schedule that was actually
+            // running is being stopped by this call.
+            boolean wasRunning = schedule.getHoldReason() == null
+                    && !Boolean.TRUE.equals(schedule.getIsPaused());
 
-        schedule.setAchRequestId(null);
-        schedule.setIsPaused(true);
-        investmentScheduleRepository.save(schedule);
-        logger.info("Investment schedule re-paused for bank account change — user {}", user.getEmail());
+            schedule.setAchRequestId(null);
+            schedule.setHoldReason(HoldReason.BANK_CHANGE);
+            investmentScheduleRepository.save(schedule);
+            logger.info("Investment schedule held for bank change, user {}", user.getEmail());
 
-        // Analytics: a SYSTEM pause, on a real transition only. A schedule that was already paused
-        // (the bank changed twice, or changed before ACH ever landed) has not stopped anything, and
-        // counting it would inflate the pause count this event exists to measure.
-        if (!wasPaused) {
-            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
-                    ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_BANK_CHANGE);
-        }
-    }
-
-    /**
-     * Update investment schedule with ACH request ID
-     */
-    public InvestmentSchedule updateWithAchRequestId(User user, String achRequestId) {
-        logger.info("Updating investment schedule with ACH request ID: {} for user: {}",
-                achRequestId, user.getEmail());
-
-        Optional<InvestmentSchedule> scheduleOpt = investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
-
-        if (scheduleOpt.isEmpty()) {
-            logger.warn("No investment schedule found for user: {} — ACH saved to user profile, schedule will pick it up when created", user.getEmail());
-            return null;
-        }
-
-        InvestmentSchedule schedule = scheduleOpt.get();
-        // Read the current state BEFORE the flip. This method is also the "ACH already exists"
-        // path (AccountStatusService.attemptAchCreation calls it with an existing relationship id)
-        // and the ACH-retry scheduler reaches it too, so it can run against a schedule that is
-        // already live.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
-
-        schedule.setAchRequestId(achRequestId);
-        schedule.setIsPaused(false); // Unpause when ACH is confirmed
-
-        InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
-        logger.info("Successfully updated investment schedule ID: {} with ACH request ID: {} and unpaused it",
-                updatedSchedule.getId(), achRequestId);
-
-        // Analytics: a SYSTEM resume, on a real transition only. A schedule that was already
-        // running and merely had its ACH id rewritten has not resumed anything.
-        if (wasPaused) {
-            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_RESUMED,
-                    ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_ACH_CONFIRMED);
-        }
-
-        return updatedSchedule;
+            // Analytics: a SYSTEM pause, on a real transition only. A schedule that was already
+            // held (a second bank change in a row) or already paused by the user has not stopped
+            // anything here, and counting it would inflate the pause count this event measures.
+            // The hold, not is_paused, is what stops it now; the event name stays schedule_paused
+            // because the taxonomy has one word for "this schedule stopped running".
+            if (wasRunning) {
+                recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
+                        ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_BANK_CHANGE);
+            }
+        });
     }
 
     /**
@@ -325,40 +279,40 @@ public class InvestmentScheduleService {
     }
 
     /**
-     * Get all schedules ready for investment execution (for cron processing).
-     * Only returns schedules where:
-     *   - isPaused == false (the user has not paused the schedule), AND
-     *   - user.accountStatus == "ACTIVE" (the Alpaca account is fully active)
-     * Both conditions must be true for a trade to be placed.
+     * Schedules the 11:55 cron may queue tonight: user ACTIVE (both modes), then the per-mode clause.
      */
     @Transactional(readOnly = true)
-    public List<InvestmentSchedule> getSchedulesReadyForInvestment() {
-        logger.info("Finding investment schedules ready for execution...");
-
+    public List<InvestmentSchedule> getSchedulesReadyForInvestment(LocalDate todayET) {
         List<InvestmentSchedule> readySchedules = investmentScheduleRepository
                 .findByUser_AccountStatus("ACTIVE")
                 .stream()
-                .filter(InvestmentSchedule::isReadyForInvestment)
+                .filter(s -> isReady(s, todayET))
                 .toList();
-
-        logger.info("Found {} schedules ready for investment execution", readySchedules.size());
+        logger.info("Found {} schedules ready for investment execution on {}", readySchedules.size(), todayET);
         return readySchedules;
     }
 
+    /** Mode switch (spec 5.2). Phase 0 never produces DETECTED rows; the branch exists so the switch is exhaustive. */
+    static boolean isReady(InvestmentSchedule s, LocalDate todayET) {
+        ScheduleMode mode = s.getMode() == null ? ScheduleMode.MANUAL : s.getMode();
+        return switch (mode) {
+            case MANUAL -> s.isReadyForInvestment(todayET);
+            case DETECTED -> false;
+        };
+    }
+
     /**
-     * Calculate monthly amount from investment amount and frequency
+     * Monthly amount from the per-paycheck amount, through {@link InvestmentFrequency} so the row
+     * holds the same cents the client computes. An unknown frequency keeps the old lenient default
+     * and stores the per-paycheck amount unchanged.
      */
     private BigDecimal calculateMonthlyAmountFromInvestment(BigDecimal investmentAmount, String frequency) {
         if (investmentAmount == null)
             return BigDecimal.ZERO;
 
-        return switch (frequency.toUpperCase()) {
-            case "WEEKLY" -> investmentAmount.multiply(new BigDecimal("4.33")); // ~4.33 weeks per month
-            case "BIWEEKLY" -> investmentAmount.multiply(new BigDecimal("2.17")); // ~2.17 biweekly periods per month
-            case "SEMI_MONTHLY" -> investmentAmount.multiply(new BigDecimal("2")); // Exactly 2 times per month
-            case "MONTHLY" -> investmentAmount;
-            default -> investmentAmount;
-        };
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.toMonthly(investmentAmount))
+                .orElse(investmentAmount);
     }
 
     /**

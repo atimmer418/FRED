@@ -7,6 +7,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Subject, takeUntil, catchError, tap, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../utils/plaid-link-session';
 import { PlaidService } from '../services/plaid.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
@@ -49,6 +50,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
   
   private plaidHandler: any;
   private plaidSubscription: any;
+  private currentLinkToken: string | null = null;
 
   constructor(
     private router: Router,
@@ -117,17 +119,36 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
     this.statusMessage = 'Initializing secure connection...';
 
     try {
-      // Get link token for updating bank account
-      const linkTokenData = await this.getLinkTokenAuthenticated().toPromise();
-      const linkToken = linkTokenData.link_token;
-
-      if (!linkToken) {
-        throw new Error('Failed to retrieve link_token from backend.');
+      // Back from the bank's OAuth page: Link must resume with the SAME link_token it left with.
+      // onboarding and change-bank share one sessionStorage slot, so a token left behind by the
+      // other flow must never be reused here: the return marker has to match this page too.
+      const returnHref = this.oauthReturnHref();
+      const storedToken = returnHref ? readPlaidLinkToken() : null;
+      const storedReturn = returnHref ? readPlaidLinkReturn() : null;
+      const resuming = returnHref !== null && storedToken !== null && storedReturn === 'change-bank';
+      if (returnHref !== null && storedToken !== null && !resuming) {
+        // Stale token from a different flow (or a corrupted marker): discard it and fetch a fresh
+        // one below rather than ever treating it as proof this page's step-up gate already passed.
+        clearPlaidLinkSession();
       }
+      let linkToken: string;
+      if (resuming) {
+        linkToken = storedToken as string;
+      } else {
+        const linkTokenData = await this.getLinkTokenAuthenticated().toPromise();
+        linkToken = linkTokenData.link_token;
+        if (!linkToken) {
+          throw new Error('Failed to retrieve link_token from backend.');
+        }
+        // Not stored yet: a stored token must only ever exist once openPlaid has passed the PIN
+        // step-up, so the OAuth return can trust it and skip the gate.
+      }
+      this.currentLinkToken = linkToken;
 
-      this.plaidHandler = Plaid.create({
+      const config: any = {
         token: linkToken,
         onSuccess: (public_token: string, metadata: any) => {
+          clearPlaidLinkSession();
           console.log('Plaid Link success! Public Token:', public_token, 'Metadata:', metadata);
           this.statusMessage = 'Processing...';
           this.isLoading = true;
@@ -140,6 +161,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
           this.statusMessage = 'Ready to change your bank account.';
         },
         onExit: (err: any, metadata: any) => {
+          clearPlaidLinkSession();
           this.isLoading = false;
           this.isPlaidReady = true;
           if (err != null) {
@@ -155,7 +177,18 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         onEvent: (eventName: string, metadata: any) => {
           console.log('Plaid Link event:', eventName, metadata);
         }
-      });
+      };
+      if (resuming) {
+        config.receivedRedirectUri = returnHref;
+      }
+      this.plaidHandler = Plaid.create(config);
+      if (resuming) {
+        // A stored token only exists because openPlaid already passed the PIN step-up before Link
+        // left for the bank, so it is safe to reopen straight away. Consume it now so a stale
+        // oauth_state_id still in the URL cannot later pair with a fresh, different token.
+        clearPlaidLinkSession();
+        this.plaidHandler.open();
+      }
 
     } catch (error: any) {
       console.error('Error initializing Plaid Link:', error);
@@ -185,6 +218,11 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         }
       }
 
+      // The step-up gate (or its deliberate absence) just passed: only now is it true that a
+      // stored token proves Link really left for the bank after a verified step-up.
+      if (this.currentLinkToken) {
+        storePlaidLinkSession(this.currentLinkToken, 'change-bank');
+      }
       this.plaidHandler.open();
     } else {
       this.analytics.trackErrorShown('bank_link', 'portfolio', 'inline_banner', null, false);
@@ -193,9 +231,14 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
   }
 
   private getLinkTokenAuthenticated() {
-    return this.http.post<any>(`${BACKEND_API_URL}/plaid/create_link_token`, {}, { 
-      headers: this.getAuthHeaders() 
+    return this.http.post<any>(`${BACKEND_API_URL}/plaid/create_link_token`, { mode: 'link' }, {
+      headers: this.getAuthHeaders()
     });
+  }
+
+  /** The current URL when it carries Plaid's oauth_state_id, else null. Stubbed in specs. */
+  private oauthReturnHref(): string | null {
+    return window.location.search.includes('oauth_state_id') ? window.location.href : null;
   }
 
   private exchangePublicTokenAuthenticated(publicToken: string): void {

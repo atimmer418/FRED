@@ -46,4 +46,7 @@ public interface DripExecutionRepository extends JpaRepository<DripExecution, Lo
      */
     boolean existsByUserAndSymbolAndStatusIn(User user, String symbol,
             java.util.Collection<DripExecution.DripStatus> statuses);
+
+    /** User deletion: drip_executions.user_id has no ON DELETE CASCADE (V1:108). */
+    void deleteAllByUser(User user);
 }

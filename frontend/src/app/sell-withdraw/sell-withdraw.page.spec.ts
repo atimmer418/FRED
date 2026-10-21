@@ -26,6 +26,7 @@ describe('SellWithdrawPage — analytics', () => {
   let trading: jasmine.SpyObj<TradingService>;
   let portfolio: jasmine.SpyObj<PortfolioService>;
   let modalCtrl: jasmine.SpyObj<ModalController>;
+  let toast: jasmine.SpyObj<ToastService>;
   let page: SellWithdrawPage;
 
   const position: Position = {
@@ -76,6 +77,7 @@ describe('SellWithdrawPage — analytics', () => {
 
     portfolio = jasmine.createSpyObj<PortfolioService>('PortfolioService', ['getPortfolioDashboard']);
     modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
+    toast = jasmine.createSpyObj<ToastService>('ToastService', ['showToast']);
 
     page = new SellWithdrawPage(
       jasmine.createSpyObj<Router>('Router', ['navigateByUrl']),
@@ -83,7 +85,7 @@ describe('SellWithdrawPage — analytics', () => {
       portfolio,
       jasmine.createSpyObj<AlertController>('AlertController', ['create']),
       modalCtrl,
-      jasmine.createSpyObj<ToastService>('ToastService', ['showToast']),
+      toast,
       jasmine.createSpyObj<PasskeyService>('PasskeyService', ['startAuthentication']),
       jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']),
       jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
@@ -296,6 +298,21 @@ describe('SellWithdrawPage — analytics', () => {
     tick();
 
     expect(analytics.trackErrorShown).toHaveBeenCalledOnceWith('save_failed', 'portfolio', 'toast', 500, false);
+  }));
+
+  it('a close deferred by the 60-day settlement hold shows that copy, not the generic failure', fakeAsync(() => {
+    trading.closeAccount.and.returnValue(throwError(() => new HttpErrorResponse({
+      status: 409,
+      error: { code: 'DELETION_DEFERRED', message: 'SETTLEMENT_WINDOW' },
+    })));
+
+    page.confirmCloseAccount();
+    tick();
+
+    expect(toast.showToast).toHaveBeenCalledOnceWith(
+      'Your account can close 60 days after your last transfer settles. Everything stays safe until then.',
+      'danger',
+    );
   }));
 
   // ── the money actions themselves stay server-side ──────────────────────────

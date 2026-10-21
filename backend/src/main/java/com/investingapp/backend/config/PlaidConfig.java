@@ -50,13 +50,11 @@ public class PlaidConfig {
 
         ApiClient apiClient = new ApiClient(authCredentials);
 
-        // Set the environment adapter
+        // Set the environment adapter. plaid-java 46 knows only Sandbox and Production: Plaid
+        // retired the Development environment, so any other value falls back to Sandbox below.
         if ("sandbox".equalsIgnoreCase(plaidEnv)) {
             apiClient.setPlaidAdapter(ApiClient.Sandbox);
             logger.info("Plaid client configured for Sandbox environment.");
-        } else if ("development".equalsIgnoreCase(plaidEnv)) {
-            apiClient.setPlaidAdapter(ApiClient.Development);
-            logger.info("Plaid client configured for Development environment.");
         } else if ("production".equalsIgnoreCase(plaidEnv)) {
             apiClient.setPlaidAdapter(ApiClient.Production);
             logger.info("Plaid client configured for Production environment.");

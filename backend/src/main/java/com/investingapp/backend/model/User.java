@@ -175,6 +175,30 @@ public class User {
     @Column(length = 50)
     private String alpacaAchStatus; // "QUEUED", "APPROVED", "PENDING", etc.
 
+    // Paycheck Autopilot, Phase 0 (V6). The rest of spec 3.1 stays unmapped until a later phase.
+    @Column(name = "plaid_account_mask", length = 4)
+    private String plaidAccountMask;
+
+    /** Tri-state: null unknown, true consented, false refused (spec 2.3). Nullable, so no DEFAULT. */
+    @Column(name = "plaid_transactions_consented", columnDefinition = "BOOLEAN")
+    private Boolean plaidTransactionsConsented;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "plaid_item_status", length = 24, nullable = false)
+    private PlaidItemStatus plaidItemStatus = PlaidItemStatus.OK;
+
+    @Column(name = "plaid_item_error_code", length = 64)
+    private String plaidItemErrorCode;
+
+    @Column(name = "plaid_item_linked_at")
+    private LocalDateTime plaidItemLinkedAt;
+
+    @Column(name = "plaid_webhook_acked_at")
+    private LocalDateTime plaidWebhookAckedAt;
+
+    @Column(name = "previous_ach_relationship_id", length = 512)
+    private String previousAchRelationshipId; // Stored as ENC:<base64(iv+ciphertext)>, encrypted at rest
+
     @Column(name = "account_status", length = 30)
     private String accountStatus; // SUBMITTED, APPROVAL_PENDING, APPROVED, ACTIVE, REJECTED, ACTION_REQUIRED
 

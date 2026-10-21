@@ -3,6 +3,7 @@ package com.investingapp.backend.repository;
 import com.investingapp.backend.model.Beneficiary;
 import com.investingapp.backend.model.Beneficiary.BeneficiaryStatus;
 import com.investingapp.backend.model.Beneficiary.BeneficiaryType;
+import com.investingapp.backend.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -106,9 +107,12 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary, Long> 
     @Query("SELECT b FROM Beneficiary b WHERE b.user.id = :userId AND " +
            "b.firstName = :firstName AND b.lastName = :lastName AND " +
            "b.dateOfBirth = :dateOfBirth AND b.id != :excludeId")
-    List<Beneficiary> findDuplicateBeneficiaries(@Param("userId") Long userId, 
+    List<Beneficiary> findDuplicateBeneficiaries(@Param("userId") Long userId,
                                                  @Param("firstName") String firstName,
                                                  @Param("lastName") String lastName,
                                                  @Param("dateOfBirth") java.time.LocalDate dateOfBirth,
                                                  @Param("excludeId") Long excludeId);
+
+    /** User deletion: beneficiaries.user_id has no ON DELETE CASCADE (V1:40). */
+    void deleteAllByUser(User user);
 }

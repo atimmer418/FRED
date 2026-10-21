@@ -2,6 +2,7 @@ package com.investingapp.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
@@ -30,6 +31,8 @@ public class AccountStatusService {
     private final PlaidToAlpacaService plaidToAlpacaService;
     private final InvestmentScheduleService investmentScheduleService;
     private final AnalyticsOutboxService analyticsOutboxService;
+    private final AchRelationshipService achRelationshipService;
+    private final UserDeletionService userDeletionService;
     private final ObjectMapper objectMapper;
 
     public AccountStatusService(
@@ -40,7 +43,9 @@ public class AccountStatusService {
             EmailService emailService,
             PlaidToAlpacaService plaidToAlpacaService,
             InvestmentScheduleService investmentScheduleService,
-            AnalyticsOutboxService analyticsOutboxService) {
+            AnalyticsOutboxService analyticsOutboxService,
+            AchRelationshipService achRelationshipService,
+            UserDeletionService userDeletionService) {
         this.userRepository = userRepository;
         this.investmentScheduleRepository = investmentScheduleRepository;
         this.alpacaApiService = alpacaApiService;
@@ -49,6 +54,8 @@ public class AccountStatusService {
         this.plaidToAlpacaService = plaidToAlpacaService;
         this.investmentScheduleService = investmentScheduleService;
         this.analyticsOutboxService = analyticsOutboxService;
+        this.achRelationshipService = achRelationshipService;
+        this.userDeletionService = userDeletionService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -126,12 +133,14 @@ public class AccountStatusService {
 
     /**
      * Handle an account that has been REJECTED.
-     * Sends a rejection email, deletes the user's InvestmentSchedule, then hard-deletes the user.
-     * All cascade-deleted entities (passkeys, progress, etc.) are handled by JPA cascades.
+     * Records the decision, emails the user, then deletes the user through the one deletion path.
+     * A REJECTED account never reached ACH setup (attemptAchCreation only runs for ACTIVE users and
+     * an ACTIVE user is never re-polled), so the broker call inside that path is skipped and
+     * nothing talks to Alpaca from inside this transaction.
      */
     @Transactional
     public void handleRejected(User user) {
-        logger.warn("Account REJECTED for user {} — sending rejection email and deleting user record",
+        logger.warn("Account REJECTED for user {}: sending rejection email and deleting user record",
                 user.getEmail());
 
         // Record the decision FIRST, while the user still has an id and a public_id to copy.
@@ -149,16 +158,22 @@ public class AccountStatusService {
 
         // Same reasoning for the cancellation: recorded before anything is deleted, while the user
         // still has an id and a public_id, and while the schedule still exists to be asked about.
+        // Unconditional, including on the deferred path below: the broker has rejected this
+        // application, so the schedule is cancelled now whether or not the row deletes land today.
         recordScheduleCancelled(user, ServerAnalyticsEvent.INITIATOR_SYSTEM,
                 ServerAnalyticsEvent.REASON_KYC_REJECTED);
 
-        // Delete InvestmentSchedule first (not covered by User cascades)
-        investmentScheduleRepository.deleteAllByUser(user);
-        logger.info("Deleted InvestmentSchedule(s) for rejected user {}", user.getEmail());
-
-        // Hard delete the user — all @OneToMany cascade=ALL entities deleted by JPA
-        userRepository.delete(user);
-        logger.info("Hard-deleted user record for rejected user {}", user.getEmail());
+        try {
+            userDeletionService.delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+            logger.info("Hard-deleted user record for rejected user {}", user.getEmail());
+        } catch (DeletionDeferredException deferred) {
+            // Park the row as REJECTED: findUsersWithPendingAccountStatus excludes it, so the poller
+            // stops re-deciding, and the admin verb finishes the job once the money has settled.
+            user.setAccountStatus("REJECTED");
+            userRepository.save(user);
+            logger.error("alert.user_deletion.deferred user={} reason=KYC_REJECTED deferral={}",
+                    user.getId(), deferred.reason);
+        }
     }
 
     /**
@@ -196,25 +211,39 @@ public class AccountStatusService {
     }
 
     /**
-     * Called when a user changes their linked bank account.
-     * Resets the investment schedule and triggers a fresh ACH creation if the account is already ACTIVE.
+     * Bank change (spec 7.8), in order: record the relationship being replaced, hold the schedule,
+     * cancel the old relationships, and leave creation to the 15-minute poll. The exchange that calls
+     * this already copied previous_ach_relationship_id and nulled alpacaAchRelationshipId (T09), so the
+     * copy below is a no-op there and only matters for any other caller.
      */
     @Transactional
     public void handleBankAccountChange(User user) {
+        if (user.getAlpacaAchRelationshipId() != null) {
+            user.setPreviousAchRelationshipId(user.getAlpacaAchRelationshipId());
+        } else if (user.getPreviousAchRelationshipId() == null) {
+            // Legacy split row: the deleted /update-ach-request-id endpoint could write the
+            // schedule's achRequestId while saveAchRelationshipToUser silently swallowed a failure
+            // to write alpacaAchRelationshipId on the user. Without this fallback adopt's
+            // firstEverAdoption recognizer (previousAchRelationshipId null AND achRequestId null,
+            // both true here once resetForBankChange runs) would mistake this bank change for a
+            // first adoption and unpause a schedule the user may have paused themselves. Guarded on
+            // previousAchRelationshipId already being null so this stays a no-op on the exchange
+            // path, where PlaidService's own capture (direct copy or this same schedule fallback)
+            // already ran before calling here.
+            investmentScheduleService.getCurrentSchedule(user)
+                    .map(InvestmentSchedule::getAchRequestId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .ifPresent(id -> user.setPreviousAchRelationshipId(encryptionService.encrypt(id)));
+        }
         investmentScheduleService.resetForBankChange(user);
-
-        if ("ACTIVE".equals(user.getAccountStatus())) {
-            logger.info("Account ACTIVE for user {} — triggering ACH creation for new bank account", user.getEmail());
-            attemptAchCreation(user);
-        } else {
-            logger.info("Account not yet ACTIVE for user {} — ACH will be created when account becomes active", user.getEmail());
+        if (!achRelationshipService.cancelAllActive(user)) {
+            logger.warn("Bank change for user {}: ACH cancellation deferred while a transfer is in flight; the poll retries", user.getEmail());
         }
     }
 
     /**
-     * Attempt to create an ACH relationship for a user using their stored Plaid data.
-     * Silently skips if Plaid data is not yet available (the retry scheduler will pick it up).
-     * Sends an error email if creation fails unexpectedly.
+     * Precondition guards (Plaid data, Alpaca account, legal name), then
+     * AchRelationshipService.ensureRelationship, which is the only path that creates or adopts.
      */
     @Transactional
     public void attemptAchCreation(User user) {
@@ -237,81 +266,7 @@ public class AccountStatusService {
             return;
         }
 
-        // If an ACH relationship was already created (e.g., user linked bank during onboarding
-        // before their account became ACTIVE), skip creation and use the existing ID to unpause.
-        if (user.getAlpacaAchRelationshipId() != null) {
-            try {
-                String existingAchId = encryptionService.decrypt(user.getAlpacaAchRelationshipId());
-                investmentScheduleService.updateWithAchRequestId(user, existingAchId);
-                logger.info("ACH relationship already exists ({}) — investment schedule unpaused for user {}",
-                        existingAchId, user.getEmail());
-            } catch (Exception e) {
-                logger.error("Error unpausing schedule with existing ACH relationship for user {}: {}",
-                        user.getEmail(), e.getMessage(), e);
-            }
-            return;
-        }
-
-        // Guard against cases where Alpaca already has an active ACH relationship but our DB
-        // never recorded it (e.g., a previous run crashed between Alpaca responding and the DB write).
-        try {
-            String alpacaAccountId = encryptionService.decrypt(user.getAlpacaAccountId());
-            String existingRelationships = alpacaApiService.getAchRelationships(alpacaAccountId);
-            JsonNode relationships = objectMapper.readTree(existingRelationships);
-            if (relationships.isArray()) {
-                for (JsonNode rel : relationships) {
-                    String status = rel.has("status") ? rel.get("status").asText() : "";
-                    if ("APPROVED".equals(status) || "QUEUED".equals(status)) {
-                        String achId = rel.get("id").asText();
-                        logger.info("Found existing active ACH relationship {} on Alpaca for user {} — saving and unpausing",
-                                achId, user.getEmail());
-                        investmentScheduleService.updateWithAchRequestId(user, achId);
-                        return;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Could not check existing ACH relationships for user {} — proceeding with creation: {}",
-                    user.getEmail(), e.getMessage());
-        }
-
-        String ownerName = firstName + " " + lastName;
-
-        try {
-            String alpacaAccountId = encryptionService.decrypt(user.getAlpacaAccountId());
-
-            Map<String, Object> achResult = plaidToAlpacaService.createAchRelationshipFromPlaid(
-                    alpacaAccountId,
-                    user.getPlaidAccountId(),
-                    ownerName,
-                    user);
-
-            if (achResult.containsKey("error")) {
-                String errorMsg = (String) achResult.get("error");
-                logger.error("ACH creation failed for user {}: {}", user.getEmail(), errorMsg);
-                emailService.sendEmail(
-                        user.getEmail(),
-                        "Action needed: bank account linking failed",
-                        "We were unable to automatically link your bank account after your FRED account was approved. "
-                        + "Please open the FRED app and link your bank account manually in Settings. "
-                        + "Error: " + errorMsg);
-                return;
-            }
-
-            String achId = (String) achResult.get("id");
-            if (achId == null) {
-                logger.warn("ACH creation for user {} returned no ID — cannot update investment schedule", user.getEmail());
-                return;
-            }
-
-            // Save ACH ID to InvestmentSchedule and unpause it
-            investmentScheduleService.updateWithAchRequestId(user, achId);
-            logger.info("ACH relationship {} created and investment schedule unpaused for user {}",
-                    achId, user.getEmail());
-
-        } catch (Exception e) {
-            logger.error("Unexpected error creating ACH relationship for user {}: {}", user.getEmail(), e.getMessage(), e);
-        }
+        achRelationshipService.ensureRelationship(user);
     }
 
     // --- Analytics ------------------------------------------------------------------------------
@@ -350,13 +305,16 @@ public class AccountStatusService {
      * Records schedule_cancelled, in whatever transaction the caller already has.
      *
      * <p>Only a REAL transition is recorded. The schedule's existence is read BEFORE it is changed,
-     * and a user with no schedule emits nothing: deleteAllByUser is a no-op for them, and an event
-     * there would invent a cancellation for every rejected user who never set a schedule up. These
+     * and a user with no schedule emits nothing: the deletion below removes no schedule for them,
+     * and an event there would invent a cancellation for every rejected user who never set a
+     * schedule up. These
      * events exist to count churn, so a phantom would inflate the one number they are for.
      *
      * <p>Called before the deletes for the same reason as the decision above: the outbox copies the
      * user's id and public_id, and in a moment there will be neither to copy. The row has no foreign
-     * key to users and denormalises public_id, so it outlives the schedule and the person.
+     * key to users and denormalises public_id, so it outlives the schedule and the person. When the
+     * deletes are deferred (money still in flight) the row is parked as REJECTED instead, and the
+     * cancellation still stands: a rejected application never invests again.
      *
      * <p>Two properties and nothing else, in this order: who caused it and why. No amount, no
      * frequency, no bank.

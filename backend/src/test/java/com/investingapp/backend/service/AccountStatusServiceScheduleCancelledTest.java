@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -37,9 +38,9 @@ import static org.mockito.Mockito.when;
  *
  * <p>A rejected user loses their schedule along with their account, and that is a real cancellation
  * worth counting. A rejected user who never set a schedule up has nothing cancelled, and
- * {@code deleteAllByUser} is a no-op for them. Both cases are pinned here, because the event exists
- * to measure churn and a phantom cancellation for every schedule-less rejection would inflate
- * exactly the number it is for.
+ * UserDeletionService removes no schedule for them. Both cases are pinned here, because the event
+ * exists to measure churn and a phantom cancellation for every schedule-less rejection would
+ * inflate exactly the number it is for.
  *
  * <p>The property map is asserted WHOLE, never as a subset: a stray property is how PII reaches a
  * third party, and this event is only ever allowed to carry two enum values.
@@ -67,6 +68,10 @@ class AccountStatusServiceScheduleCancelledTest {
     private InvestmentScheduleService investmentScheduleService;
     @Mock
     private AnalyticsOutboxService analyticsOutboxService;
+    @Mock
+    private AchRelationshipService achRelationshipService;
+    @Mock
+    private UserDeletionService userDeletionService;
 
     @Captor
     private ArgumentCaptor<String> eventNameCaptor;
@@ -88,7 +93,9 @@ class AccountStatusServiceScheduleCancelledTest {
                 emailService,
                 plaidToAlpacaService,
                 investmentScheduleService,
-                analyticsOutboxService);
+                analyticsOutboxService,
+                achRelationshipService,
+                userDeletionService);
 
         user = new User("rejected@fredvested.com");
         user.setId(7L);
@@ -140,8 +147,9 @@ class AccountStatusServiceScheduleCancelledTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        // The delete still runs, as it always did. It is simply a no-op, and a no-op is not churn.
-        verify(investmentScheduleRepository).deleteAllByUser(user);
+        // The deletion still runs, as it always did. It simply cancels nothing, and nothing
+        // cancelled is not churn.
+        verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
         verify(analyticsOutboxService, never())
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), any(), anyMap());
         // The decision itself is unaffected.
@@ -158,11 +166,11 @@ class AccountStatusServiceScheduleCancelledTest {
         service.checkAndUpdateAccountStatuses();
 
         // Reading it afterwards would always answer 'no' and the event would never fire.
-        InOrder order = inOrder(investmentScheduleRepository, analyticsOutboxService);
+        InOrder order = inOrder(investmentScheduleRepository, analyticsOutboxService, userDeletionService);
         order.verify(investmentScheduleRepository).existsByUser(user);
         order.verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), anyMap());
-        order.verify(investmentScheduleRepository).deleteAllByUser(user);
+        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
     }
 
     @Test
@@ -182,12 +190,33 @@ class AccountStatusServiceScheduleCancelledTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        InOrder order = inOrder(analyticsOutboxService, userRepository);
+        InOrder order = inOrder(analyticsOutboxService, userDeletionService);
         order.verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), anyMap());
-        order.verify(userRepository).delete(user);
+        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
         // The outbox copies both of these out of the user; neither can be recovered afterwards.
         assertThat(identityAtRecordTime.get()).isEqualTo("7|" + PUBLIC_ID);
+    }
+
+    @Test
+    @DisplayName("a deferred deletion still records the cancellation once and parks the user as REJECTED")
+    void deferredDeletionStillRecordsTheCancellation() {
+        givenTheUserHasASchedule();
+        brokerSays("REJECTED");
+        doThrow(new DeletionDeferredException("SETTLEMENT_WINDOW"))
+                .when(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+
+        service.checkAndUpdateAccountStatuses();
+
+        // The broker has rejected the application, so the schedule is cancelled whether or not the
+        // rows can be removed today. The row is parked as REJECTED and the admin verb finishes it.
+        verify(analyticsOutboxService, times(1))
+                .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), propertiesCaptor.capture());
+        assertThat(propertiesCaptor.getValue()).containsExactly(
+                entry("initiator", "system"),
+                entry("reason", "kyc_rejected"));
+        assertThat(user.getAccountStatus()).isEqualTo("REJECTED");
+        verify(userRepository).save(user);
     }
 
     @Test

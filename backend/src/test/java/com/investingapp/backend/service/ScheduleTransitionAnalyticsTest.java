@@ -1,5 +1,6 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.HoldReason;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -31,13 +32,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * schedule_paused and schedule_resumed, pinned at their four emitting call sites.
+ * schedule_paused and schedule_resumed, pinned at the emitting call sites in this class.
  *
  * <p>THE GUARD IS THE SUBJECT OF THIS TEST, more than the event. These events exist so
  * v_schedule_churn can count how many schedules actually stopped and started, so only a real state
  * transition may emit. Pausing an already-paused schedule and resuming an already-running one are
  * no-ops and must be silent, because a no-op counted as a transition inflates the churn number the
- * view reports. Every one of the four sites therefore has both a transition test and a no-op test.
+ * view reports. Every site here therefore has both a transition test and a no-op test.
  *
  * <p>Each event carries exactly two properties, in this order: {@code initiator} and {@code reason}.
  * The whole map is asserted rather than a subset, in both content and key order: a property that
@@ -47,6 +48,10 @@ import static org.mockito.Mockito.when;
  * <p>Atomicity is not testable here, because a Mockito test has no transaction and
  * {@link AnalyticsOutboxService} is a mock. That is
  * {@link ScheduleTransitionOutboxRollbackTest}'s job.
+ *
+ * <p>The fourth site, the system resume on ACH confirmation, moved to
+ * AchRelationshipService.adopt with the rest of the ACH writes, and is pinned in
+ * {@link AchRelationshipServiceTest}.
  *
  * <p>investment_schedule_created has its own test, {@link InvestmentScheduleServiceAnalyticsTest};
  * the one case from that path asserted here is the trap, that being BORN paused emits no pause.
@@ -88,7 +93,7 @@ class ScheduleTransitionAnalyticsTest {
         user.setAccountStatus("ACTIVE");
     }
 
-    /** A persisted schedule in a known pause state. */
+    /** A persisted schedule in a known stopped or running state. */
     private InvestmentSchedule schedule(boolean paused) {
         InvestmentSchedule schedule = new InvestmentSchedule();
         schedule.setId(SCHEDULE_ID);
@@ -100,6 +105,13 @@ class ScheduleTransitionAnalyticsTest {
         schedule.setNextInvestmentDate(LocalDate.of(2026, 2, 5));
         schedule.setIsPaused(paused);
         return schedule;
+    }
+
+    /** The same schedule under a system hold, which is the other way to be stopped. */
+    private InvestmentSchedule heldSchedule(HoldReason reason) {
+        InvestmentSchedule held = schedule(false);
+        held.setHoldReason(reason);
+        return held;
     }
 
     /** save() returns what it was handed, which is what the real repository does. */
@@ -233,21 +245,39 @@ class ScheduleTransitionAnalyticsTest {
     // --- Site 4: resetForBankChange, the system pause -------------------------------------------
 
     @Test
-    void bankChangePauseOfARunningScheduleEmitsASystemPause() {
-        stubLatestSchedule(schedule(false));
+    void bankChangeHoldOfARunningScheduleEmitsASystemPause() {
+        InvestmentSchedule running = schedule(false);
+        stubLatestSchedule(running);
         stubSaveEchoesBack();
 
         service.resetForBankChange(user);
 
         assertRecordedExactlyOnce(PAUSED, "system", "bank_change");
+        // The hold is what stops it now. is_paused belongs to the user and is not written here.
+        assertEquals(HoldReason.BANK_CHANGE, running.getHoldReason(), "the system hold went on");
+        assertEquals(Boolean.FALSE, running.getIsPaused(), "and is_paused was left alone");
     }
 
     /**
-     * A bank changed while the schedule was already paused: during onboarding before ACH ever
-     * landed, or a second bank change in a row. Nothing stopped, so nothing is counted.
+     * A second bank change in a row, or a bank change while an earlier hold was still on. The
+     * schedule was already stopped, so nothing stopped here and nothing is counted.
      */
     @Test
-    void bankChangePauseOfAnAlreadyPausedScheduleEmitsNothing() {
+    void bankChangeHoldOfAnAlreadyHeldScheduleEmitsNothing() {
+        stubLatestSchedule(heldSchedule(HoldReason.BANK_CHANGE));
+        stubSaveEchoesBack();
+
+        service.resetForBankChange(user);
+
+        verify(analyticsOutboxService, never()).record(any(), any(), any());
+    }
+
+    /**
+     * A bank changed while the schedule was paused by its owner: during onboarding before ACH ever
+     * landed, or after the user stopped it themselves. Nothing stopped, so nothing is counted.
+     */
+    @Test
+    void bankChangeHoldOfAnAlreadyPausedScheduleEmitsNothing() {
         stubLatestSchedule(schedule(true));
         stubSaveEchoesBack();
 
@@ -266,42 +296,9 @@ class ScheduleTransitionAnalyticsTest {
         verify(analyticsOutboxService, never()).record(any(), any(), any());
     }
 
-    // --- Site 5: updateWithAchRequestId, the system resume --------------------------------------
-
-    @Test
-    void achConfirmationOfAPausedScheduleEmitsASystemResume() {
-        stubLatestSchedule(schedule(true));
-        stubSaveEchoesBack();
-
-        service.updateWithAchRequestId(user, "ach-relationship-id");
-
-        assertRecordedExactlyOnce(RESUMED, "system", "ach_confirmed");
-    }
-
-    /**
-     * The ACH id being rewritten on a schedule that is already live. Both
-     * AccountStatusService.attemptAchCreation (the "ACH already exists" branch) and the ACH retry
-     * scheduler can do this. It resumed nothing.
-     */
-    @Test
-    void achUpdateOfAnAlreadyRunningScheduleEmitsNothing() {
-        stubLatestSchedule(schedule(false));
-        stubSaveEchoesBack();
-
-        service.updateWithAchRequestId(user, "ach-relationship-id");
-
-        verify(analyticsOutboxService, never()).record(any(), any(), any());
-    }
-
-    /** No schedule yet: the ACH id is kept on the user and this returns null without emitting. */
-    @Test
-    void achUpdateWithNoScheduleEmitsNothing() {
-        stubLatestSchedule(null);
-
-        service.updateWithAchRequestId(user, "ach-relationship-id");
-
-        verify(analyticsOutboxService, never()).record(any(), any(), any());
-    }
+    // --- Site 5: the system resume, which now lives in AchRelationshipService.adopt -------------
+    // updateWithAchRequestId is gone (Phase 0 made AchRelationshipService the single writer of the
+    // ACH fields), and its resume cases are AchRelationshipServiceTest's.
 
     // --- Site 1: the trap. A schedule is BORN paused, which is not a pause. ---------------------
 

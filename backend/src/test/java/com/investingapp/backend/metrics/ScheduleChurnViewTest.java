@@ -137,7 +137,7 @@ class ScheduleChurnViewTest {
 
     private long foreignActive(String monthStart) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM investment_schedules "
-                + "WHERE created_at < ? + INTERVAL 1 MONTH AND is_paused = 0",
+                + "WHERE created_at < ? + INTERVAL 1 MONTH AND is_paused = 0 AND hold_reason IS NULL",
                 Long.class, monthStart);
     }
 
@@ -219,6 +219,28 @@ class ScheduleChurnViewTest {
         // The other two columns are history and do not move.
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
         assertThat(num(june, "schedules_created")).isEqualTo(baseCreatedJune + 1);
+    }
+
+    @Test
+    @DisplayName("a held schedule counts as stopped in active_at_month_end, exactly like a paused one")
+    void activeAtMonthEndTreatsAHoldAsStopped() {
+        long user = seed.user(signupAt);
+        seed.schedule(user, LocalDateTime.of(2024, 6, 14, 9, 0), false);
+
+        // Running: no pause, no hold.
+        assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+
+        // A bank-change hold stops the schedule without touching is_paused (Phase 0, V6).
+        jdbc.update("UPDATE investment_schedules SET hold_reason = 'BANK_CHANGE' WHERE user_id = ?", user);
+
+        Map<String, Object> held = row(JUNE);
+        assertThat(num(held, "active_at_month_end")).isEqualTo(baseActiveJune);
+        assertThat(num(held, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
+        assertThat(num(held, "schedules_created")).isEqualTo(baseCreatedJune + 1);
+
+        // The hold clears when the new ACH relationship lands, and the schedule counts again.
+        jdbc.update("UPDATE investment_schedules SET hold_reason = NULL WHERE user_id = ?", user);
+        assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 1);
     }
 
     @Test

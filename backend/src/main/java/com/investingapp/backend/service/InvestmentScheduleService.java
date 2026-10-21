@@ -160,7 +160,15 @@ public class InvestmentScheduleService {
                 schedule.setNextInvestmentDate(schedule.calculateNextInvestmentDate(effectiveStartDate));
             }
 
-            schedule.setIsPaused(true); // Always start paused until ACH is confirmed
+            // Always start paused until ACH is confirmed.
+            //
+            // DELIBERATELY NO schedule_paused EVENT HERE, and please do not "fix" that. This is
+            // not a pause: there is no earlier running state it moved away from. It is how a
+            // schedule is born, and investment_schedule_created (emitted at the end of this
+            // method) already records it. Emitting a pause here would make every new user look
+            // like immediate churn in v_schedule_churn. The real pause transitions are in
+            // pauseSchedule (user) and resetForBankChange (system).
+            schedule.setIsPaused(true);
 
             logger.info("Creating new investment schedule for user: {}", user.getEmail());
         }
@@ -244,10 +252,22 @@ public class InvestmentScheduleService {
             return;
         }
         InvestmentSchedule schedule = scheduleOpt.get();
+        // Read the current state BEFORE the flip: only a schedule that was actually running is
+        // being paused by this call.
+        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+
         schedule.setAchRequestId(null);
         schedule.setIsPaused(true);
         investmentScheduleRepository.save(schedule);
         logger.info("Investment schedule re-paused for bank account change — user {}", user.getEmail());
+
+        // Analytics: a SYSTEM pause, on a real transition only. A schedule that was already paused
+        // (the bank changed twice, or changed before ACH ever landed) has not stopped anything, and
+        // counting it would inflate the pause count this event exists to measure.
+        if (!wasPaused) {
+            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
+                    ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_BANK_CHANGE);
+        }
     }
 
     /**
@@ -265,12 +285,26 @@ public class InvestmentScheduleService {
         }
 
         InvestmentSchedule schedule = scheduleOpt.get();
+        // Read the current state BEFORE the flip. This method is also the "ACH already exists"
+        // path (AccountStatusService.attemptAchCreation calls it with an existing relationship id)
+        // and the ACH-retry scheduler reaches it too, so it can run against a schedule that is
+        // already live.
+        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+
         schedule.setAchRequestId(achRequestId);
         schedule.setIsPaused(false); // Unpause when ACH is confirmed
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully updated investment schedule ID: {} with ACH request ID: {} and unpaused it",
                 updatedSchedule.getId(), achRequestId);
+
+        // Analytics: a SYSTEM resume, on a real transition only. A schedule that was already
+        // running and merely had its ACH id rewritten has not resumed anything.
+        if (wasPaused) {
+            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_RESUMED,
+                    ServerAnalyticsEvent.INITIATOR_SYSTEM, ServerAnalyticsEvent.REASON_ACH_CONFIRMED);
+        }
+
         return updatedSchedule;
     }
 
@@ -341,11 +375,22 @@ public class InvestmentScheduleService {
         }
 
         InvestmentSchedule schedule = scheduleOpt.get();
+        // Read the current state BEFORE the flip. Both callers of this method (the REST endpoint
+        // and FredChatActionService) can be asked to pause a schedule that is already paused.
+        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+
         schedule.setIsPaused(true);
         schedule.setMonthlyStreak(0);
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully paused investment schedule ID: {}", scheduleId);
+
+        // Analytics: the genuine user pause, on a real transition only. Pausing an already-paused
+        // schedule is a no-op, and emitting for it would inflate the churn count.
+        if (!wasPaused) {
+            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
+                    ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.REASON_USER_REQUEST);
+        }
 
         // Reset the user's consecutive-month streak
         streakService.resetStreak(user);
@@ -378,10 +423,21 @@ public class InvestmentScheduleService {
         }
 
         InvestmentSchedule schedule = scheduleOpt.get();
+        // Read the current state BEFORE the flip. Nothing above this line has changed state, so
+        // the ACCOUNT_NOT_ACTIVE throw and the not-found throw both leave without emitting.
+        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+
         schedule.setIsPaused(false);
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully resumed investment schedule ID: {}", scheduleId);
+
+        // Analytics: the genuine user resume, on a real transition only. Resuming a schedule that
+        // is already running is a no-op.
+        if (wasPaused) {
+            recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_RESUMED,
+                    ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.REASON_USER_REQUEST);
+        }
 
         return updatedSchedule;
     }
@@ -419,6 +475,33 @@ public class InvestmentScheduleService {
         logger.info("Successfully updated investment schedule ID: {}", scheduleId);
 
         return updatedSchedule;
+    }
+
+    // --- Analytics ------------------------------------------------------------------------------
+
+    /**
+     * Records one schedule state transition, in whatever transaction the caller already has.
+     *
+     * <p>Transaction boundary: this class carries a type-level {@code @Transactional} and every
+     * emitting method here is public, so the call arrives through the Spring proxy inside one
+     * REQUIRED transaction that also commits the schedule row. Nothing was added or widened for
+     * analytics. {@link AnalyticsOutboxService} refuses to write without an active transaction, by
+     * design, so the event and the state change land together or not at all.
+     *
+     * <p>Every one of these events carries exactly two properties, in this order: who caused it and
+     * why. No amount, no frequency, no bank, no id, no dates. Churn is a count of transitions, and
+     * the two closed vocabularies are all that is needed to tell churn ("the user stopped it") from
+     * lifecycle ("we stopped it while the bank changed").
+     *
+     * <p>CALLERS MUST HAVE ALREADY ESTABLISHED THAT THE STATE REALLY CHANGED, by reading the pause
+     * flag before writing it. A repeated no-op must emit nothing: these events exist to count
+     * churn, and a no-op counted as a transition inflates it.
+     */
+    private void recordScheduleTransition(User user, String event, String initiator, String reason) {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("initiator", initiator);
+        props.put("reason", reason);
+        analyticsOutboxService.record(event, user, props);
     }
 
 }

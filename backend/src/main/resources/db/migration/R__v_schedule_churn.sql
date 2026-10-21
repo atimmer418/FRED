@@ -1,55 +1,91 @@
--- Recurring schedules, by calendar month.
+-- Recurring schedules, by calendar month: are they accumulating or leaking?
 --
--- READ THIS BEFORE USING THE VIEW. Only two of the four numbers asked for can honestly be produced
--- from the schema as it stands, and inventing the other two would be worse than leaving them out.
+-- This view used to report only what the schedules table could answer, because that table holds
+-- ONE CURRENT ROW per user with a flag rather than a history: nothing recorded when a schedule was
+-- paused, a schedule is created paused on purpose, and a cancellation is a row delete that leaves
+-- nothing behind. Pause, resume and cancel are now recorded as events in analytics_outbox at the
+-- moment the state actually changes, in the same transaction as the change, so they can be counted
+-- honestly here.
 --
--- What EXISTS: investment_schedules holds one CURRENT row per user (there is a unique key on
--- user_id), with created_at, updated_at and an is_paused flag. That is a snapshot, not a history.
+-- CHURN IS NOT LIFECYCLE, and the split is the point of this view. Each event carries why it
+-- happened:
+--   user_request    the user pressed pause, resume, or closed their account      -> CHURN
+--   bank_change     we paused it ourselves while a new bank was linked           -> lifecycle
+--   ach_confirmed   we started it ourselves once the ACH relationship landed     -> lifecycle
+--   kyc_rejected    the broker rejected them and we deleted everything           -> not their doing
+-- The *_by_user columns are the ones to read as churn. The totals are there so the two can be
+-- reconciled, and so a surge of system pauses (a Plaid outage, say) is visible rather than hidden
+-- inside a churn number.
 --
--- What therefore CANNOT be counted today:
---   * paused    — nothing records WHEN a schedule was paused, or how often. Worse, a schedule is
---                 created paused on purpose ("always start paused until ACH is confirmed"), so
---                 is_paused = 1 mostly means "not funded yet", not "the user paused it".
---   * resumed   — nothing records a transition at all.
---   * cancelled — cancellation is a row DELETE, which leaves nothing behind to count. Deletion
---                 also happens for an unrelated reason: a rejected KYC deletes the user's
---                 schedules along with the user.
+-- A schedule being CREATED paused emits nothing: that is how a schedule is born, not a pause, and
+-- investment_schedule_created already records it. Counting it would make every new user look like
+-- immediate churn.
 --
--- Fixing this needs either three new server events (schedule_paused, schedule_resumed,
--- schedule_cancelled) written to the outbox at the transitions, or a state-transition table. Both
--- are decisions about the taxonomy, not something to bolt on inside a view, so this view reports
--- what is true and the gap is documented in FREDdocs/metrics.md.
---
--- active_at_month_end is a point-in-time read of the CURRENT snapshot, so it is only accurate for
--- the month in progress. Historical months report the schedules that existed then and are still
--- unpaused NOW; it cannot reconstruct what the flag was back then. Treat the current month as the
--- live number and earlier months as "still active today, created by then".
+-- WHAT IS STILL TRUE OF THE SNAPSHOT COLUMNS. active_at_month_end and
+-- schedules_existing_at_month_end read the CURRENT schedules table, so they are accurate for the
+-- month in progress and approximate for history: they cannot reconstruct what the pause flag was
+-- back then, and a cancelled schedule has left the table entirely, taking its creation with it.
+-- The event columns do not have that problem, because an event is a fact about a moment. Prefer
+-- them when comparing months.
 
 CREATE OR REPLACE VIEW v_schedule_churn AS
 WITH months AS (
-    SELECT DISTINCT DATE(DATE_FORMAT(s.created_at, '%Y-%m-01')) AS month_start
+    SELECT DATE(DATE_FORMAT(s.created_at, '%Y-%m-01')) AS month_start
     FROM investment_schedules s
     WHERE s.created_at IS NOT NULL
+    UNION
+    SELECT DATE(DATE_FORMAT(o.occurred_at, '%Y-%m-01'))
+    FROM analytics_outbox o
+    WHERE o.event_name IN ('investment_schedule_created', 'schedule_paused',
+                           'schedule_resumed', 'schedule_cancelled')
 ),
-created AS (
+events AS (
     SELECT
-        DATE(DATE_FORMAT(s.created_at, '%Y-%m-01')) AS month_start,
-        COUNT(*) AS schedules_created
-    FROM investment_schedules s
-    WHERE s.created_at IS NOT NULL
-    GROUP BY DATE(DATE_FORMAT(s.created_at, '%Y-%m-01'))
+        DATE(DATE_FORMAT(o.occurred_at, '%Y-%m-01')) AS month_start,
+        o.event_name,
+        JSON_UNQUOTE(JSON_EXTRACT(o.properties, '$.initiator')) AS initiator,
+        JSON_UNQUOTE(JSON_EXTRACT(o.properties, '$.reason'))    AS reason
+    FROM analytics_outbox o
+    WHERE o.event_name IN ('schedule_paused', 'schedule_resumed', 'schedule_cancelled')
 )
 SELECT
     m.month_start,
-    COALESCE(c.schedules_created, 0) AS schedules_created,
-    -- Created on or before the end of this month and not paused as the table stands now.
-    (SELECT COUNT(*)
-       FROM investment_schedules s
+    -- Created, from the schedules table. See the caveat above: a cancelled schedule's creation
+    -- leaves with it, so this can shrink for a past month.
+    (SELECT COUNT(*) FROM investment_schedules s
+      WHERE DATE(DATE_FORMAT(s.created_at, '%Y-%m-01')) = m.month_start) AS schedules_created,
+
+    -- Transitions, from the events. These are facts about a moment and do not change afterwards.
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_paused') AS paused,
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_paused'
+        AND e.initiator = 'user') AS paused_by_user,
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_resumed') AS resumed,
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_resumed'
+        AND e.initiator = 'user') AS resumed_by_user,
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_cancelled') AS cancelled,
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_cancelled'
+        AND e.initiator = 'user') AS cancelled_by_user,
+
+    -- Net user-driven movement in the month: resumes minus pauses and cancellations. Negative is
+    -- a month where more people stopped than restarted.
+    (SELECT COUNT(*) FROM events e
+      WHERE e.month_start = m.month_start AND e.event_name = 'schedule_resumed'
+        AND e.initiator = 'user')
+    - (SELECT COUNT(*) FROM events e
+        WHERE e.month_start = m.month_start AND e.initiator = 'user'
+          AND e.event_name IN ('schedule_paused', 'schedule_cancelled')) AS net_user_change,
+
+    -- Snapshot columns. Accurate for the month in progress, approximate for history.
+    (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
         AND s.is_paused = 0) AS active_at_month_end,
-    (SELECT COUNT(*)
-       FROM investment_schedules s
+    (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH) AS schedules_existing_at_month_end
 FROM months m
-LEFT JOIN created c ON c.month_start = m.month_start
 ORDER BY m.month_start;

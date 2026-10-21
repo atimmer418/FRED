@@ -147,40 +147,57 @@ Read `pct_retained_m3 = 0.0` with `eligible_m3 = 0` as "ask again later", not as
 
 ## v_schedule_churn
 
-**The question:** are recurring schedules accumulating or leaking?
+**The question:** are recurring schedules accumulating or leaking, and is the leaking something we
+did or something the user chose?
 
-**The definition, and an honest gap.** This view reports `schedules_created` per calendar month,
-`active_at_month_end` and `schedules_existing_at_month_end`. It does **not** report paused, resumed
-or cancelled, because the schema cannot answer those:
+**The definition:** one row per calendar month. The transition columns are counted from events
+written to `analytics_outbox` at the moment the state changed, in the same transaction as the
+change itself. The snapshot columns are read from the current schedules table.
 
-- `investment_schedules` holds **one current row per user** (unique on `user_id`) with a flag, not
-  a history. Nothing records when a schedule was paused or how often.
-- A schedule is **created paused on purpose** ("always start paused until ACH is confirmed"), so
-  `is_paused = 1` mostly means "not funded yet", not "the user paused it".
-- A cancellation is a row **delete**, which leaves nothing to count. Deletion also happens for an
-  unrelated reason: a rejected KYC deletes the user's schedules along with the user.
+**Churn is not lifecycle, and that split is the point of this view.** Every transition carries why
+it happened:
 
-Closing this needs either three new server events (`schedule_paused`, `schedule_resumed`,
-`schedule_cancelled`) written to the outbox at the transitions, or a state-transition table. Both
-are taxonomy decisions, not something to infer inside a view.
+| `reason` | What happened | Read as |
+|---|---|---|
+| `user_request` | the user pressed pause or resume | **churn** |
+| `account_closed` | the user closed their account | **churn** |
+| `bank_change` | we paused it while a new bank was linked | lifecycle |
+| `ach_confirmed` | we started it once the ACH relationship landed | lifecycle |
+| `kyc_rejected` | the broker rejected them and we deleted everything | not their doing |
 
-**`schedules_created` is rewritten by cancellation.** Because cancelling deletes the row, the
-creation it represents disappears from its own creation month. The column therefore means "created
-that month and not since cancelled", so a historical month's number can go down over time.
+The `*_by_user` columns are the ones to read as churn. The totals sit beside them so the two
+reconcile, and so a surge of *system* pauses (a Plaid outage, say) is visible rather than buried
+inside a churn number. `net_user_change` is user resumes minus user pauses and cancellations:
+negative is a month where more people stopped than restarted.
 
-**One caveat on `active_at_month_end`:** it reads the *current* pause flag, so it is accurate for
-the month in progress and approximate for history ("created by then and still unpaused today"). It
-cannot reconstruct what the flag was in a past month. A consequence worth knowing: re-running the
-same query next month gives a different history, so this series is not reproducible for past
-months.
+**A schedule being created paused emits nothing.** Schedules are born paused, on purpose, until
+the ACH is confirmed; `investment_schedule_created` already records that. Counting it as a pause
+would make every new user look like immediate churn, which is exactly the confusion the old
+version of this view had to warn about.
+
+**Only real transitions are recorded.** Pausing an already-paused schedule emits nothing, and so
+does resuming a running one, so a client retrying a request cannot inflate churn.
+
+**One honest gap remains:** there is no user-facing "cancel my schedule" anywhere in the app. The
+only cancellations are a user closing their whole account and a KYC rejection, so
+`cancelled_by_user` today means "closed their account", not "turned off their recurring
+investment". If a cancel button is ever added it will land in this column automatically.
+
+**The snapshot columns are still approximate for history.** `active_at_month_end` and
+`schedules_existing_at_month_end` read the *current* table, so they cannot reconstruct what the
+pause flag was in a past month, and a cancelled schedule has left the table entirely, taking its
+creation with it (so `schedules_created` for a past month can shrink). The event columns do not
+have that problem, because an event is a fact about a moment. **Prefer the event columns when
+comparing months.**
 
 ```sql
-SELECT month_start, schedules_created, active_at_month_end, schedules_existing_at_month_end
+SELECT month_start, schedules_created,
+       paused, paused_by_user, resumed, resumed_by_user,
+       cancelled, cancelled_by_user, net_user_change,
+       active_at_month_end
 FROM v_schedule_churn
 ORDER BY month_start;
 ```
-
----
 
 ## v_kyc_outcomes
 
@@ -226,6 +243,11 @@ ORDER BY month_start;
 opted out yesterday reads as opted out for their whole cohort, and the opposite is equally true.
 For "how much of last quarter is missing" this will understate or overstate; it is accurate as a
 statement about today. Consent history would need its own table.
+
+**This limitation is deliberate and is not going to be fixed here.** Recording consent history
+would mean a second table and a write on every toggle; the number as it stands is correct about
+today and is the one to quote when asking "how much are we missing right now". Do not use it to
+qualify a historical cohort's funnel.
 
 It also counts every row in `users`, including staff and test accounts. The schema has a
 `private_beta` flag that this view deliberately does not use, because excluding people would make

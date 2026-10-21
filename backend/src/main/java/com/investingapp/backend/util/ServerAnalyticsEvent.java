@@ -36,6 +36,18 @@ public final class ServerAnalyticsEvent {
     /** A recurring investment schedule was created. */
     public static final String INVESTMENT_SCHEDULE_CREATED = "investment_schedule_created";
 
+    /**
+     * A recurring schedule stopped. `reason` says why, because the reasons are not equivalent: a
+     * user pausing is churn, a system pause during a bank change is a lifecycle step.
+     */
+    public static final String SCHEDULE_PAUSED = "schedule_paused";
+
+    /** A recurring schedule started again, either because the user asked or because ACH landed. */
+    public static final String SCHEDULE_RESUMED = "schedule_resumed";
+
+    /** A recurring schedule was destroyed. Only ever system- or account-closure-driven today. */
+    public static final String SCHEDULE_CANCELLED = "schedule_cancelled";
+
     /** A trial began. NOT EMITTED YET: billing owns this. */
     public static final String TRIAL_STARTED = "trial_started";
 
@@ -61,6 +73,9 @@ public final class ServerAnalyticsEvent {
             KYC_SUBMITTED,
             PLAID_LINKED,
             INVESTMENT_SCHEDULE_CREATED,
+            SCHEDULE_PAUSED,
+            SCHEDULE_RESUMED,
+            SCHEDULE_CANCELLED,
             TRIAL_STARTED,
             KYC_DECIDED,
             FIRST_ACH_TRANSFER_COMPLETED,
@@ -71,6 +86,20 @@ public final class ServerAnalyticsEvent {
     /** The three that billing will emit once it exists. Here so tests can assert they are inert. */
     public static final List<String> AWAITING_BILLING =
             List.of(TRIAL_STARTED, SUBSCRIPTION_BILLED, SUBSCRIPTION_CANCELLED);
+
+    /**
+     * Why a schedule changed state. Closed, because the whole point of recording the reason is to
+     * tell churn ("the user stopped it") from lifecycle ("we stopped it while the bank changed").
+     */
+    public static final String REASON_USER_REQUEST = "user_request";
+    public static final String REASON_BANK_CHANGE = "bank_change";
+    public static final String REASON_ACH_CONFIRMED = "ach_confirmed";
+    public static final String REASON_ACCOUNT_CLOSED = "account_closed";
+    public static final String REASON_KYC_REJECTED = "kyc_rejected";
+
+    /** Who caused it. 'user' is churn you can act on; 'system' is our own machinery. */
+    public static final String INITIATOR_USER = "user";
+    public static final String INITIATOR_SYSTEM = "system";
 
     /** Every trial is two weeks, on every tier. */
     public static final int TRIAL_LENGTH_DAYS = 14;

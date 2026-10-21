@@ -2,12 +2,14 @@ package com.investingapp.backend.controller;
 
 import com.investingapp.backend.service.AlpacaService;
 import com.investingapp.backend.service.AlpacaApiService;
+import com.investingapp.backend.service.AnalyticsOutboxService;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.PortfolioRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.repository.UserSessionRepository;
+import com.investingapp.backend.util.ServerAnalyticsEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -53,6 +55,9 @@ public class TradingController {
 
     @Autowired
     private EncryptionService encryptionService;
+
+    @Autowired
+    private AnalyticsOutboxService analyticsOutboxService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -319,6 +324,9 @@ public class TradingController {
             // Close the Alpaca brokerage account
             alpacaService.closeAccount(accountId);
 
+            // Record the cancellation before anything is deleted: see recordScheduleCancelled.
+            recordScheduleCancelled(user);
+
             // Delete investment schedules first (FK not covered by JPA cascade)
             investmentScheduleRepository.deleteAllByUser(user);
 
@@ -343,6 +351,37 @@ public class TradingController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to close account. Please ensure all positions are sold and all cash is withdrawn."));
         }
+    }
+
+    /**
+     * Records schedule_cancelled for a user closing their own account.
+     *
+     * <p>Called from inside closeAccount's transaction, BEFORE the deletes, while the user still has
+     * an id and a public_id for the outbox to copy: in a moment it will have neither. The outbox row
+     * has no foreign key to users and denormalises public_id, so it outlives the schedule and the
+     * person. AnalyticsOutboxService refuses to write outside a transaction, and closeAccount is
+     * annotated {@code @Transactional}, so the event and the deletion commit together or not at all.
+     *
+     * <p>Only a REAL transition is recorded. The schedule's existence is read BEFORE it is changed,
+     * and a user with no schedule emits nothing: deleteAllByUser is a no-op for them, and an event
+     * there would invent a cancellation for everyone who closed an account without ever setting a
+     * schedule up. These events exist to count churn, so a phantom would inflate the one number they
+     * are for.
+     *
+     * <p>Two properties and nothing else, in this order: who caused it and why. No amount, no
+     * frequency, no bank. The initiator is the user, because this endpoint is only ever reached by
+     * the account holder asking for it.
+     */
+    private void recordScheduleCancelled(User user) {
+        if (!investmentScheduleRepository.existsByUser(user)) {
+            return;
+        }
+
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("initiator", ServerAnalyticsEvent.INITIATOR_USER);
+        properties.put("reason", ServerAnalyticsEvent.REASON_ACCOUNT_CLOSED);
+
+        analyticsOutboxService.record(ServerAnalyticsEvent.SCHEDULE_CANCELLED, user, properties);
     }
 
     // DTOs for request bodies

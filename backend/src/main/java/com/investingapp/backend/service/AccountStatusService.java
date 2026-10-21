@@ -147,6 +147,11 @@ public class AccountStatusService {
                 "We're sorry, but we were unable to approve your FRED brokerage account application at this time. "
                 + "If you have questions, please contact our support team.");
 
+        // Same reasoning for the cancellation: recorded before anything is deleted, while the user
+        // still has an id and a public_id, and while the schedule still exists to be asked about.
+        recordScheduleCancelled(user, ServerAnalyticsEvent.INITIATOR_SYSTEM,
+                ServerAnalyticsEvent.REASON_KYC_REJECTED);
+
         // Delete InvestmentSchedule first (not covered by User cascades)
         investmentScheduleRepository.deleteAllByUser(user);
         logger.info("Deleted InvestmentSchedule(s) for rejected user {}", user.getEmail());
@@ -339,6 +344,33 @@ public class AccountStatusService {
                 AnalyticsBands.daysBetween(user.getKycSubmittedAt(), LocalDateTime.now()));
 
         analyticsOutboxService.record(ServerAnalyticsEvent.KYC_DECIDED, user, properties);
+    }
+
+    /**
+     * Records schedule_cancelled, in whatever transaction the caller already has.
+     *
+     * <p>Only a REAL transition is recorded. The schedule's existence is read BEFORE it is changed,
+     * and a user with no schedule emits nothing: deleteAllByUser is a no-op for them, and an event
+     * there would invent a cancellation for every rejected user who never set a schedule up. These
+     * events exist to count churn, so a phantom would inflate the one number they are for.
+     *
+     * <p>Called before the deletes for the same reason as the decision above: the outbox copies the
+     * user's id and public_id, and in a moment there will be neither to copy. The row has no foreign
+     * key to users and denormalises public_id, so it outlives the schedule and the person.
+     *
+     * <p>Two properties and nothing else, in this order: who caused it and why. No amount, no
+     * frequency, no bank.
+     */
+    private void recordScheduleCancelled(User user, String initiator, String reason) {
+        if (!investmentScheduleRepository.existsByUser(user)) {
+            return;
+        }
+
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("initiator", initiator);
+        properties.put("reason", reason);
+
+        analyticsOutboxService.record(ServerAnalyticsEvent.SCHEDULE_CANCELLED, user, properties);
     }
 
     /**

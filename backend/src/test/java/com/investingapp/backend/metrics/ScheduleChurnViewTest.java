@@ -6,6 +6,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import com.investingapp.backend.model.User;
+import com.investingapp.backend.repository.UserRepository;
+import com.investingapp.backend.service.InvestmentScheduleService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -47,6 +50,12 @@ class ScheduleChurnViewTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired
+    private InvestmentScheduleService scheduleService;
+
+    @Autowired
+    private UserRepository userRepository;
+
     private MetricsViewSeed seed;
     private LocalDateTime signupAt;
 
@@ -56,6 +65,13 @@ class ScheduleChurnViewTest {
     private long baseCreatedJuly;
     private long baseActiveJuly;
     private long baseExistingJuly;
+    private long basePausedJune;
+    private long basePausedByUserJune;
+    private long baseResumedJune;
+    private long baseResumedByUserJune;
+    private long baseCancelledJune;
+    private long baseCancelledByUserJune;
+    private long baseNetUserChangeJune;
 
     @BeforeEach
     void setUp() {
@@ -72,6 +88,33 @@ class ScheduleChurnViewTest {
         baseCreatedJuly = foreignCreated(JULY);
         baseActiveJuly = foreignActive(JULY);
         baseExistingJuly = foreignExisting(JULY);
+        basePausedJune = foreignEvents(JUNE, "schedule_paused", null);
+        basePausedByUserJune = foreignEvents(JUNE, "schedule_paused", "user");
+        baseResumedJune = foreignEvents(JUNE, "schedule_resumed", null);
+        baseResumedByUserJune = foreignEvents(JUNE, "schedule_resumed", "user");
+        baseCancelledJune = foreignEvents(JUNE, "schedule_cancelled", null);
+        baseCancelledByUserJune = foreignEvents(JUNE, "schedule_cancelled", "user");
+        baseNetUserChangeJune = baseResumedByUserJune - basePausedByUserJune
+                - baseCancelledByUserJune;
+    }
+
+    /** Transition events already in the schema that this test did not write. */
+    private long foreignEvents(String monthStart, String eventName, String initiator) {
+        String sql = "SELECT COUNT(*) FROM analytics_outbox "
+                + "WHERE event_name = ? AND occurred_at >= ? AND occurred_at < ? + INTERVAL 1 MONTH";
+        if (initiator == null) {
+            return jdbc.queryForObject(sql, Long.class, eventName, monthStart, monthStart);
+        }
+        return jdbc.queryForObject(
+                sql + " AND JSON_UNQUOTE(JSON_EXTRACT(properties, '$.initiator')) = ?",
+                Long.class, eventName, monthStart, monthStart, initiator);
+    }
+
+    /** A transition event as the services write it: two enum properties and nothing else. */
+    private void transition(long userId, String eventName, String initiator, String reason,
+                            LocalDateTime at) {
+        seed.outboxEvent(userId, eventName, at,
+                "{\"initiator\":\"" + initiator + "\",\"reason\":\"" + reason + "\"}", "SENT");
     }
 
     private Map<String, Object> row(String monthStart) {
@@ -200,5 +243,104 @@ class ScheduleChurnViewTest {
         assertThat(num(june, "schedules_created")).isEqualTo(baseCreatedJune + 1);
         assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune + 1);
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
+    }
+
+    @Test
+    @DisplayName("counts pauses, resumes and cancellations from the events, split by who caused them")
+    void countsTransitionsSplitByInitiator() {
+        long user = seed.user(signupAt);
+        LocalDateTime inJune = LocalDateTime.of(2024, 6, 20, 12, 0);
+
+        // Two user pauses and one system pause during a bank change.
+        transition(user, "schedule_paused", "user", "user_request", inJune);
+        transition(user, "schedule_paused", "user", "user_request", inJune.plusDays(1));
+        transition(user, "schedule_paused", "system", "bank_change", inJune.plusDays(2));
+        // One user resume and one the system did when the ACH landed.
+        transition(user, "schedule_resumed", "user", "user_request", inJune.plusDays(3));
+        transition(user, "schedule_resumed", "system", "ach_confirmed", inJune.plusDays(4));
+        // One cancellation, by the user closing their account.
+        transition(user, "schedule_cancelled", "user", "account_closed", inJune.plusDays(5));
+
+        Map<String, Object> june = row(JUNE);
+
+        assertThat(num(june, "paused")).isEqualTo(basePausedJune + 3);          // 2 user + 1 system
+        assertThat(num(june, "paused_by_user")).isEqualTo(basePausedByUserJune + 2);
+        assertThat(num(june, "resumed")).isEqualTo(baseResumedJune + 2);        // 1 user + 1 system
+        assertThat(num(june, "resumed_by_user")).isEqualTo(baseResumedByUserJune + 1);
+        assertThat(num(june, "cancelled")).isEqualTo(baseCancelledJune + 1);
+        assertThat(num(june, "cancelled_by_user")).isEqualTo(baseCancelledByUserJune + 1);
+    }
+
+    @Test
+    @DisplayName("net_user_change is resumes minus pauses and cancellations, by the user only")
+    void netUserChangeIgnoresTheSystem() {
+        long user = seed.user(signupAt);
+        LocalDateTime inJune = LocalDateTime.of(2024, 6, 20, 12, 0);
+
+        // The user stopped twice and restarted once: net -1. The system events either side must
+        // not move it, which is the whole reason the column is "by user".
+        transition(user, "schedule_paused", "user", "user_request", inJune);
+        transition(user, "schedule_cancelled", "user", "account_closed", inJune.plusDays(1));
+        transition(user, "schedule_resumed", "user", "user_request", inJune.plusDays(2));
+        transition(user, "schedule_paused", "system", "bank_change", inJune.plusDays(3));
+        transition(user, "schedule_resumed", "system", "ach_confirmed", inJune.plusDays(4));
+
+        // This test added, by the user: 1 resume, 1 pause, 1 cancellation. Net = 1 - 1 - 1 = -1.
+        // The two system events must not move it at all.
+        assertThat(num(row(JUNE), "net_user_change")).isEqualTo(baseNetUserChangeJune - 1);
+    }
+
+    @Test
+    @DisplayName("a system pause is counted but is not user churn")
+    void systemPauseIsNotChurn() {
+        long user = seed.user(signupAt);
+        transition(user, "schedule_paused", "system", "bank_change",
+                LocalDateTime.of(2024, 6, 21, 9, 0));
+
+        Map<String, Object> june = row(JUNE);
+
+        assertThat(num(june, "paused")).isEqualTo(basePausedJune + 1);
+        assertThat(num(june, "paused_by_user")).isEqualTo(basePausedByUserJune);
+    }
+
+    @Test
+    @DisplayName("a month with transitions but no creations still gets a row")
+    void eventOnlyMonthHasARow() {
+        // The old view keyed months off created_at alone, so a month of pure churn was invisible.
+        long user = seed.user(signupAt);
+        transition(user, "schedule_cancelled", "user", "account_closed",
+                LocalDateTime.of(2024, 7, 14, 9, 0));
+
+        Map<String, Object> july = row(JULY);
+
+        assertThat(num(july, "cancelled_by_user")).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("the real service's event is readable by this view, property names and all")
+    void realServiceEventReachesTheView() {
+        // The seam nothing else covers. Every other test here seeds the outbox by hand, and the
+        // service tests mock the outbox away, so the one thing neither proves is that the JSON the
+        // service writes is the JSON this view reads: a rename of 'initiator' on either side would
+        // pass both suites and quietly zero the churn columns.
+        String thisMonth = LocalDate.now().withDayOfMonth(1).toString();
+        long baseByUser = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM analytics_outbox WHERE event_name = 'schedule_paused' "
+                        + "AND JSON_UNQUOTE(JSON_EXTRACT(properties, '$.initiator')) = 'user' "
+                        + "AND occurred_at >= ? AND occurred_at < ? + INTERVAL 1 MONTH",
+                Long.class, thisMonth, thisMonth);
+
+        long userId = seed.user(signupAt);
+        // Running, so the pause is a real transition.
+        seed.schedule(userId, LocalDateTime.now().minusDays(1), false);
+        Long scheduleId = jdbc.queryForObject(
+                "SELECT id FROM investment_schedules WHERE user_id = ?", Long.class, userId);
+        User user = userRepository.findById(userId).orElseThrow();
+
+        scheduleService.pauseSchedule(user, scheduleId);
+
+        Map<String, Object> month = row(thisMonth);
+        assertThat(num(month, "paused_by_user")).isEqualTo(baseByUser + 1);
+        assertThat(num(month, "paused")).isGreaterThanOrEqualTo(baseByUser + 1);
     }
 }

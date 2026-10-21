@@ -248,12 +248,22 @@ when it was written, used only when the user is gone.
 | `kyc_submitted` | `attempt` | A KYC submission was persisted and sent to the broker. |
 | `plaid_linked` | `is_first_link` | A bank was linked through Plaid. |
 | `investment_schedule_created` | `frequency`, `amount_band`, `days_since_signup_band` | A recurring schedule was created. |
+| `schedule_paused` | `initiator`, `reason` | A recurring schedule stopped. |
+| `schedule_resumed` | `initiator`, `reason` | A recurring schedule started again. |
+| `schedule_cancelled` | `initiator`, `reason` | A recurring schedule was destroyed. |
 | `trial_started` | `tier`, `trial_length_days` | A trial began. **Not emitted yet: billing owns it.** |
 | `kyc_decided` | `outcome`, `days_to_decision_band` | The broker decided on a submission. |
 | `first_ach_transfer_completed` | `amount_band`, `days_since_schedule_band` | The user's first ACH transfer **settled**. |
 | `ach_transfer_completed` | `transfer_number_band` | Every transfer after the first, once settled. |
 | `subscription_billed` | `tier`, `is_first_billing` | A fee was collected. **Not emitted yet: billing owns it.** |
 | `subscription_cancelled` | `tier`, `days_since_trial_start_band` | A subscription was cancelled. **Not emitted yet: billing owns it.** |
+
+The three schedule transitions carry `initiator` (`user` or `system`) and `reason`
+(`user_request`, `bank_change`, `ach_confirmed`, `account_closed`, `kyc_rejected`). The split
+matters: a user pausing is churn, and us pausing while their bank changes is lifecycle. Only real
+transitions are recorded, so pausing an already-paused schedule emits nothing, and a schedule being
+created paused emits nothing at all because that is how a schedule is born. See
+FREDdocs/metrics.md for how `v_schedule_churn` reads them.
 
 Outcomes for `kyc_decided`: `approved`, `rejected`, `needs_more_info`. Attempts for
 `kyc_submitted`: `1`, `2`, `3_plus`, because the question is "did this take more than one go" and a

@@ -20,8 +20,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -58,8 +56,6 @@ public class TradingController {
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
 
-    @Autowired
-    private PlatformTransactionManager transactionManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -305,7 +301,8 @@ public class TradingController {
      * Close the user's brokerage account and delete their FRED user record.
      * Prerequisites: all positions must be liquidated and all cash withdrawn.
      * Not transactional: the broker calls run outside the database transaction that
-     * UserDeletionService opens for the row deletes.
+     * UserDeletionService opens for the row deletes. The cancellation event is handed to that
+     * service so it is written inside that one transaction: see recordScheduleCancelled.
      */
     @PostMapping("/account/close")
     public ResponseEntity<?> closeAccount(Authentication authentication) {
@@ -335,11 +332,11 @@ public class TradingController {
             // Close the Alpaca brokerage account
             alpacaService.closeAccount(accountId);
 
-            // Record the cancellation before anything is deleted: see recordScheduleCancelled.
-            recordScheduleCancelled(user);
-
-            // One path for every row that references the user (schedules, sessions, portfolio, ...)
-            userDeletionService.delete(user, UserDeletionService.DeletionReason.ACCOUNT_CLOSED);
+            // One path for every row that references the user (schedules, sessions, portfolio, ...),
+            // with the cancellation recorded as the first statement inside that same transaction:
+            // see recordScheduleCancelled.
+            userDeletionService.delete(user, UserDeletionService.DeletionReason.ACCOUNT_CLOSED,
+                () -> recordScheduleCancelled(user));
 
             logger.info("Account closed and user deleted for alpaca account: {}", accountId);
 
@@ -370,15 +367,13 @@ public class TradingController {
      *
      * <p>Transaction boundary: closeAccount is deliberately NOT {@code @Transactional}, because the
      * broker calls must not run inside a database transaction, and AnalyticsOutboxService refuses to
-     * write without one. So the insert gets its own short REQUIRED transaction here. Under a caller
-     * that already has one (the rollback test, and any future transactional caller) it joins that
-     * transaction and rolls back with it. On the real request path it commits on its own, a moment
-     * before UserDeletionService opens its transaction for the deletes. That ordering is safe
-     * because the brokerage account is already closed by the time this runs and the deferral was
-     * already refused above: the cancellation has really happened, whatever the row deletes do next.
+     * write without one. So this runs as the hook UserDeletionService.delete invokes as the first
+     * statement inside its own deletion transaction: the event and the deletes it describes commit
+     * together or not at all, and a delete that throws or is deferred leaves no event behind
+     * claiming a cancellation whose rows are still there.
      *
      * <p>Only a REAL transition is recorded. The schedule's existence is read BEFORE it is changed,
-     * and a user with no schedule emits nothing: the deletion below removes no schedule for them,
+     * and a user with no schedule emits nothing: the deletion removes no schedule for them,
      * and an event there would invent a cancellation for everyone who closed an account without
      * ever setting a schedule up. These events exist to count churn, so a phantom would inflate the one number they
      * are for.
@@ -396,8 +391,7 @@ public class TradingController {
         properties.put("initiator", ServerAnalyticsEvent.INITIATOR_USER);
         properties.put("reason", ServerAnalyticsEvent.REASON_ACCOUNT_CLOSED);
 
-        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                analyticsOutboxService.record(ServerAnalyticsEvent.SCHEDULE_CANCELLED, user, properties));
+        analyticsOutboxService.record(ServerAnalyticsEvent.SCHEDULE_CANCELLED, user, properties);
     }
 
     // DTOs for request bodies

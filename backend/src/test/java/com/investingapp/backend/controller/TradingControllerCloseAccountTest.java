@@ -18,14 +18,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -48,6 +49,7 @@ class TradingControllerCloseAccountTest {
     private TradingController controller;
     private AlpacaService alpacaService;
     private UserDeletionService userDeletionService;
+    private AnalyticsOutboxService analyticsOutboxService;
     private Authentication authentication;
     private User user;
 
@@ -62,12 +64,10 @@ class TradingControllerCloseAccountTest {
         ReflectionTestUtils.setField(controller, "encryptionService", encryptionService);
         ReflectionTestUtils.setField(controller, "alpacaService", alpacaService);
         ReflectionTestUtils.setField(controller, "userDeletionService", userDeletionService);
+        analyticsOutboxService = mock(AnalyticsOutboxService.class);
         ReflectionTestUtils.setField(controller, "investmentScheduleRepository",
                 mock(InvestmentScheduleRepository.class));
-        ReflectionTestUtils.setField(controller, "analyticsOutboxService",
-                mock(AnalyticsOutboxService.class));
-        ReflectionTestUtils.setField(controller, "transactionManager",
-                mock(PlatformTransactionManager.class));
+        ReflectionTestUtils.setField(controller, "analyticsOutboxService", analyticsOutboxService);
 
         user = new User(EMAIL);
         user.setId(42L);
@@ -91,7 +91,7 @@ class TradingControllerCloseAccountTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isEqualTo(new ErrorCodeResponse("DELETION_DEFERRED", "FUNDING_INITIATED"));
         verify(alpacaService, never()).closeAccount(anyString());
-        verify(userDeletionService, never()).delete(any(), any());
+        verify(userDeletionService, never()).delete(any(), any(), any());
     }
 
     @Test
@@ -106,7 +106,8 @@ class TradingControllerCloseAccountTest {
         assertThat((Map<String, Object>) response.getBody()).containsEntry("success", true);
         InOrder order = inOrder(alpacaService, userDeletionService);
         order.verify(alpacaService).closeAccount("acct");
-        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.ACCOUNT_CLOSED);
+        order.verify(userDeletionService).delete(eq(user),
+                eq(UserDeletionService.DeletionReason.ACCOUNT_CLOSED), any(Runnable.class));
     }
 
     @Test
@@ -114,11 +115,16 @@ class TradingControllerCloseAccountTest {
     void lateDeferralIs409() {
         when(userDeletionService.deferralReason(user)).thenReturn(Optional.empty());
         doThrow(new DeletionDeferredException("SETTLEMENT_WINDOW"))
-                .when(userDeletionService).delete(user, UserDeletionService.DeletionReason.ACCOUNT_CLOSED);
+                .when(userDeletionService).delete(eq(user),
+                        eq(UserDeletionService.DeletionReason.ACCOUNT_CLOSED), any(Runnable.class));
 
         ResponseEntity<?> response = controller.closeAccount(authentication);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isEqualTo(new ErrorCodeResponse("DELETION_DEFERRED", "SETTLEMENT_WINDOW"));
+        // The deferral is raised before the hook runs, so no cancellation was recorded for a
+        // deletion that did not happen. That is the whole point of handing the event to the
+        // deletion transaction instead of committing it here first.
+        verify(analyticsOutboxService, never()).record(anyString(), any(), anyMap());
     }
 }

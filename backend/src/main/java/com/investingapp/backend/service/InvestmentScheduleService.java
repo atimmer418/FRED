@@ -330,8 +330,12 @@ public class InvestmentScheduleService {
 
         InvestmentSchedule schedule = scheduleOpt.get();
         // Read the current state BEFORE the flip. Both callers of this method (the REST endpoint
-        // and FredChatActionService) can be asked to pause a schedule that is already paused.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        // and FredChatActionService) can be asked to pause a schedule that is already stopped, and
+        // since Phase 0 there are two ways to be stopped: the user's is_paused and the system's
+        // hold_reason. Neither caller knows about the hold, so a user can ask to pause a schedule
+        // that a bank change already stopped.
+        boolean wasRunning = schedule.getHoldReason() == null
+                && !Boolean.TRUE.equals(schedule.getIsPaused());
 
         schedule.setIsPaused(true);
         schedule.setMonthlyStreak(0);
@@ -339,9 +343,10 @@ public class InvestmentScheduleService {
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully paused investment schedule ID: {}", scheduleId);
 
-        // Analytics: the genuine user pause, on a real transition only. Pausing an already-paused
-        // schedule is a no-op, and emitting for it would inflate the churn count.
-        if (!wasPaused) {
+        // Analytics: the genuine user pause, on a real transition only. Pausing a schedule that was
+        // already paused or already held stops nothing, and emitting for the held one would count
+        // the same stop twice: resetForBankChange already recorded it.
+        if (wasRunning) {
             recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_PAUSED,
                     ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.REASON_USER_REQUEST);
         }
@@ -379,16 +384,21 @@ public class InvestmentScheduleService {
         InvestmentSchedule schedule = scheduleOpt.get();
         // Read the current state BEFORE the flip. Nothing above this line has changed state, so
         // the ACCOUNT_NOT_ACTIVE throw and the not-found throw both leave without emitting.
-        boolean wasPaused = Boolean.TRUE.equals(schedule.getIsPaused());
+        // Stopped is either stop: the user's is_paused or the system's hold_reason.
+        boolean wasStopped = schedule.getHoldReason() != null
+                || Boolean.TRUE.equals(schedule.getIsPaused());
 
         schedule.setIsPaused(false);
 
         InvestmentSchedule updatedSchedule = investmentScheduleRepository.save(schedule);
         logger.info("Successfully resumed investment schedule ID: {}", scheduleId);
 
-        // Analytics: the genuine user resume, on a real transition only. Resuming a schedule that
-        // is already running is a no-op.
-        if (wasPaused) {
+        // Analytics: the genuine user resume, on a real transition only, and both halves must hold,
+        // which is the rule AchRelationshipService.adopt applies too. Resuming an already running
+        // schedule is a no-op; clearing the user's pause while a system hold still stands leaves
+        // the schedule stopped, so that resume belongs to adopt when it clears the hold, not here.
+        // Emitting here as well would report two resumes for one real start.
+        if (wasStopped && schedule.getHoldReason() == null) {
             recordScheduleTransition(user, ServerAnalyticsEvent.SCHEDULE_RESUMED,
                     ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.REASON_USER_REQUEST);
         }
@@ -447,9 +457,10 @@ public class InvestmentScheduleService {
      * the two closed vocabularies are all that is needed to tell churn ("the user stopped it") from
      * lifecycle ("we stopped it while the bank changed").
      *
-     * <p>CALLERS MUST HAVE ALREADY ESTABLISHED THAT THE STATE REALLY CHANGED, by reading the pause
-     * flag before writing it. A repeated no-op must emit nothing: these events exist to count
-     * churn, and a no-op counted as a transition inflates it.
+     * <p>CALLERS MUST HAVE ALREADY ESTABLISHED THAT THE STATE REALLY CHANGED, by reading BOTH stop
+     * flags (is_paused and hold_reason) before writing either. A repeated no-op must emit nothing:
+     * these events exist to count churn, and a no-op counted as a transition inflates it. Reading
+     * is_paused alone would count a user's pause of an already held schedule as a second stop.
      */
     private void recordScheduleTransition(User user, String event, String initiator, String reason) {
         Map<String, Object> props = new LinkedHashMap<>();

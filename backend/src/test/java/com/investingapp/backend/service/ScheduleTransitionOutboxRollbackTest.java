@@ -179,6 +179,22 @@ class ScheduleTransitionOutboxRollbackTest {
         assertEquals(0, countOutboxRows(), "a repeated pause is not a transition");
     }
 
+    /**
+     * The schedule was already stopped by a system hold, which the pause endpoint cannot see.
+     * resetForBankChange recorded that stop; a second row here would count it twice.
+     */
+    @Test
+    void pausingAnAlreadyHeldScheduleWritesNoOutboxRow() {
+        long scheduleId = seedSchedule(false, HoldReason.BANK_CHANGE, null);
+
+        investmentScheduleService.pauseSchedule(user, scheduleId);
+
+        assertTrue(isPausedInDatabase(scheduleId), "the user's pause is still written");
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "and the hold is untouched");
+        assertEquals(0, countOutboxRows(), "pausing an already stopped schedule is not a transition");
+    }
+
     // --- Site 3: resumeSchedule, the genuine user resume ----------------------------------------
 
     @Test
@@ -214,6 +230,29 @@ class ScheduleTransitionOutboxRollbackTest {
 
         assertFalse(isPausedInDatabase(scheduleId), "still running, as it already was");
         assertEquals(0, countOutboxRows(), "a repeated resume is not a transition");
+    }
+
+    /**
+     * One real start, one row. A held and paused schedule is resumed by its owner (the frontend has
+     * no idea a hold exists, so this is a tap the user can really make), which clears the pause but
+     * leaves the schedule stopped, then ACH lands and adopt clears the hold. Only the second step
+     * actually started the schedule, so only the second step may write a row.
+     */
+    @Test
+    void aUserResumeOfAHeldScheduleThenAdoptionWritesExactlyOneRow() {
+        long scheduleId = seedSchedule(true, HoldReason.BANK_CHANGE, null);
+
+        investmentScheduleService.resumeSchedule(user, scheduleId);
+
+        assertFalse(isPausedInDatabase(scheduleId), "the user's pause is cleared");
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "but the hold still stops the schedule");
+        assertEquals(0, countOutboxRows(), "so nothing resumed yet");
+
+        achRelationshipService.adopt(user, relationship("ach-rel-held"));
+
+        assertNull(holdReasonInDatabase(scheduleId), "now it really is running");
+        assertSoleEvent(RESUMED, SYSTEM_RESUME_PROPS);
     }
 
     /** The ACCOUNT_NOT_ACTIVE gate throws before the flip, so there is nothing to record. */

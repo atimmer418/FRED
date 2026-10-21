@@ -47,11 +47,11 @@ import static org.assertj.core.api.Assertions.entry;
  *
  * <p>The two paths reach their transaction differently, and both are proved here. handleRejected is
  * {@code @Transactional}, so its event and its deletes share one transaction. closeAccount is
- * deliberately not, because the broker calls must stay outside a database transaction, so the
- * outbox insert opens its own short REQUIRED transaction, which joins the test's when the test
- * supplies one. Either way AnalyticsOutboxService REFUSES to write without a transaction, so if
- * that boundary ever stopped existing the row would simply not be there and the committed cases
- * would fail.
+ * deliberately not, because the broker calls must stay outside a database transaction, so it hands
+ * the insert to UserDeletionService.delete, which runs it as the first statement inside the
+ * transaction that removes the rows; that transaction joins the test's when the test supplies one.
+ * Either way AnalyticsOutboxService REFUSES to write without a transaction, so if that boundary
+ * ever stopped existing the row would simply not be there and the committed cases would fail.
  *
  * <p>Deliberately NOT annotated {@code @Transactional}: a test-managed rollback-everything
  * transaction would make the committed and rolled-back cases look identical. Each test manages its

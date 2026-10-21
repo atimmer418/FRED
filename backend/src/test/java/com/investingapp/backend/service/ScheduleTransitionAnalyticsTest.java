@@ -179,6 +179,22 @@ class ScheduleTransitionAnalyticsTest {
         verify(analyticsOutboxService, never()).record(any(), any(), any());
     }
 
+    /**
+     * The other no-op, and the one Phase 0 introduced: the schedule is already stopped by a system
+     * hold. Neither the REST endpoint nor FredChatActionService knows hold_reason exists, so a user
+     * looking at a schedule a bank change stopped can still ask to pause it. resetForBankChange
+     * already counted that stop; counting this one too would report two stops for one.
+     */
+    @Test
+    void pausingAnAlreadyHeldScheduleEmitsNothing() {
+        stubFoundById(heldSchedule(HoldReason.BANK_CHANGE));
+        stubSaveEchoesBack();
+
+        service.pauseSchedule(user, SCHEDULE_ID);
+
+        verify(analyticsOutboxService, never()).record(any(), any(), any());
+    }
+
     /** A pause of a schedule that does not belong to this user throws before any state changes. */
     @Test
     void pauseOfAMissingScheduleEmitsNothing() {
@@ -210,6 +226,26 @@ class ScheduleTransitionAnalyticsTest {
 
         service.resumeSchedule(user, SCHEDULE_ID);
 
+        verify(analyticsOutboxService, never()).record(any(), any(), any());
+    }
+
+    /**
+     * A resume of a schedule the system still holds. is_paused is cleared, but the hold is not, so
+     * the schedule is still stopped and nothing resumed. The resume for this schedule belongs to
+     * AchRelationshipService.adopt, which emits it when it clears the hold; emitting here as well
+     * would report two resumes for one real start.
+     */
+    @Test
+    void resumingAScheduleTheSystemStillHoldsEmitsNothing() {
+        InvestmentSchedule heldAndPaused = heldSchedule(HoldReason.BANK_CHANGE);
+        heldAndPaused.setIsPaused(true);
+        stubFoundById(heldAndPaused);
+        stubSaveEchoesBack();
+
+        service.resumeSchedule(user, SCHEDULE_ID);
+
+        assertEquals(Boolean.FALSE, heldAndPaused.getIsPaused(), "the user's pause was cleared");
+        assertEquals(HoldReason.BANK_CHANGE, heldAndPaused.getHoldReason(), "but the hold still stops it");
         verify(analyticsOutboxService, never()).record(any(), any(), any());
     }
 

@@ -26,10 +26,12 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -211,6 +213,42 @@ class UserDeletionServiceTest {
         order.verify(portfolioRepository).delete(portfolio);
         order.verify(userRepository).delete(user);
         order.verify(transactionManager).commit(any());
+    }
+
+    @Test
+    @DisplayName("the caller's hook runs inside the transaction, after it opens and before the first delete")
+    void hookRunsInsideTheTransactionBeforeAnyDelete() {
+        AtomicInteger deletesWhenTheHookRan = new AtomicInteger(-1);
+        AtomicInteger deletes = new AtomicInteger();
+        doAnswer(invocation -> {
+            deletes.incrementAndGet();
+            return null;
+        }).when(plaidWebhookEventRepository).deleteByUserId(42L);
+        Runnable hook = () -> deletesWhenTheHookRan.set(deletes.get());
+
+        service.delete(user, DeletionReason.ACCOUNT_CLOSED, hook);
+
+        assertThat(deletesWhenTheHookRan.get())
+                .as("the hook must see the rows it describes, so it runs before any of them go")
+                .isZero();
+        InOrder order = inOrder(transactionManager, plaidWebhookEventRepository, userRepository);
+        order.verify(transactionManager).getTransaction(any(TransactionDefinition.class));
+        order.verify(plaidWebhookEventRepository).deleteByUserId(42L);
+        order.verify(userRepository).delete(user);
+        order.verify(transactionManager).commit(any());
+    }
+
+    @Test
+    @DisplayName("a deferred deletion never runs the hook, so nothing records a deletion that did not happen")
+    void deferredDeletionNeverRunsTheHook() {
+        when(executionRepository.existsByUserAndStatus(user, ExecutionStatus.FUNDING_INITIATED)).thenReturn(true);
+        AtomicInteger hookRuns = new AtomicInteger();
+
+        assertThatThrownBy(() -> service.delete(user, DeletionReason.ACCOUNT_CLOSED, hookRuns::incrementAndGet))
+                .isInstanceOf(DeletionDeferredException.class);
+
+        assertThat(hookRuns.get()).isZero();
+        verifyNoInteractions(transactionManager);
     }
 
     @Test

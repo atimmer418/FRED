@@ -107,6 +107,22 @@ public class UserDeletionService {
      * FK-bearing child (children before parents), then the user.
      */
     public void delete(User user, DeletionReason reason) {
+        delete(user, reason, () -> {
+        });
+    }
+
+    /**
+     * The same deletion, with one statement run inside the deletion transaction before any row is
+     * removed.
+     *
+     * <p>For callers that must write a record of the deletion itself, which is only safe when it
+     * commits or rolls back with the deletes: an analytics event describing a cancellation whose
+     * rows survived would be a lie, and the outbox is read as a source of truth. The hook runs as
+     * the FIRST statement inside the transaction, so it can still read the rows it describes, and it
+     * never runs at all when the deferral check above refuses the deletion. The broker call stays
+     * outside the transaction, where it belongs.
+     */
+    public void delete(User user, DeletionReason reason, Runnable insideTransactionBeforeDeletes) {
         Long userId = user.getId();
         Optional<String> deferral = deferralReason(user);
         if (deferral.isPresent()) {
@@ -117,6 +133,7 @@ public class UserDeletionService {
         deleteAlpacaRelationshipBestEffort(user);
 
         deleteTx.executeWithoutResult(status -> {
+            insideTransactionBeforeDeletes.run();
             if (user.getPlaidAccessToken() != null) {
                 plaidItemLifecycleService.enqueueRemoval(user);
             }

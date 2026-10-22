@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * v_schedule_churn against a dataset whose answers are known by construction.
  *
  * <p>Two things about this view shape the test. First, it reports only what the schema can honestly
- * answer: schedules_created, active_at_month_end and schedules_existing_at_month_end. There is no
+ * answer: schedules_created, the two active_* columns and schedules_existing_at_month_end. There is no
  * paused / resumed / cancelled column, because investment_schedules is a one-row-per-user snapshot
  * with no history, so nothing here tests for them.
  *
@@ -141,6 +141,19 @@ class ScheduleChurnViewTest {
                 Long.class, monthStart);
     }
 
+    /**
+     * Mirrors active_investing_at_month_end: running AND no BLOCKING hold. The blocking list is
+     * restated here on purpose. If BLOCKING_HOLDS and the view drift apart, this baseline disagrees
+     * with the view and the tests fail, which is the pairing being pinned rather than assumed.
+     */
+    private long foreignInvesting(String monthStart) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM investment_schedules "
+                + "WHERE created_at < ? + INTERVAL 1 MONTH AND status = 'ACTIVE' "
+                + "AND (hold_reason IS NULL OR hold_reason NOT IN "
+                + "('ACH_RETURN_UNAUTHORIZED','ACH_RETURN_ACCOUNT','MANUAL_REVIEW'))",
+                Long.class, monthStart);
+    }
+
     /** Mirrors held_at_month_end: the status still says the user wants it, a hold is stopping it. */
     private long foreignHeld(String monthStart) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM investment_schedules "
@@ -177,7 +190,7 @@ class ScheduleChurnViewTest {
         // Existing at the end of June ignores the pause flag: 2.
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 2);
         // Active at the end of June counts only the unpaused one: existing = 2, active = 1.
-        assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(june, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
 
         Map<String, Object> july = row(JULY);
         assertThat(String.valueOf(july.get("month_start"))).isEqualTo("2024-07-01");
@@ -186,7 +199,7 @@ class ScheduleChurnViewTest {
         // Existing is cumulative: all four of June's and July's schedules = 4.
         assertThat(num(july, "schedules_existing_at_month_end")).isEqualTo(baseExistingJuly + 4);
         // Active is the same cumulative set minus the paused ones: juneActive + julyActive = 2.
-        assertThat(num(july, "active_at_month_end")).isEqualTo(baseActiveJuly + 2);
+        assertThat(num(july, "active_by_intent_at_month_end")).isEqualTo(baseActiveJuly + 2);
     }
 
     @Test
@@ -200,7 +213,7 @@ class ScheduleChurnViewTest {
         Map<String, Object> june = row(JUNE);
         assertThat(num(june, "schedules_created")).isEqualTo(baseCreatedJune + 1);
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
-        assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(june, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
 
         // July is not reported at all, even though that schedule was active for the whole of July.
         // The view's month list comes from created_at, so a month with no creations is absent
@@ -210,55 +223,79 @@ class ScheduleChurnViewTest {
     }
 
     @Test
-    @DisplayName("active_at_month_end reads the pause flag as it is NOW, not as it was that month")
+    @DisplayName("active_by_intent_at_month_end reads the pause flag as it is NOW, not as it was that month")
     void activeAtMonthEndFollowsTheCurrentPauseFlag() {
         long user = seed.user(signupAt);
         seed.schedule(user, LocalDateTime.of(2024, 6, 14, 9, 0), false);
 
         // Unpaused today, so June reads active = 1.
-        assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(row(JUNE), "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
 
         // Pause it now. Nothing about June 2024 changed, but June's answer does.
         jdbc.update("UPDATE investment_schedules SET status = 'PAUSED_BY_USER' WHERE user_id = ?", user);
 
         Map<String, Object> june = row(JUNE);
-        assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune); // + 0: 1 - 1 = 0
+        assertThat(num(june, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune); // + 0: 1 - 1 = 0
         // The other two columns are history and do not move.
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
         assertThat(num(june, "schedules_created")).isEqualTo(baseCreatedJune + 1);
     }
 
+    /**
+     * The two meanings of "active", on one schedule, held one way then the other.
+     *
+     * <p>This is 2580767's case retargeted rather than rewritten. Its point was that a held
+     * schedule is not active, and that point survives intact: it is now a statement about
+     * active_investing_at_month_end, which is the column that answers it. What it cannot be is a
+     * statement about intent, because the user has not left.
+     *
+     * <p>The BANK_CHANGE half shows why the blocking list matters. BANK_CHANGE is deliberately not
+     * in BLOCKING_HOLDS (Phase 0): a bank change already stops investing by clearing
+     * ach_request_id, so a schedule holding for one is still "investing" as far as the hold alone
+     * is concerned. MANUAL_REVIEW is blocking, and takes it out.
+     */
     @Test
-    @DisplayName("a hold does NOT come out of active_at_month_end; it shows up in held_at_month_end")
-    void activeAtMonthEndKeepsAHeldScheduleAndCountsItSeparately() {
+    @DisplayName("a hold leaves intent alone; a BLOCKING hold takes it out of active_investing")
+    void theTwoMeaningsOfActiveUnderAHold() {
         long baseHeldJune = foreignHeld(JUNE);
+        long baseInvestingJune = foreignInvesting(JUNE);
         long user = seed.user(signupAt);
         seed.schedule(user, LocalDateTime.of(2024, 6, 14, 9, 0), false);
 
-        // Running: status ACTIVE, no hold.
-        assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+        // Running, no hold: active on both readings.
+        assertThat(num(row(JUNE), "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(row(JUNE), "active_investing_at_month_end")).isEqualTo(baseInvestingJune + 1);
         assertThat(num(row(JUNE), "held_at_month_end")).isEqualTo(baseHeldJune);
 
-        // A bank-change hold stops the schedule WITHOUT touching the status (holds are orthogonal).
-        // This is the deliberate reversal of the earlier hold-aware predicate: a hold is an
-        // operational stop, not churn, so counting it as inactive would make a Plaid outage or a
-        // bank change read as users leaving. It is visible in its own column instead.
+        // A bank-change hold. Held, still intended, and still "investing" by the hold test alone.
         jdbc.update("UPDATE investment_schedules SET hold_reason = 'BANK_CHANGE' WHERE user_id = ?", user);
 
-        Map<String, Object> held = row(JUNE);
-        assertThat(num(held, "active_at_month_end")).isEqualTo(baseActiveJune + 1);
-        assertThat(num(held, "held_at_month_end")).isEqualTo(baseHeldJune + 1);
-        assertThat(num(held, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
-        assertThat(num(held, "schedules_created")).isEqualTo(baseCreatedJune + 1);
+        Map<String, Object> bankChange = row(JUNE);
+        assertThat(num(bankChange, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(bankChange, "active_investing_at_month_end")).isEqualTo(baseInvestingJune + 1);
+        assertThat(num(bankChange, "held_at_month_end")).isEqualTo(baseHeldJune + 1);
 
-        // The hold clears when the new ACH relationship lands; the active count never moved.
+        // A BLOCKING hold. This is the original assertion, now aimed at the column that answers
+        // it: it drops out of active_investing while intent is untouched.
+        jdbc.update("UPDATE investment_schedules SET hold_reason = 'MANUAL_REVIEW' WHERE user_id = ?", user);
+
+        Map<String, Object> blocked = row(JUNE);
+        assertThat(num(blocked, "active_investing_at_month_end")).isEqualTo(baseInvestingJune);
+        assertThat(num(blocked, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(blocked, "held_at_month_end")).isEqualTo(baseHeldJune + 1);
+        // History does not move for either.
+        assertThat(num(blocked, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
+        assertThat(num(blocked, "schedules_created")).isEqualTo(baseCreatedJune + 1);
+
+        // The hold clears when the new relationship lands, and both readings agree again.
         jdbc.update("UPDATE investment_schedules SET hold_reason = NULL WHERE user_id = ?", user);
-        assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(row(JUNE), "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(row(JUNE), "active_investing_at_month_end")).isEqualTo(baseInvestingJune + 1);
         assertThat(num(row(JUNE), "held_at_month_end")).isEqualTo(baseHeldJune);
     }
 
     @Test
-    @DisplayName("a user pause while a hold stands leaves active_at_month_end AND held_at_month_end")
+    @DisplayName("a user pause while a hold stands leaves intent, investing AND held")
     void aPausedAndHeldScheduleIsNeitherActiveNorHeld() {
         long baseHeldJune = foreignHeld(JUNE);
         long user = seed.user(signupAt);
@@ -270,11 +307,13 @@ class ScheduleChurnViewTest {
 
         Map<String, Object> june = row(JUNE);
         // Not active: the user turned it off, and that IS churn.
-        assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune);
+        assertThat(num(june, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune);
         // Not held either: held_at_month_end is "the user still wants it but we are stopping it",
         // and that is no longer true once the user has paused it. Counting it in both would
         // double-count one schedule.
         assertThat(num(june, "held_at_month_end")).isEqualTo(baseHeldJune);
+        // And not investing either: a paused schedule invests nothing whatever the hold says.
+        assertThat(num(june, "active_investing_at_month_end")).isEqualTo(foreignInvesting(JUNE));
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
     }
 
@@ -289,7 +328,7 @@ class ScheduleChurnViewTest {
 
         // Two schedules really were created in June.
         assertThat(num(row(JUNE), "schedules_created")).isEqualTo(baseCreatedJune + 2);
-        assertThat(num(row(JUNE), "active_at_month_end")).isEqualTo(baseActiveJune + 2);
+        assertThat(num(row(JUNE), "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 2);
 
         // Cancelling is a row delete, which is how the app does it.
         jdbc.update("DELETE FROM investment_schedules WHERE user_id = ?", cancelled);
@@ -298,7 +337,7 @@ class ScheduleChurnViewTest {
         // June now reports ONE creation where two happened: 2 - 1 = 1. schedules_created is
         // really "created that month and not since cancelled", which is not what the name says.
         assertThat(num(june, "schedules_created")).isEqualTo(baseCreatedJune + 1);
-        assertThat(num(june, "active_at_month_end")).isEqualTo(baseActiveJune + 1);
+        assertThat(num(june, "active_by_intent_at_month_end")).isEqualTo(baseActiveJune + 1);
         assertThat(num(june, "schedules_existing_at_month_end")).isEqualTo(baseExistingJune + 1);
     }
 

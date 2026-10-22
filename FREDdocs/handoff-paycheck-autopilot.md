@@ -150,25 +150,38 @@ worse than leaving it null. If you come to rely on that column, treat existing n
 
 ---
 
-## 6. One behaviour of yours that was deliberately reversed
+## 6. The churn view now answers your question AND the churn question
 
 Commit `344b7bb` made `v_schedule_churn.active_at_month_end` require `hold_reason IS NULL` alongside
-`is_paused = 0`, and `2580767` pinned it with a test. **That is reversed.** The predicate is now
-`status = 'ACTIVE'` alone, and holds get their own column, `held_at_month_end`.
+`is_paused = 0`, and `2580767` pinned it with a test. That was right about investing and wrong about
+churn, and the single column could not be both. So **"active" is published twice** instead of one
+meaning winning:
 
-The reasoning: a hold is an operational stop, not churn. If a held schedule drops out of the active
-count, a Plaid outage or a routine bank change reads as users leaving, which is the one thing this
-view exists to measure correctly. It is also unexplainable arithmetic, because a schedule would be neither
-paused-by-user nor active, with no column accounting for it.
+| Column | Means | Read it when |
+| --- | --- | --- |
+| `active_by_intent_at_month_end` | `status = 'ACTIVE'`, holds ignored | Asking about **users leaving**. A Plaid outage or a bank change must not read as churn. |
+| `active_investing_at_month_end` | `status = 'ACTIVE'` and no **blocking** hold | Asking whether **money is moving**. This is your number, and it is the one `344b7bb` was reaching for. |
+| `held_at_month_end` | `status = 'ACTIVE'` and **any** hold | Asking **how much we are sitting on**. |
 
-Nothing is lost. `held_at_month_end` counts `status = 'ACTIVE' AND hold_reason IS NOT NULL`, so
-"the user still wants it, we are stopping it" is visible on its own. A schedule that is both paused
-by its owner and held appears in **neither** column, deliberately: the user's pause is the real
-state, and counting it twice would double-count one schedule. The replaced test is
-`ScheduleChurnViewTest.activeAtMonthEndKeepsAHeldScheduleAndCountsItSeparately`.
+`active_at_month_end` no longer exists under that name; it split into the first two.
 
-**If you disagree, say so.** It is a metrics judgement about your feature's operational states, and
-it is one line of SQL plus two tests to swap back.
+**Churn and `net_user_change` pair with intent.** A schedule stopped by a hold has not churned and
+its owner has not left.
+
+The blocking set mirrors `BLOCKING_HOLDS` exactly: `ACH_RETURN_UNAUTHORIZED`, `ACH_RETURN_ACCOUNT`,
+`MANUAL_REVIEW`. Your decision to leave `BANK_CHANGE` out of it is respected, so a schedule holding
+for a bank change still counts as investing *by the hold test alone* (its null `ach_request_id` is
+what actually stops it). **If `BLOCKING_HOLDS` changes, change the view's list with it.** The test
+restates the list and fails if the two drift apart.
+
+Your test was **retargeted, not rewritten**: it is now
+`ScheduleChurnViewTest.theTwoMeaningsOfActiveUnderAHold`, and its original assertion, that a held
+schedule is not active, is intact as a statement about `active_investing_at_month_end` with a
+blocking hold. Its `BANK_CHANGE` case survives too, now asserting what is actually true of each
+column.
+
+A schedule both paused by its owner and held appears in **none** of the three, deliberately: the
+user's pause is the real state, and the hold column means "the user still wants it".
 
 ---
 

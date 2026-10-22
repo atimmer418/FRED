@@ -183,10 +183,32 @@ only cancellations are a user closing their whole account and a KYC rejection, s
 `cancelled_by_user` today means "closed their account", not "turned off their recurring
 investment". If a cancel button is ever added it will land in this column automatically.
 
-**The snapshot columns are still approximate for history.** `active_at_month_end` and
-`schedules_existing_at_month_end` read the *current* table, so they cannot reconstruct what the
-pause flag was in a past month, and a cancelled schedule has left the table entirely, taking its
-creation with it (so `schedules_created` for a past month can shrink). The event columns do not
+**"Active" has two honest meanings, and the view publishes both.** Once a schedule can be stopped
+by a system hold as well as by its owner, one "active" column would have to lie about something, so
+there are two plus a third for the holds themselves:
+
+| Column | Means | Read it when |
+| --- | --- | --- |
+| `active_by_intent_at_month_end` | `status = 'ACTIVE'`, holds ignored | You are asking about **users leaving**: this counts everyone who still wants their schedule running, so a Plaid outage or a bank change cannot read as churn. |
+| `active_investing_at_month_end` | `status = 'ACTIVE'` and no **blocking** hold | You are asking whether **money is actually moving**: this is the operational number, and it drops when we stop a schedule the user never touched. |
+| `held_at_month_end` | `status = 'ACTIVE'` and **any** hold | You are asking **how much we are sitting on**: the gap between the two columns above is this one's blocking subset. |
+
+**Churn and `net_user_change` pair with `active_by_intent_at_month_end`.** A schedule stopped by a
+hold has not churned and its owner has not left, so pairing the transition counts with the
+operational number would overstate churn every time something broke on our side.
+
+The blocking set is `ACH_RETURN_UNAUTHORIZED`, `ACH_RETURN_ACCOUNT` and `MANUAL_REVIEW`, mirroring
+`BLOCKING_HOLDS` in `InvestmentSchedule.isReadyForInvestment`. `BANK_CHANGE` is deliberately **not**
+in it: a bank change already stops investing by clearing `ach_request_id`, so listing it would
+count one stop twice. A schedule holding for a bank change therefore shows up in
+`active_investing_at_month_end` and in `held_at_month_end` at once, which is correct. If
+`BLOCKING_HOLDS` ever changes, change the view with it; `ScheduleChurnViewTest` pins the pairing and
+will fail if they drift.
+
+**The snapshot columns are still approximate for history.** All three `*_at_month_end` columns above
+and `schedules_existing_at_month_end` read the *current* table, so they cannot reconstruct what the
+status or the hold was in a past month, and a cancelled schedule has left the table entirely, taking
+its creation with it (so `schedules_created` for a past month can shrink). The event columns do not
 have that problem, because an event is a fact about a moment. **Prefer the event columns when
 comparing months.**
 
@@ -194,7 +216,7 @@ comparing months.**
 SELECT month_start, schedules_created,
        paused, paused_by_user, resumed, resumed_by_user,
        cancelled, cancelled_by_user, net_user_change,
-       active_at_month_end
+       active_by_intent_at_month_end, active_investing_at_month_end, held_at_month_end
 FROM v_schedule_churn
 ORDER BY month_start;
 ```

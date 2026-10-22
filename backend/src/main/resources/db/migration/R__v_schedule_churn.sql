@@ -20,6 +20,10 @@
 -- system resume from AchRelationshipService and a user resume from InvestmentScheduleService; the
 -- initiator filter is what keeps the system half out of churn.
 --
+-- Churn and net_user_change are about INTENT, so they pair with active_by_intent_at_month_end and
+-- not with active_investing_at_month_end: a schedule stopped by a hold has not churned, and its
+-- owner has not left.
+--
 -- The *_by_user columns are the ones to read as churn. The totals are there so the two can be
 -- reconciled, and so a surge of system pauses (a Plaid outage, say) is visible rather than hidden
 -- inside a churn number.
@@ -28,10 +32,11 @@
 -- investment_schedule_created already records it. Counting it would make every new user look like
 -- immediate churn.
 --
--- WHAT IS STILL TRUE OF THE SNAPSHOT COLUMNS. active_at_month_end and
--- schedules_existing_at_month_end read the CURRENT schedules table, so they are accurate for the
--- month in progress and approximate for history: they cannot reconstruct what the pause flag was
--- back then, and a cancelled schedule has left the table entirely, taking its creation with it.
+-- WHAT IS STILL TRUE OF THE SNAPSHOT COLUMNS. active_by_intent_at_month_end,
+-- active_investing_at_month_end, held_at_month_end and schedules_existing_at_month_end read the
+-- CURRENT schedules table, so they are accurate for the month in progress and approximate for
+-- history: they cannot reconstruct what the status or the hold was back then, and a cancelled
+-- schedule has left the table entirely, taking its creation with it.
 -- The event columns do not have that problem, because an event is a fact about a moment. Prefer
 -- them when comparing months.
 
@@ -89,13 +94,33 @@ SELECT
           AND e.event_name IN ('schedule_paused', 'schedule_cancelled')) AS net_user_change,
 
     -- Snapshot columns. Accurate for the month in progress, approximate for history.
+    --
+    -- "Active" has TWO honest meanings once holds exist, so both are published rather than one
+    -- being picked. Read active_by_intent for anything about users leaving, and active_investing
+    -- for anything about money actually moving. See metrics.md.
+    --
+    -- Intent: the user wants this schedule running. Holds are ignored on purpose, because a hold is
+    -- an operational stop and not churn: a Plaid outage or a routine bank change must not read as
+    -- users leaving. This is the column the transition counts above pair with.
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
-        AND s.status = 'ACTIVE') AS active_at_month_end,
-    -- Held but not paused: the status says the user still wants it, a system hold is stopping it.
-    -- Separate on purpose. A hold is an operational stop, not churn, so it must not come out of
-    -- active_at_month_end: a Plaid outage or a bank change would then read as users leaving. It is
-    -- its own column so the operational state is still visible and the arithmetic reconciles.
+        AND s.status = 'ACTIVE') AS active_by_intent_at_month_end,
+
+    -- Reality: the schedule would actually invest. Mirrors BLOCKING_HOLDS in
+    -- InvestmentSchedule.isReadyForInvestment, which deliberately does NOT include BANK_CHANGE: a
+    -- bank change already stops investing by clearing ach_request_id, so listing it here as well
+    -- would be the same stop counted twice. If BLOCKING_HOLDS changes, change this list with it;
+    -- ScheduleChurnViewTest pins the pairing.
+    (SELECT COUNT(*) FROM investment_schedules s
+      WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
+        AND s.status = 'ACTIVE'
+        AND (s.hold_reason IS NULL
+             OR s.hold_reason NOT IN ('ACH_RETURN_UNAUTHORIZED', 'ACH_RETURN_ACCOUNT',
+                                      'MANUAL_REVIEW'))) AS active_investing_at_month_end,
+
+    -- Held but not paused: the status says the user still wants it, a system hold is on it. ANY
+    -- hold, blocking or not, so the operational state is visible and the arithmetic reconciles.
+    -- The gap between the two columns above is the blocking subset of this one.
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
         AND s.status = 'ACTIVE'

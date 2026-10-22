@@ -64,7 +64,12 @@ public class MetricsViewSeed {
         }
     }
 
-    /** One level is enough for this schema: trades hang off executions, nothing hangs off trades. */
+    /**
+     * One level is enough for this schema: trades hang off executions, nothing hangs off trades.
+     * The subquery is wrapped in a derived table because a table can reference itself
+     * (ach_authorizations.superseded_by since V6), and MySQL refuses to delete from a table it is
+     * also selecting from in the same statement (error 1093) unless the selection is materialised.
+     */
     private void deleteGrandchildren(String parentTable, String parentColumn, String userIds) {
         List<String> tables = jdbc.queryForList(
                 "SELECT DISTINCT TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE "
@@ -77,8 +82,8 @@ public class MetricsViewSeed {
                             + "AND REFERENCED_TABLE_NAME = ? LIMIT 1",
                     String.class, table, parentTable);
             jdbc.update("DELETE FROM `" + table + "` WHERE `" + column + "` IN "
-                    + "(SELECT id FROM `" + parentTable + "` WHERE `" + parentColumn
-                    + "` IN (" + userIds + "))");
+                    + "(SELECT id FROM (SELECT id FROM `" + parentTable + "` WHERE `" + parentColumn
+                    + "` IN (" + userIds + ")) AS cohort_rows)");
         }
     }
 

@@ -1,20 +1,18 @@
 package com.investingapp.backend.controller;
 
+import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
-import com.investingapp.backend.repository.PortfolioRepository;
 import com.investingapp.backend.repository.UserRepository;
-import com.investingapp.backend.repository.UserSessionRepository;
 import com.investingapp.backend.service.AlpacaService;
 import com.investingapp.backend.service.AnalyticsOutboxService;
-import com.investingapp.backend.service.AnalyticsPersonDeletionService;
 import com.investingapp.backend.service.EncryptionService;
+import com.investingapp.backend.service.UserDeletionService;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -22,6 +20,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,12 +30,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -56,6 +54,13 @@ import static org.mockito.Mockito.when;
  * injection. Only the fields closeAccount actually touches are set; alpacaApiService is not one of
  * them. Mocks are plain (no MockitoExtension), as the repo's other controller tests are, so the
  * 404 and broker-failure cases can share a fixture without tripping strict-stub checks.
+ *
+ * <p>Every row the user owns is deleted by UserDeletionService now, so the deletion assertions are
+ * made against that one path rather than against the individual repositories. closeAccount is not
+ * transactional (the broker calls must stay outside a database transaction) and the outbox refuses
+ * to write without one, so the controller hands the cancellation to UserDeletionService.delete as a
+ * hook to run inside the deletion transaction. The mock here runs that hook where the real service
+ * runs it: after the deletion is allowed to start and before any row is removed.
  */
 class TradingControllerScheduleCancelledTest {
 
@@ -68,11 +73,9 @@ class TradingControllerScheduleCancelledTest {
     private AlpacaService alpacaService;
     private UserRepository userRepository;
     private InvestmentScheduleRepository investmentScheduleRepository;
-    private UserSessionRepository userSessionRepository;
-    private PortfolioRepository portfolioRepository;
     private EncryptionService encryptionService;
     private AnalyticsOutboxService analyticsOutboxService;
-    private AnalyticsPersonDeletionService analyticsPersonDeletionService;
+    private UserDeletionService userDeletionService;
 
     private TradingController controller;
     private Authentication authentication;
@@ -83,23 +86,18 @@ class TradingControllerScheduleCancelledTest {
         alpacaService = mock(AlpacaService.class);
         userRepository = mock(UserRepository.class);
         investmentScheduleRepository = mock(InvestmentScheduleRepository.class);
-        userSessionRepository = mock(UserSessionRepository.class);
-        portfolioRepository = mock(PortfolioRepository.class);
         encryptionService = mock(EncryptionService.class);
         analyticsOutboxService = mock(AnalyticsOutboxService.class);
-        analyticsPersonDeletionService = mock(AnalyticsPersonDeletionService.class);
+        userDeletionService = mock(UserDeletionService.class);
 
         controller = new TradingController();
         ReflectionTestUtils.setField(controller, "alpacaService", alpacaService);
         ReflectionTestUtils.setField(controller, "userRepository", userRepository);
         ReflectionTestUtils.setField(controller, "investmentScheduleRepository",
                 investmentScheduleRepository);
-        ReflectionTestUtils.setField(controller, "userSessionRepository", userSessionRepository);
-        ReflectionTestUtils.setField(controller, "portfolioRepository", portfolioRepository);
         ReflectionTestUtils.setField(controller, "encryptionService", encryptionService);
-        ReflectionTestUtils.setField(controller, "analyticsPersonDeletionService",
-                analyticsPersonDeletionService);
         ReflectionTestUtils.setField(controller, "analyticsOutboxService", analyticsOutboxService);
+        ReflectionTestUtils.setField(controller, "userDeletionService", userDeletionService);
 
         user = new User(EMAIL);
         user.setId(USER_ID);
@@ -112,7 +110,13 @@ class TradingControllerScheduleCancelledTest {
 
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         when(encryptionService.decrypt(ENCRYPTED_ACCOUNT)).thenReturn(ALPACA_ACCOUNT);
-        when(portfolioRepository.findByUser(user)).thenReturn(Optional.empty());
+        // Nothing in flight, so the closure is allowed to proceed to the deletes.
+        when(userDeletionService.deferralReason(user)).thenReturn(Optional.empty());
+        // Stand in for the real deletion transaction: run the hook, then the deletes would follow.
+        doAnswer(invocation -> {
+            invocation.getArgument(2, Runnable.class).run();
+            return null;
+        }).when(userDeletionService).delete(any(), any(), any());
     }
 
     private void givenTheUserHasASchedule() {
@@ -124,7 +128,7 @@ class TradingControllerScheduleCancelledTest {
     void closingWithAScheduleRecordsOneCancellation() {
         givenTheUserHasASchedule();
 
-        ResponseEntity<Map<String, Object>> response = controller.closeAccount(authentication);
+        ResponseEntity<?> response = controller.closeAccount(authentication);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 
@@ -145,15 +149,18 @@ class TradingControllerScheduleCancelledTest {
     }
 
     @Test
-    @DisplayName("closing an account also asks the vendor to delete the person record")
-    void closingAlsoRequestsThePersonDeletion() {
+    @DisplayName("closing an account hands the whole deletion, person record included, to one service")
+    void closingDelegatesTheDeletionIncludingThePersonRecord() {
         givenTheUserHasASchedule();
 
         controller.closeAccount(authentication);
 
-        // Requested with the user still intact, so there is a public_id to copy. Deleting our
-        // rows without asking the vendor would make "we deleted your account" only half true.
-        verify(analyticsPersonDeletionService).request(user);
+        // The vendor's person record is deleted by UserDeletionService, inside the same transaction
+        // as the row deletes, so EVERY deletion reason propagates it and not just this one. The
+        // controller's job is only to hand over; UserDeletionServiceTest owns the
+        // "it really is requested, in that transaction, with the user still intact" assertions.
+        verify(userDeletionService).delete(eq(user),
+                eq(UserDeletionService.DeletionReason.ACCOUNT_CLOSED), any(Runnable.class));
     }
 
     @Test
@@ -161,33 +168,51 @@ class TradingControllerScheduleCancelledTest {
     void closingWithoutAScheduleEmitsNothing() {
         // existsByUser is left unstubbed: false, this user never set a schedule up.
 
-        ResponseEntity<Map<String, Object>> response = controller.closeAccount(authentication);
+        ResponseEntity<?> response = controller.closeAccount(authentication);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        // The closure itself is untouched: the delete still runs, it is simply a no-op.
-        verify(investmentScheduleRepository).deleteAllByUser(user);
-        verify(userRepository).delete(user);
+        // The closure itself is untouched: the one deletion path still runs.
+        verify(userDeletionService).delete(eq(user),
+                eq(UserDeletionService.DeletionReason.ACCOUNT_CLOSED), any(Runnable.class));
         verifyNoInteractions(analyticsOutboxService);
     }
 
     @Test
-    @DisplayName("the schedule's existence is read before the schedule is deleted")
-    void existenceIsReadBeforeTheDelete() {
-        givenTheUserHasASchedule();
+    @DisplayName("the existence read and the event happen inside the deletion transaction, before any row goes")
+    void theEventIsRecordedInsideTheDeletionTransaction() {
+        List<String> order = new ArrayList<>();
+        // The deletion transaction, from the outside: it opens, runs the controller's hook, then
+        // removes the rows. An event committed before this window could describe a cancellation
+        // whose schedule and user are still there; one written after it could not read the
+        // schedule, or the user's identity, at all.
+        doAnswer(invocation -> {
+            order.add("deletion transaction opens");
+            invocation.getArgument(2, Runnable.class).run();
+            order.add("rows removed");
+            return null;
+        }).when(userDeletionService).delete(any(), any(), any());
+        when(investmentScheduleRepository.existsByUser(user)).thenAnswer(invocation -> {
+            order.add("schedule existence read");
+            return true;
+        });
+        when(analyticsOutboxService.record(anyString(), any(User.class), anyMap()))
+                .thenAnswer(invocation -> {
+                    order.add("event recorded");
+                    return null;
+                });
 
         controller.closeAccount(authentication);
 
-        // Reading it afterwards would always answer 'no' and the event would never fire.
-        InOrder order = inOrder(investmentScheduleRepository, analyticsOutboxService);
-        order.verify(investmentScheduleRepository).existsByUser(user);
-        order.verify(analyticsOutboxService)
-                .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), anyMap());
-        order.verify(investmentScheduleRepository).deleteAllByUser(user);
+        assertThat(order).containsExactly(
+                "deletion transaction opens",
+                "schedule existence read",
+                "event recorded",
+                "rows removed");
     }
 
     @Test
-    @DisplayName("the cancellation is recorded before the user is deleted, while it still has an identity")
-    void cancellationIsRecordedBeforeTheHardDelete() {
+    @DisplayName("the cancellation is recorded while the user still has an identity to copy")
+    void cancellationIsRecordedWhileTheUserStillHasAnIdentity() {
         givenTheUserHasASchedule();
         AtomicReference<String> identityAtRecordTime = new AtomicReference<>();
         when(analyticsOutboxService.record(anyString(), any(User.class), anyMap()))
@@ -199,10 +224,8 @@ class TradingControllerScheduleCancelledTest {
 
         controller.closeAccount(authentication);
 
-        InOrder order = inOrder(analyticsOutboxService, userRepository);
-        order.verify(analyticsOutboxService)
+        verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), anyMap());
-        order.verify(userRepository).delete(user);
         // The outbox copies both of these out of the user; neither can be recovered afterwards.
         assertThat(identityAtRecordTime.get()).isEqualTo(USER_ID + "|" + PUBLIC_ID);
     }
@@ -213,17 +236,33 @@ class TradingControllerScheduleCancelledTest {
         givenTheUserHasASchedule();
         doThrow(new RuntimeException("alpaca unreachable")).when(alpacaService).closeAccount(ALPACA_ACCOUNT);
 
-        // The failure now PROPAGATES rather than being swallowed into a 500 body. That is the
-        // point: this method is @Transactional, and one that returns commits whatever it has
-        // already written. An @ExceptionHandler turns this into the same 500 the caller used to
-        // get, after the rollback.
+        // The failure PROPAGATES rather than being swallowed into a 500 body, so a partial close
+        // can never be reported as an orderly one. The rollback itself is UserDeletionService's
+        // doing now, inside its own transaction; an @ExceptionHandler turns this throw into the
+        // same 500 the caller used to get.
         assertThatThrownBy(() -> controller.closeAccount(authentication))
                 .isInstanceOf(TradingController.AccountCloseFailedException.class);
 
         // Nothing was closed and nothing was deleted, so there is no cancellation to describe.
-        verify(investmentScheduleRepository, never()).deleteAllByUser(any());
-        verify(userRepository, never()).delete(any(User.class));
+        verify(userDeletionService, never()).delete(any(), any(), any());
         verify(analyticsOutboxService, never()).record(anyString(), any(), anyMap());
+    }
+
+    @Test
+    @DisplayName("a deferred deletion is refused before the broker call and cancels nothing")
+    void deferredClosureEmitsNothing() {
+        givenTheUserHasASchedule();
+        when(userDeletionService.deferralReason(user)).thenReturn(Optional.of("SETTLEMENT_WINDOW"));
+
+        ResponseEntity<?> response = controller.closeAccount(authentication);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody())
+                .isEqualTo(new ErrorCodeResponse("DELETION_DEFERRED", "SETTLEMENT_WINDOW"));
+        // The schedule is still running and the account is still open: nothing was cancelled.
+        verify(alpacaService, never()).closeAccount(anyString());
+        verify(userDeletionService, never()).delete(any(), any(), any());
+        verifyNoInteractions(analyticsOutboxService);
     }
 
     @Test
@@ -231,17 +270,17 @@ class TradingControllerScheduleCancelledTest {
     void userWithoutABrokerageAccountEmitsNothing() {
         user.setAlpacaAccountId(null);
 
-        ResponseEntity<Map<String, Object>> response = controller.closeAccount(authentication);
+        ResponseEntity<?> response = controller.closeAccount(authentication);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         verifyNoInteractions(analyticsOutboxService);
-        verify(userSessionRepository, never()).deleteAllByUserId(anyLong());
+        verify(userDeletionService, never()).delete(any(), any(), any());
     }
 
     @Test
     @DisplayName("an unauthenticated call emits nothing")
     void unauthenticatedCallEmitsNothing() {
-        ResponseEntity<Map<String, Object>> response = controller.closeAccount(null);
+        ResponseEntity<?> response = controller.closeAccount(null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         verifyNoInteractions(analyticsOutboxService);

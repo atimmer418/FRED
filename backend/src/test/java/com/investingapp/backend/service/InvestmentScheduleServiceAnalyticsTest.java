@@ -165,6 +165,7 @@ class InvestmentScheduleServiceAnalyticsTest {
         assertEquals("semi_monthly", InvestmentScheduleService.frequencySlug("SEMI_MONTHLY"));
         assertEquals("monthly", InvestmentScheduleService.frequencySlug("MONTHLY"));
         assertEquals("monthly", InvestmentScheduleService.frequencySlug(" monthly "));
+        assertEquals("semi_monthly", InvestmentScheduleService.frequencySlug("SEMIMONTHLY"));
 
         assertNull(InvestmentScheduleService.frequencySlug(null));
         assertNull(InvestmentScheduleService.frequencySlug(""));

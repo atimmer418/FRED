@@ -1,5 +1,6 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -64,6 +67,10 @@ class AccountStatusServiceKycDecidedTest {
     private InvestmentScheduleService investmentScheduleService;
     @Mock
     private AnalyticsOutboxService analyticsOutboxService;
+    @Mock
+    private AchRelationshipService achRelationshipService;
+    @Mock
+    private UserDeletionService userDeletionService;
 
     @Captor
     private ArgumentCaptor<String> eventNameCaptor;
@@ -85,7 +92,9 @@ class AccountStatusServiceKycDecidedTest {
                 emailService,
                 plaidToAlpacaService,
                 investmentScheduleService,
-                analyticsOutboxService);
+                analyticsOutboxService,
+                achRelationshipService,
+                userDeletionService);
 
         user = new User("kyc@fredvested.com");
         user.setId(42L);
@@ -165,12 +174,28 @@ class AccountStatusServiceKycDecidedTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        InOrder order = inOrder(analyticsOutboxService, userRepository);
+        InOrder order = inOrder(analyticsOutboxService, userDeletionService);
         order.verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.KYC_DECIDED), eq(user), anyMap());
-        order.verify(userRepository).delete(user);
+        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+        verify(userRepository, never()).delete(any());
         // The outbox copies both of these out of the user; neither can be recovered afterwards.
         assertThat(identityAtRecordTime.get()).isEqualTo("42|" + PUBLIC_ID);
+    }
+
+    @Test
+    @DisplayName("a deferred deletion parks the user as REJECTED so the poller stops re-deciding")
+    void deferredRejectionParksTheUserAsRejected() {
+        brokerSays("REJECTED");
+        doThrow(new DeletionDeferredException("FUNDING_INITIATED"))
+                .when(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+
+        service.checkAndUpdateAccountStatuses();
+
+        assertOneDecisionEvent("rejected", "1_3");
+        assertThat(user.getAccountStatus()).isEqualTo("REJECTED");
+        verify(userRepository).save(user);
+        verify(userRepository, never()).delete(any());
     }
 
     @Test
@@ -255,5 +280,44 @@ class AccountStatusServiceKycDecidedTest {
         assertThat(AccountStatusService.kycOutcome("SUBMITTED")).isNull();
         assertThat(AccountStatusService.kycOutcome("")).isNull();
         assertThat(AccountStatusService.kycOutcome(null)).isNull();
+    }
+
+    @Test
+    @DisplayName("a bank change records the previous relationship, resets, cancels, and never creates synchronously")
+    void bankChangeResetsThenCancelsAndNeverCreatesSynchronously() {
+        user.setAlpacaAchRelationshipId("ENC:rel-old");
+        user.setPlaidAccessToken("ENC:token");
+        user.setPlaidAccountId("plaid-acct");
+        user.setFirstName("Ada");
+        user.setLastName("Lovelace");
+
+        service.handleBankAccountChange(user);
+
+        assertThat(user.getPreviousAchRelationshipId()).isEqualTo("ENC:rel-old");
+        InOrder order = inOrder(investmentScheduleService, achRelationshipService);
+        order.verify(investmentScheduleService).resetForBankChange(user);
+        order.verify(achRelationshipService).cancelAllActive(user);
+        verify(achRelationshipService, never()).ensureRelationship(any());
+
+        service.attemptAchCreation(user);
+
+        verify(achRelationshipService).ensureRelationship(user);
+    }
+
+    @Test
+    @DisplayName("a bank change falls back to the schedule's achRequestId when the user field was never populated (legacy split row)")
+    void bankChangeFallsBackToTheScheduleWhenTheUserFieldIsNull() {
+        // Legacy split row: the deleted /update-ach-request-id endpoint wrote only the schedule's
+        // achRequestId; alpacaAchRelationshipId was never populated, so the direct copy has nothing
+        // to capture.
+        InvestmentSchedule schedule = new InvestmentSchedule();
+        schedule.setAchRequestId("rel-legacy");
+        when(investmentScheduleService.getCurrentSchedule(user)).thenReturn(Optional.of(schedule));
+        when(encryptionService.encrypt("rel-legacy")).thenReturn("ENC:rel-legacy");
+
+        service.handleBankAccountChange(user);
+
+        assertThat(user.getPreviousAchRelationshipId()).isEqualTo("ENC:rel-legacy");
+        verify(investmentScheduleService).resetForBankChange(user);
     }
 }

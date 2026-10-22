@@ -5,11 +5,12 @@ import com.investingapp.backend.service.AlpacaApiService;
 import com.investingapp.backend.service.AnalyticsOutboxService;
 import com.investingapp.backend.service.AnalyticsPersonDeletionService;
 import com.investingapp.backend.service.EncryptionService;
+import com.investingapp.backend.service.DeletionDeferredException;
+import com.investingapp.backend.service.UserDeletionService;
+import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
-import com.investingapp.backend.repository.PortfolioRepository;
 import com.investingapp.backend.repository.UserRepository;
-import com.investingapp.backend.repository.UserSessionRepository;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,7 +21,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.*;
 
@@ -50,10 +50,7 @@ public class TradingController {
     private InvestmentScheduleRepository investmentScheduleRepository;
 
     @Autowired
-    private UserSessionRepository userSessionRepository;
-
-    @Autowired
-    private PortfolioRepository portfolioRepository;
+    private UserDeletionService userDeletionService;
 
     @Autowired
     private EncryptionService encryptionService;
@@ -61,8 +58,7 @@ public class TradingController {
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
 
-    @Autowired
-    private AnalyticsPersonDeletionService analyticsPersonDeletionService;
+
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -307,10 +303,12 @@ public class TradingController {
     /**
      * Close the user's brokerage account and delete their FRED user record.
      * Prerequisites: all positions must be liquidated and all cash withdrawn.
+     * Not transactional: the broker calls run outside the database transaction that
+     * UserDeletionService opens for the row deletes. The cancellation event is handed to that
+     * service so it is written inside that one transaction: see recordScheduleCancelled.
      */
-    @Transactional
     @PostMapping("/account/close")
-    public ResponseEntity<Map<String, Object>> closeAccount(Authentication authentication) {
+    public ResponseEntity<?> closeAccount(Authentication authentication) {
         try {
             if (authentication == null || authentication.getPrincipal() == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -324,31 +322,26 @@ public class TradingController {
                     .body(Map.of("error", "User or Alpaca account not found"));
             }
 
+            // Refuse before touching the broker: closing the brokerage account and then keeping
+            // the FRED row would leave the user half deleted.
+            Optional<String> deferral = userDeletionService.deferralReason(user);
+            if (deferral.isPresent()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ErrorCodeResponse("DELETION_DEFERRED", deferral.get()));
+            }
+
             String accountId = encryptionService.decrypt(user.getAlpacaAccountId());
 
             // Close the Alpaca brokerage account
             alpacaService.closeAccount(accountId);
 
-            // Record the cancellation before anything is deleted: see recordScheduleCancelled.
-            recordScheduleCancelled(user);
-
-            // Delete investment schedules first (FK not covered by JPA cascade)
-            investmentScheduleRepository.deleteAllByUser(user);
-
-            // Delete user sessions (FK not covered by JPA cascade)
-            userSessionRepository.deleteAllByUserId(user.getId());
-
-            // Delete portfolio and its items (FK not covered by JPA cascade; items cascade from portfolio)
-            portfolioRepository.findByUser(user).ifPresent(portfolioRepository::delete);
-
-            // Ask the analytics vendor to delete their person record too, BEFORE the user row
-            // goes, while there is still a public_id to copy. In the same transaction as the
-            // deletion itself, so "we deleted your account" is either true of both sides or of
-            // neither. See FREDdocs/what-we-send.md.
-            analyticsPersonDeletionService.request(user);
-
-            // Delete the user from our database (cascades to passkey credentials, user progress, etc.)
-            userRepository.delete(user);
+            // One path for every row that references the user (schedules, sessions, portfolio, ...),
+            // with the cancellation recorded as the first statement inside that same transaction:
+            // see recordScheduleCancelled. The analytics vendor's person record is deleted inside
+            // that transaction too, by UserDeletionService itself, so every deletion reason gets it
+            // and not just this one. See FREDdocs/what-we-send.md.
+            userDeletionService.delete(user, UserDeletionService.DeletionReason.ACCOUNT_CLOSED,
+                () -> recordScheduleCancelled(user));
 
             logger.info("Account closed and user deleted for alpaca account: {}", accountId);
 
@@ -357,14 +350,20 @@ public class TradingController {
                 "message", "Your account has been permanently closed."
             ));
 
+        } catch (DeletionDeferredException deferred) {
+            // A transfer landed between the pre-check and the delete. The brokerage account is
+            // already closed, so a person finishes this one through the admin verb.
+            logger.error("alert.user_deletion.deferred reason=ACCOUNT_CLOSED deferral={}", deferred.reason);
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorCodeResponse("DELETION_DEFERRED", deferred.reason));
         } catch (Exception e) {
             logger.error("Error closing account: {}", e.getMessage(), e);
-            // RETHROW. This method is @Transactional, and a @Transactional method that RETURNS
-            // commits whatever it has already written. Swallowing here left the account half
-            // closed: the schedules could be gone, the analytics row committed, and the user row
-            // still present, with the caller told only that it failed. Throwing rolls the whole
-            // thing back, and the handler below turns it into the same response the caller used
-            // to get, after the rollback has happened.
+            // RETHROW rather than return. The rollback itself is no longer this method's doing:
+            // the deletes run inside UserDeletionService's TransactionTemplate, which rolls back
+            // on its own when a statement throws. What this keeps is the other half of the fix,
+            // that a failed close leaves as a hard failure instead of a tidy return, so a partial
+            // close can never be reported as an orderly one. The handler below turns it into the
+            // same response the caller used to get.
             throw new AccountCloseFailedException(e);
         }
     }
@@ -391,16 +390,21 @@ public class TradingController {
     /**
      * Records schedule_cancelled for a user closing their own account.
      *
-     * <p>Called from inside closeAccount's transaction, BEFORE the deletes, while the user still has
-     * an id and a public_id for the outbox to copy: in a moment it will have neither. The outbox row
-     * has no foreign key to users and denormalises public_id, so it outlives the schedule and the
-     * person. AnalyticsOutboxService refuses to write outside a transaction, and closeAccount is
-     * annotated {@code @Transactional}, so the event and the deletion commit together or not at all.
+     * <p>Called BEFORE the deletes, while the user still has an id and a public_id for the outbox to
+     * copy: in a moment it will have neither. The outbox row has no foreign key to users and
+     * denormalises public_id, so it outlives the schedule and the person.
+     *
+     * <p>Transaction boundary: closeAccount is deliberately NOT {@code @Transactional}, because the
+     * broker calls must not run inside a database transaction, and AnalyticsOutboxService refuses to
+     * write without one. So this runs as the hook UserDeletionService.delete invokes as the first
+     * statement inside its own deletion transaction: the event and the deletes it describes commit
+     * together or not at all, and a delete that throws or is deferred leaves no event behind
+     * claiming a cancellation whose rows are still there.
      *
      * <p>Only a REAL transition is recorded. The schedule's existence is read BEFORE it is changed,
-     * and a user with no schedule emits nothing: deleteAllByUser is a no-op for them, and an event
-     * there would invent a cancellation for everyone who closed an account without ever setting a
-     * schedule up. These events exist to count churn, so a phantom would inflate the one number they
+     * and a user with no schedule emits nothing: the deletion removes no schedule for them,
+     * and an event there would invent a cancellation for everyone who closed an account without
+     * ever setting a schedule up. These events exist to count churn, so a phantom would inflate the one number they
      * are for.
      *
      * <p>Two properties and nothing else, in this order: who caused it and why. No amount, no

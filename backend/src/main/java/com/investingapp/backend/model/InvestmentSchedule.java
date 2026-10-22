@@ -7,6 +7,8 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.EnumSet;
+import com.investingapp.backend.util.EasternTime;
 
 @Data
 @AllArgsConstructor
@@ -71,6 +73,17 @@ public class InvestmentSchedule {
     @Column(name = "ach_request_id", length = 255)
     private String achRequestId; // This will be set when ACH linking is confirmed
 
+    // Paycheck Autopilot, Phase 0 (V6). Phase 0 never produces DETECTED.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "mode", length = 10, nullable = false)
+    private ScheduleMode mode = ScheduleMode.MANUAL;
+
+    /** The system's stop, orthogonal to {@link Status}; null means none. The status carries the
+     * user's own stop (PAUSED_BY_USER) and the bank lifecycle, and a hold never changes it. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "hold_reason", length = 32)
+    private HoldReason holdReason;
+
     @Column(name = "monthly_streak", nullable = false)
     private Integer monthlyStreak = 0;
 
@@ -85,12 +98,12 @@ public class InvestmentSchedule {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        createdAt = EasternTime.now();
+        updatedAt = EasternTime.now();
 
         // Set initial dates if not provided
         if (startDate == null) {
-            startDate = LocalDate.now();
+            startDate = EasternTime.today();
         }
         if (nextInvestmentDate == null) {
             nextInvestmentDate = calculateNextInvestmentDate(startDate);
@@ -99,7 +112,7 @@ public class InvestmentSchedule {
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = EasternTime.now();
     }
 
     /**
@@ -107,7 +120,7 @@ public class InvestmentSchedule {
      */
     public LocalDate calculateNextInvestmentDate(LocalDate fromDate) {
         if (fromDate == null)
-            fromDate = LocalDate.now();
+            fromDate = EasternTime.today();
 
         LocalDate nextIdealDate;
 
@@ -311,6 +324,10 @@ public class InvestmentSchedule {
         this.nextInvestmentDate = calculateNextInvestmentDate(this.nextInvestmentDate);
     }
 
+    /** Holds that stop a MANUAL schedule from investing (spec 5.2); BANK_CHANGE is not one of them. */
+    private static final EnumSet<HoldReason> BLOCKING_HOLDS = EnumSet.of(
+            HoldReason.ACH_RETURN_UNAUTHORIZED, HoldReason.ACH_RETURN_ACCOUNT, HoldReason.MANUAL_REVIEW);
+
     /**
      * Whether the schedule is stopped, for any reason. Derived from the status rather than stored:
      * callers that only need "is it running" keep working, while the ones that have to tell a
@@ -329,45 +346,35 @@ public class InvestmentSchedule {
     }
 
     /**
-     * Check if this schedule is ready for investment execution
+     * MANUAL eligibility for the given Eastern date (spec 5.2): running, ACH linked, no blocking
+     * hold, and either the start date is today or the next investment date is today or past due.
+     *
+     * <p>Status and holds are orthogonal. The status carries the user and bank lifecycle; a hold is
+     * a separate, system-set reason that stops a schedule the user never paused. Both must be clear
+     * for money to move, so this checks each one.
      */
-    public boolean isReadyForInvestment() {
-        LocalDate today = LocalDate.now();
-
-        // Must be running and must have ACH linked
-        boolean basicRequirements = status == Status.ACTIVE && achRequestId != null;
-
-        if (!basicRequirements) {
+    public boolean isReadyForInvestment(LocalDate todayET) {
+        if (status != Status.ACTIVE || achRequestId == null) {
             return false;
         }
-
-        // Check if either:
-        // 1. Start date is today (first-time investment)
-        // 2. Next investment date is today or past due (recurring investment)
-        boolean dateRequirement = (startDate != null && startDate.equals(today)) ||
-                (nextInvestmentDate != null && !nextInvestmentDate.isAfter(today));
-
-        return dateRequirement;
+        if (holdReason != null && BLOCKING_HOLDS.contains(holdReason)) {
+            return false;
+        }
+        return (startDate != null && startDate.equals(todayET))
+                || (nextInvestmentDate != null && !nextInvestmentDate.isAfter(todayET));
     }
 
     /**
-     * Calculate investment amount based on frequency relative to monthly amount
+     * Per-paycheck amount from the monthly amount, through {@link InvestmentFrequency}. An unknown
+     * frequency keeps the old lenient default and returns the monthly amount unchanged.
      */
     public BigDecimal calculateInvestmentAmountFromMonthly() {
         if (monthlyAmount == null)
             return BigDecimal.ZERO;
 
-        return switch (frequency.toUpperCase()) {
-            case "WEEKLY" -> monthlyAmount.divide(new BigDecimal("4.33"), 2, java.math.RoundingMode.HALF_UP);
-            case "BIWEEKLY" -> monthlyAmount.divide(new BigDecimal("2.17"), 2, java.math.RoundingMode.HALF_UP);
-            case "SEMI_MONTHLY" -> monthlyAmount.divide(new BigDecimal("2"), 2, java.math.RoundingMode.HALF_UP); // Exactly
-                                                                                                                 // 2
-                                                                                                                 // times
-                                                                                                                 // per
-                                                                                                                 // month
-            case "MONTHLY" -> monthlyAmount;
-            default -> monthlyAmount;
-        };
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.fromMonthly(monthlyAmount))
+                .orElse(monthlyAmount);
     }
 
     /**

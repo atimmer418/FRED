@@ -38,16 +38,20 @@ import static org.assertj.core.api.Assertions.entry;
 /**
  * Atomicity for schedule_cancelled, against the real database.
  *
- * <p>Both call sites destroy the schedule AND the user in one transaction: the broker rejecting a
- * KYC submission (AccountStatusService.handleRejected) and the user closing their own account
+ * <p>Both call sites destroy the schedule AND the user: the broker rejecting a KYC submission
+ * (AccountStatusService.handleRejected) and the user closing their own account
  * (TradingController.closeAccount). A Mockito test can only show that {@code record()} was called;
- * it has no transaction, so it cannot show that the event shares one with the deletion. These tests
+ * it has no transaction, so it cannot show what the event does when one is rolled back. These tests
  * drive the real beans and control the boundary themselves: rolled back, the row must be absent;
  * committed, there must be exactly one, and it must outlive the person it describes.
  *
- * <p>The committed cases also prove something the annotations alone cannot. AnalyticsOutboxService
- * REFUSES to write outside a transaction, so if the {@code @Transactional} on either call site ever
- * stopped applying, the row would simply not be there and these tests would fail.
+ * <p>The two paths reach their transaction differently, and both are proved here. handleRejected is
+ * {@code @Transactional}, so its event and its deletes share one transaction. closeAccount is
+ * deliberately not, because the broker calls must stay outside a database transaction, so it hands
+ * the insert to UserDeletionService.delete, which runs it as the first statement inside the
+ * transaction that removes the rows; that transaction joins the test's when the test supplies one.
+ * Either way AnalyticsOutboxService REFUSES to write without a transaction, so if that boundary
+ * ever stopped existing the row would simply not be there and the committed cases would fail.
  *
  * <p>Deliberately NOT annotated {@code @Transactional}: a test-managed rollback-everything
  * transaction would make the committed and rolled-back cases look identical. Each test manages its
@@ -213,11 +217,10 @@ class ScheduleCancelledOutboxRollbackTest {
         User user = givenCommittedUser();
         givenCommittedSchedule(user);
 
-        // No surrounding transaction on purpose: the only transaction here is the one the
-        // @Transactional controller method opens. The outbox refuses to write without one, so a row
-        // appearing at all is the proof that the event and the deletes share it.
-        ResponseEntity<Map<String, Object>> response =
-                tradingController.closeAccount(authenticationFor(email));
+        // No surrounding transaction on purpose: the only transactions here are the ones the
+        // controller path opens for itself. The outbox refuses to write without one, so a row
+        // appearing at all is the proof that the insert really got a transaction.
+        ResponseEntity<?> response = tradingController.closeAccount(authenticationFor(email));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(userRepository.existsById(userId)).isFalse();
@@ -235,8 +238,7 @@ class ScheduleCancelledOutboxRollbackTest {
         givenCommittedSchedule(user);
 
         transaction.execute(status -> {
-            ResponseEntity<Map<String, Object>> response =
-                    tradingController.closeAccount(authenticationFor(email));
+            ResponseEntity<?> response = tradingController.closeAccount(authenticationFor(email));
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             // The state change is abandoned, so the event describing it must be abandoned too.
             status.setRollbackOnly();
@@ -254,8 +256,7 @@ class ScheduleCancelledOutboxRollbackTest {
     void closureWithoutAScheduleCommitsNoEvent() {
         givenCommittedUser();
 
-        ResponseEntity<Map<String, Object>> response =
-                tradingController.closeAccount(authenticationFor(email));
+        ResponseEntity<?> response = tradingController.closeAccount(authenticationFor(email));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(userRepository.existsById(userId)).isFalse();

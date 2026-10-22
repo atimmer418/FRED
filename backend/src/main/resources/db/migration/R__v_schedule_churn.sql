@@ -13,11 +13,13 @@
 --   account_closed  the user closed their account                                -> CHURN
 --   kyc_rejected    the broker rejected them and we deleted everything           -> not their doing
 --
--- schedule_paused and schedule_resumed are now USER-ONLY BY CONSTRUCTION. Under the status model a
--- bank change moves a schedule to PENDING_BANK and the ACH landing moves it to ACTIVE; neither is
--- a pause or a resume, and neither emits. The only system event left is a kyc_rejected
--- cancellation. The *_by_user columns are kept because cancellations still split two ways, and so
--- a future system pause, if one is ever introduced, cannot silently land in the churn number.
+-- schedule_paused and schedule_resumed are emitted by BOTH actors, so every transition column here
+-- filters on initiator = 'user'. Status and holds are orthogonal: a user pause moves the status
+-- (ACTIVE <-> PAUSED_BY_USER) and emits initiator=user, while a bank change sets hold_reason and
+-- emits initiator=system, leaving the status alone. One real restart can therefore produce a
+-- system resume from AchRelationshipService and a user resume from InvestmentScheduleService; the
+-- initiator filter is what keeps the system half out of churn.
+--
 -- The *_by_user columns are the ones to read as churn. The totals are there so the two can be
 -- reconciled, and so a surge of system pauses (a Plaid outage, say) is visible rather than hidden
 -- inside a churn number.
@@ -90,6 +92,14 @@ SELECT
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
         AND s.status = 'ACTIVE') AS active_at_month_end,
+    -- Held but not paused: the status says the user still wants it, a system hold is stopping it.
+    -- Separate on purpose. A hold is an operational stop, not churn, so it must not come out of
+    -- active_at_month_end: a Plaid outage or a bank change would then read as users leaving. It is
+    -- its own column so the operational state is still visible and the arithmetic reconciles.
+    (SELECT COUNT(*) FROM investment_schedules s
+      WHERE s.created_at < m.month_start + INTERVAL 1 MONTH
+        AND s.status = 'ACTIVE'
+        AND s.hold_reason IS NOT NULL) AS held_at_month_end,
     (SELECT COUNT(*) FROM investment_schedules s
       WHERE s.created_at < m.month_start + INTERVAL 1 MONTH) AS schedules_existing_at_month_end
 FROM months m

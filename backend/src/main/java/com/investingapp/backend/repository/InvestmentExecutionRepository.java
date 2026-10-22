@@ -4,12 +4,15 @@ import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface InvestmentExecutionRepository extends JpaRepository<InvestmentExecution, Long> {
@@ -129,5 +132,53 @@ public interface InvestmentExecutionRepository extends JpaRepository<InvestmentE
      * Funding completed, not merely initiated.
      */
     boolean existsByUserAndFundingCompletedAtIsNotNull(User user);
+
+    /** User deletion: every execution of this user. Trades reference executions, so they go first. */
+    void deleteAllByUser(User user);
+
+    // --- Phase 0 idempotency (spec 3.8, 5.4, 5.5) -------------------------------------------
+
+    /** source_key pre-check: one row per MANUAL due date per schedule, one per lump-sum tap. */
+    boolean existsBySourceKey(String sourceKey);
+
+    /** night_key pre-check: one recurring execution per user per Eastern night. */
+    boolean existsByNightKey(String nightKey);
+
+    /** Lump-sum duplicate short-circuit on POST /api/investments/execute. */
+    Optional<InvestmentExecution> findBySourceKey(String sourceKey);
+
+    /**
+     * 11:59 selection: still SCHEDULED, never claimed, and created before the batch started (a
+     * 23:59:xx row runs the next night). Excluding an already-claimed row (transferAttemptedAt IS
+     * NOT NULL) is load-bearing: without it, a row stranded by a crash between the claim and the
+     * status write would be selected again every night, its claim would always come up short
+     * against the fresh rows beside it, and the whole user would be skipped forever.
+     *
+     * <p>JOIN FETCH, not a derived query: the selecting transaction is short-lived (spec 5.5), and
+     * the caller snapshots each row's user into a plain value object before that transaction ends.
+     * The fetch join is belt-and-braces against an accidental later touch of the association: it
+     * loads a fully-hydrated User, not a lazy proxy, so even a stray access after the rows detach
+     * reads real data instead of throwing LazyInitializationException.
+     */
+    @Query("SELECT e FROM InvestmentExecution e JOIN FETCH e.user WHERE e.status = :status " +
+           "AND e.transferAttemptedAt IS NULL AND e.createdAt < :before")
+    List<InvestmentExecution> findByStatusAndTransferAttemptedAtIsNullAndCreatedAtBefore(
+            @Param("status") ExecutionStatus status, @Param("before") LocalDateTime before);
+
+    /** Deferral guard (T10 bank change, T11 deletion): is money in flight for this user. */
+    boolean existsByUserAndStatus(User user, ExecutionStatus status);
+
+    /** Deferral guard (T11): the most recent settled transfer, for the 60-day window. */
+    Optional<InvestmentExecution> findTopByUserAndFundingCompletedAtIsNotNullOrderByFundingCompletedAtDesc(User user);
+
+    /**
+     * Compare-and-set claim before the Alpaca POST (spec 5.5 b). Only rows nobody attempted yet
+     * are claimed; the caller compares the row count with the batch size and skips the user when
+     * they differ. Run it in a REQUIRES_NEW TransactionTemplate so the claim commits before HTTP.
+     */
+    @Modifying
+    @Query("UPDATE InvestmentExecution e SET e.transferAttemptedAt = :at, e.batchNight = :night " +
+           "WHERE e.id IN :ids AND e.transferAttemptedAt IS NULL AND e.alpacaTransferId IS NULL")
+    int claimForBatch(@Param("ids") List<Long> ids, @Param("at") LocalDateTime at, @Param("night") LocalDate night);
 
 }

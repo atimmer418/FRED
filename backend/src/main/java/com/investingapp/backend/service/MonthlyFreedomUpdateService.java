@@ -2,6 +2,7 @@ package com.investingapp.backend.service;
 
 import com.investingapp.backend.dto.MonthlyFreedomUpdateDTO;
 import com.investingapp.backend.dto.MonthlyFreedomUpdateDTO.MilestoneDTO;
+import com.investingapp.backend.model.InvestmentFrequency;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
@@ -905,24 +906,15 @@ public class MonthlyFreedomUpdateService {
     }
 
     /**
-     * Convert per-execution investment amount to monthly equivalent.
+     * Convert per-execution investment amount to monthly equivalent through
+     * {@link InvestmentFrequency}. An unknown frequency returns the amount unchanged.
      */
     BigDecimal calculateMonthlyEquivalent(BigDecimal amount, String frequency) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
 
-        switch (frequency.toUpperCase()) {
-            case "WEEKLY":
-                return amount.multiply(new BigDecimal("4.33")).setScale(2, RoundingMode.HALF_UP);
-            case "BIWEEKLY":
-                return amount.multiply(new BigDecimal("2.17")).setScale(2, RoundingMode.HALF_UP);
-            case "SEMIMONTHLY":
-            case "SEMI_MONTHLY":
-                return amount.multiply(new BigDecimal("2")).setScale(2, RoundingMode.HALF_UP);
-            case "MONTHLY":
-                return amount;
-            default:
-                return amount;
-        }
+        return InvestmentFrequency.tryParse(frequency)
+                .map(parsed -> parsed.toMonthly(amount))
+                .orElse(amount);
     }
 
     /**

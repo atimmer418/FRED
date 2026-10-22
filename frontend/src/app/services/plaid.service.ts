@@ -80,7 +80,7 @@ export class PlaidService {
             name: response.accountName || `${response.institutionName} ${response.accountSubtype || 'Account'}`,
             type: response.accountSubtype === 'checking' ? 'checking' : 
                   response.accountSubtype === 'savings' ? 'savings' : 'checking',
-            mask: '****', // Backend doesn't store mask for security
+            mask: response.mask ?? '****', // null for links made before the mask was stored (T09)
             institutionName: response.institutionName,
             isLinked: true,
             linkDate: new Date(), // Could be enhanced to store actual link date

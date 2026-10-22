@@ -151,10 +151,13 @@ export class InvestmentService {
   }
 
   /**
-   * Create a manual investment execution
+   * Create a manual investment execution. clientUuid is generated once per call: a retry of this
+   * request carries the same UUID and the backend returns the first row instead of queueing a
+   * second one (decision 18).
    */
   createManualInvestment(amount: number): Observable<any> {
-    return this.http.post(`${this.apiUrl}/execute`, { amount }, {
+    const clientUuid = crypto.randomUUID();
+    return this.http.post(`${this.apiUrl}/execute`, { amount, clientUuid }, {
       headers: this.getAuthHeaders()
     });
   }
@@ -221,27 +224,6 @@ export class InvestmentService {
     return this.http.post<InvestmentSchedule>(`${this.scheduleApiUrl}/${scheduleId}/resume`, {}, {
       headers: this.getAuthHeaders()
     }).pipe(tap(() => this.authService.clearScheduleCache()));
-  }
-
-  /**
-   * Update ACH request ID for investment schedule
-   */
-  updateAchRequestId(achRequestId: string): Observable<InvestmentSchedule> {
-    const token = localStorage.getItem('jwtToken');
-    if (!token) {
-      throw new Error('No authentication token found');
-    }
-
-    // Decode token to get user email (simplified - you might want to use a proper JWT library)
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const userEmail = payload.sub;
-
-    return this.http.post<InvestmentSchedule>(`${this.scheduleApiUrl}/update-ach-request-id`, {
-      userEmail,
-      achRequestId
-    }, {
-      headers: this.getAuthHeaders()
-    });
   }
 
   /**

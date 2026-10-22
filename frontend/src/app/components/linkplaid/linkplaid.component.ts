@@ -13,6 +13,7 @@ import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
+import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../../utils/plaid-link-session';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -72,13 +73,32 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
     this.statusMessage = 'Initializing secure connection...';
 
     try {
-      let linkTokenData: LinkTokenAuthenticatedResponse;
+      // Back from the bank's OAuth page: Link must resume with the SAME link_token it left with.
+      // Without a stored token (storage cleared, new browser) Link simply starts over. onboarding
+      // and change-bank share one sessionStorage slot, so a token left behind by the other flow
+      // must never be reused here: the return marker has to match this page too.
+      const returnHref = this.oauthReturnHref();
+      const storedToken = returnHref ? readPlaidLinkToken() : null;
+      const storedReturn = returnHref ? readPlaidLinkReturn() : null;
+      const resuming = returnHref !== null && storedToken !== null && storedReturn === 'onboarding';
+      if (returnHref !== null && storedToken !== null && !resuming) {
+        // Stale token from a different flow (or a corrupted marker): discard it and fetch a fresh
+        // one below.
+        clearPlaidLinkSession();
+      }
       let linkToken: string;
 
       if (this.isUserAuthenticated) {
-        linkTokenData = await this.getLinkTokenAuthenticated().toPromise() as LinkTokenAuthenticatedResponse;
-        linkToken = linkTokenData.link_token;
-        console.log('Received authenticated link_token.');
+        if (resuming) {
+          linkToken = storedToken as string;
+        } else {
+          const linkTokenData = await this.getLinkTokenAuthenticated().toPromise() as LinkTokenAuthenticatedResponse;
+          linkToken = linkTokenData.link_token;
+          if (!linkToken) {
+            throw new Error('Failed to retrieve link_token from backend.');
+          }
+          storePlaidLinkSession(linkToken, 'onboarding');
+        }
       } else {
         // JWT is not available — the AppLockService will handle re-authentication.
         // Do not force a page reload or redirect here; let the auth flow resolve it.
@@ -88,13 +108,10 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
         return;
       }
 
-      if (linkToken === "") {
-        throw new Error('Failed to retrieve link_token from backend.');
-      }
-
-      this.plaidHandler = Plaid.create({
+      const config: any = {
         token: linkToken,
         onSuccess: (public_token: string, metadata: any) => {
+          clearPlaidLinkSession();
           // The step finishes when the user comes back out of the Plaid sheet having picked an
           // account, not when the Connect button was tapped: the sheet can be abandoned invisibly.
           // Nothing from public_token or metadata is ever read here.
@@ -118,6 +135,7 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
           this.statusMessage = 'Ready to link your bank.';
         },
         onExit: (err: any, metadata: any) => {
+          clearPlaidLinkSession();
           this.isLoading = false;
           this.isPlaidReady = true;
           if (err != null) {
@@ -134,7 +152,18 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
         onEvent: (eventName: string, metadata: any) => {
           console.log('Plaid Link event:', eventName, metadata);
         }
-      });
+      };
+      if (resuming) {
+        config.receivedRedirectUri = returnHref;
+      }
+      this.plaidHandler = Plaid.create(config);
+      if (resuming) {
+        // The stored link_token is single-use for the OAuth round trip; consume it now so a stale
+        // oauth_state_id still in the URL cannot later pair with a fresh, different token.
+        clearPlaidLinkSession();
+        // Plaid requires open() straight after an OAuth return so Link picks up where it left off.
+        this.plaidHandler.open();
+      }
     } catch (error: any) {
       // The link token could not be fetched or the SDK refused it; the user sees an error and can
       // retry from the same button.
@@ -154,7 +183,7 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
 
   private getLinkTokenAuthenticated(): Observable<LinkTokenAuthenticatedResponse> {
     console.log('Requesting authenticated link_token...');
-    return this.http.post<LinkTokenAuthenticatedResponse>(`${BACKEND_API_URL}/plaid/create_link_token`, {}, { headers: this.getAuthHeaders() })
+    return this.http.post<LinkTokenAuthenticatedResponse>(`${BACKEND_API_URL}/plaid/create_link_token`, { mode: 'link' }, { headers: this.getAuthHeaders() })
       .pipe(
         tap(response => console.log('Received authenticated link_token response:', response)),
         catchError(this.handleError.bind(this))
@@ -206,7 +235,12 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
   }
 
   goBack() {
-    this.navCtrl.navigateBack('/auth-finalize');
+    this.navCtrl.navigateBack('/kyc-verification');
+  }
+
+  /** The current URL when it carries Plaid's oauth_state_id, else null. Stubbed in specs. */
+  private oauthReturnHref(): string | null {
+    return window.location.search.includes('oauth_state_id') ? window.location.href : null;
   }
 
   private handleError(error: HttpErrorResponse) {

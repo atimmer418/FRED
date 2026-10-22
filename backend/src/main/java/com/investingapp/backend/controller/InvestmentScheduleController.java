@@ -3,7 +3,6 @@ package com.investingapp.backend.controller;
 import com.investingapp.backend.dto.CreateInvestmentScheduleRequest;
 import com.investingapp.backend.dto.InvestmentScheduleResponse;
 import com.investingapp.backend.dto.MessageResponse;
-import com.investingapp.backend.dto.UpdateAchRequestIdRequest;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
@@ -83,50 +82,6 @@ public class InvestmentScheduleController {
             logger.error("Error creating investment schedule: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new MessageResponse("Error creating investment schedule: " + e.getMessage()));
-        }
-    }
-    
-    /**
-     * Update investment schedule with ACH request ID (called when user confirms on investment-confirmation page)
-     */
-    @PostMapping("/update-ach-request-id")
-    public ResponseEntity<?> updateAchRequestId(@Valid @RequestBody UpdateAchRequestIdRequest request) {
-        try {
-            User user = getCurrentUser();
-            if (user == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(new MessageResponse("User not authenticated"));
-            }
-            
-            // Validate that the userEmail in request matches the authenticated user
-            if (!user.getEmail().equals(request.getUserEmail())) {
-                logger.warn("User email mismatch: authenticated user {} vs request user {}", 
-                           user.getEmail(), request.getUserEmail());
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(new MessageResponse("User email mismatch"));
-            }
-            
-            logger.info("Updating ACH request ID: {} for user: {}", 
-                       request.getAchRequestId(), user.getEmail());
-            
-            InvestmentSchedule schedule = investmentScheduleService.updateWithAchRequestId(
-                    user, request.getAchRequestId());
-            
-            InvestmentScheduleResponse response = new InvestmentScheduleResponse(schedule);
-            
-            logger.info("Successfully updated investment schedule ID: {} with ACH request ID", 
-                       schedule.getId());
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (RuntimeException e) {
-            logger.error("Runtime error updating ACH request ID: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(new MessageResponse(e.getMessage()));
-        } catch (Exception e) {
-            logger.error("Error updating ACH request ID: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new MessageResponse("Error updating ACH request ID: " + e.getMessage()));
         }
     }
     

@@ -1,5 +1,7 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.model.HoldReason;
+import com.investingapp.backend.model.InvestmentSchedule.Status;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.support.RequiresCiDatabase;
@@ -14,57 +16,42 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Atomicity for schedule_paused and schedule_resumed, and the status transitions underneath them,
- * against the real database.
+ * Atomicity for schedule_paused and schedule_resumed, against the real database.
  *
  * <p>The whole reason the outbox exists is that the event and the fact it describes must land
  * together or not at all. A Mockito test cannot show that: it has no transaction, so it can only
  * show that {@code record()} was called. {@link ScheduleTransitionAnalyticsTest} does that part.
- * This one drives the real {@link InvestmentScheduleService} against a real schedule row and reads
- * the committed {@code status} column back through JDBC.
- *
- * <p>Since investment_schedules.is_paused became a three-state status, only TWO of the four call
- * sites emit anything at all:
- *
- * <pre>
- *   pauseSchedule          ACTIVE         -> PAUSED_BY_USER   schedule_paused  {user, user_request}
- *   resumeSchedule         PAUSED_BY_USER -> ACTIVE           schedule_resumed {user, user_request}
- *   resetForBankChange     ACTIVE         -> PENDING_BANK     nothing
- *   updateWithAchRequestId PENDING_BANK   -> ACTIVE           nothing
- * </pre>
- *
- * <p>The last two used to emit a system pause and a system resume. They no longer emit anything,
- * because under this model they are not pauses or resumes, they are lifecycle: a schedule going
- * back to waiting for a bank, and a schedule starting for the first time. schedule_paused and
- * schedule_resumed are therefore user-only BY CONSTRUCTION, which is what makes v_schedule_churn
- * countable. Those two sites are still exercised here, for the status transition and to pin that
- * NO row is written.
- *
- * <p>The single behaviour this whole model exists to guarantee gets its own case:
- * {@link #achConfirmationCannotRestartAScheduleTheUserPaused()}. The old boolean let the ACH retry
- * scheduler force-unpause a schedule the user had deliberately switched off, because to the code
- * both reasons were simply {@code is_paused = 1}.
- *
- * <p>For the two emitting sites, each case comes in halves: the event commits with the status
- * change, and after {@code setRollbackOnly()} neither the status nor the event survives. If an emit
- * ever drifts out of the committing transaction (its own transaction, an async hand-off, an
- * after-commit hook), the rollback cases fail. Every rollback case also asserts that the status
- * really reverted, so a passing rollback case can never be a false pass from the state change
- * having never happened in the first place.
+ * This one drives the real {@link InvestmentScheduleService} and the real
+ * {@link AchRelationshipService} against a real schedule row, and for each call site proves both
+ * halves: the event commits with the state change, and after {@code setRollbackOnly()} neither the
+ * state change nor the event survives. If an emit ever drifts out of the committing transaction
+ * (its own transaction, an async hand-off, an after-commit hook), the rollback cases fail.
  *
  * <p>No boundary was added for any of this. InvestmentScheduleService carries a type-level
- * {@code @Transactional}, so each method under test already runs in one REQUIRED transaction, and
- * the TransactionTemplate here simply becomes that transaction when the test supplies one.
+ * {@code @Transactional} and AchRelationshipService.adopt carries its own, so each method under
+ * test already runs in one REQUIRED transaction, and the TransactionTemplate here simply becomes
+ * that transaction when the test supplies one.
+ *
+ * <p>"Stopped" is either stop: the system's hold_reason or a status that is not ACTIVE. The two are
+ * ORTHOGONAL. A bank change holds the schedule and never touches the status (Phase 0, spec 3.2,
+ * and V7), and the hold is cleared again by AchRelationshipService.adopt, which is why the system
+ * resume is driven through adopt here. Because they are independent, one real restart can write two
+ * rows, a user resume and a system resume, and the pair is asserted rather than suppressed: they
+ * carry different initiators and v_schedule_churn counts only the user's.
  *
  * <p>Deliberately NOT annotated {@code @Transactional}: a test-managed rollback-everything
  * transaction would make the commit and rollback cases look identical. Each case manages its own
@@ -85,20 +72,15 @@ class ScheduleTransitionOutboxRollbackTest {
     private static final String PAUSED = "schedule_paused";
     private static final String RESUMED = "schedule_resumed";
 
-    /**
-     * Both surviving events carry these same two properties. That is not a coincidence to be
-     * tidied away: initiator is 'user' and reason is 'user_request' on every one of them now,
-     * because the system-initiated transitions do not emit at all.
-     */
-    private static final String USER_TRANSITION_PROPS =
-            "{\"initiator\":\"user\",\"reason\":\"user_request\"}";
-
-    private static final String PENDING_BANK = "PENDING_BANK";
-    private static final String ACTIVE = "ACTIVE";
-    private static final String PAUSED_BY_USER = "PAUSED_BY_USER";
+    private static final String USER_PAUSE_PROPS = "{\"initiator\":\"user\",\"reason\":\"user_request\"}";
+    private static final String USER_RESUME_PROPS = "{\"initiator\":\"user\",\"reason\":\"user_request\"}";
+    private static final String SYSTEM_PAUSE_PROPS = "{\"initiator\":\"system\",\"reason\":\"bank_change\"}";
+    private static final String SYSTEM_RESUME_PROPS = "{\"initiator\":\"system\",\"reason\":\"ach_confirmed\"}";
 
     @Autowired
     private InvestmentScheduleService investmentScheduleService;
+    @Autowired
+    private AchRelationshipService achRelationshipService;
     @Autowired
     private UserRepository userRepository;
     @Autowired
@@ -118,7 +100,7 @@ class ScheduleTransitionOutboxRollbackTest {
         fresh.setEmail("analytics-transition-" + UUID.randomUUID() + "@example.invalid");
         // resumeSchedule refuses to run unless the brokerage account is ACTIVE.
         fresh.setAccountStatus("ACTIVE");
-        user = transactions.execute(tx -> userRepository.saveAndFlush(fresh));
+        user = transactions.execute(status -> userRepository.saveAndFlush(fresh));
         userId = user.getId();
         assertNotNull(userId, "the test user must be committed before the service runs");
     }
@@ -133,116 +115,159 @@ class ScheduleTransitionOutboxRollbackTest {
         jdbcTemplate.update("DELETE FROM users WHERE id = ?", userId);
     }
 
+    /**
+     * A committed schedule in a known status, inserted directly so the starting state is exactly
+     * what each case needs and owes nothing to the create path.
+     */
+    private long seedSchedule(Status status) {
+        return seedSchedule(status, null, null);
+    }
+
+    /** The same, under a system hold and with an ACH id already on it where the case needs them. */
+    private long seedSchedule(Status status, HoldReason hold, String achRequestId) {
+        LocalDate today = LocalDate.now();
+        jdbcTemplate.update(
+                "INSERT INTO investment_schedules "
+                        + "(user_id, created_at, frequency, investment_amount, monthly_amount, "
+                        + " monthly_streak, next_investment_date, start_date, status, mode, "
+                        + " hold_reason, ach_request_id) "
+                        + "VALUES (?, NOW(), 'BIWEEKLY', 250.00, 542.50, 0, ?, ?, ?, 'MANUAL', ?, ?)",
+                userId, today.plusDays(3), today, status.name(),
+                hold == null ? null : hold.name(), achRequestId);
+        Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        assertNotNull(id);
+        return id;
+    }
+
+    /** One relationship as Alpaca would report it, fresh enough to pass the predates-link guard. */
+    private static AchRelationshipSummary relationship(String id) {
+        return new AchRelationshipSummary(id, "QUEUED",
+                OffsetDateTime.now(ZoneOffset.UTC).toString(), null);
+    }
+
     // --- Site 2: pauseSchedule, the genuine user pause ------------------------------------------
 
     @Test
     void committedUserPauseWritesExactlyOneOutboxRow() {
-        long scheduleId = seedSchedule(ACTIVE);
+        long scheduleId = seedSchedule(Status.ACTIVE);
 
         investmentScheduleService.pauseSchedule(user, scheduleId);
 
-        assertEquals(PAUSED_BY_USER, statusInDatabase(scheduleId), "the state change committed");
-        assertSoleEvent(PAUSED, USER_TRANSITION_PROPS);
+        assertEquals(Status.PAUSED_BY_USER.name(), statusInDatabase(scheduleId), "the state change committed");
+        assertSoleEvent(PAUSED, USER_PAUSE_PROPS);
     }
 
     @Test
     void rolledBackUserPauseLeavesNoOutboxRow() {
-        long scheduleId = seedSchedule(ACTIVE);
+        long scheduleId = seedSchedule(Status.ACTIVE);
 
-        transactions.executeWithoutResult(tx -> {
+        transactions.executeWithoutResult(status -> {
             investmentScheduleService.pauseSchedule(user, scheduleId);
-            tx.setRollbackOnly();
+            status.setRollbackOnly();
         });
 
         assertEquals(0, countOutboxRows(),
                 "the event must not outlive the transaction that was rolled back");
-        assertEquals(ACTIVE, statusInDatabase(scheduleId),
+        assertEquals(Status.ACTIVE.name(), statusInDatabase(scheduleId),
                 "sanity check: the rollback really did discard the state change too");
     }
 
     /** The no-op. Nothing stopped, so the churn count must not move. */
     @Test
-    void pausingAScheduleTheUserAlreadyPausedWritesNoOutboxRow() {
-        long scheduleId = seedSchedule(PAUSED_BY_USER);
+    void pausingAnAlreadyPausedScheduleWritesNoOutboxRow() {
+        long scheduleId = seedSchedule(Status.PAUSED_BY_USER);
 
         investmentScheduleService.pauseSchedule(user, scheduleId);
 
-        assertEquals(PAUSED_BY_USER, statusInDatabase(scheduleId), "still paused, as it already was");
+        assertEquals(Status.PAUSED_BY_USER.name(), statusInDatabase(scheduleId), "still paused, as it already was");
         assertEquals(0, countOutboxRows(), "a repeated pause is not a transition");
     }
 
     /**
-     * Pausing a schedule that has never run. The old boolean could not tell this from a real
-     * pause; it is not churn, so it must neither emit nor overwrite the waiting-for-bank status.
+     * The schedule was already held by the system, which the pause endpoint cannot see. It still
+     * writes a row, because the STATUS transition is real: ACTIVE to PAUSED_BY_USER is a decision
+     * by a person, and it outlives the hold. The hold is left exactly as it was.
      */
     @Test
-    void pausingAScheduleWaitingForItsBankWritesNoOutboxRow() {
-        long scheduleId = seedSchedule(PENDING_BANK);
+    void pausingAHeldButRunningScheduleWritesExactlyOneUserRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE, HoldReason.BANK_CHANGE, null);
 
         investmentScheduleService.pauseSchedule(user, scheduleId);
 
-        assertEquals(PENDING_BANK, statusInDatabase(scheduleId),
-                "a schedule that has never run is not moved to PAUSED_BY_USER");
-        assertEquals(0, countOutboxRows(), "stopping something that never started is not churn");
+        assertEquals(Status.PAUSED_BY_USER.name(), statusInDatabase(scheduleId), "the user's pause is written");
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "and the hold is untouched: a user pause never writes a hold");
+        assertSoleEvent(PAUSED, USER_PAUSE_PROPS);
     }
 
     // --- Site 3: resumeSchedule, the genuine user resume ----------------------------------------
 
     @Test
     void committedUserResumeWritesExactlyOneOutboxRow() {
-        long scheduleId = seedSchedule(PAUSED_BY_USER);
+        long scheduleId = seedSchedule(Status.PAUSED_BY_USER);
 
         investmentScheduleService.resumeSchedule(user, scheduleId);
 
-        assertEquals(ACTIVE, statusInDatabase(scheduleId), "the state change committed");
-        assertSoleEvent(RESUMED, USER_TRANSITION_PROPS);
+        assertEquals(Status.ACTIVE.name(), statusInDatabase(scheduleId), "the state change committed");
+        assertSoleEvent(RESUMED, USER_RESUME_PROPS);
     }
 
     @Test
     void rolledBackUserResumeLeavesNoOutboxRow() {
-        long scheduleId = seedSchedule(PAUSED_BY_USER);
+        long scheduleId = seedSchedule(Status.PAUSED_BY_USER);
 
-        transactions.executeWithoutResult(tx -> {
+        transactions.executeWithoutResult(status -> {
             investmentScheduleService.resumeSchedule(user, scheduleId);
-            tx.setRollbackOnly();
+            status.setRollbackOnly();
         });
 
         assertEquals(0, countOutboxRows(),
                 "the event must not outlive the transaction that was rolled back");
-        assertEquals(PAUSED_BY_USER, statusInDatabase(scheduleId),
+        assertEquals(Status.PAUSED_BY_USER.name(), statusInDatabase(scheduleId),
                 "sanity check: the rollback really did discard the state change too");
     }
 
     @Test
     void resumingAnAlreadyRunningScheduleWritesNoOutboxRow() {
-        long scheduleId = seedSchedule(ACTIVE);
+        long scheduleId = seedSchedule(Status.ACTIVE);
 
         investmentScheduleService.resumeSchedule(user, scheduleId);
 
-        assertEquals(ACTIVE, statusInDatabase(scheduleId), "still running, as it already was");
+        assertEquals(Status.ACTIVE.name(), statusInDatabase(scheduleId), "still running, as it already was");
         assertEquals(0, countOutboxRows(), "a repeated resume is not a transition");
     }
 
     /**
-     * A schedule waiting for its bank is started by the ACH path, not by the resume button. The
-     * user cannot skip the bank, and nothing is recorded if they try.
+     * One real start, TWO rows, one per actor. A held and paused schedule is resumed by its owner
+     * (the frontend has no idea a hold exists, so this is a tap the user can really make), which
+     * moves the status and leaves the schedule stopped by the hold; then ACH lands and adopt clears
+     * the hold. Both steps are genuine transitions of the thing each one owns, so both record, and
+     * they are told apart by initiator: v_schedule_churn counts the user's and ignores the
+     * system's. Suppressing the user's row would lose the fact that they asked for it back.
      */
     @Test
-    void resumingAScheduleWaitingForItsBankWritesNoOutboxRow() {
-        long scheduleId = seedSchedule(PENDING_BANK);
+    void aUserResumeOfAHeldScheduleThenAdoptionWritesOneRowPerActor() {
+        long scheduleId = seedSchedule(Status.PAUSED_BY_USER, HoldReason.BANK_CHANGE, null);
 
         investmentScheduleService.resumeSchedule(user, scheduleId);
 
-        assertEquals(PENDING_BANK, statusInDatabase(scheduleId),
-                "only the ACH path may start a schedule that has never run");
-        assertEquals(0, countOutboxRows(), "and nothing resumed, so nothing is recorded");
+        assertEquals(Status.ACTIVE.name(), statusInDatabase(scheduleId), "the user's own stop is lifted");
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "but the hold still stops the schedule, and a resume may never clear one");
+        assertEquals(1, countOutboxRows(), "the user's resume is recorded on its own merits");
+
+        achRelationshipService.adopt(user, relationship("ach-rel-held"));
+
+        assertNull(holdReasonInDatabase(scheduleId), "now it really is running");
+        assertEquals(2, countOutboxRows(), "and the system's resume is the second row");
+        assertEquals(2, countOutboxRows(RESUMED), "both rows are resumes, by different initiators");
     }
 
     /** The ACCOUNT_NOT_ACTIVE gate throws before the flip, so there is nothing to record. */
     @Test
     void resumeBlockedByAnInactiveAccountWritesNoOutboxRow() {
-        long scheduleId = seedSchedule(PAUSED_BY_USER);
-        User pending = transactions.execute(tx -> {
+        long scheduleId = seedSchedule(Status.PAUSED_BY_USER);
+        User pending = transactions.execute(status -> {
             User loaded = userRepository.findById(userId).orElseThrow();
             loaded.setAccountStatus("APPROVAL_PENDING");
             return userRepository.saveAndFlush(loaded);
@@ -252,171 +277,110 @@ class ScheduleTransitionOutboxRollbackTest {
                 () -> investmentScheduleService.resumeSchedule(pending, scheduleId));
         assertEquals("ACCOUNT_NOT_ACTIVE", thrown.getMessage());
 
-        assertEquals(PAUSED_BY_USER, statusInDatabase(scheduleId), "the schedule was never touched");
+        assertEquals(Status.PAUSED_BY_USER.name(), statusInDatabase(scheduleId), "the schedule was never touched");
         assertEquals(0, countOutboxRows(), "a refused resume is not a transition");
     }
 
-    // --- Site 4: resetForBankChange, lifecycle, no longer an event ------------------------------
+    // --- Site 4: resetForBankChange, the system pause -------------------------------------------
 
     @Test
-    void bankChangeSendsARunningScheduleBackToPendingBankAndRecordsNothing() {
-        long scheduleId = seedSchedule(ACTIVE, "ach-rel-seed");
+    void committedBankChangeHoldWritesExactlyOneSystemOutboxRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE);
 
         investmentScheduleService.resetForBankChange(user);
 
-        assertEquals(PENDING_BANK, statusInDatabase(scheduleId),
-                "it cannot run until the new ACH relationship lands");
-        assertNull(achRequestIdInDatabase(scheduleId), "and the old ACH id is gone");
-        assertEquals(0, countOutboxRows(),
-                "a bank change is lifecycle, not a pause: emitting here would put Plaid outages "
-                        + "back into the churn number");
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "the state change committed");
+        assertEquals(Status.ACTIVE.name(), statusInDatabase(scheduleId), "and the status was left to the user");
+        assertSoleEvent(PAUSED, SYSTEM_PAUSE_PROPS);
     }
 
     @Test
-    void rolledBackBankChangeRevertsTheStatusAndTheAchId() {
-        long scheduleId = seedSchedule(ACTIVE, "ach-rel-seed");
+    void rolledBackBankChangeHoldLeavesNoOutboxRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE);
 
-        transactions.executeWithoutResult(tx -> {
+        transactions.executeWithoutResult(status -> {
             investmentScheduleService.resetForBankChange(user);
-            tx.setRollbackOnly();
+            status.setRollbackOnly();
         });
 
-        assertEquals(ACTIVE, statusInDatabase(scheduleId),
-                "the status change belongs to the caller's transaction");
-        assertEquals("ach-rel-seed", achRequestIdInDatabase(scheduleId), "and the ACH id with it");
-        assertEquals(0, countOutboxRows(), "nothing was emitted to roll back in the first place");
-    }
-
-    /**
-     * The user's intent outlives a bank change. The bank is cleared, because it really did change,
-     * but the schedule stays switched off so that the ACH landing cannot restart it.
-     */
-    @Test
-    void bankChangeLeavesAUserPausedSchedulePausedWhileStillClearingTheAchId() {
-        long scheduleId = seedSchedule(PAUSED_BY_USER, "ach-rel-seed");
-
-        investmentScheduleService.resetForBankChange(user);
-
-        assertEquals(PAUSED_BY_USER, statusInDatabase(scheduleId),
-                "a bank change must not quietly convert a user pause into a pending bank");
-        assertNull(achRequestIdInDatabase(scheduleId), "the ACH id is still cleared");
-        assertEquals(0, countOutboxRows(), "nothing transitioned");
-    }
-
-    /** A bank change on a schedule that was already waiting for its bank stopped nothing. */
-    @Test
-    void bankChangeOfAScheduleAlreadyWaitingForItsBankRecordsNothing() {
-        long scheduleId = seedSchedule(PENDING_BANK);
-
-        investmentScheduleService.resetForBankChange(user);
-
-        assertEquals(PENDING_BANK, statusInDatabase(scheduleId));
-        assertEquals(0, countOutboxRows(), "a re-reset is not a transition");
-    }
-
-    // --- Site 5: updateWithAchRequestId, lifecycle, no longer an event --------------------------
-
-    @Test
-    void achConfirmationStartsAPendingScheduleAndRecordsNothing() {
-        long scheduleId = seedSchedule(PENDING_BANK);
-
-        investmentScheduleService.updateWithAchRequestId(user, "ach-rel-1");
-
-        assertEquals(ACTIVE, statusInDatabase(scheduleId), "the ACH relationship landed");
-        assertEquals("ach-rel-1", achRequestIdInDatabase(scheduleId));
         assertEquals(0, countOutboxRows(),
-                "a schedule starting for the first time is not a resume: "
-                        + "investment_schedule_created already recorded that it exists");
+                "the event must not outlive the transaction that was rolled back");
+        assertNull(holdReasonInDatabase(scheduleId),
+                "sanity check: the rollback really did discard the state change too");
+    }
+
+    /** A second bank change in a row: the schedule was already held, so it stopped nothing. */
+    @Test
+    void bankChangeHoldOfAnAlreadyHeldScheduleWritesNoOutboxRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE, HoldReason.BANK_CHANGE, "rel-old");
+
+        investmentScheduleService.resetForBankChange(user);
+
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId));
+        assertEquals(0, countOutboxRows(), "a repeated hold is not a transition");
+    }
+
+    /** A bank change on a schedule the user had already paused stopped nothing either. */
+    @Test
+    void bankChangeHoldOfAnAlreadyPausedScheduleWritesNoOutboxRow() {
+        long scheduleId = seedSchedule(Status.PAUSED_BY_USER);
+
+        investmentScheduleService.resetForBankChange(user);
+
+        assertEquals(Status.PAUSED_BY_USER.name(), statusInDatabase(scheduleId));
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "the hold still goes on; it is the event that does not");
+        assertEquals(0, countOutboxRows(), "a hold on an already stopped schedule is not a transition");
+    }
+
+    // --- Site 5: AchRelationshipService.adopt, the system resume --------------------------------
+    //
+    // The resume moved here with the rest of the ACH writes when updateWithAchRequestId was
+    // deleted. adopt clears the bank-change hold, which is the transition back to running.
+
+    @Test
+    void committedAchAdoptionWritesExactlyOneSystemOutboxRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE, HoldReason.BANK_CHANGE, null);
+
+        achRelationshipService.adopt(user, relationship("ach-rel-1"));
+
+        assertNull(holdReasonInDatabase(scheduleId), "the state change committed");
+        assertEquals("ach-rel-1", achRequestIdInDatabase(scheduleId));
+        assertSoleEvent(RESUMED, SYSTEM_RESUME_PROPS);
     }
 
     @Test
-    void rolledBackAchConfirmationRevertsTheStatusAndTheAchId() {
-        long scheduleId = seedSchedule(PENDING_BANK);
+    void rolledBackAchAdoptionLeavesNoOutboxRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE, HoldReason.BANK_CHANGE, null);
 
-        transactions.executeWithoutResult(tx -> {
-            investmentScheduleService.updateWithAchRequestId(user, "ach-rel-1");
-            tx.setRollbackOnly();
+        transactions.executeWithoutResult(status -> {
+            achRelationshipService.adopt(user, relationship("ach-rel-1"));
+            status.setRollbackOnly();
         });
 
-        assertEquals(PENDING_BANK, statusInDatabase(scheduleId),
-                "the status change belongs to the caller's transaction");
+        assertEquals(0, countOutboxRows(),
+                "the event must not outlive the transaction that was rolled back");
+        assertEquals(HoldReason.BANK_CHANGE.name(), holdReasonInDatabase(scheduleId),
+                "sanity check: the rollback really did discard the state change too");
         assertNull(achRequestIdInDatabase(scheduleId), "and the ACH id with it");
-        assertEquals(0, countOutboxRows(), "nothing was emitted to roll back in the first place");
     }
 
     /**
-     * An ACH id rewritten on a schedule that is already live. Both the "ACH already exists" branch
-     * of AccountStatusService.attemptAchCreation and the ACH retry scheduler reach this.
+     * A relationship adopted onto a schedule that is already running. The 15-minute poll reaches
+     * adopt whenever it creates a relationship, so this happens; it resumed nothing.
      */
     @Test
-    void achUpdateOfAnAlreadyRunningScheduleWritesNoOutboxRow() {
-        long scheduleId = seedSchedule(ACTIVE, "ach-rel-seed");
+    void achAdoptionOntoAnAlreadyRunningScheduleWritesNoOutboxRow() {
+        long scheduleId = seedSchedule(Status.ACTIVE, null, "ach-rel-old");
 
-        investmentScheduleService.updateWithAchRequestId(user, "ach-rel-2");
+        achRelationshipService.adopt(user, relationship("ach-rel-2"));
 
         assertEquals("ach-rel-2", achRequestIdInDatabase(scheduleId), "the id still updates");
-        assertEquals(ACTIVE, statusInDatabase(scheduleId), "it was running and stays running");
-        assertEquals(0, countOutboxRows(), "but nothing started, so nothing is recorded");
-    }
-
-    /**
-     * THE reason the three-state status exists.
-     *
-     * <p>The ACH retry scheduler and the "ACH already exists" branch both call this on whatever
-     * schedule the user has. Under the old boolean that call force-unpaused it, so a user who
-     * switched their schedule off and later relinked a bank found it running again, with no event
-     * and no explanation. The ACH path now only ever moves PENDING_BANK to ACTIVE, which makes
-     * that override impossible rather than merely discouraged.
-     */
-    @Test
-    void achConfirmationCannotRestartAScheduleTheUserPaused() {
-        long scheduleId = seedSchedule(PAUSED_BY_USER);
-
-        investmentScheduleService.updateWithAchRequestId(user, "ach-rel-3");
-
-        assertEquals(PAUSED_BY_USER, statusInDatabase(scheduleId),
-                "the ACH path must never override a deliberate pause");
-        assertEquals("ach-rel-3", achRequestIdInDatabase(scheduleId),
-                "the new relationship is still recorded, ready for when the user resumes");
-        assertEquals(0, countOutboxRows(), "and no resume is claimed on the user's behalf");
+        assertEquals(0, countOutboxRows(), "but no resume happened");
     }
 
     // --- helpers --------------------------------------------------------------------------------
-
-    /**
-     * A committed schedule in a known status, inserted directly so the starting state is exactly
-     * what each case needs and owes nothing to the create path.
-     *
-     * @param status PENDING_BANK, ACTIVE or PAUSED_BY_USER, written as the stored string so a
-     *               renamed enum constant has to be dealt with here rather than silently passing
-     */
-    private long seedSchedule(String status) {
-        return seedSchedule(status, null);
-    }
-
-    /**
-     * As {@link #seedSchedule(String)}, with an existing ACH relationship id on the row, so that a
-     * case which expects the id to be cleared or rewritten has something to observe.
-     */
-    private long seedSchedule(String status, String achRequestId) {
-        LocalDate today = LocalDate.now();
-        jdbcTemplate.update(
-                "INSERT INTO investment_schedules "
-                        + "(user_id, created_at, frequency, investment_amount, monthly_amount, "
-                        + " monthly_streak, next_investment_date, start_date, status) "
-                        + "VALUES (?, NOW(), 'BIWEEKLY', 250.00, 542.50, 0, ?, ?, ?)",
-                userId, today.plusDays(3), today, status);
-        Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        assertNotNull(id);
-        // Set as a second statement rather than a null bind parameter in the insert: the column
-        // stays NULL by default and no driver has to be asked what type a null is.
-        if (achRequestId != null) {
-            jdbcTemplate.update("UPDATE investment_schedules SET ach_request_id = ? WHERE id = ?",
-                    achRequestId, id);
-        }
-        assertEquals(status, statusInDatabase(id), "the seed must start in the status it asked for");
-        return id;
-    }
 
     /** Exactly one outbox row for this user, with this name and these two properties verbatim. */
     private void assertSoleEvent(String eventName, String propertiesJson) {
@@ -439,12 +403,22 @@ class ScheduleTransitionOutboxRollbackTest {
         return count == null ? 0 : count;
     }
 
+    private int countOutboxRows(String eventName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM analytics_outbox WHERE user_id = ? AND event_name = ?",
+                Integer.class, userId, eventName);
+        return count == null ? 0 : count;
+    }
+
     /** Read straight through JDBC, so a rolled-back in-memory entity cannot answer for the row. */
     private String statusInDatabase(long scheduleId) {
-        String status = jdbcTemplate.queryForObject(
+        return jdbcTemplate.queryForObject(
                 "SELECT status FROM investment_schedules WHERE id = ?", String.class, scheduleId);
-        assertNotNull(status, "the schedule row must exist, with a status");
-        return status;
+    }
+
+    private String holdReasonInDatabase(long scheduleId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT hold_reason FROM investment_schedules WHERE id = ?", String.class, scheduleId);
     }
 
     private String achRequestIdInDatabase(long scheduleId) {

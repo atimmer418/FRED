@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
 import { Subject, takeUntil } from 'rxjs';
@@ -580,7 +581,16 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
         httpStatusOf(error),
         false,
       );
-      this.showToast('Failed to close account. Please ensure all positions are sold and all cash is withdrawn.', 'danger');
+      if (error instanceof HttpErrorResponse && error.error?.code === 'DELETION_DEFERRED') {
+        // The 60-day settlement hold (T11): the user already sold and withdrew, so telling them
+        // to do that again would be wrong. Everything is safe; the close just has to wait.
+        this.showToast(
+          'Your account can close 60 days after your last transfer settles. Everything stays safe until then.',
+          'danger',
+        );
+      } else {
+        this.showToast('Failed to close account. Please ensure all positions are sold and all cash is withdrawn.', 'danger');
+      }
     } finally {
       this.isClosingAccount = false;
       this.showCloseConfirmation = false;

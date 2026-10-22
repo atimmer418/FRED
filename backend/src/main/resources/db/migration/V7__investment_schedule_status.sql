@@ -13,17 +13,35 @@
 --   PAUSED_BY_USER   was running, the user turned it off.
 --
 --   PENDING_BANK  -> ACTIVE          the ACH relationship landed. The ONLY thing this path does.
---   ACTIVE        -> PENDING_BANK    the user changed bank; it cannot run until the new ACH lands.
 --   ACTIVE        -> PAUSED_BY_USER  the user pressed pause.          (schedule_paused)
 --   PAUSED_BY_USER-> ACTIVE          the user pressed resume.         (schedule_resumed)
 --
 -- Note what is now IMPOSSIBLE rather than merely discouraged: the ACH path cannot touch a
 -- PAUSED_BY_USER schedule, so the retry scheduler can no longer override a deliberate pause.
 --
--- The backfill reads the old flag plus the ACH state, which is the best evidence available:
+-- THE STATUS IS NOT THE ONLY THING THAT CAN STOP A SCHEDULE. Paycheck Autopilot's V6 added
+-- investment_schedules.hold_reason, and the two are ORTHOGONAL by design:
+--
+--   status       the user and bank lifecycle. Only the user's own actions and the ACH landing
+--                move it. A system hold never does.
+--   hold_reason  a system stop with a reason (BANK_CHANGE, MANUAL_REVIEW, an ACH return, ...).
+--                Set and cleared by the system. The user cannot clear one by pressing resume.
+--
+-- A schedule is runnable only when status = 'ACTIVE' AND no blocking hold is set; that rule lives
+-- in InvestmentSchedule.isReadyForInvestment and nowhere else. A bank change is therefore a HOLD,
+-- not a status change: it leaves status alone so a Plaid outage cannot read as churn, and so a
+-- schedule the user had paused is not silently restarted when the new bank lands.
+--
+-- The backfill reads the old flag plus the ACH state, which is the best evidence available. It
+-- does not read hold_reason, and does not write it:
 --   is_paused = 0                          -> ACTIVE          (it was running)
 --   is_paused = 1 and ach_request_id set   -> PAUSED_BY_USER  (it had a bank, so it had run)
 --   is_paused = 1 and no ach_request_id    -> PENDING_BANK    (it never got a bank)
+--
+-- Against a database that already carries V6's shape, a schedule mid-bank-change (is_paused = 0,
+-- ach_request_id NULL, hold_reason = 'BANK_CHANGE') lands on ACTIVE and keeps its hold, which is
+-- the orthogonal reading: the user still wants it, the system is holding it. The first branch is
+-- what makes this work, so the CASE order below is load-bearing.
 --
 -- Idempotent: safe to run against a database that already has the column.
 

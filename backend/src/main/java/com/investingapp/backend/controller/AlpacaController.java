@@ -222,35 +222,6 @@ public class AlpacaController {
         }
     }
 
-    @PostMapping("/accounts/{accountId}/ach-relationships")
-    public ResponseEntity<Map<String, Object>> createAchRelationship(
-            @PathVariable String accountId,
-            @RequestBody CreateAchRelationshipRequest request) {
-        try {
-            logger.info("Creating ACH relationship for account: {}", accountId);
-
-            Map<String, Object> result = alpacaApiService.createAchRelationship(
-                    accountId,
-                    request.getAccountOwnerName(),
-                    request.getBankAccountType(),
-                    request.getBankAccountNumber(),
-                    request.getBankRoutingNumber(),
-                    request.getNickname());
-
-            if (result.containsKey("error")) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
-            }
-
-            return ResponseEntity.ok(result);
-
-        } catch (Exception e) {
-            logger.error("Error creating ACH relationship: {}", e.getMessage());
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to create ACH relationship: " + e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-
     @GetMapping("/accounts/{accountId}/ach-relationships")
     public ResponseEntity<String> getAchRelationships(@PathVariable String accountId) {
         try {
@@ -402,55 +373,4 @@ public class AlpacaController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }
-
-    // DTO for ACH relationship creation request
-    public static class CreateAchRelationshipRequest {
-        private String accountOwnerName;
-        private String bankAccountType; // CHECKING or SAVINGS
-        private String bankAccountNumber;
-        private String bankRoutingNumber;
-        private String nickname;
-
-        // Getters and setters
-        public String getAccountOwnerName() {
-            return accountOwnerName;
-        }
-
-        public void setAccountOwnerName(String accountOwnerName) {
-            this.accountOwnerName = accountOwnerName;
-        }
-
-        public String getBankAccountType() {
-            return bankAccountType;
-        }
-
-        public void setBankAccountType(String bankAccountType) {
-            this.bankAccountType = bankAccountType;
-        }
-
-        public String getBankAccountNumber() {
-            return bankAccountNumber;
-        }
-
-        public void setBankAccountNumber(String bankAccountNumber) {
-            this.bankAccountNumber = bankAccountNumber;
-        }
-
-        public String getBankRoutingNumber() {
-            return bankRoutingNumber;
-        }
-
-        public void setBankRoutingNumber(String bankRoutingNumber) {
-            this.bankRoutingNumber = bankRoutingNumber;
-        }
-
-        public String getNickname() {
-            return nickname;
-        }
-
-        public void setNickname(String nickname) {
-            this.nickname = nickname;
-        }
-    }
-
 }

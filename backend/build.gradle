@@ -29,7 +29,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
-	implementation 'com.plaid:plaid-java:18.0.0'
+	implementation 'com.plaid:plaid-java:46.0.0'
 	implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
 	implementation 'com.anthropic:anthropic-java:2.48.0' // Claude chat (Ask FRED); OpenAI kept for embeddings
 	implementation 'com.yubico:webauthn-server-core:2.7.0' // Check for the latest version

@@ -3,9 +3,11 @@ package com.investingapp.backend.repository; // Make sure this package name matc
 
 import com.investingapp.backend.model.User; // Import your User entity
 import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -38,6 +40,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // Find a user by their Plaid item ID for webhook processing
     User findByPlaidItemId(String plaidItemId);
+
+    // Every user holding a Plaid access token: the one-off /item/webhook/update backfill
+    // (PlaidItemLifecycleService.backfillWebhookUrl, exposed by DevPlaidController)
+    List<User> findByPlaidAccessTokenIsNotNull();
 
     // Find users by registration IP who have completed auth-finalize (for passkey
     // re-auth prompting)
@@ -75,6 +81,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.id = :id")
     Optional<User> findByIdForUpdate(@Param("id") Long id);
+
+    // Same row lock as findByIdForUpdate, but fails fast instead of waiting: the Plaid exchange
+    // holds this lock across outbound Plaid HTTP calls, so a contended second exchange must not
+    // block for the default lock-wait timeout and surface as a 500. A lock timeout of 0 renders
+    // "FOR UPDATE NOWAIT" on MySQL 8/Hibernate, so a contended lock raises immediately (translated
+    // by Spring to PessimisticLockingFailureException) and the caller maps it to LINK_IN_PROGRESS.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "0"))
+    @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForUpdateNoWait(@Param("id") Long id);
 
     // You can add more custom query methods here as needed following Spring Data
     // JPA conventions

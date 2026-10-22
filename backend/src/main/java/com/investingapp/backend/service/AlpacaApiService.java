@@ -20,6 +20,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+import java.util.ArrayList;
+import org.springframework.web.client.RestClientException;
 import java.util.Base64;
 import java.nio.charset.StandardCharsets;
 
@@ -452,24 +454,11 @@ public class AlpacaApiService {
 
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode().value() == 409) {
-                logger.info("ACH relationship already exists for account {} (409) — fetching existing one", accountId);
-                try {
-                    String existing = getAchRelationships(accountId);
-                    JsonNode relationships = objectMapper.readTree(existing);
-                    for (JsonNode rel : relationships) {
-                        String status = rel.has("status") ? rel.get("status").asText() : "";
-                        if ("APPROVED".equals(status) || "QUEUED".equals(status)) {
-                            Map<String, Object> result = new HashMap<>();
-                            result.put("id", rel.get("id").asText());
-                            result.put("status", status);
-                            result.put("created_at", rel.has("created_at") ? rel.get("created_at").asText() : "");
-                            logger.info("Returning existing ACH relationship: {}", result.get("id"));
-                            return result;
-                        }
-                    }
-                } catch (Exception fetchEx) {
-                    logger.error("Could not fetch existing ACH relationships for account {}: {}", accountId, fetchEx.getMessage());
-                }
+                // Spec 7.8: a 409 means a relationship still exists. Never adopt it; the 15-minute poll retries.
+                logger.warn("ACH relationship create returned 409 for account {}; waiting for cancellation", accountId);
+                return Map.<String, Object>of(
+                        "error", "Alpaca returned 409: an ACH relationship already exists; waiting for cancellation",
+                        "conflict", true);
             }
             logger.error("Error creating ACH relationship for account {}: {}", accountId, e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
@@ -577,6 +566,55 @@ public class AlpacaApiService {
                 entity,
                 String.class);
         return response.getBody();
+    }
+
+    /**
+     * DELETE one ACH relationship. 204 and 404 both mean "gone", which is all a caller needs; any
+     * other outcome is logged and reported as false so the caller can retry on the next poll.
+     */
+    public boolean deleteAchRelationship(String accountId, String relationshipId) {
+        String url = brokerBaseUrl + "/accounts/" + accountId + "/ach_relationships/" + relationshipId;
+        try {
+            restTemplate.exchange(url, HttpMethod.DELETE, new HttpEntity<>(createHeaders()), String.class);
+            logger.info("ACH relationship {} delete requested for account {}", relationshipId, accountId);
+            return true;
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return true;
+            }
+            logger.error("ACH relationship delete refused rel={} account={}: {}", relationshipId, accountId, e.getMessage());
+            return false;
+        } catch (RestClientException e) {
+            logger.error("ACH relationship delete failed rel={} account={}: {}", relationshipId, accountId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * GET the account's ACH relationships filtered server-side by status. Rows without an id are
+     * skipped so a caller can always encrypt and store what it gets back. Transport failures
+     * propagate as RestClientException; callers decide whether to swallow them.
+     */
+    public List<AchRelationshipSummary> listAchRelationships(String accountId, List<String> statuses) {
+        String url = brokerBaseUrl + "/accounts/" + accountId + "/ach_relationships?statuses=" + String.join(",", statuses);
+        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(createHeaders()), String.class);
+        try {
+            JsonNode root = objectMapper.readTree(response.getBody() == null ? "[]" : response.getBody());
+            List<AchRelationshipSummary> result = new ArrayList<>();
+            if (root.isArray()) {
+                for (JsonNode rel : root) {
+                    String id = rel.path("id").asText(null);
+                    if (id == null) {
+                        continue;
+                    }
+                    result.add(new AchRelationshipSummary(id, rel.path("status").asText(null),
+                            rel.path("created_at").asText(null), rel.path("bank_account_number").asText(null)));
+                }
+            }
+            return result;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Unreadable ACH relationship list for account " + accountId, e);
+        }
     }
 
     /**

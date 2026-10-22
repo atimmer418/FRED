@@ -381,11 +381,14 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
         }
       }
 
-      // Prepare request payload
+      // Prepare request payload. clientUuid is minted once per tap (decision 18): a retried
+      // request carries the same id and the backend answers with the first row instead of
+      // queueing a second investment.
       const requestData: any = {
         amount: this.investmentAmount,
         type: this.investmentType,
-        fundingSource: this.fundingSource
+        fundingSource: this.fundingSource,
+        clientUuid: crypto.randomUUID()
       };
 
       // Add specific stock symbol if investing in individual stock

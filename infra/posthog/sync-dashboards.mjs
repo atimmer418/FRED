@@ -134,9 +134,16 @@ async function syncDashboard(projectId, definition, existingDashboards) {
   }
 
   // Tiles are insights that belong to this dashboard. Match by name.
+  //
+  // Read them from the dashboard rather than from `/insights/?dashboards=<id>`: that filter
+  // returns a 500 from PostHog's own server (the unfiltered list and this endpoint both work),
+  // so it cannot be used. The dashboard carries its tiles anyway, each wrapping the insight,
+  // which is one request instead of a paged listing.
   const onDashboard = dryRun && !existing
     ? []
-    : await listAll(`${base}/insights/?dashboards=${dashboard.id}`);
+    : ((await api('GET', `${base}/dashboards/${dashboard.id}/`)).tiles || [])
+        .map((t) => t.insight)
+        .filter(Boolean);
 
   let created = 0;
   let updated = 0;

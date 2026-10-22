@@ -10,12 +10,36 @@ its file.
 
 ```bash
 export POSTHOG_PERSONAL_API_KEY=phx_...
-node infra/posthog/sync-dashboards.mjs --dry-run    # show what would change, touch nothing
-node infra/posthog/sync-dashboards.mjs              # apply
+node infra/posthog/sync-dashboards.mjs --project=667874 --dry-run   # show what would change
+node infra/posthog/sync-dashboards.mjs --project=667874             # apply
 ```
 
+**667874 is the FRED dev project.** Pass it explicitly: the key is scoped to dashboards and
+insights only, so it cannot list projects to discover the id, and every discovery endpoint
+(`/api/users/@me/`, `/api/projects/`, `/api/projects/@current/`) answers 403. That is the key
+being correctly minimal, not a misconfiguration.
+
 Options: `--host=https://eu.posthog.com` (default `https://us.posthog.com`), `--project=12345`
-(or `POSTHOG_PROJECT_ID`; only needed when the key can see more than one project).
+(or `POSTHOG_PROJECT_ID`).
+
+### The four dashboards this writes
+
+| Dashboard | URL |
+| --- | --- |
+| FRED — Onboarding funnel | https://us.posthog.com/project/667874/dashboard/2243707 |
+| FRED — Activation | https://us.posthog.com/project/667874/dashboard/2243702 |
+| FRED — Contribution retention | https://us.posthog.com/project/667874/dashboard/2243705 |
+| FRED — Data health | https://us.posthog.com/project/667874/dashboard/2243706 |
+
+The ids are PostHog's, assigned on first creation. The script matches dashboards **by name**, not
+by id, so these are a convenience for opening them and nothing depends on them.
+
+### One PostHog server bug to know about
+
+`GET /api/projects/<id>/insights/?dashboards=<id>` returns **500** from PostHog's own server. The
+obvious way to ask "which tiles does this dashboard already have" is therefore unusable, and the
+script reads the tiles off `GET /dashboards/<id>/` instead, which also costs one request rather
+than a paged listing. If a future PostHog release fixes the filter, nothing needs to change.
 
 It is **idempotent**. Run it as often as you like:
 

@@ -107,7 +107,7 @@ public class FredKnowledge {
                 "Deposits, Automation & Fees",
                 "• Investments are automated based on paycheck activity " +
                         "• A flat $8/month subscription funds the platform " +
-                        "• First 2 months are free so users can try the service " +
+                        "• First 2 weeks are free so users can try the service " +
                         "There are no trading commissions inside Alpaca for standard ETF trades, though regulatory fees may still apply. "
                         +
                         "Automation exists to reduce temptation to time the market.",

@@ -770,7 +770,23 @@ ion-modal.mc-bottom-sheet-modal {
      longhands where a 4-value list is invalid. */
   --border-radius: 24px 24px 0 0;
   --background: #ffffff;
-  --box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.12);
+  /* Two shadows. The FIRST is a white "skirt": a zero-blur box-shadow with a
+     35vh spread, offset down by 24px + 35vh, so its top edge sits 24px below
+     the wrapper top (clear of the rounded corners; the spread-grown corner arc
+     stays under the opaque card) and it reaches 70vh past the card bottom.
+     It rides the wrapper's transform, so when the drag gesture rubber-bands
+     the sheet UPWARD (SheetDragDismissDirective) the page behind is never
+     exposed beneath the card: the skirt continues the white. Worst-case lift
+     is ~35vh from rubberband() (bounded by finger travel on screen) plus up
+     to ~100px of snap-back spring overshoot on a hard upward flick, so 70vh
+     leaves ample margin. At rest / sliding in / sliding out it is entirely
+     off-screen. Kept bounded (not 100vh) because the wrapper is a will-change
+     compositor layer and shadow extents grow that layer's backing store.
+     Listed first so it paints OVER the soft shadow's below-the-card spill
+     (no grey seam at the card bottom while lifted). */
+  --box-shadow:
+    0 calc(35vh + 24px) 0 35vh #ffffff,
+    0 -8px 30px rgba(15, 23, 42, 0.12);
   --backdrop-opacity: 0.4;
   align-items: flex-end;
 }

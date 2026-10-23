@@ -28,6 +28,20 @@ place to see rejections. **Never compute an approval rate from `v_activation_fun
 two month-keyed views (`v_schedule_churn`, `v_kyc_outcomes`) use the first of the calendar month
 instead, because the thing they count is not a property of a cohort.
 
+## Retention means contribution retention, not app opens
+
+Written down here so it does not get relitigated: **D1, D7 and D30 session retention are secondary
+metrics for FRED and are never the headline retention number.** Nobody should need to open a
+set-and-forget investing app daily, and a product that works well is one people stop thinking
+about. An app-open retention curve for FRED measures how anxious our users are, not how well the
+product is doing its job.
+
+The headline retention number is `v_contribution_retention`: the share of funded users who had a
+settled contribution in a later 30-day window. The roadmap targets, **60% at 30 days and 40% at
+90 days**, are measured against that view and against nothing else. PostHog's retention tiles on
+the contribution dashboard are a convenience for spotting a shape change quickly; when they
+disagree with this view, this view is right.
+
 ---
 
 ## v_activation_funnel
@@ -40,7 +54,7 @@ buying-power path) also sets `funding_completed_at`, but no ACH ran and no money
 `first_ach_transfer_completed` event excludes that case, so these views do too: if they disagreed,
 the weekly reconciliation would show a gap that is not a delivery failure.
 
-**The definition:** one row per signup week. Each step is "ever reached", not "reached in order" —
+**The definition:** one row per signup week. Each step is "ever reached", not "reached in order":
 a user who linked a bank before approval counts for both, because the real flow does let steps
 overlap. Every step reads the operational table rather than the event ledger, so cohorts that
 predate the analytics work are still correct.
@@ -108,7 +122,7 @@ LIMIT 12;
 
 ## v_contribution_retention
 
-**The question — the headline one:** do people keep contributing after the first time?
+**The question, and it is the headline one:** do people keep contributing after the first time?
 
 **The definition:** for each signup-week cohort, the share of **funded** users with at least one
 settled contribution in month 1, 2, 3 and 6 after **their own** first transfer. A month is a 30-day
@@ -227,7 +241,8 @@ ORDER BY month_start;
 
 **The definition:** one row per calendar month, read from `analytics_outbox`. Submissions are
 counted in the month they were submitted and decisions in the month they were decided, so the two
-will not balance within a month — a submission late in a month is usually decided in the next one.
+will not balance within a month, because a submission late in a month is usually decided in the
+next one.
 That is correct, not a bug.
 
 `median_days_to_decision` is computed from the outbox's own `occurred_at` timestamps, pairing each
@@ -290,7 +305,7 @@ ORDER BY cohort_week DESC;
 **The question:** has our copy and PostHog's copy drifted, and is the publisher keeping up?
 
 **The definition:** per week and per event name, how many rows we **wrote** and how many reached
-the vendor, split by why the rest did not — `suppressed` (opted out, correct and expected),
+the vendor, split by why the rest did not: `suppressed` (opted out, correct and expected),
 `parked` (needs a human), `pending` (in flight, or the publisher is off or broken).
 
 **Two delivery rates, and the difference matters.** `pct_of_sendable` excludes suppressed rows and
@@ -326,7 +341,8 @@ SELECT toStartOfWeek(timestamp) AS week_start,
        count(DISTINCT uuid) AS distinct_uuids
 FROM events
 WHERE event IN ('freedom_plan_created', 'passkey_created', 'kyc_submitted', 'plaid_linked',
-                'investment_schedule_created', 'kyc_decided',
+                'investment_schedule_created', 'schedule_paused', 'schedule_resumed',
+                'schedule_cancelled', 'kyc_decided',
                 'first_ach_transfer_completed', 'ach_transfer_completed')
   AND timestamp >= now() - INTERVAL 8 WEEK
 GROUP BY week_start, event

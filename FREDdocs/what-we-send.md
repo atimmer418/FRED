@@ -4,10 +4,12 @@ One page covering every piece of data FRED sends to a third party, what identifi
 deliberately blunted, and how long it lives.
 
 This is the document to hand to counsel and to an App Store reviewer. It is written to be read by
-someone who has never seen the code, and it is kept honest mechanically: a check in CI fails the
-build if the event list here and the event list in the code ever disagree.
+someone who has never seen the code. The event list it summarises is kept honest mechanically: a
+check in CI fails the build if the taxonomy in the code and the per-event list in
+[analytics-events.md](analytics-events.md) ever disagree. This page summarises that one by kind, so
+it is kept true by review against it rather than by the check itself.
 
-**Last reviewed:** 2026-10-20. **Owner:** Andrew Timmer.
+**Last reviewed:** 2026-10-23. **Owner:** Andrew Timmer.
 
 ---
 
@@ -103,10 +105,11 @@ because the phone can be wrong or absent.
 | `passkey_created` | a passkey was registered, and whether it was the first |
 | `kyc_submitted` | an identity verification was submitted, and whether it was attempt 1, 2 or 3+ |
 | `plaid_linked` | a bank was linked, and whether it was the first. **Never which bank.** |
-| `investment_schedule_created` | a recurring schedule was set up, with a **banded** amount and frequency |
-| `schedule_paused`, `schedule_resumed`, `schedule_cancelled` | a schedule stopped or restarted, and why |
+| `investment_schedule_created` | a recurring schedule was set up, with a **banded** amount, the frequency, and a **banded** number of days since signup |
+| `schedule_paused`, `schedule_resumed`, `schedule_cancelled` | a schedule stopped or restarted, who caused it (the user or our own machinery), and why |
 | `kyc_decided` | the broker approved, rejected, or asked for more information, and a **banded** time taken |
-| `first_ach_transfer_completed`, `ach_transfer_completed` | a bank transfer **settled**, with a **banded** amount |
+| `first_ach_transfer_completed` | the first bank transfer **settled**, with a **banded** amount and a **banded** number of days since the schedule was created |
+| `ach_transfer_completed` | a later bank transfer **settled**. Carries only a **banded** count of how many transfers this makes: no amount at all |
 | `trial_started`, `subscription_billed`, `subscription_cancelled` | defined but **not yet sent**: billing does not exist yet |
 
 **What these deliberately do not contain:** the bank or institution name, any account or routing
@@ -178,8 +181,9 @@ The analytics ledger rows in our own database survive that deletion by design: t
 opaque UUID and the non-identifying fields above, and they are what the money and compliance
 history is rebuilt from.
 
-A **rejected KYC application** also deletes the user row, and currently does **not** request a
-PostHog deletion. See the open items.
+This covers **every** way a user row is deleted, not only a closure the user asked for. An
+application the broker rejected and an administrative removal get the same deletion request, on the
+same path, in the same transaction.
 
 ---
 
@@ -190,16 +194,17 @@ These are the gaps in this document, listed rather than quietly omitted:
 1. **Sentry is not integrated.** When it is, a row describing exactly what a crash report contains
    must be added here *before* any key is configured, since crash reports can carry more than
    intended by default.
-2. **A rejected KYC application does not request a PostHog deletion**, only a closed account does.
-   A rejected applicant's user row is deleted from our database, but their person record at the
-   vendor remains. Whether a rejection should carry the same deletion obligation as a closure is a
-   decision for counsel, and the mechanism is already built if the answer is yes: it is one call
-   on that path.
-3. **The deletion job needs a credential that is not yet provisioned.** It uses a PostHog
+2. **The deletion job needs a credential that is not yet provisioned.** It uses a PostHog
    *personal* API key with `person:read` and `person:write`, a far more powerful credential than
-   the public project key the events use. Until it is set in the environment, deletion requests
-   are recorded and retried but never complete, and they will sit visibly as PENDING rather than
-   being silently marked done.
+   the public project key the events use, plus the numeric project id. Until both are set in the
+   server environment, deletion requests are recorded and retried but never complete, and they
+   sit visibly as PENDING rather than being silently marked done.
+3. **There is no key-pattern deny-list or value-shape filter on the way out.** Nothing identifying
+   is sent today, and that is enforced by construction rather than by a filter: the client's event
+   payloads are a closed, typed vocabulary that accepts no free text and no raw amount, and the
+   server's are hand-written maps of banded values checked against a fixed event list. What does
+   not exist is the backstop that would catch a future mistake, on either side. Until it does, a
+   new property is only as safe as the review that added it.
 
 ---
 

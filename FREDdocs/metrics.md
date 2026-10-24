@@ -18,11 +18,16 @@ checkpoint. You read these with a SQL client.
 figure. They return counts, rates, medians and day counts. That is enforced by the read-only role
 below granting on the views only: a reports account cannot reach the base tables at all.
 
-**Rejected users are invisible in most of them.** A rejected KYC hard-deletes the user row, so
-rejected users are absent from `users` and therefore from every cohort built on it, including the
-funnel's `signed_up`. This makes the funnel's approval rate look better than reality.
-`v_kyc_outcomes` reads the outbox instead, whose rows survive the deletion, and is the only honest
-place to see rejections. **Never compute an approval rate from `v_activation_funnel`.**
+**Rejected users were invisible in most of them until 2026-10-24, and the old cohorts stay that
+way.** A rejected KYC used to hard-delete the user row, so those applicants are absent from
+`users` and therefore from every cohort built on it, including the funnel's `signed_up`, which
+makes the approval rate of an early cohort look better than it was. From 2026-10-24 the row is
+kept with status `REJECTED`, so new cohorts are complete. The damage is not retroactive: anyone
+rejected before that date cannot be recovered.
+
+`v_kyc_outcomes` reads the outbox instead, whose rows survived the deletions, and is the honest
+place to see rejections in any period. **Never compute an approval rate from `v_activation_funnel`
+for a cohort that starts before 2026-10-24.**
 
 **Cohorts are signup weeks**, keyed on the Monday of the week containing `users.create_date`. The
 two month-keyed views (`v_schedule_churn`, `v_kyc_outcomes`) use the first of the calendar month
@@ -177,7 +182,7 @@ it happened:
 | `account_closed` | the user closed their account | **churn** |
 | `bank_change` | we paused it while a new bank was linked | lifecycle |
 | `ach_confirmed` | we started it once the ACH relationship landed | lifecycle |
-| `kyc_rejected` | the broker rejected them and we deleted everything | not their doing |
+| `kyc_rejected` | the broker rejected the application; the row is kept, marked `REJECTED` | not their doing |
 
 The `*_by_user` columns are the ones to read as churn. The totals sit beside them so the two
 reconcile, and so a surge of *system* pauses (a Plaid outage, say) is visible rather than buried

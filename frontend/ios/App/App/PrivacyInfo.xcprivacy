@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  FRED's privacy manifest.
+
+  WHAT THIS FILE COVERS: the analytics this repository's analytics layer sends, and the
+  required-reason APIs the app itself calls. It is written to agree, line for line, with
+  FREDdocs/what-we-send.md and FREDdocs/privacy-manifest-and-label.md. Change one and change all
+  three.
+
+  WHAT IS NOT DECLARED HERE, AND MUST BE BEFORE SUBMISSION: the data the KYC and banking flows
+  collect, which is name, date of birth, Social Security number, address, email and bank account
+  details. That data is collected by those flows and sent to our own servers and to our broker,
+  not by analytics, and whoever owns those flows has to declare it. A manifest that covers only
+  analytics is incomplete for the app as a whole. FREDdocs/privacy-manifest-and-label.md names
+  exactly which entries are still owed and who owns them.
+
+  Why the identifier is NOT linked: the only identifier analytics sends is `public_id`, a random
+  UUID generated for analytics and nothing else. It is not the row id, not the email address, not
+  the broker account id, and it cannot be reversed into any of them from outside our database.
+  Nothing is sent to an advertising or attribution SDK; there is none in the app. NSPrivacyTracking
+  is false for the same reason: no data is shared with a data broker and nothing is joined to
+  third-party data to target anyone.
+
+  WHAT WOULD MAKE THAT FALSE: attaching anything that identifies the person to a person record, or
+  sending revenue or purchase data joined to the user. Billing does not exist in this repository
+  yet. The day it does, this file has to be revisited before the build ships. See J5 in
+  FREDdocs/analytics-implementation-review.md.
+-->
+<plist version="1.0">
+<dict>
+	<!-- No tracking: nothing is shared with a data broker, and nothing is joined to third-party
+	     data for advertising or measurement across apps. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<!-- Which screens were reached, which steps were completed, which controls were used.
+		     Banded, never a raw amount and never free text. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeProductInteraction</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<!-- The opaque analytics UUID (`public_id`). Declared as a User ID because it is stable
+		     per account, and NOT linked because it exists only to group one person's events and
+		     cannot identify them outside our own database. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- Capacitor's own bridge stores preferences in UserDefaults, and the WebView's local
+		     storage sits behind it. CA92.1 is "access information from the app itself", which is
+		     the only use here: nothing reads another app's defaults and nothing is sent anywhere.
+		     Declared by the app because the Capacitor pods, which do ship manifests, declare an
+		     EMPTY NSPrivacyAccessedAPITypes in them. An empty declaration is not a declaration,
+		     so if the app does not make this one, nobody does. FRED's own Swift code does not
+		     touch UserDefaults; this covers the bridge underneath it. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

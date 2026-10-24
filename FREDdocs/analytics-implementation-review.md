@@ -5,8 +5,8 @@ diff. It covers the original analytics brief, the 13 decisions and 12 sections t
 Phase 0 discovery, the scope change that removed subscriptions, and every checkpoint instruction
 from B through H including the follow-ups.
 
-**Branch:** `feature/analytics`, merged to `develop` through `10522f5`.
-**Written:** 2026-10-23. **Decisions recorded:** 2026-10-24.
+**Branch:** `feature/analytics`, merged to `develop` through `bdb2f42`.
+**Written:** 2026-10-23. **Decisions recorded and Checkpoint J built:** 2026-10-24.
 **Author:** this session, reviewed against the code as it stands today.
 
 ## How to read the status column
@@ -18,8 +18,14 @@ from B through H including the follow-ups.
 | **deferred** | not built. Every one has a line in [Deviations](#deviations-and-deferrals) |
 | **withdrawn** | removed from scope by a later instruction, so there is nothing to build |
 
-Several deferrals were given a home on 2026-10-24. Those rows now say **Checkpoint J** or
-**follow-on plan**, which names when the work happens without pretending it has happened.
+Several deferrals were given a home on 2026-10-24, and Checkpoint J then closed seven of them.
+The rows that are still open say **follow-on plan**, which names when the work happens without
+pretending it has happened.
+
+**Where the 236 rows stand after Checkpoint J:** 172 done, 26 deviated, 32 deferred, 2 withdrawn,
+and 4 that are partly one and partly another and say so in place. Checkpoint J moved 7.1, 7.2,
+7.3, 7.4, 7.6, D12 and D8.2 from deferred or deviated to done, and corrected 1.5 and B.7, which
+this review had wrongly called unenforced.
 
 "Done" never means "seen working in production". Nothing here has run against a real beta user
 yet, which is why [what to check on the first real beta account](#5-what-to-check-on-the-first-real-beta-account)
@@ -62,7 +68,8 @@ migration touches it. **This is the one open legal dependency created by decisio
 it belongs in the counsel-facing document when 7.7 is closed.
 
 **3. The Phase 7 guardrails become Checkpoint J**, with `PrivacyInfo.xcprivacy` in the same
-checkpoint. Scope below.
+checkpoint. **Built the same day**; the scope table below records what each item closed, and the
+rows above now read "done (J*)".
 
 **4. Alerts, Sentry, the transfer tables, acquisition attribution and LTV/CAC are deferred to a
 follow-on plan**, not abandoned. One line of scope each, below.
@@ -77,8 +84,23 @@ follow-on plan**, not abandoned. One line of scope each, below.
 | J4 | A test on each side that sends a forbidden payload through the real dispatch path and proves it never leaves: nothing in the network call, nothing in the outbox row | 7.3 |
 | J5 | `PrivacyInfo.xcprivacy` in the app target, declaring analytics with a **non-linked** identifier, plus the matching nutrition-label answers in FREDdocs so the two agree | 7.6, S6.3 |
 | J6 | Delete the unset fields from the `PersonProperties` interface so the type stops promising what nothing sets | 3.3 |
-| J7 | `npm run test:lint-rule` added to `verify.yml`, so the test that proves the restricted-import rule fires actually runs | 1.5, B.7 |
+| J7 | ~~`npm run test:lint-rule` added to `verify.yml`~~ **Nothing to do: it was already there, and this review was wrong to say otherwise.** It has run in CI since `710667b`, 2026-10-15 | 1.5, B.7 |
 | J8 | Keep the rejected applicant's row, status `REJECTED`, in `AccountStatusService.handleRejected`, and leave the SSN column untouched | D8.2 |
+
+Two things were added while building J, both because the agreed scope turned out to imply them:
+
+- **J8 also holds the schedule.** While a rejection deleted the user it deleted their schedule
+  too, so `schedule_cancelled` described something that had really gone. Keeping the row would
+  have left the event saying cancelled while the table said otherwise, and the only thing stopping
+  that schedule from investing would have been an invariant two classes away (`isReadyForInvestment`
+  needs an ACH relationship, and a rejected application never got one). So the rejection now sets a
+  blocking `MANUAL_REVIEW` hold: a hold rather than a status, because status and holds are
+  orthogonal, and a person should decide what happens to a rejected applicant's plan.
+- **The server's property list is now pinned to the document.** `ServerAnalyticsEvent.PROPERTY_KEYS`
+  is the server's exemption list, and it was hand-written with nothing checking it. It is now
+  pinned to the server event table in `analytics-events.md` by `ServerAnalyticsEventParityTest`,
+  which also closes the audit gap this review found: the document's server event **names** were
+  checked by CI and its **property lists** were checked by nothing.
 
 Note on J5: the manifest declares a **non-linked** identifier, which differs from what this review
 originally proposed (product interaction, purchase history and user id, *linked* to the user).
@@ -102,17 +124,21 @@ Deferred by decision on 2026-10-24, with the scope each one needs. None is start
 
 ## Evidence: what was run for this review
 
-Every check below was run today, against the tree at `f794d62`.
+Every check below was run against the tree at `f794d62` on 2026-10-23, and re-run after
+Checkpoint J on 2026-10-24. The numbers in the table are the Checkpoint J run.
 
 | Check | Command | Result |
 |---|---|---|
-| Backend suite | `./gradlew cleanTest test` with a real MySQL datasource | **720 tests, 0 failures, 0 skipped.** The database-gated tests really ran; counted from the 103 JUnit XML reports |
-| Frontend suite | `ng test --watch=false --browsers=ChromeHeadlessNoSandbox` | **829 specs, 815 pass, 14 fail.** The 14 are FRED-226, pre-existing, and not one is an analytics spec |
-| Taxonomy versus its document | `npm run test:events-documented` | **PASS:** 15 client events and their properties, 14 server events, 18 vocabularies |
+| Backend suite | `./gradlew cleanTest test` with `SPRING_DATASOURCE_URL` pointed at a scratch MySQL schema | **754 tests, 0 failures, 0 skipped.** The 97 database-gated tests really ran rather than skipping; counted from the JUnit XML reports. Checkpoint I's run was 720 |
+| Frontend suite | `ng test --watch=false --browsers=ChromeHeadlessNoSandbox` | **910 specs, 896 pass, 14 fail.** The same 14 FRED-226 failures as Checkpoint I, named at the end of this document; not one is an analytics spec. Checkpoint J added 81 passing specs |
+| Taxonomy versus its document | `npm run test:events-documented` | **PASS:** 15 client events and their properties, 14 server events, 18 vocabularies, and the privacy guard's exemption list. Both new checks were negative-tested: a bogus exempt key and a missing one each fail the build |
 | Server event properties versus the document | by hand, every emit site read and diffed | All 14 match. This is the part no check covers |
 | Person properties versus the document | read `AnalyticsOutboxService.personProperties()` | All five match |
 | Dashboard sync | `sync-dashboards.mjs --project=667874` | Idempotent: 0 created, 4 updated, 15 tiles live |
 | Migration chain | rehearsed on a database at develop's V6 carrying Autopilot's shape | V7 and V8 applied, five row shapes backfilled correctly, re-ran clean, app booted with `ddl-auto=validate` passing |
+| Cross-language guard parity | `AnalyticsPrivacyGuardParityTest` | **PASS**, and negative-tested: changing one Java pattern by a single character fails it |
+| Type check and lint | `npx tsc --noEmit`; `npx ng lint`; `npm run test:lint-rule` | All clean. The lint-rule script was already in CI, contrary to what this review first said |
+| The privacy manifest reaches the bundle | `xcodebuild -workspace App.xcworkspace -scheme App -sdk iphonesimulator build` | **BUILD SUCCEEDED**, and the log shows `PrivacyInfo.xcprivacy` copied to `App.app/`. `plutil -lint` passes |
 
 Everything marked "deferred" below was confirmed absent by grep or by listing the directory, not
 assumed from a file name. Where a claim rests on inspection rather than a test, the row says so.
@@ -140,7 +166,7 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 | 1.2 | `AnalyticsService` exposing track, identify, screen, reset, setOptOut | done | `analytics.service.ts:80,96,117,136,156` | All five exist with the specified signatures, plus `applyServerConsent` for the server-held opt-out |
 | 1.3 | Rules in the service, not by convention: try/catch, no-op when opted out, no-op in tests, scalars only | done | `analytics.service.ts`; `analytics.service.spec.ts` | Four gates, each with its own spec: "never lets a vendor failure reach the caller", "sends nothing while opted out", "is silent under Karma", and `ScalarValue` rejecting objects at the type level |
 | 1.4 | Vendor adapter behind an interface, service never imports `posthog-js` | done | `analytics-adapter.ts`, `posthog.adapter.ts`, `lazy-posthog.adapter.ts` | The service depends on `ANALYTICS_ADAPTER`; `posthog.adapter.ts` is the only file importing the SDK |
-| 1.5 | ESLint `no-restricted-imports` failing the build on any other `posthog-js` import | done, partly unenforced | `frontend/.eslintrc.json:47-84`; `.github/workflows/verify.yml:108` | The rule and its single-file override are present and `npx ng lint` runs in CI. `scripts/lint/assert-posthog-restriction.mjs`, the test that proves the rule fires, is **not** wired into CI |
+| 1.5 | ESLint `no-restricted-imports` failing the build on any other `posthog-js` import | done | `frontend/.eslintrc.json:47-84`; `.github/workflows/verify.yml:109-110` | The rule, its single-file override, `npx ng lint`, **and** `npm run test:lint-rule` all run in CI. **This review previously said the last of those was missing. That was wrong**: it has been in `verify.yml` since `710667b` on 2026-10-15 |
 
 ### Phase 2: PostHog client installation
 
@@ -157,7 +183,7 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 |---|---|---|---|---|
 | 3.1 | Leave the anonymous id alone before sign-in | done | `analytics.service.ts` | Nothing calls `identify` before authentication; the first three onboarding steps land on the SDK's own anonymous id and are stitched at identify time |
 | 3.2 | `identify()` with the opaque server UUID, never email, phone or the numeric id | done | `auth.service.ts:219,367`; `V2__user_public_id.sql`; `JwtUtils.java:95` | The service **refuses** a non-UUID (spec: "refuses to identify with anything that is not a UUID"), so a mistake sends nothing rather than leaking. The `pid` JWT claim lets a cold start identify without a round trip |
-| 3.3 | Ten person properties including `signup_month` and the acquisition fields | deviated | `AnalyticsOutboxService.personProperties()` (lines 118-127) | Five are set, server-side, refreshed on every event: `tier`, `kyc_status`, `has_linked_bank`, `has_schedule`, `has_funded`. These are the Checkpoint E list. The `PersonProperties` interface in the taxonomy still **declares** seven of the originals that nothing sets |
+| 3.3 | Ten person properties including `signup_month` and the acquisition fields | deviated, narrowed by J6 | `AnalyticsOutboxService.personProperties()` (lines 118-127); `PersonProperties` in the taxonomy | Five are set, server-side, refreshed on every event: `tier`, `kyc_status`, `has_linked_bank`, `has_schedule`, `has_funded`. **J6 cut the interface down to exactly those five**, so the type no longer promises `signup_month`, the four `acquisition_*` fields, `waitlist_member`, `founder_access`, or the two duplicates under second names. The acquisition half is on the follow-on plan |
 | 3.4 | Never set name, email, phone, address, DOB, SSN, account numbers, bank name, balance, portfolio value, contribution amount or income | done | `what-we-send.md`; `personProperties()` | Verified by reading every `$set` key and every event property map: not one of the forbidden fields appears. Amounts exist only as bands |
 | 3.5 | Backfill acquisition properties from the waitlist by email hash, during registration | deferred | nowhere | No `acquisition_*` columns on `User`, no lookup client, no spec. Confirmed by grep |
 | 3.6 | `reset()` on sign-out | done | `auth.service.ts:199`; `sell-withdraw.page.ts:566` | Both session-clearing paths call it, and the close-account path calls it **before** `localStorage.clear()`, which is the ordering the reset needs to survive |
@@ -219,12 +245,12 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 
 | Id | Item | Status | Where it lives | How it is proven |
 |---|---|---|---|---|
-| 7.1 | A deny-list of forbidden property key patterns, stripped before dispatch, warned in dev | **deferred, Checkpoint J (J1)** | nowhere yet | `analytics.service.ts:317` is the whole sanitizer and it scrubs URL properties only. Its own comment says the deny-list is for "a later checkpoint", and that checkpoint never ran |
-| 7.2 | A value-shape guard rejecting emails, phone numbers, 9-digit numbers, 8+ digit strings and JWTs | **deferred, Checkpoint J (J1)** | nowhere yet | Confirmed by grep: no such pattern exists in the frontend |
-| 7.3 | A test firing every event with a forbidden payload and asserting it was stripped | **deferred, Checkpoint J (J4)** | nowhere yet | There is nothing to test. The type system refuses a forbidden payload at compile time instead, which is not the same guarantee |
-| 7.4 | The same guards in the Spring Boot publisher, which is more dangerous than the client | **deferred, Checkpoint J (J2)** | nowhere yet | `AnalyticsOutboxService.record()` validates the event **name** against a closed list and takes the property map as given. No key or value filtering anywhere on the server |
+| 7.1 | A deny-list of forbidden property key patterns, stripped before dispatch, warned in dev | **done (J1)** | `analytics-privacy-guard.ts` `FORBIDDEN_KEY_PATTERNS`, applied in `analytics.service.ts` `sanitize()` | 13 rules over the normalised key. A stripped property is reported with `console.error` in any non-production build, naming the rule and never the value. `analytics-privacy-guard.spec.ts` |
+| 7.2 | A value-shape guard rejecting emails, phone numbers, 9-digit numbers, 8+ digit strings and JWTs | **done (J1)** | `analytics-privacy-guard.ts` `FORBIDDEN_VALUE_PATTERNS` | Six rules: email, formatted SSN, formatted phone, E.164 phone, a run of 8+ digits, and a JWT. Numbers are checked as their decimal text, so a nine-digit number is caught like a string |
+| 7.3 | A test firing every event with a forbidden payload and asserting it was stripped | **done (J4)** | `analytics-forbidden-payload.spec.ts`; `AnalyticsOutboxForbiddenPayloadTest.java` | Both sides, through the real dispatch path: all 15 client events plus a screen view and the vendor's own `before_send` hook over `properties`, `$set` and `$set_once`; all 14 server events through the writer, asserting the outbox row's JSON |
+| 7.4 | The same guards in the Spring Boot publisher, which is more dangerous than the client | **done (J2)** | `util/AnalyticsPrivacyGuard.java`, called from `AnalyticsOutboxService.record()` on both the event properties and the `$set` | Identical rules, held identical by `AnalyticsPrivacyGuardParityTest`, which reads the TypeScript and fails on any drift. A violation is `logger.error` with the key and the rule, never the value |
 | 7.5 | A user-facing opt-out, honoured by client and server, enforced in the publisher | done | `V4__user_analytics_opt_out.sql`; `UserController.java:643`; `AnalyticsPublisherService.loadConsent()` | Stored server-side so it applies on every device; read **live** immediately before sending, so events recorded before the change are suppressed too. `AnalyticsConsentEndpointTest`, `AnalyticsPublisherServiceTest` |
-| 7.6 | ATT posture confirmed, privacy nutrition label declarations written into FREDdocs, `PrivacyInfo.xcprivacy` created | **deferred, Checkpoint J (J5)** | nowhere yet | No `PrivacyInfo.xcprivacy` exists in the app target (only the one vendored inside `Pods/lottie-ios`). No declarations document |
+| 7.6 | ATT posture confirmed, privacy nutrition label declarations written into FREDdocs, `PrivacyInfo.xcprivacy` created | **done (J5), with one gap named below** | `frontend/ios/App/App/PrivacyInfo.xcprivacy`; `FREDdocs/privacy-manifest-and-label.md` | `NSPrivacyTracking` false, no tracking domains, product interaction and user id both **not linked**, UserDefaults declared CA92.1. Registered in the Xcode project and proven to reach the bundle: a simulator build copies it to `App.app/PrivacyInfo.xcprivacy`. **It declares analytics only**; the KYC, auth and banking data types are still owed |
 | 7.7 | `FREDdocs/analytics-privacy-review.md` listing every property, its purpose and its retention, for counsel | deviated | `FREDdocs/what-we-send.md` | Checkpoint H commissioned a counsel-facing document under a different name. It covers destinations, the identifier, events by kind, banding, opt-out, retention and deletion. It is **not** a per-property purpose and retention table, and the legal flags from decision 8 and decision 9 are not collected in it |
 
 ### Phase 8: the MySQL metrics layer
@@ -312,7 +338,7 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 | D7.3 | Persist Alpaca's rejection reason and map it to a fixed vocabulary | **deferred** | nowhere | The reason is still not persisted, so `kyc_decided` carries the outcome without a reason category |
 | D7.4 | Add the Section 10 subscription events and `deposit_returned` | withdrawn / deferred | n/a | Subscription events withdrawn by the scope change. `deposit_returned` deferred with the rest of Section 7 |
 | D8.1 | KYC poll: one transaction per user | done | `AccountStatusService` / the poller | Per-user transaction, so one failure cannot roll back another user's approval |
-| D8.2 | Stop hard-deleting rejected KYC users; keep the row marked REJECTED | **deviated, decided 2026-10-24, Checkpoint J (J8)** | `AccountStatusService.handleRejected` calls `UserDeletionService` | A rejected user is still **deleted** today. Andy's answer: keep the row, status `REJECTED`, no hard delete, and leave the SSN column alone pending counsel |
+| D8.2 | Stop hard-deleting rejected KYC users; keep the row marked REJECTED | **done (J8)** | `AccountStatusService.handleRejected` | Nothing deletes a rejected applicant. The row is kept with status `REJECTED`, the poller excludes it so the decision cannot fire twice, and the schedule is explicitly held (`MANUAL_REVIEW`) so the `schedule_cancelled` event and the table agree. The SSN column is untouched, pending counsel. `AccountStatusServiceKycDecidedTest`, `AccountStatusServiceKycDecidedRollbackTest`, `ScheduleCancelledOutboxRollbackTest` |
 | D8.3 | Account close: ordered and idempotent CLOSING then CLOSED, retry-safe, never hard-delete anyone who has invested | **deviated** | `UserDeletionService.delete()`; `deferralReason()` | There is no CLOSING state. What exists instead: a refusal to delete while money is in flight or within a 60-day settlement window, and one transaction for the deletes |
 | D8.4 | Add the no-hard-deletes-without-asking rule to the legal review document | deferred | nowhere | There is no legal review document (7.7) |
 | D9.1 | Opt-out default on, stored server-side, honoured on both sides | done | `V4__user_analytics_opt_out.sql` | Default was flipped to on at Andy's instruction, including the migration, the entity default and the specs |
@@ -320,7 +346,7 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 | D9.3 | Default-on depends on disclosure: privacy policy and App Store label | partly deferred | `what-we-send.md` documents it | The disclosure document exists; the privacy policy and the App Store label are outside this repo and not confirmed |
 | D10 | Cloudflare Worker proxy on a neutral hostname with click-by-click deploy steps | done | `infra/posthog-proxy/`; `FREDdocs/posthog-proxy-deploy.md` | `m.fredvested.com` carries none of the blocked words |
 | D11 | WIP resolved by Section 2 | done | n/a | |
-| D12 | Exempt declared taxonomy keys from key-pattern matching; two tests | **deferred, Checkpoint J (J3)** | nowhere yet | Depends on the deny-list in 7.1. Approved on 2026-10-24 as part of J |
+| D12 | Exempt declared taxonomy keys from key-pattern matching; two tests | **done (J3)** | `DECLARED_PROPERTY_KEYS` and `PERSON_PROPERTY_KEYS` in the taxonomy; `ServerAnalyticsEvent.PROPERTY_KEYS` | The two tests asked for, on each side: a declared key matching a forbidden pattern survives, an undeclared key matching the same pattern is stripped. The exempt lists are pinned to the events themselves by `test:events-documented` and by `ServerAnalyticsEventParityTest` |
 | D13 | Security resolved by Section 3 | done | n/a | |
 | S6.1 | Screen views through `TabActivationService`, de-duplicated, `NavigationEnd` kept for non-tab routes | done | `screen-tracking.service.ts`; `tab-activation.service.ts:31` | Spec: "drops a repeated screen name but keeps a real change" |
 | S6.2 | Call `logout()` and `reset()` in close-account and wherever `logout()` runs; backlog a real sign-out button | done | `auth.service.ts:199`; `sell-withdraw.page.ts:566`; `backlog.md:409` | `reset()` runs before `localStorage.clear()` |
@@ -368,7 +394,7 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 | B.4 | `public_id` stays nullable until F, every read path tolerates null | done | `V2__user_public_id.sql`; `AnalyticsPublisherService` | A row with no `public_id` is PARKED rather than sent under a substitute. **Still nullable**: the F that would have tightened it never ran |
 | B.5 | Push and merge protocol: ask before every push, never force-push, never rewrite history, never reset hard | done, with one disclosed exception | n/a | Every push was asked for. One exception: the unpushed merge commit `c3372d6` was amended to include test fixes so it would compile. Disclosed at the time |
 | B.6 | PostHog install plus the abstraction layer in `services/analytics/` | done | the folder | |
-| B.7 | The ESLint rule and a unit test proving it fires | done, not in CI | `scripts/lint/assert-posthog-restriction.mjs` | The script exists and passes; it is not in `verify.yml` |
+| B.7 | The ESLint rule and a unit test proving it fires | done | `scripts/lint/assert-posthog-restriction.mjs`; `.github/workflows/verify.yml:110` | Both exist and both run in CI. The earlier claim that the script was not wired in was a mistake in this review, corrected on 2026-10-24 |
 | B.8 | One dev project, key from environment config, never in source | done | `environment.ts`, `environment.dev.ts` | |
 | B.9 | Nothing leaves the device at the end of B except a smoke event behind the consent gate | done | n/a | Default was opt-out until C wired identity, so in practice nothing left |
 | B.10 | Set `posthogApiHost` to `https://m.fredvested.com` in both environment files | done | `environment.ts`, `environment.dev.ts` | |
@@ -475,10 +501,9 @@ One line each: why it is not what was asked, and what would close it.
 | Id | Why | What would close it |
 |---|---|---|
 | 1.1 | `core/` does not exist in this codebase; `services/` is the convention (decision 4) | Nothing. The instruction was superseded |
-| 1.5, B.7 | The rule is enforced by `ng lint` in CI; the script that proves the rule *fires* was never added to the workflow. **Approved as J7 on 2026-10-24** | One line in `verify.yml`: `npm run test:lint-rule` |
 | 2.1 | PostHog deprecated `sanitize_properties`; it logs an error on every capture and is slated for removal | Nothing. `before_send` is strictly better: it can drop an event, which the old hook could not |
 | 2.4 | PostHog's free plan allows one project (decision 1) | A paid plan, then a second key for prod |
-| 3.3 | The Checkpoint E instruction gave a different, server-side list, and the original list's acquisition half has no data behind it | **J6 deletes the unset fields from `PersonProperties`** so the type matches what is sent. Setting them for real needs acquisition attribution, which is on the follow-on plan |
+| 3.3 | The Checkpoint E instruction gave a different, server-side list, and the original list's acquisition half has no data behind it. J6 cut the type down to the five that are really sent | Acquisition attribution, on the follow-on plan. Then the properties come back with something in them |
 | 4a.1 | iOS gives an app no install attribution, so `install_source` would always be null | Nothing |
 | 4a.2, 4a.4, 4a.7 | A per-step viewed/completed pair measures drop-off at every step; separate start markers would double-count the same moment | Nothing |
 | 4a.3 | Registration persists the plan and the passkey in one transaction; a third event for the same instant would be a phantom funnel step | Nothing |
@@ -502,7 +527,6 @@ One line each: why it is not what was asked, and what would close it.
 | CR7 | The Checkpoint I instruction named the file `analytics-implementation-review.md`, which is later than the brief's `app-analytics-implementation-review.md` | Nothing, unless you want the original name; it is a `git mv` |
 | D7.1 | `action_required` is a person-property state and `needs_more_info` is a `kyc_decided` outcome; a separate event would duplicate both | Nothing |
 | D7.2 | Cancellation turned out to be reachable (account closure, KYC rejection), so it was built rather than marked not-implemented | Nothing for cancellation. `bank_unlinked` is 4c.5 |
-| D8.2 | **A rejected KYC application still hard-deletes the user row.** I built the ledger to survive it (the outbox row has no foreign key and denormalises `public_id`) rather than changing the account lifecycle, which is outside the analytics layer | **Answered on 2026-10-24: keep the row, status `REJECTED`, no hard delete.** Scheduled as J8. The SSN column stays untouched until counsel answers the retention question |
 | D8.3 | There is no CLOSING or CLOSED state. What exists is a refusal to delete while money is in flight or inside a 60-day settlement window, and a single transaction for the deletes | A real two-phase close, with the states and a resumable retry |
 | E.7 | One `schedule_cancelled` comes from `TradingController`, because that is where the close-account transaction is opened | Nothing material; it is the transaction boundary that matters, not the layer |
 | X5 | The checkpoint letters drifted from the revised plan: the plan's F (metrics) was run as G, and the plan's G (dashboards) as H. The plan's "Phase 9 alerts, Sentry, and Section 8 acquisition" half of G was never run at all | See open item 1 |
@@ -518,8 +542,7 @@ One line each: why it is not what was asked, and what would close it.
 | 4c.5 | `bank_unlinked` has no call site; a bank *change* is visible as `schedule_paused` with `reason: 'bank_change'` | A call site on the unlink path, if unlinking without relinking is a churn signal you want |
 | 4c.6 | Nothing records a withdrawal, so the event has nothing to fire from. The brief called full withdrawal one of the two churn signals that matter most | S7.4, then the event |
 | 4d.x, S11, D5, R2 | The email pipeline was explicitly gated on a go-ahead that never came. Correctly not started | Your go-ahead, then one checkpoint |
-| 7.1, 7.2, 7.3, 7.4, D12 | **The Phase 7 deny-list and value-shape guards do not exist. Approved as Checkpoint J on 2026-10-24.** The design substituted construction for filtering: closed vocabularies, typed scalars, banded money and no free text. That is strong on the client and **nothing at all** on the server, where the brief said the danger is highest | A key-pattern deny-list plus a value-shape filter in `AnalyticsService.sanitize()` and in `AnalyticsOutboxService.record()`, the taxonomy-key exemption, and the test that fires every event with a forbidden payload |
-| 7.6, S6.3 | No `PrivacyInfo.xcprivacy` and no nutrition-label declarations document. App Store submission requires the manifest. **Approved as J5 on 2026-10-24** | Create the manifest declaring analytics with a **non-linked** identifier, not used for tracking, and write the matching declarations into FREDdocs so the label and the manifest agree |
+| 7.6, S6.3 | **Built as J5 for the analytics half only.** The manifest and `privacy-manifest-and-label.md` declare what analytics sends; the KYC, auth and banking data types are not declared, and they are collected | The owners of those flows adding their entries to both the manifest and the label. Listed in `privacy-manifest-and-label.md` with who owns each one |
 | 8.2 | No `metrics_daily` and no snapshot job, so every view recomputes from current state and history moves when users change state | One table, one scheduled job writing a row per metric per day |
 | 9.1c | No `kyc_started` event and no path insight | A path insight from `onboarding_step_viewed` filtered to the KYC step |
 | 9.1e | **No alerts.** Nothing will tell anyone that activation fell or rejections spiked. **Deferred by decision on 2026-10-24 to the follow-on plan** | PostHog alerts on the four named conditions, ideally added to the sync script so they are code too |
@@ -535,15 +558,17 @@ One line each: why it is not what was asked, and what would close it.
 
 ## Open items for Andy
 
-In priority order. Each one says exactly what to do and where. Four earlier items were answered on
-2026-10-24 and have moved into [Checkpoint J](#checkpoint-j-the-agreed-scope): the rejected-row
-deletion, the Phase 7 guardrails, the privacy manifest, and the one line of CI. What is left needs
-something only you can supply.
+In priority order. Each one says exactly what to do and where. Checkpoint J is built, so the four
+items it answered are gone from this list. What is left needs something only you, or another
+flow's owner, can supply.
 
-1. **Say go on Checkpoint J.** The scope is agreed and written down above, eight items. It is the
-   last thing between this work and an App Store submission, because J5 is the privacy manifest
-   Apple rejects builds without. **Action:** tell me to start J, and I will report it in the usual
-   format and ask before pushing.
+1. **Get the KYC, auth and banking data types into the privacy manifest and the label.** J5
+   declared what analytics sends. The app also collects a name, date of birth, **Social Security
+   number**, address, email, phone and bank account details, and none of that is declared yet. A
+   manifest that covers one tenth of the collection is a rejected submission at best.
+   **Action:** `FREDdocs/privacy-manifest-and-label.md` lists each missing data type and who owns
+   it. Tell me to write them if you would rather I drafted it, but it needs whoever knows those
+   flows to confirm the purposes.
 2. **Take the SSN retention question to counsel.** You are already doing this. It is listed here so
    it is not lost: keeping a rejected applicant's row means keeping that row's identity data, and
    nothing in J touches the column until there is an answer. **Action:** when counsel answers, tell
@@ -603,10 +628,10 @@ absent from `users` and therefore from every cohort built on it, including the f
 the outbox and is the only honest place to see rejections. **Never compute an approval rate from
 `v_activation_funnel`.**
 
-That is the state **today**. J8 keeps the row, which removes the distortion at the source, but it
-only fixes it going forward: any applicant rejected before J8 ships is already gone from `users`
-and cannot be recovered. Treat the funnel's approval rate as unusable for every cohort up to that
-date, whatever J8 does afterwards.
+**J8 fixed this on 2026-10-24, forward only.** The row is kept now, so new cohorts are complete,
+but anyone rejected before that date is already gone from `users` and cannot be recovered. Treat
+the funnel's approval rate as unusable for every cohort that starts before 2026-10-24, and read
+`v_kyc_outcomes` instead for any period.
 
 **Settlement events can be half an hour late.** They are stamped when the poll noticed, not when
 Alpaca says it happened (S7.6), so time-to-funded is accurate to about 30 minutes, not to the
@@ -620,6 +645,15 @@ from PostHog's own server. The sync script reads tiles from the dashboard instea
 the endpoint nothing breaks; if they change the dashboard payload shape, the script stops finding
 existing tiles and would create duplicates. A `--dry-run` would show that before it happened, which
 is why the runbook below says to run one first.
+
+**The guard is a deny-list, not a reviewer.** J1 and J2 catch a property that is *named* for
+something forbidden or whose *value* has a recognisable shape. They would not catch a genuinely
+new kind of identifying data under an innocent name with no shape: a free-text field called
+`label`, say, or a town name. Nothing sends either, and the taxonomy accepts no free text, but the
+filter is a backstop for a mistake, not a substitute for reading what a new property carries. The
+`$`-prefixed properties the vendor's SDK adds are also exempt from the value-shape half, because
+they are epochs and generated ids; the key deny-list still applies to them, which is what stops a
+`$email`.
 
 **Fourteen frontend specs fail, and they are not mine.** FRED-226. None is an analytics spec; they
 are component smoke tests and two swipe utilities. They were failing before this task and you told

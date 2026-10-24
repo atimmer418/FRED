@@ -9,7 +9,7 @@ check in CI fails the build if the taxonomy in the code and the per-event list i
 [analytics-events.md](analytics-events.md) ever disagree. This page summarises that one by kind, so
 it is kept true by review against it rather than by the check itself.
 
-**Last reviewed:** 2026-10-24. **Owner:** Andrew Timmer.
+**Last reviewed:** 2026-10-24 (second revision: the outbound filter now exists). **Owner:** Andrew Timmer.
 
 ---
 
@@ -133,6 +133,43 @@ drift, so no combination of the two can narrow a value further than one bucket.
 
 ---
 
+## The filter on the way out
+
+Nothing identifying is sent, and two independent things make that true.
+
+**The first is construction.** On the phone, an event's payload is a closed, typed vocabulary: to
+send an email you would have to widen a type first, and there is no property anywhere that accepts
+free text or a raw amount. On the server, each event is a hand-written map of banded values,
+checked against a fixed list of event names.
+
+**The second is a filter, because construction cannot catch a mistake made in good faith.** Every
+property is checked twice immediately before it leaves, on the phone and again on the server:
+
+- **By name.** A property named for something forbidden is dropped, whatever it holds: anything
+  containing email, phone, SSN or social security, a date of birth, a person's or institution's
+  name, an address, an account or routing number, a password or token, a raw amount or balance, an
+  IP address, a location, or a name ending in "text".
+- **By shape.** A property with an innocent name whose value looks like an email address, a
+  formatted or international phone number, a Social Security number, a run of eight or more
+  digits, or a JSON web token is dropped too. This is the half that catches a field called
+  `detail` or `ref`.
+
+A dropped property is **logged as an error** on the server and reported on a developer's console in
+a development build, and the event still goes with its remaining properties. The log and the
+console message name the property and which rule it broke, and never the value: writing it down
+would be the leak it was stripped to prevent.
+
+The taxonomy's own property names are exempt from the name check and from nothing else, because
+`amount_band` and `monthly_income_band` are the words "amount" and "income" and are also exactly
+how money is sent safely. Their values are still shape-checked. The exempt list is pinned by a
+build check to the list of properties the events actually declare, so it cannot quietly grow.
+
+The two copies of these rules, one in TypeScript and one in Java, are held identical by a test
+that reads both. A rule enforced on one side only would read as covered here while the other side
+sent whatever it liked.
+
+---
+
 ## Turning it off
 
 Settings contains **"Share anonymous usage data"**, on by default.
@@ -181,9 +218,16 @@ The analytics ledger rows in our own database survive that deletion by design: t
 opaque UUID and the non-identifying fields above, and they are what the money and compliance
 history is rebuilt from.
 
-This covers **every** way a user row is deleted, not only a closure the user asked for. An
-application the broker rejected and an administrative removal get the same deletion request, on the
-same path, in the same transaction.
+This covers **every** way a user row is deleted, not only a closure the user asked for: an
+administrative removal gets the same deletion request, on the same path, in the same transaction.
+
+**An application the broker rejects is no longer deleted at all.** Until 2026-10-24 a rejected
+applicant's row was removed automatically. It is now kept, marked `REJECTED`, because a registered
+adviser is expected to be able to produce the record of an application it declined, and because
+deleting it was irreversible and nobody had asked for it. Nothing is sent to PostHog about that
+person beyond the events already described, and no deletion is requested, because nothing was
+deleted. How long the identity data on a rejected application may be kept is with counsel as of
+2026-10-24; this page will say what they decide.
 
 ---
 
@@ -199,14 +243,9 @@ These are the gaps in this document, listed rather than quietly omitted:
    the public project key the events use, plus the numeric project id. Until both are set in the
    server environment, deletion requests are recorded and retried but never complete, and they
    sit visibly as PENDING rather than being silently marked done.
-3. **There is no key-pattern deny-list or value-shape filter on the way out.** Nothing identifying
-   is sent today, and that is enforced by construction rather than by a filter: the client's event
-   payloads are a closed, typed vocabulary that accepts no free text and no raw amount, and the
-   server's are hand-written maps of banded values checked against a fixed event list. What does
-   not exist is the backstop that would catch a future mistake, on either side. Until it does, a
-   new property is only as safe as the review that added it. **Approved for build on 2026-10-24**
-   as the next piece of work: the key deny-list and the value-shape filter on both sides, plus a
-   test that sends a forbidden payload and proves it never leaves.
+3. **Alerts and a daily metrics snapshot do not exist.** Neither affects what is sent; both are
+   listed because this page is also read as a statement of how carefully the data is handled, and
+   nothing today would tell us that an event stopped arriving.
 
 ---
 

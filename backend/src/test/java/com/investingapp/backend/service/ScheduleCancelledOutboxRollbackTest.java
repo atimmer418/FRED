@@ -268,7 +268,7 @@ class ScheduleCancelledOutboxRollbackTest {
     // --- The broker rejects the KYC submission --------------------------------------------------
 
     @Test
-    @DisplayName("a committed rejection cancels the schedule and the event outlives both")
+    @DisplayName("a committed rejection records the cancellation, keeps the row, and holds the schedule")
     void committedRejectionKeepsTheCancellation() {
         User user = givenCommittedUser();
         givenCommittedSchedule(user);
@@ -277,8 +277,16 @@ class ScheduleCancelledOutboxRollbackTest {
         transaction.executeWithoutResult(status ->
                 accountStatusService.handleRejected(userRepository.findById(id).orElseThrow()));
 
-        assertThat(userRepository.existsById(id)).isFalse();
-        assertThat(countSchedules()).isZero();
+        // Decision 8: the applicant and their plan are both kept. The schedule row therefore
+        // outlives the rejection, which is why it is explicitly held rather than left looking
+        // runnable: the event says the schedule stopped, and the table has to agree.
+        assertThat(userRepository.existsById(id)).isTrue();
+        assertThat(userRepository.findById(id).orElseThrow().getAccountStatus()).isEqualTo("REJECTED");
+        assertThat(countSchedules()).isEqualTo(1);
+        InvestmentSchedule held = investmentScheduleRepository
+                .findByUserOrderByCreatedAtDesc(userRepository.findById(id).orElseThrow()).get(0);
+        assertThat(held.getHoldReason()).isEqualTo(com.investingapp.backend.model.HoldReason.MANUAL_REVIEW);
+        assertThat(held.isReadyForInvestment(LocalDate.now())).isFalse();
 
         // Two events on this path: the decision, then the cancellation it caused.
         assertThat(outboxRows()).extracting(row -> row.get("event_name"))
@@ -316,7 +324,7 @@ class ScheduleCancelledOutboxRollbackTest {
         transaction.executeWithoutResult(status ->
                 accountStatusService.handleRejected(userRepository.findById(id).orElseThrow()));
 
-        assertThat(userRepository.existsById(id)).isFalse();
+        assertThat(userRepository.existsById(id)).isTrue();
         assertThat(outboxRows()).extracting(row -> row.get("event_name"))
                 .containsExactly("kyc_decided");
     }

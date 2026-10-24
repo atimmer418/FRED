@@ -2,6 +2,7 @@ package com.investingapp.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.investingapp.backend.model.HoldReason;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -32,7 +33,6 @@ public class AccountStatusService {
     private final InvestmentScheduleService investmentScheduleService;
     private final AnalyticsOutboxService analyticsOutboxService;
     private final AchRelationshipService achRelationshipService;
-    private final UserDeletionService userDeletionService;
     private final ObjectMapper objectMapper;
 
     public AccountStatusService(
@@ -44,8 +44,7 @@ public class AccountStatusService {
             PlaidToAlpacaService plaidToAlpacaService,
             InvestmentScheduleService investmentScheduleService,
             AnalyticsOutboxService analyticsOutboxService,
-            AchRelationshipService achRelationshipService,
-            UserDeletionService userDeletionService) {
+            AchRelationshipService achRelationshipService) {
         this.userRepository = userRepository;
         this.investmentScheduleRepository = investmentScheduleRepository;
         this.alpacaApiService = alpacaApiService;
@@ -55,7 +54,6 @@ public class AccountStatusService {
         this.investmentScheduleService = investmentScheduleService;
         this.analyticsOutboxService = analyticsOutboxService;
         this.achRelationshipService = achRelationshipService;
-        this.userDeletionService = userDeletionService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -133,46 +131,78 @@ public class AccountStatusService {
 
     /**
      * Handle an account that has been REJECTED.
-     * Records the decision, emails the user, then deletes the user through the one deletion path.
-     * A REJECTED account never reached ACH setup (attemptAchCreation only runs for ACTIVE users and
-     * an ACTIVE user is never re-polled), so the broker call inside that path is skipped and
-     * nothing talks to Alpaca from inside this transaction.
+     *
+     * Records the decision, cancels the schedule, emails the user, and KEEPS the user row with
+     * status REJECTED. It does not delete anyone.
+     *
+     * This used to hard-delete the applicant. That was wrong twice over. The discovery's decision
+     * 8 asked for the row to be kept and marked, for the recordkeeping an RIA is expected to be
+     * able to produce; and the standing rule is that no client record is hard-deleted without
+     * being asked first. A rejection is also the one deletion that cannot be undone by asking the
+     * user, because they never got an account to ask about.
+     *
+     * What the kept row changes, beyond the obvious: rejected users are now present in `users`, so
+     * they appear in the funnel's `signed_up` and the approval rate stops flattering itself. That
+     * only holds from here forward. Anyone rejected before this shipped is already gone, which is
+     * why FREDdocs/metrics.md still says not to read an approval rate from v_activation_funnel for
+     * an early cohort.
+     *
+     * `findUsersWithPendingAccountStatus` excludes REJECTED, so the poller stops re-deciding this
+     * user and the event cannot fire twice. Deleting a rejected applicant is still possible, by
+     * the admin verb, which is where a decision to delete belongs.
+     *
+     * The SSN column is deliberately untouched here. How long a rejected applicant's identity data
+     * may be kept is a question for counsel, not for this code, and it is open as of 2026-10-24.
      */
     @Transactional
     public void handleRejected(User user) {
-        logger.warn("Account REJECTED for user {}: sending rejection email and deleting user record",
-                user.getEmail());
+        logger.warn("Account REJECTED for user {}: sending rejection email and marking the record "
+                + "REJECTED", user.getEmail());
 
-        // Record the decision FIRST, while the user still has an id and a public_id to copy.
-        // Everything below runs in this same transaction, including the hard delete, so the event
-        // and the deletion land together or not at all. The outbox row has no foreign key to users
-        // and denormalises public_id, so it outlives the row it describes.
+        // Recorded first, and in this same transaction as the status write, so the event and the
+        // state it describes land together or not at all.
         recordKycDecision(user, "REJECTED");
 
-        // Notify the user before deleting their record
+        // Notify the user of the decision.
         emailService.sendEmail(
                 user.getEmail(),
                 "Your FRED account application was not approved",
                 "We're sorry, but we were unable to approve your FRED brokerage account application at this time. "
                 + "If you have questions, please contact our support team.");
 
-        // Same reasoning for the cancellation: recorded before anything is deleted, while the user
-        // still has an id and a public_id, and while the schedule still exists to be asked about.
-        // Unconditional, including on the deferred path below: the broker has rejected this
-        // application, so the schedule is cancelled now whether or not the row deletes land today.
+        // The broker has rejected the application, so the schedule stops. Recorded while the
+        // schedule still exists to be asked about.
         recordScheduleCancelled(user, ServerAnalyticsEvent.INITIATOR_SYSTEM,
                 ServerAnalyticsEvent.REASON_KYC_REJECTED);
+        holdSchedulesForRejection(user);
 
-        try {
-            userDeletionService.delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
-            logger.info("Hard-deleted user record for rejected user {}", user.getEmail());
-        } catch (DeletionDeferredException deferred) {
-            // Park the row as REJECTED: findUsersWithPendingAccountStatus excludes it, so the poller
-            // stops re-deciding, and the admin verb finishes the job once the money has settled.
-            user.setAccountStatus("REJECTED");
-            userRepository.save(user);
-            logger.error("alert.user_deletion.deferred user={} reason=KYC_REJECTED deferral={}",
-                    user.getId(), deferred.reason);
+        user.setAccountStatus("REJECTED");
+        userRepository.save(user);
+    }
+
+    /**
+     * Stops the rejected applicant's schedule, explicitly.
+     *
+     * This exists because the row now survives. While a rejection deleted the user, it deleted the
+     * schedule with them, and `schedule_cancelled` described something that had really gone. Now
+     * the row stays, so without this the event would say cancelled while the table said otherwise.
+     *
+     * It could not actually have invested: `isReadyForInvestment` requires an ACH relationship, and
+     * a rejected application never got one, because ACH is only created for an ACTIVE account and
+     * an ACTIVE account is never re-polled. That is an invariant two classes away, which is a thin
+     * thing to rest money movement on. A blocking hold says it here, where the rejection is known.
+     *
+     * A HOLD rather than a status change, because status and holds are orthogonal: the status is
+     * the user and bank lifecycle, and this is the system stopping a schedule the user never
+     * paused. MANUAL_REVIEW is the honest reason. A person decides what happens to a rejected
+     * applicant's plan; nothing here should quietly restart it, and a resume must not either.
+     */
+    private void holdSchedulesForRejection(User user) {
+        List<InvestmentSchedule> schedules = investmentScheduleRepository
+                .findByUserOrderByCreatedAtDesc(user);
+        for (InvestmentSchedule schedule : schedules) {
+            schedule.setHoldReason(HoldReason.MANUAL_REVIEW);
+            investmentScheduleRepository.save(schedule);
         }
     }
 

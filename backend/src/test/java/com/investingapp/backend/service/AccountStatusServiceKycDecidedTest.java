@@ -69,8 +69,6 @@ class AccountStatusServiceKycDecidedTest {
     private AnalyticsOutboxService analyticsOutboxService;
     @Mock
     private AchRelationshipService achRelationshipService;
-    @Mock
-    private UserDeletionService userDeletionService;
 
     @Captor
     private ArgumentCaptor<String> eventNameCaptor;
@@ -93,8 +91,7 @@ class AccountStatusServiceKycDecidedTest {
                 plaidToAlpacaService,
                 investmentScheduleService,
                 analyticsOutboxService,
-                achRelationshipService,
-                userDeletionService);
+                achRelationshipService);
 
         user = new User("kyc@fredvested.com");
         user.setId(42L);
@@ -161,8 +158,8 @@ class AccountStatusServiceKycDecidedTest {
     }
 
     @Test
-    @DisplayName("the rejection event is recorded before the user is deleted, while it still has an identity")
-    void rejectionIsRecordedBeforeTheHardDelete() {
+    @DisplayName("a rejected applicant keeps their row, marked REJECTED, and is never deleted")
+    void rejectionKeepsTheRow() {
         brokerSays("REJECTED");
         AtomicReference<String> identityAtRecordTime = new AtomicReference<>();
         when(analyticsOutboxService.record(anyString(), any(User.class), anyMap()))
@@ -174,27 +171,30 @@ class AccountStatusServiceKycDecidedTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        InOrder order = inOrder(analyticsOutboxService, userDeletionService);
-        order.verify(analyticsOutboxService)
-                .record(eq(ServerAnalyticsEvent.KYC_DECIDED), eq(user), anyMap());
-        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+        // Decision 8, and the standing rule that no client record is hard-deleted without asking.
+        // This used to call UserDeletionService; now nothing deletes a rejected applicant, and the
+        // row is the recordkeeping an RIA is expected to be able to produce.
+        assertThat(user.getAccountStatus()).isEqualTo("REJECTED");
+        verify(userRepository).save(user);
         verify(userRepository, never()).delete(any());
-        // The outbox copies both of these out of the user; neither can be recovered afterwards.
+        // Still recorded with a real identity, which is now simply the identity it keeps.
         assertThat(identityAtRecordTime.get()).isEqualTo("42|" + PUBLIC_ID);
     }
 
     @Test
-    @DisplayName("a deferred deletion parks the user as REJECTED so the poller stops re-deciding")
-    void deferredRejectionParksTheUserAsRejected() {
+    @DisplayName("the decision is recorded and the status written in one transaction, in that order")
+    void theDecisionIsRecordedBeforeTheStatusIsWritten() {
         brokerSays("REJECTED");
-        doThrow(new DeletionDeferredException("FUNDING_INITIATED"))
-                .when(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
 
         service.checkAndUpdateAccountStatuses();
 
         assertOneDecisionEvent("rejected", "1_3");
+        InOrder order = inOrder(analyticsOutboxService, userRepository);
+        order.verify(analyticsOutboxService)
+                .record(eq(ServerAnalyticsEvent.KYC_DECIDED), eq(user), anyMap());
+        order.verify(userRepository).save(user);
+        // The poller excludes REJECTED, so the event cannot fire a second time for this user.
         assertThat(user.getAccountStatus()).isEqualTo("REJECTED");
-        verify(userRepository).save(user);
         verify(userRepository, never()).delete(any());
     }
 

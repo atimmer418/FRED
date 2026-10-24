@@ -142,8 +142,8 @@ class AccountStatusServiceKycDecidedRollbackTest {
     }
 
     @Test
-    @DisplayName("a committed rejection leaves exactly one kyc_decided row, and it survives the user's deletion")
-    void committedRejectionKeepsTheEventAfterTheUserIsGone() {
+    @DisplayName("a committed rejection leaves exactly one kyc_decided row, and keeps the user row")
+    void committedRejectionKeepsTheEventAndTheUser() {
         User user = givenUserAwaitingDecision();
         Long id = user.getId();
         String publicId = user.getPublicId();
@@ -151,7 +151,11 @@ class AccountStatusServiceKycDecidedRollbackTest {
         transaction.executeWithoutResult(status ->
                 accountStatusService.handleRejected(userRepository.findById(id).orElseThrow()));
 
-        assertThat(userRepository.existsById(id)).isFalse();
+        // Decision 8: the applicant is kept and marked, not deleted. The outbox row would have
+        // survived a deletion anyway (no foreign key, denormalised public_id), which is what the
+        // rest of this test pins; what changed is that there is nothing to survive.
+        assertThat(userRepository.existsById(id)).isTrue();
+        assertThat(userRepository.findById(id).orElseThrow().getAccountStatus()).isEqualTo("REJECTED");
 
         List<Map<String, Object>> rows = outboxRowsFor(publicId);
         assertThat(rows).hasSize(1);

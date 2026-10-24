@@ -70,8 +70,6 @@ class AccountStatusServiceScheduleCancelledTest {
     private AnalyticsOutboxService analyticsOutboxService;
     @Mock
     private AchRelationshipService achRelationshipService;
-    @Mock
-    private UserDeletionService userDeletionService;
 
     @Captor
     private ArgumentCaptor<String> eventNameCaptor;
@@ -94,8 +92,7 @@ class AccountStatusServiceScheduleCancelledTest {
                 plaidToAlpacaService,
                 investmentScheduleService,
                 analyticsOutboxService,
-                achRelationshipService,
-                userDeletionService);
+                achRelationshipService);
 
         user = new User("rejected@fredvested.com");
         user.setId(7L);
@@ -147,9 +144,8 @@ class AccountStatusServiceScheduleCancelledTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        // The deletion still runs, as it always did. It simply cancels nothing, and nothing
-        // cancelled is not churn.
-        verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+        // Nothing cancelled is not churn. The row is marked REJECTED either way.
+        assertThat(user.getAccountStatus()).isEqualTo("REJECTED");
         verify(analyticsOutboxService, never())
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), any(), anyMap());
         // The decision itself is unaffected.
@@ -158,24 +154,23 @@ class AccountStatusServiceScheduleCancelledTest {
     }
 
     @Test
-    @DisplayName("the schedule's existence is read before the schedule is deleted")
-    void existenceIsReadBeforeTheDelete() {
+    @DisplayName("the schedule's existence is read before the status is written")
+    void existenceIsReadBeforeTheStatusWrite() {
         givenTheUserHasASchedule();
         brokerSays("REJECTED");
 
         service.checkAndUpdateAccountStatuses();
 
-        // Reading it afterwards would always answer 'no' and the event would never fire.
-        InOrder order = inOrder(investmentScheduleRepository, analyticsOutboxService, userDeletionService);
+        InOrder order = inOrder(investmentScheduleRepository, analyticsOutboxService, userRepository);
         order.verify(investmentScheduleRepository).existsByUser(user);
         order.verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), anyMap());
-        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
+        order.verify(userRepository).save(user);
     }
 
     @Test
-    @DisplayName("the cancellation is recorded before the user is deleted, while it still has an identity")
-    void cancellationIsRecordedBeforeTheHardDelete() {
+    @DisplayName("the cancellation is recorded with the user's real identity, in one transaction")
+    void cancellationIsRecordedWithTheRealIdentity() {
         givenTheUserHasASchedule();
         brokerSays("REJECTED");
         AtomicReference<String> identityAtRecordTime = new AtomicReference<>();
@@ -190,26 +185,24 @@ class AccountStatusServiceScheduleCancelledTest {
 
         service.checkAndUpdateAccountStatuses();
 
-        InOrder order = inOrder(analyticsOutboxService, userDeletionService);
+        InOrder order = inOrder(analyticsOutboxService, userRepository);
         order.verify(analyticsOutboxService)
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), anyMap());
-        order.verify(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
-        // The outbox copies both of these out of the user; neither can be recovered afterwards.
+        order.verify(userRepository).save(user);
         assertThat(identityAtRecordTime.get()).isEqualTo("7|" + PUBLIC_ID);
+        verify(userRepository, never()).delete(any());
     }
 
     @Test
-    @DisplayName("a deferred deletion still records the cancellation once and parks the user as REJECTED")
-    void deferredDeletionStillRecordsTheCancellation() {
+    @DisplayName("the cancellation is recorded exactly once, with system and kyc_rejected")
+    void theCancellationIsRecordedOnce() {
         givenTheUserHasASchedule();
         brokerSays("REJECTED");
-        doThrow(new DeletionDeferredException("SETTLEMENT_WINDOW"))
-                .when(userDeletionService).delete(user, UserDeletionService.DeletionReason.KYC_REJECTED);
 
         service.checkAndUpdateAccountStatuses();
 
-        // The broker has rejected the application, so the schedule is cancelled whether or not the
-        // rows can be removed today. The row is parked as REJECTED and the admin verb finishes it.
+        // The broker has rejected the application, so the schedule is cancelled. It is the system
+        // doing it, not the user, which is what keeps this out of the churn number.
         verify(analyticsOutboxService, times(1))
                 .record(eq(ServerAnalyticsEvent.SCHEDULE_CANCELLED), eq(user), propertiesCaptor.capture());
         assertThat(propertiesCaptor.getValue()).containsExactly(

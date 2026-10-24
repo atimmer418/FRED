@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { environment } from '../../../environments/environment';
 import { AnalyticsAdapter } from './analytics-adapter';
 import { ANALYTICS_ADAPTER } from './analytics-adapter.token';
+import { applyPrivacyGuard } from './analytics-privacy-guard';
 import {
   AnalyticsEvent,
   AppEnvironment,
@@ -311,8 +312,10 @@ export class AnalyticsService {
    * which is exactly what "screen name only, no ids" forbids. Query strings go too: they have
    * carried a dev-tools key.
    *
-   * A later checkpoint adds the full Phase 7 deny-list (forbidden key patterns and value-shape
-   * checks) on top of this.
+   * The URL pass runs FIRST and the deny-list second, which is the only order that works: a
+   * route id and a query string are forbidden content in a legitimate property, so scrubbing has
+   * to happen before anything judges the value. Reversed, `$current_url` would be stripped whole
+   * for carrying a long digit run, and every event would lose its screen.
    */
   private sanitize(props: ScalarProps): ScalarProps {
     const sanitized: ScalarProps = { ...props };
@@ -324,7 +327,20 @@ export class AnalyticsService {
       }
     }
 
-    return sanitized;
+    const guarded = applyPrivacyGuard(sanitized);
+    if (guarded.violations.length && !environment.production) {
+      for (const violation of guarded.violations) {
+        // error, not warn: this is a bug in the calling code, and it is the one kind of analytics
+        // problem that must be fixed before the build ships. The value is never printed.
+        console.error(
+          `[analytics] stripped '${violation.key}': its ${violation.kind} matches the ` +
+            `forbidden ${violation.rule} rule. Nothing identifying may be sent; band it, ` +
+            'collapse it to a fixed vocabulary, or do not send it.',
+        );
+      }
+    }
+
+    return guarded.props;
   }
 
   /**

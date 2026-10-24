@@ -416,20 +416,96 @@ export const SERVER_EVENT_NAMES = [
 export type ServerEventName = (typeof SERVER_EVENT_NAMES)[number];
 
 /**
- * Person properties. Safe, low-cardinality facts about a user, set at identify time.
+ * Person properties. Safe, low-cardinality facts about a user, attached to the person record.
+ *
+ * These five are what a FRED person record actually holds, and the SERVER sets all of them: every
+ * server event carries them as its `$set`, refreshed on each event so a person never drifts from
+ * the funnel. The client declares them so it cannot invent a sixth under a different name, and
+ * passes none itself today.
+ *
+ * This interface used to promise nine, including `signup_month` and four `acquisition_*` fields
+ * that nothing anywhere set, plus `bank_linked` and `has_active_recurring`, which were the
+ * server's `has_linked_bank` and `has_schedule` under second names. A type that describes data
+ * nobody sends is worse than no type: it reads as a list of what we collect. The acquisition
+ * fields come back when there is something to put in them, which needs the attribution work, not
+ * a type.
  *
  * Never on this list: name, email, phone, address, date of birth, SSN or any part of it, account
  * numbers, bank name, balance, portfolio value, contribution amount, income.
  */
 export interface PersonProperties {
-  /** Month the account was created, e.g. '2026-11'. Month, not day: day is near-unique. */
-  signup_month?: string;
-  acquisition_source?: string;
-  acquisition_campaign?: string;
-  acquisition_content?: string;
-  waitlist_member?: boolean;
-  founder_access?: boolean;
-  kyc_status?: 'not_started' | 'pending' | 'approved' | 'rejected';
-  bank_linked?: boolean;
-  has_active_recurring?: boolean;
+  /** `core`, `plus`, `pro`, or null when none is selected. */
+  tier?: 'core' | 'plus' | 'pro' | null;
+  /** The broker's richer statuses, collapsed to six. */
+  kyc_status?: 'not_started' | 'pending' | 'approved' | 'rejected' | 'action_required' | 'other';
+  has_linked_bank?: boolean;
+  has_schedule?: boolean;
+  has_funded?: boolean;
 }
+
+/**
+ * The keys of PersonProperties, for the privacy guard's exemption. Pinned to the interface above
+ * and to FREDdocs/analytics-events.md by `npm run test:events-documented`.
+ */
+export const PERSON_PROPERTY_KEYS = [
+  'tier',
+  'kyc_status',
+  'has_linked_bank',
+  'has_schedule',
+  'has_funded',
+] as const;
+
+/**
+ * Every property name the client taxonomy declares, in sorted order.
+ *
+ * This is the privacy guard's exemption list, and the reason the guard can forbid a key named for
+ * money at all: `monthly_income_band` is the word "income", and it is also exactly how an income
+ * is sent safely. A declared key is exempt from the key deny-list and from nothing else, so its
+ * value is still shape-checked.
+ *
+ * Pinned by `npm run test:events-documented`, which rebuilds this union from the event props
+ * above and fails if the two disagree. Adding a property to an event and forgetting this list is
+ * therefore a failing build rather than a silently stripped property.
+ */
+export const DECLARED_PROPERTY_KEYS = [
+  'action',
+  'app_environment',
+  'category',
+  'direction',
+  'display',
+  'enabled',
+  'exit',
+  'feature',
+  'goal_count',
+  'http_status',
+  'icon',
+  'included_outside_accounts',
+  'income_changed',
+  'input_method',
+  'invest_changed',
+  'is_rerun',
+  'max_slide_reached',
+  'monthly_income_band',
+  'monthly_invest_band',
+  'outcome',
+  'platform',
+  'preset_changed',
+  'progress',
+  'resumed',
+  'retry_available',
+  'return_preset',
+  'scenario',
+  'setting',
+  'slide_count',
+  'source',
+  'step',
+  'strategies_held',
+  'strategy',
+  'sub_step',
+  'surface',
+  'target_band',
+  'tier',
+  'value',
+  'years_to_freedom',
+  'years_to_target',
+] as const;

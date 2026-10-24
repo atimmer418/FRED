@@ -65,6 +65,50 @@ class ServerAnalyticsEventParityTest {
         }
     }
 
+    /**
+     * The server's property names, pinned to the document that counsel and an App Store reviewer
+     * read.
+     *
+     * Until this existed, the document's server event NAMES were checked by the frontend's
+     * `test:events-documented` and its PROPERTY lists were not checked by anything, because they
+     * are defined in Java and that script only parses TypeScript. The Checkpoint I review found
+     * three places where the document had drifted as a result. PROPERTY_KEYS is also the privacy
+     * guard's exemption list, so a stale entry here is not just a stale document: it is a key the
+     * guard stops judging.
+     */
+    @Test
+    @DisplayName("PROPERTY_KEYS is exactly what the events document says the server sends")
+    void propertyKeysMatchTheDocument() throws IOException {
+        Path doc = Paths.get("..", "FREDdocs", "analytics-events.md").toAbsolutePath().normalize();
+        assertTrue(Files.exists(doc), "cannot find the events document at " + doc);
+        String source = Files.readString(doc);
+
+        // The server events live in one table, one row per event: | `name` | `a`, `b` | when |
+        List<String> documented = new ArrayList<>();
+        for (String eventName : ServerAnalyticsEvent.ALL) {
+            Matcher row = Pattern
+                    .compile("\\n\\| `" + eventName + "` \\| ([^|]*)\\|")
+                    .matcher(source);
+            assertTrue(row.find(), eventName + " has no row in FREDdocs/analytics-events.md");
+            // Drop parenthesised glosses of VALUES, or they would be read as property names.
+            Matcher property = Pattern.compile("`([a-z0-9_]+)`")
+                    .matcher(row.group(1).replaceAll("\\([^)]*\\)", ""));
+            while (property.find()) {
+                if (!documented.contains(property.group(1))) {
+                    documented.add(property.group(1));
+                }
+            }
+        }
+
+        List<String> sorted = new ArrayList<>(documented);
+        java.util.Collections.sort(sorted);
+        assertEquals(sorted, ServerAnalyticsEvent.PROPERTY_KEYS,
+                "ServerAnalyticsEvent.PROPERTY_KEYS and the server event table in "
+                        + "FREDdocs/analytics-events.md disagree. Both have to change together: "
+                        + "the list is the privacy guard's exemption and the table is what counsel "
+                        + "was shown");
+    }
+
     @Test
     @DisplayName("the three billing events are defined but emitted by nothing")
     void billingEventsAreInert() throws IOException {

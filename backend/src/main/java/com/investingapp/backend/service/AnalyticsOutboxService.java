@@ -7,6 +7,7 @@ import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.AnalyticsOutboxRepository;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
+import com.investingapp.backend.util.AnalyticsPrivacyGuard;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +57,8 @@ public class AnalyticsOutboxService {
      * @param eventName one of ServerAnalyticsEvent's names
      * @param user      the user it happened to; its public_id becomes the distinct id
      * @param properties scalar values only, already banded. Never an amount, a name, an email, an
-     *                   account number or an institution.
+     *                   account number or an institution. Enforced, not assumed: see
+     *                   AnalyticsPrivacyGuard, which strips a forbidden property and says so.
      * @return the row written, or null when nothing was written
      */
     public AnalyticsOutboxEntry record(String eventName, User user, Map<String, Object> properties) {
@@ -82,8 +84,16 @@ public class AnalyticsOutboxService {
             entry.setEventName(eventName);
             entry.setPublicId(user.getPublicId());
             entry.setUserId(user.getId());
-            entry.setProperties(toJson(properties == null ? Map.of() : properties));
-            entry.setPersonProperties(toJson(personProperties(user)));
+            // The last thing before the row is written. Everything above this line is the
+            // caller's map, assembled next to the access tokens and the Social Security number
+            // that the same service has in scope; nothing in the type system would object to one
+            // of them being put in it. A forbidden property is stripped and logged, and the event
+            // still lands: it is the ledger of money moving, and throwing it away to protect a
+            // property we already removed would lose a real accounting row for nothing.
+            entry.setProperties(toJson(AnalyticsPrivacyGuard.scrub(
+                    eventName, "properties", properties == null ? Map.of() : properties)));
+            entry.setPersonProperties(toJson(AnalyticsPrivacyGuard.scrub(
+                    eventName, "person_properties", personProperties(user))));
             entry.setOccurredAt(LocalDateTime.now());
             entry.setStatus(AnalyticsOutboxEntry.STATUS_PENDING);
             entry.setConsentOptOutAtWrite(Boolean.TRUE.equals(user.getAnalyticsOptOut()));

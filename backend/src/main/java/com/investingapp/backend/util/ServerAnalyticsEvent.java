@@ -103,4 +103,49 @@ public final class ServerAnalyticsEvent {
 
     /** Every trial is two weeks, on every tier. */
     public static final int TRIAL_LENGTH_DAYS = 14;
+
+    /**
+     * Every property name the server's events carry, sorted.
+     *
+     * This is the privacy guard's exemption list, and the reason the guard can forbid a key named
+     * for money at all: `amount_band` and `monthly_income_band` are the words "amount" and
+     * "income", and they are also exactly how money is sent safely. A declared key is exempt from
+     * the key deny-list and from nothing else, so its value is still shape-checked.
+     *
+     * Pinned to FREDdocs/analytics-events.md by ServerAnalyticsEventParityTest, which is also the
+     * first thing that pins the server half of that document to the code at all: until now the
+     * document's event NAMES were checked and its property lists were not.
+     */
+    public static final List<String> PROPERTY_KEYS = List.of(
+            "amount_band",
+            "attempt",
+            "days_since_schedule_band",
+            "days_since_signup_band",
+            "days_since_trial_start_band",
+            "days_to_decision_band",
+            "frequency",
+            "initiator",
+            "is_first_billing",
+            "is_first_link",
+            "is_first_passkey",
+            "monthly_income_band",
+            "monthly_invest_band",
+            "outcome",
+            "reason",
+            "strategy",
+            "tier",
+            "transfer_number_band",
+            "trial_length_days",
+            "years_to_freedom");
+
+    /**
+     * The `$set` keys every server event carries. Mirrored by the client's PERSON_PROPERTY_KEYS,
+     * which exists so the phone cannot invent a sixth person property under another name.
+     */
+    public static final List<String> PERSON_PROPERTY_KEYS = List.of(
+            "tier",
+            "kyc_status",
+            "has_linked_bank",
+            "has_schedule",
+            "has_funded");
 }

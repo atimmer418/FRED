@@ -254,6 +254,81 @@ for (const vocabulary of VOCABULARIES) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// 4. The privacy guard's exemption list. It must be exactly the keys the taxonomy declares.
+// ---------------------------------------------------------------------------------------------
+
+// The guard forbids property names that look like money, an email or an id. The taxonomy's own
+// keys include `monthly_income_band` and `target_band`, so they are exempt from that check, and
+// the exemption is only safe while the list of exempt keys IS the list of declared keys. A key
+// added to an event and forgotten here would be stripped on its way out: an event that silently
+// loses a dimension, which is the hardest kind of analytics bug to notice. So it is a build
+// failure instead.
+const declaredListMatch = taxonomySource.match(
+  /export const DECLARED_PROPERTY_KEYS = \[([\s\S]*?)\] as const;/,
+);
+if (!declaredListMatch) {
+  failures.push('DECLARED_PROPERTY_KEYS is no longer declared in analytics-events.ts');
+} else {
+  const exempt = [...declaredListMatch[1].matchAll(/'([a-z0-9_$]+)'/g)].map((m) => m[1]);
+  const fromEvents = new Set();
+  for (const name of eventNames) {
+    for (const prop of taxonomyPropertiesFor(name) ?? []) {
+      fromEvents.add(prop);
+    }
+  }
+  const expected = [...fromEvents].sort();
+  for (const key of expected) {
+    if (!exempt.includes(key)) {
+      failures.push(
+        `the taxonomy declares the property \`${key}\` but DECLARED_PROPERTY_KEYS does not list ` +
+          'it, so the privacy guard would strip it on the way out',
+      );
+    }
+  }
+  for (const key of exempt) {
+    if (!fromEvents.has(key)) {
+      failures.push(
+        `DECLARED_PROPERTY_KEYS exempts \`${key}\` from the privacy guard, but no event carries ` +
+          'it. An exemption for a property nothing sends is a hole with no purpose',
+      );
+    }
+  }
+  if (exempt.join() !== [...exempt].sort().join()) {
+    failures.push('DECLARED_PROPERTY_KEYS is not in sorted order, which makes a diff of it unreadable');
+  }
+}
+
+// The person-property keys, pinned to the interface they describe. The guard exempts these too,
+// and the server sets them, so a rename on one side has to fail here rather than at run time.
+const personListMatch = taxonomySource.match(
+  /export const PERSON_PROPERTY_KEYS = \[([\s\S]*?)\] as const;/,
+);
+const personInterface = taxonomySource.match(/export interface PersonProperties \{([\s\S]*?)\n\}/);
+if (!personListMatch || !personInterface) {
+  failures.push('PERSON_PROPERTY_KEYS or the PersonProperties interface is no longer declared');
+} else {
+  const listed = [...personListMatch[1].matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]);
+  const declared = personInterface[1]
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+    .split(/[;\n]/)
+    .map((line) => line.trim().match(/^([a-z0-9_]+)\??\s*:/))
+    .filter(Boolean)
+    .map((m) => m[1]);
+  if (listed.join() !== declared.join()) {
+    failures.push(
+      `PERSON_PROPERTY_KEYS [${listed.join(', ')}] does not match the PersonProperties interface ` +
+        `[${declared.join(', ')}]`,
+    );
+  }
+  for (const key of declared) {
+    if (!docSource.includes(`\`${key}\``)) {
+      failures.push(`the person property \`${key}\` is not documented in FREDdocs/analytics-events.md`);
+    }
+  }
+}
+
 if (failures.length > 0) {
   console.error('FAIL: taxonomy and documentation disagree\n');
   for (const failure of failures) {
@@ -264,6 +339,6 @@ if (failures.length > 0) {
 
 console.log(
   `PASS: ${eventNames.length} client events and their properties, ${serverEventNames.length} ` +
-    `server events, and ${VOCABULARIES.length} vocabularies all match ` +
-    'FREDdocs/analytics-events.md',
+    `server events, ${VOCABULARIES.length} vocabularies, and the privacy guard's ` +
+    'exemption list all match FREDdocs/analytics-events.md',
 );

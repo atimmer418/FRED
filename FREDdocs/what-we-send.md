@@ -9,7 +9,7 @@ check in CI fails the build if the taxonomy in the code and the per-event list i
 [analytics-events.md](analytics-events.md) ever disagree. This page summarises that one by kind, so
 it is kept true by review against it rather than by the check itself.
 
-**Last reviewed:** 2026-10-23. **Owner:** Andrew Timmer.
+**Last reviewed:** 2026-10-24. **Owner:** Andrew Timmer.
 
 ---
 
@@ -204,7 +204,9 @@ These are the gaps in this document, listed rather than quietly omitted:
    payloads are a closed, typed vocabulary that accepts no free text and no raw amount, and the
    server's are hand-written maps of banded values checked against a fixed event list. What does
    not exist is the backstop that would catch a future mistake, on either side. Until it does, a
-   new property is only as safe as the review that added it.
+   new property is only as safe as the review that added it. **Approved for build on 2026-10-24**
+   as the next piece of work: the key deny-list and the value-shape filter on both sides, plus a
+   test that sends a forbidden payload and proves it never leaves.
 
 ---
 

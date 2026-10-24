@@ -91,6 +91,64 @@ This happened for real while building `V2` (the migration said `CHAR(36)`, the e
 
 To fix one: write a new migration that changes the column to match the entity. Do not edit history.
 
+## If a migration was renumbered after it had already run somewhere
+
+This happened on 2026-10-24 and cost a working local backend, so it is written down.
+
+The analytics branch carried its two migrations as `V6` and `V7`. Paycheck Autopilot's `V6` landed
+on `develop` first, so on merge the analytics pair was renumbered to `V7` and `V8`. Any database
+that had already applied them under the old numbers now disagrees with the files, and Flyway
+refuses to boot:
+
+```
+Validate failed: Migrations have failed validation
+Migration checksum mismatch for migration version 6
+-> Applied to database : 1593911986
+-> Resolved locally    : 1271936953
+```
+
+**Do not run `flyway repair` for this.** Repair rewrites the stored checksum to match the file,
+which would record Autopilot's `V6` as applied when its seven tables were never created. The boot
+would then fail on `ddl-auto=validate`, or worse, not fail and leave the schema short.
+
+The fix is to delete the two mis-numbered rows and let the migrations re-run under their shipped
+numbers. `V6`, `V7` and `V8` are all guarded with `information_schema` checks, so the two that
+really did run are no-ops the second time, and `V6` does its work for the first time:
+
+```sql
+DELETE FROM flyway_schema_history WHERE version='6' AND description='investment schedule status';
+DELETE FROM flyway_schema_history WHERE version='7' AND description='analytics person deletions';
+```
+
+Take a `mysqldump` first, then boot. Expect "Successfully applied 4 migrations ... now at version
+v8" (the fourth is the `v_schedule_churn` repeatable). Verify afterwards: history reads `1`..`8`
+in order, `investment_schedules` has both `status` and `hold_reason` and no `is_paused`, and the
+seven Autopilot tables exist.
+
+The one thing this loses is the original `installed_on` timestamps for those two rows, which now
+read as the day of the repair rather than the day they first ran. The alternative, renumbering the
+rows in place, keeps the timestamps but needs `out-of-order` migrations enabled permanently, which
+is a worse trade.
+
+**`api-dev` very likely needs this same repair**, because `develop` carried the old numbering at
+Checkpoint H, before the Autopilot merge. Check its `flyway_schema_history` before or during the
+next deploy: if version 6 reads "investment schedule status", apply the two deletes above against
+that database and expect Autopilot's `V6` to do real work on the next boot.
+
+## A property added to every profile cannot reach application-local.properties
+
+That file is gitignored, so a commit that adds a required property to the tracked profiles leaves
+local behind, and the boot fails on something that looks unrelated:
+
+```
+Could not resolve placeholder 'plaid.webhook.url' in value "${plaid.webhook.url}"
+```
+
+This is what `5dba233` did with `plaid.webhook.url`, `plaid.redirect.uri` and
+`plaid.link.customization`. When a commit adds a property to `application-dev.properties` and
+friends, add it to the local file by hand as well. The local values live beside the others in that
+file, with defaults so an unset environment variable does not break the boot.
+
 ## Before the next deploy to Railway dev
 
 `api-dev` currently runs `develop @ 7c0d5e8`. When this branch reaches it, the first boot will

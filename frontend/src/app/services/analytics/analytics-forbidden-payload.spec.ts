@@ -3,7 +3,15 @@ import { environment } from '../../../environments/environment';
 import { AnalyticsAdapter, AnalyticsAdapterConfig } from './analytics-adapter';
 import { ANALYTICS_ADAPTER } from './analytics-adapter.token';
 import { AnalyticsService } from './analytics.service';
-import { AnalyticsEvent, CLIENT_EVENT_NAMES, PersonProperties, ScalarProps } from './analytics-events';
+import {
+  AnalyticsEvent,
+  CLIENT_EVENT_NAMES,
+  DECLARED_PROPERTY_KEYS,
+  PERSON_PROPERTY_KEYS,
+  PersonProperties,
+  ScalarProps,
+} from './analytics-events';
+import { applyPrivacyGuard } from './analytics-privacy-guard';
 import { buildBeforeSend } from './posthog-before-send';
 
 /**
@@ -202,5 +210,124 @@ describe('a forbidden payload never leaves the device', () => {
       );
       expect(result!.properties!['$pathname']).toBe('/beneficiaries/edit/:id');
     });
+  });
+});
+
+/**
+ * The other direction, and the one that costs data rather than leaking it.
+ *
+ * The value-shape checks run over EVERY property, declared or not: decision 12's exemption covers
+ * a key's name and nothing else. So a declared property whose legitimate value happened to be a
+ * long run of digits, an e.164 number or a `###-###-####` shape would be stripped in silence, and
+ * the first sign of it would be a funnel with a hole in it.
+ *
+ * This table is every key the client taxonomy declares, with its COMPLETE legitimate value domain:
+ * the whole closed vocabulary for an enum, every band for a band, and the real range for a number.
+ * The last test refuses to let the table fall behind the taxonomy, so a new property cannot be
+ * added without someone stating here what it can hold.
+ */
+describe('the guard keeps every legitimate declared value', () => {
+  const AMOUNT_BANDS = [
+    'under_50', '50_99', '100_249', '250_499', '500_999', '1k_2499',
+    '2500_4999', '5k_9999', '10k_49k', '50k_249k', '250k_999k', '1m_plus',
+  ];
+  const COUNT_BANDS = ['0', '1', '2_3', '4_9', '10_plus'];
+  const YEARS_BANDS = ['under_1', '1_2', '3_5', '6_10', '11_20', 'over_20', 'never'];
+  const PERCENT_BANDS = ['0_9', '10_24', '25_49', '50_74', '75_99', '100'];
+  const TIERS = ['core', 'plus', 'pro', null];
+  const BOOLEANS = [true, false, null];
+
+  /** Every declared key against every value it is allowed to carry. */
+  const DOMAINS: Record<string, ReadonlyArray<string | number | boolean | null>> = {
+    action: [
+      'created', 'updated', 'completed', 'reopened', 'removed',
+      'adjusted_contribution', 'adjusted_retirement', 'changed_scenario', 'shared',
+      'opened_assumptions', 'shown', 'upgrade_tapped', 'dismissed',
+    ],
+    app_environment: ['local', 'dev', 'test', 'ci', 'prod'],
+    category: [
+      'network', 'auth_required', 'passkey', 'step_up_pin', 'bank_link', 'validation',
+      'save_failed', 'load_failed', 'document', 'chat', 'unavailable', 'unknown',
+    ],
+    direction: ['increase', 'decrease', null],
+    display: ['toast', 'inline_field', 'inline_banner', 'alert'],
+    enabled: BOOLEANS,
+    exit: ['cancel', 'done', 'stress_test', 'drawdown', 'upgrade'],
+    feature: [
+      'goals', 'rebalancing', 'monte_carlo', 'market_scenarios', 'optimal_drawdown',
+      'tax_loss_harvesting',
+    ],
+    goal_count: COUNT_BANDS,
+    // Every status an HTTP client can hand us, plus the null that means "no response at all".
+    http_status: [null, 0, 100, 204, 301, 400, 401, 403, 404, 409, 418, 422, 429, 499, 500, 502, 503, 504, 599],
+    icon: [
+      'home', 'health_and_safety', 'flag', 'balance', 'savings', 'school', 'directions_car',
+    ],
+    included_outside_accounts: BOOLEANS,
+    income_changed: BOOLEANS,
+    input_method: ['slider', 'typed', 'fetched', null],
+    invest_changed: BOOLEANS,
+    is_rerun: BOOLEANS,
+    // A deck has single digits of slides. The upper bound is deliberately absurd: if a deck ever
+    // had ten million slides the number would be stripped, and that is worth knowing here.
+    max_slide_reached: [0, 1, 7, 50, 9999999],
+    monthly_income_band: [...AMOUNT_BANDS, null],
+    monthly_invest_band: [...AMOUNT_BANDS, null],
+    outcome: ['applied', 'cancelled', 'failed', 'strong', 'moderate', 'risk'],
+    platform: ['ios', 'web'],
+    preset_changed: BOOLEANS,
+    progress: [...PERCENT_BANDS, null],
+    resumed: BOOLEANS,
+    retry_available: BOOLEANS,
+    return_preset: ['conservative', 'moderate', 'optimistic', null],
+    scenario: ['conservative', 'expected', 'aggressive', null],
+    setting: [
+      'app_lock', 'step_up_auth', 'analytics_consent', 'drip', 'rebalance_schedule',
+      'marketing_emails',
+    ],
+    slide_count: [1, 7, 50, 9999999],
+    source: ['orb', 'history'],
+    step: [
+      'get_started', 'survey_initial', 'fi_plan_results', 'auth_finalize', 'kyc_verification',
+      'link_plaid', 'investment_schedule', 'investment_confirmation',
+      'portfolio', 'outside', 'spend', 'duration',
+    ],
+    strategies_held: COUNT_BANDS,
+    strategy: ['yield', 'guardrails', 'sbloc', 'annuity', 'optimal_drawdown'],
+    sub_step: [null, 1, 2, 9999999],
+    surface: [
+      'onboarding', 'freedom_sheet', 'my_profile', 'goals', 'retirement_planning', 'monte_carlo',
+      'strategy_deck', 'settings', 'portfolio', 'chat', 'other',
+    ],
+    target_band: AMOUNT_BANDS,
+    tier: TIERS,
+    // The rebalance schedule slug, which is the only thing `value` carries today, plus the null
+    // every switch sends.
+    value: ['monthly', 'quarterly', 'semi_annual', 'annual', null],
+    years_to_freedom: YEARS_BANDS,
+    years_to_target: YEARS_BANDS,
+    // The five person properties the server sets.
+    kyc_status: ['not_started', 'pending', 'approved', 'rejected', 'action_required', 'other'],
+    has_linked_bank: BOOLEANS,
+    has_schedule: BOOLEANS,
+    has_funded: BOOLEANS,
+  };
+
+  Object.entries(DOMAINS).forEach(([key, values]) => {
+    it(`keeps every value '${key}' can carry`, () => {
+      for (const value of values) {
+        const { props, violations } = applyPrivacyGuard({ [key]: value });
+        expect(violations)
+          .withContext(`${key}=${String(value)} was stripped as ${violations[0]?.rule}`)
+          .toEqual([]);
+        expect(props[key]).toBe(value as never);
+      }
+    });
+  });
+
+  it('covers every declared key, so a new property cannot be added without declaring its domain', () => {
+    const covered = Object.keys(DOMAINS).sort();
+    const declared = [...DECLARED_PROPERTY_KEYS, ...PERSON_PROPERTY_KEYS].sort();
+    expect(covered).toEqual([...new Set(declared)].sort());
   });
 });

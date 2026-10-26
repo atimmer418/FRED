@@ -6,6 +6,8 @@ import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.AnalyticsOutboxRepository;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
+import com.investingapp.backend.util.AnalyticsBands;
+import com.investingapp.backend.util.AnalyticsPrivacyGuard;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -159,6 +162,99 @@ class AnalyticsOutboxForbiddenPayloadTest {
 
         assertTrue(entry.getProperties().contains("\"amount_band\":\"1k_2499\""));
         assertTrue(entry.getProperties().contains("\"days_since_schedule_band\":\"4_7\""));
+    }
+
+    /**
+     * The other direction, and the one that costs data rather than leaking it.
+     *
+     * The value-shape checks run over EVERY property, declared or not: decision 12's exemption
+     * covers a key's NAME and nothing else. So a declared property whose legitimate value happened
+     * to be a long run of digits, an e.164 number or a {@code ###-###-####} shape would be
+     * stripped in silence, and the first sign of it would be a funnel with a hole in it.
+     *
+     * This table is every key {@link ServerAnalyticsEvent#PROPERTY_KEYS} and
+     * {@link ServerAnalyticsEvent#PERSON_PROPERTY_KEYS} declare, with its COMPLETE legitimate
+     * value domain: the whole closed vocabulary for an enum, every band for a band, and the real
+     * range for a number. The band domains are read from AnalyticsBands rather than retyped, so a
+     * new band is covered the day it is added. The last test refuses to let the table fall behind
+     * the taxonomy, so a new property cannot be added without someone stating here what it holds.
+     *
+     * The client's half of this is in analytics-forbidden-payload.spec.ts.
+     */
+    private static final Map<String, List<Object>> LEGITIMATE_VALUES = legitimateValues();
+
+    private static Map<String, List<Object>> legitimateValues() {
+        List<Object> booleans = List.of(true, false);
+        List<Object> tiers = List.of("core", "plus", "pro");
+        List<Object> amounts = List.copyOf(AnalyticsBands.AMOUNT_BANDS);
+        List<Object> counts = List.copyOf(AnalyticsBands.COUNT_BANDS);
+        List<Object> days = List.copyOf(AnalyticsBands.DAY_BANDS);
+        List<Object> years = List.copyOf(AnalyticsBands.YEARS_BANDS);
+
+        Map<String, List<Object>> domains = new LinkedHashMap<>();
+        domains.put("amount_band", amounts);
+        domains.put("attempt", List.of("1", "2", "3_plus"));
+        domains.put("days_since_schedule_band", days);
+        domains.put("days_since_signup_band", days);
+        domains.put("days_since_trial_start_band", days);
+        domains.put("days_to_decision_band", days);
+        // InvestmentFrequency, lowercased by frequencySlug.
+        domains.put("frequency", List.of("weekly", "biweekly", "semi_monthly", "monthly"));
+        domains.put("initiator",
+                List.of(ServerAnalyticsEvent.INITIATOR_USER, ServerAnalyticsEvent.INITIATOR_SYSTEM));
+        domains.put("is_first_billing", booleans);
+        domains.put("is_first_link", booleans);
+        domains.put("is_first_passkey", booleans);
+        domains.put("monthly_income_band", amounts);
+        domains.put("monthly_invest_band", amounts);
+        // kyc_decided's outcomes, from AccountStatusService.kycOutcome.
+        domains.put("outcome", List.of("approved", "rejected", "needs_more_info"));
+        domains.put("reason", List.of(
+                ServerAnalyticsEvent.REASON_USER_REQUEST,
+                ServerAnalyticsEvent.REASON_BANK_CHANGE,
+                ServerAnalyticsEvent.REASON_ACH_CONFIRMED,
+                ServerAnalyticsEvent.REASON_ACCOUNT_CLOSED,
+                ServerAnalyticsEvent.REASON_KYC_REJECTED));
+        domains.put("strategy", List.of("yield", "guardrails", "sbloc", "annuity"));
+        domains.put("tier", tiers);
+        domains.put("transfer_number_band", counts);
+        // The only number the server sends, and it is a constant. The absurd upper bound is
+        // deliberate: a trial of ten million days would be stripped, and that is worth knowing.
+        domains.put("trial_length_days",
+                List.of(ServerAnalyticsEvent.TRIAL_LENGTH_DAYS, 1, 365, 9999999));
+        domains.put("years_to_freedom", years);
+        // The person properties, from AnalyticsOutboxService.
+        domains.put("kyc_status", List.of(
+                "not_started", "pending", "approved", "rejected", "action_required", "other"));
+        domains.put("has_linked_bank", booleans);
+        domains.put("has_schedule", booleans);
+        domains.put("has_funded", booleans);
+        return Map.copyOf(domains);
+    }
+
+    @Test
+    @DisplayName("every legitimate value of every declared property survives the guard")
+    void legitimateValuesSurvive() {
+        LEGITIMATE_VALUES.forEach((key, values) -> {
+            for (Object value : values) {
+                Map<String, Object> properties = new LinkedHashMap<>();
+                properties.put(key, value);
+                Map<String, Object> scrubbed =
+                        AnalyticsPrivacyGuard.scrub("kyc_decided", "properties", properties);
+                assertEquals(properties, scrubbed,
+                        key + "=" + value + " is a legitimate declared value and was stripped");
+            }
+        });
+    }
+
+    @Test
+    @DisplayName("the table covers every declared property, so a new one cannot skip it")
+    void theTableCoversEveryDeclaredKey() {
+        Set<String> declared = new java.util.TreeSet<>(ServerAnalyticsEvent.PROPERTY_KEYS);
+        declared.addAll(ServerAnalyticsEvent.PERSON_PROPERTY_KEYS);
+        assertEquals(declared, new java.util.TreeSet<>(LEGITIMATE_VALUES.keySet()),
+                "a property was added to ServerAnalyticsEvent without stating what it can hold; "
+                        + "state its whole legitimate domain in LEGITIMATE_VALUES");
     }
 
     @Test

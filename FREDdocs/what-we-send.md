@@ -164,6 +164,11 @@ The taxonomy's own property names are exempt from the name check and from nothin
 how money is sent safely. Their values are still shape-checked. The exempt list is pinned by a
 build check to the list of properties the events actually declare, so it cannot quietly grow.
 
+The filter errs toward dropping. Every property the taxonomy declares was checked, on 2026-10-25,
+against the complete list of values it is allowed to carry, to confirm that the filter removes
+nothing real: it does not, because every value sent is a short word from a fixed list, a band, or a
+small number. That check is a test, so it is re-run on every build.
+
 The two copies of these rules, one in TypeScript and one in Java, are held identical by a test
 that reads both. A rule enforced on one side only would read as covered here while the other side
 sent whatever it liked.

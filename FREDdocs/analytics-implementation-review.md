@@ -22,10 +22,11 @@ Several deferrals were given a home on 2026-10-24, and Checkpoint J then closed 
 The rows that are still open say **follow-on plan**, which names when the work happens without
 pretending it has happened.
 
-**Where the 236 rows stand after Checkpoint J:** 172 done, 26 deviated, 32 deferred, 2 withdrawn,
+**Where the 237 rows stand after Checkpoint J:** 173 done, 26 deviated, 32 deferred, 2 withdrawn,
 and 4 that are partly one and partly another and say so in place. Checkpoint J moved 7.1, 7.2,
 7.3, 7.4, 7.6, D12 and D8.2 from deferred or deviated to done, and corrected 1.5 and B.7, which
-this review had wrongly called unenforced.
+this review had wrongly called unenforced. Row 7.8 is new, added on 2026-10-25: the proof that the
+guard does not drop legitimate data.
 
 "Done" never means "seen working in production". Nothing here has run against a real beta user
 yet, which is why [what to check on the first real beta account](#5-what-to-check-on-the-first-real-beta-account)
@@ -124,19 +125,21 @@ Deferred by decision on 2026-10-24, with the scope each one needs. None is start
 
 ## Evidence: what was run for this review
 
-Every check below was run against the tree at `f794d62` on 2026-10-23, and re-run after
-Checkpoint J on 2026-10-24. The numbers in the table are the Checkpoint J run.
+Every check below was run against the tree at `f794d62` on 2026-10-23, re-run after Checkpoint J on
+2026-10-24, and extended on 2026-10-25 with the legitimate-value audit (7.8). The numbers in the
+table are the Checkpoint J run.
 
 | Check | Command | Result |
 |---|---|---|
-| Backend suite | `./gradlew cleanTest test` with `SPRING_DATASOURCE_URL` pointed at a scratch MySQL schema | **754 tests, 0 failures, 0 skipped.** The 97 database-gated tests really ran rather than skipping; counted from the JUnit XML reports. Checkpoint I's run was 720 |
-| Frontend suite | `ng test --watch=false --browsers=ChromeHeadlessNoSandbox` | **910 specs, 896 pass, 14 fail.** The same 14 FRED-226 failures as Checkpoint I, named at the end of this document; not one is an analytics spec. Checkpoint J added 81 passing specs |
+| Backend suite | `./gradlew cleanTest test` with `SPRING_DATASOURCE_URL` pointed at a scratch MySQL schema | **756 tests, 0 failures, 0 skipped.** The 97 database-gated tests really ran rather than skipping; counted from the JUnit XML reports. Checkpoint I's run was 720, Checkpoint J's 754, and 7.8 added the last two |
+| Frontend suite | `ng test --watch=false --browsers=ChromeHeadless` | **955 specs, 941 pass, 14 fail.** The same 14 FRED-226 failures as Checkpoint I, named at the end of this document; not one is an analytics spec. Checkpoint J added 81 passing specs and 7.8 added 45 more |
 | Taxonomy versus its document | `npm run test:events-documented` | **PASS:** 15 client events and their properties, 14 server events, 18 vocabularies, and the privacy guard's exemption list. Both new checks were negative-tested: a bogus exempt key and a missing one each fail the build |
 | Server event properties versus the document | by hand, every emit site read and diffed | All 14 match. This is the part no check covers |
 | Person properties versus the document | read `AnalyticsOutboxService.personProperties()` | All five match |
 | Dashboard sync | `sync-dashboards.mjs --project=667874` | Idempotent: 0 created, 4 updated, 15 tiles live |
 | Migration chain | rehearsed on a database at develop's V6 carrying Autopilot's shape | V7 and V8 applied, five row shapes backfilled correctly, re-ran clean, app booted with `ddl-auto=validate` passing |
 | Cross-language guard parity | `AnalyticsPrivacyGuardParityTest` | **PASS**, and negative-tested: changing one Java pattern by a single character fails it |
+| The guard does not drop real data (7.8) | the `DOMAINS` table in `analytics-forbidden-payload.spec.ts`; `LEGITIMATE_VALUES` in `AnalyticsOutboxForbiddenPayloadTest` | **PASS.** Every one of the 44 client and 25 server declared keys, against its complete legitimate value domain: nothing legitimate is stripped today. Negative-tested on each side by raising one numeric bound to eight digits, which fails with the key, the value and the rule named |
 | Type check and lint | `npx tsc --noEmit`; `npx ng lint`; `npm run test:lint-rule` | All clean. The lint-rule script was already in CI, contrary to what this review first said |
 | The privacy manifest reaches the bundle | `xcodebuild -workspace App.xcworkspace -scheme App -sdk iphonesimulator build` | **BUILD SUCCEEDED**, and the log shows `PrivacyInfo.xcprivacy` copied to `App.app/`. `plutil -lint` passes |
 
@@ -251,6 +254,7 @@ assumed from a file name. Where a claim rests on inspection rather than a test, 
 | 7.4 | The same guards in the Spring Boot publisher, which is more dangerous than the client | **done (J2)** | `util/AnalyticsPrivacyGuard.java`, called from `AnalyticsOutboxService.record()` on both the event properties and the `$set` | Identical rules, held identical by `AnalyticsPrivacyGuardParityTest`, which reads the TypeScript and fails on any drift. A violation is `logger.error` with the key and the rule, never the value |
 | 7.5 | A user-facing opt-out, honoured by client and server, enforced in the publisher | done | `V4__user_analytics_opt_out.sql`; `UserController.java:643`; `AnalyticsPublisherService.loadConsent()` | Stored server-side so it applies on every device; read **live** immediately before sending, so events recorded before the change are suppressed too. `AnalyticsConsentEndpointTest`, `AnalyticsPublisherServiceTest` |
 | 7.6 | ATT posture confirmed, privacy nutrition label declarations written into FREDdocs, `PrivacyInfo.xcprivacy` created | **done (J5), with one gap named below** | `frontend/ios/App/App/PrivacyInfo.xcprivacy`; `FREDdocs/privacy-manifest-and-label.md` | `NSPrivacyTracking` false, no tracking domains, product interaction and user id both **not linked**, UserDefaults declared CA92.1. Registered in the Xcode project and proven to reach the bundle: a simulator build copies it to `App.app/PrivacyInfo.xcprivacy`. **It declares analytics only**; the KYC, auth and banking data types are still owed |
+| 7.8 | **Added 2026-10-25 at Andy's request:** proof that the value-shape guard does not silently drop legitimate data | **done** | the `DOMAINS` table in `analytics-forbidden-payload.spec.ts`; `LEGITIMATE_VALUES` in `AnalyticsOutboxForbiddenPayloadTest` | Every declared key on both sides, enumerated against its **complete** legitimate value domain: whole closed vocabularies, every band, and the real numeric range. **No key is at risk today and nothing needed fixing.** A companion test fails if the table falls behind the taxonomy, so a new property cannot be added without someone stating what it can hold |
 | 7.7 | `FREDdocs/analytics-privacy-review.md` listing every property, its purpose and its retention, for counsel | deviated | `FREDdocs/what-we-send.md` | Checkpoint H commissioned a counsel-facing document under a different name. It covers destinations, the identifier, events by kind, banding, opt-out, retention and deletion. It is **not** a per-property purpose and retention table, and the legal flags from decision 8 and decision 9 are not collected in it |
 
 ### Phase 8: the MySQL metrics layer
@@ -574,24 +578,33 @@ flow's owner, can supply.
    nothing in J touches the column until there is an answer. **Action:** when counsel answers, tell
    me the retention rule and whether anything needs to clear, re-encrypt or age out that column, and
    it goes into the counsel-facing document along with the no-hard-deletes rule (D8.4, 7.7).
-3. **Provision the deletion credential.** Until it is set, every PostHog person deletion sits as
+3. **Repair `api-dev`'s Flyway history, or confirm it does not need it.** The analytics migrations
+   were renumbered behind Autopilot's V6, so any database that applied them under their old numbers
+   refuses to start with a checksum mismatch on versions 6 and 7. My local database failed exactly
+   this way and is now fixed. `develop` carried the old numbering at Checkpoint H, so **if that was
+   ever deployed, `api-dev` is broken the same way**. I cannot reach that database from here.
+   **Action:** try to boot the dev service. If Flyway fails on 6 or 7, run the two `DELETE`
+   statements in `FREDdocs/flyway-baseline.md` against a backup-first clone and then the real
+   database. Do **not** run `flyway repair`: it would record Autopilot's V6 as applied when its
+   seven tables were never created, and the damage would be silent.
+4. **Provision the deletion credential.** Until it is set, every PostHog person deletion sits as
    PENDING and we do not keep the promise `what-we-send.md` makes. **Action:** in PostHog, Settings
    then Personal API keys, create a key scoped to project 667874 with `person:read` and
    `person:write`. Set it on the dev Railway service as `POSTHOG_PERSONAL_API_KEY`, and set
    `POSTHOG_PROJECT_ID=667874` beside it. Neither is the public `phc_` key; do not reuse that one.
-4. **Turn the publisher on wherever you want events to flow.** `ANALYTICS_PUBLISHER_ENABLED`
+5. **Turn the publisher on wherever you want events to flow.** `ANALYTICS_PUBLISHER_ENABLED`
    defaults to **false**, so the outbox fills and nothing is sent. **Action:** set
    `ANALYTICS_PUBLISHER_ENABLED=true` and `POSTHOG_PROJECT_KEY=<the phc_ key>` on the dev Railway
    service. Check it worked with the `pending_count` column of `v_outbox_reconciliation`: it should
    stop growing.
-5. **Confirm the privacy policy and the App Store privacy label say analytics is on by default and
+6. **Confirm the privacy policy and the App Store privacy label say analytics is on by default and
    can be turned off.** Both live outside this repo, and J5 writes the nutrition-label answers that
    have to agree with them. **Action:** read them, or send them to me.
-6. **Set a CAC input, when the follow-on plan comes up.** LTV/CAC has no definition because it has
+7. **Set a CAC input, when the follow-on plan comes up.** LTV/CAC has no definition because it has
    no cost input. **Action:** decide where ad spend, tooling cost and an hours-based cost for
    content-driven users are recorded, even if it is a spreadsheet, and I will write the definition
    against it.
-7. **Decide when the follow-on plan runs**, and in what order. The five items are listed above with
+8. **Decide when the follow-on plan runs**, and in what order. The five items are listed above with
    their scope. Acquisition attribution is the one with an external dependency: it needs a spec for
    the landing page side, which is a different repo and out of my scope. **Action:** tell me which
    of the five to plan first, and whether to write `FREDdocs/specs/waitlist-lookup-api.md` for the
@@ -600,6 +613,17 @@ flow's owner, can supply.
 ---
 
 ## Known gaps and risks
+
+**The value guard's threshold is eight digits, and that is a judgement, not a law.** Any property
+value containing a run of eight or more digits is stripped, declared or not, because that is the
+shape of an unbanded SSN, an account number and a broker id. The 2026-10-25 audit (7.8) enumerated
+every declared property's legitimate domain on both sides and found **nothing at risk today**: every
+declared value is a short closed-vocabulary string, a band, or a number in the hundreds at most. The
+risk is forward-looking. The only type-unbounded declared values are the numeric ones (`http_status`,
+`sub_step`, `slide_count`, `max_slide_reached`, `trial_length_days`), and a future property carrying
+a timestamp, an epoch or a raw id would be dropped in silence. The two domain tables are the guard
+against that: they fail the build the day a legitimate value crosses the line, naming the key and
+the rule. Band anything that can grow instead of widening the threshold.
 
 **Instrumented but never seen working end to end.** `kyc_submitted`, `kyc_decided`,
 `first_ach_transfer_completed` and `ach_transfer_completed` have unit and rollback coverage and have

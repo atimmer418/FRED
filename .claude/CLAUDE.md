@@ -23,6 +23,16 @@ Read this at the start of any non-trivial development task. It contains:
 - Frontend conventions (services, components, auth patterns)
 - When and how to use builder/verifier agents
 
+### FREDdocs/analytics-roadmap.md
+Read this before touching anything to do with analytics, metrics, PostHog, or event tracking. It
+contains:
+- The scope split: app analytics is this repo (PostHog); landing page analytics is a separate repo
+  (Plausible) and **this repo never touches it or any lpapi host**
+- What is already built and live, in one paragraph
+- The sequence from here and the trigger for each step, including what is blocked on counsel
+- The standing rules: no PII or raw amounts, band anything that can grow, declare properties in both
+  taxonomies, schedule status and hold_reason are orthogonal, never run `flyway repair` on dev
+
 ### .claude/REFERENCES.md
 Consult this when you need to look something up or work on a specific domain. It contains:
 - Alpaca Broker API documentation URL — read before touching any Alpaca integration

@@ -1,5 +1,10 @@
 # Analytics layer: completion review
 
+> **Looking for what happens next rather than what exists?** Read
+> [analytics-roadmap.md](analytics-roadmap.md) first: it has the scope split between the app and the
+> landing page, the sequence from here with the trigger for each step, and the standing rules. This
+> document is the item-by-item record behind it.
+
 A mapping from what was asked to what exists, so the work can be verified without reading every
 diff. It covers the original analytics brief, the 13 decisions and 12 sections that answered the
 Phase 0 discovery, the scope change that removed subscriptions, and every checkpoint instruction

@@ -22,6 +22,13 @@ class GoalConfigCodecTest {
             """;
 
     @Test
+    void writesStrippedBigDecimalsAsPlainNumbers() {
+        String json = codec.write(new TargetConfig(new java.math.BigDecimal("4E+5"), 2030));
+
+        assertTrue(json.contains("\"targetAmount\":400000"), json);
+    }
+
+    @Test
     void parsesKidsConfigRoundTrip() {
         Object parsed = codec.parse(GoalType.KIDS, KIDS_JSON);
         assertInstanceOf(KidsConfig.class, parsed);

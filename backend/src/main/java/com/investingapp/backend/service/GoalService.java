@@ -266,6 +266,8 @@ public class GoalService {
         if (balance.signum() < 0 || balance.compareTo(MAX_AMOUNT) > 0) {
             throw new GoalValidationException("Enter a balance between $0 and $100,000,000.");
         }
+        requireScale(balance, "Enter a balance with at most 2 decimals.");
+        requireMonthly(request.getAnchorMonthly(), "Enter a monthly amount from $0 to $100,000,000 with at most 2 decimals.");
         Object config = codec.parse(request.getType(), request.getConfig());
         return switch (request.getType()) {
             case KIDS -> validateKids((KidsConfig) config, year);
@@ -374,10 +376,27 @@ public class GoalService {
         }
     }
 
+    private void requireScale(BigDecimal value, String message) {
+        if (value.stripTrailingZeros().scale() > 2) {
+            throw new GoalValidationException(message);
+        }
+    }
+
+    private void requireMonthly(BigDecimal value, String message) {
+        if (value == null || value.signum() < 0 || value.compareTo(MAX_AMOUNT) > 0
+                || value.stripTrailingZeros().scale() > 2) {
+            throw new GoalValidationException(message);
+        }
+    }
+
     private void requireAccountBalance(AccountState state) {
         BigDecimal balance = state.balance();
         if (balance == null || balance.signum() < 0 || balance.compareTo(MAX_AMOUNT) > 0) {
             throw new GoalValidationException("Enter an account balance between $0 and $100,000,000.");
+        }
+        if (state.anchorMonthly() != null) {
+            requireMonthly(state.anchorMonthly(),
+                    "Enter a monthly contribution from $0 to $100,000,000 with at most 2 decimals.");
         }
     }
 
@@ -392,7 +411,7 @@ public class GoalService {
     /** Normalizes the legacy values into the valid range first, then builds a CUSTOM goal from them. */
     private Goal buildImportedGoal(User user, GoalImportRequest.ImportedGoal legacy, int sortOrder) {
         int year = EasternTime.today().getYear();
-        int targetYear = Math.max(legacy.getTargetYear(), year);
+        int targetYear = Math.min(Math.max(legacy.getTargetYear(), year), year + 50);
         BigDecimal target = legacy.getTargetAmount().max(BigDecimal.ONE).min(MAX_AMOUNT)
                 .setScale(2, RoundingMode.HALF_UP);
         BigDecimal starting = legacy.getStartingValue().max(BigDecimal.ZERO)

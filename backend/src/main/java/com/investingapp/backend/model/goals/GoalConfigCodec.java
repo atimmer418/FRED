@@ -1,5 +1,6 @@
 package com.investingapp.backend.model.goals;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -22,6 +23,7 @@ public class GoalConfigCodec {
         this.mapper = appMapper.copy()
                 .registerModule(new JavaTimeModule())
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .enable(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN)
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 

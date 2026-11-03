@@ -27,6 +27,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -69,12 +70,7 @@ class GoalServiceTest {
         r.setType(type);
         r.setName("  My goal ");
         r.setIcon(icon);
-        // Round-trip through text like a real HTTP body; valueToTree would turn 400000 into 4E+5.
-        try {
-            r.setConfig(mapper.readTree(mapper.writeValueAsString(config)));
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        r.setConfig(mapper.valueToTree(config));
         r.setCurrentBalance(bd(balance));
         r.setAnchorMonthly(bd(monthly));
         r.setPlanRate(bd("0.0700"));
@@ -130,12 +126,18 @@ class GoalServiceTest {
     }
 
     @Test
-    void createStoresReserializedConfigNotTheRequestText() {
+    void createStoresReserializedConfigNotTheRequestText() throws Exception {
         stubSave();
-        HouseCarConfig config = new HouseCarConfig(bd("400000"), 20, year + 5);
-        Goal goal = service.create(user, houseRequest("400000", "0", "0"));
+        String requestText = "{ \"targetYear\" : " + (year + 5) + " ,  \"downPaymentPct\":20, \"price\": 400000.00 }";
+        GoalRequest r = houseRequest("400000", "0", "0");
+        r.setConfig(mapper.readTree(requestText));
 
-        assertEquals(codec.write(config), goal.getConfigJson());
+        Goal goal = service.create(user, r);
+
+        String expected = codec.write(codec.parse(GoalType.HOUSE, r.getConfig()));
+        assertEquals(expected, goal.getConfigJson());
+        assertNotEquals(requestText, goal.getConfigJson());
+        assertNotEquals(r.getConfig().toString(), goal.getConfigJson());
     }
 
     @Test
@@ -429,5 +431,42 @@ class GoalServiceTest {
         assertEquals(year, config.targetYear());
         assertEquals("flag", goal.getIcon());
         assertEquals(0, goal.getCurrentBalance().signum());
+    }
+
+    @Test
+    void importClampsFarFutureTargetYear() {
+        stubSave();
+        List<Goal> saved = service.importLegacy(user, importOf(legacy("a", "flag", "1000", 2099, "0")));
+
+        TargetConfig config = (TargetConfig) codec.parse(GoalType.CUSTOM, saved.get(0).getConfigJson());
+        assertEquals(year + 50, config.targetYear());
+    }
+
+    @Test
+    void kidsRejectNegativeAccountAnchorMonthly() {
+        KidsConfig config = kids("1000", "1000", kid("Sam", year - 2, acct("0", "-5"), acct("0", "0")));
+
+        assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+    }
+
+    @Test
+    void rejectsOutOfRangeTopLevelAnchorMonthlyAndBalanceScale() {
+        assertThrows(GoalValidationException.class,
+                () -> service.create(user, houseRequest("400000", "0", "100000001")));
+        assertThrows(GoalValidationException.class,
+                () -> service.create(user, houseRequest("400000", "0", "10.005")));
+        assertThrows(GoalValidationException.class,
+                () -> service.create(user, houseRequest("400000", "10.005", "0")));
+    }
+
+    @Test
+    void updateRejectsChangingTheGoalType() {
+        Goal custom = new Goal();
+        custom.setId(3L);
+        custom.setType(GoalType.CUSTOM);
+        when(goalRepository.findByIdAndUser(3L, user)).thenReturn(Optional.of(custom));
+
+        assertThrows(GoalValidationException.class,
+                () -> service.update(user, 3L, houseRequest("400000", "0", "0")));
     }
 }

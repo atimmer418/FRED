@@ -67,4 +67,25 @@ export class InvestmentFrequencyUtils {
     const monthlyCents = Math.floor((cents * factorHundredths + 50) / 100);
     return monthlyCents / 100;
   }
+
+  /**
+   * Converts a monthly amount to what one paycheck of the given frequency should carry.
+   * Mirror of InvestmentFrequency.fromMonthly on the backend: monthly divided by the
+   * paychecks-per-month factor, rounded to cents HALF_UP. Returns null for an unknown or
+   * missing frequency, and 0 for a zero or negative monthly amount.
+   */
+  static toPerPaycheckEquivalent(monthly: number, frequency: string | null | undefined): number | null {
+    const key = InvestmentFrequencyUtils.parse(frequency);
+    if (!key) return null;
+    if (!monthly || monthly <= 0) return 0;
+
+    const factorHundredths = FREQUENCY_FACTOR_HUNDREDTHS[key];
+
+    // Per-paycheck cents = monthlyCents x 100 / factor. HALF_UP means floor(x + 0.5),
+    // which is floor((2N + F) / 2F) in integers, so no floating-point drift.
+    const monthlyCents = Math.round(monthly * 100);
+    const numerator = monthlyCents * 100;
+    const perPaycheckCents = Math.floor((2 * numerator + factorHundredths) / (2 * factorHundredths));
+    return perPaycheckCents / 100;
+  }
 }

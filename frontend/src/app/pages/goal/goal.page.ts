@@ -69,7 +69,11 @@ export class GoalPage implements OnInit {
       this.mode.set('setup');
       this.form.set(defaultForm(typeParam, new Date()));
       if (await this.isTierGated()) {
-        await this.openMultiGoalNudge();
+        const role = await this.openMultiGoalNudge();
+        if (role === 'upgrade') {
+          // No IAP flow yet: mirrors my-profile's upgradeToPlusClicked() stub.
+          console.log('[GoalPage] Plus upgrade requested');
+        }
         this.goBack();
         return;
       }
@@ -225,19 +229,22 @@ export class GoalPage implements OnInit {
     }
     const active = this.goalsService.goals().filter(g => !g.completed).length;
     if (active < 1) return false;
+    // No data (timeout or error): fail open. The backend enforces the limit with a 403 TIER_LIMIT.
     const progress = await firstValueFrom(
       this.authService.userProgress$.pipe(
         filter(p => !!p),
         take(1),
         timeout(3000),
-        catchError(() => of(null)),
+        catchError(() => of(undefined)),
       ),
     );
+    if (progress === undefined) return false;
+    // Real data with a missing or unknown tier counts as not Plus/Pro.
     const tier = progress?.selectedTier;
     return !(tier === 'plus' || tier === 'pro');
   }
 
-  private async openMultiGoalNudge(): Promise<void> {
+  private async openMultiGoalNudge(): Promise<string | undefined> {
     const modal = await this.modalCtrl.create({
       component: McInfoSheetComponent,
       componentProps: {
@@ -250,6 +257,7 @@ export class GoalPage implements OnInit {
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
-    await modal.onDidDismiss();
+    const { role } = await modal.onDidDismiss();
+    return role;
   }
 }

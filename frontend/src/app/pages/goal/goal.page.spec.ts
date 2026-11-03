@@ -31,19 +31,19 @@ describe('GoalPage (setup step)', () => {
 
   async function create(
     params: Record<string, string>,
-    opts: { goals?: Goal[]; loaded?: Goal[]; tier?: string } = {},
+    opts: { goals?: Goal[]; loaded?: Goal[]; tier?: string; noProgress?: boolean; dismissRole?: string } = {},
   ): Promise<ComponentFixture<GoalPage>> {
     goals = signal<Goal[]>(opts.goals ?? []);
     load = jasmine.createSpy('load').and.callFake(() => {
       if (opts.loaded) goals.set(opts.loaded);
       return of(goals());
     });
-    progress = new BehaviorSubject<{ selectedTier: string } | null>({ selectedTier: opts.tier ?? 'plus' });
+    progress = new BehaviorSubject<{ selectedTier: string } | null>(opts.noProgress ? null : { selectedTier: opts.tier ?? 'plus' });
     navCtrl = jasmine.createSpyObj<NavController>('NavController', ['navigateBack']);
     modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
     modalCtrl.create.and.resolveTo({
       present: async () => {},
-      onDidDismiss: async () => ({ role: undefined }),
+      onDidDismiss: async () => ({ role: opts.dismissRole }),
     } as unknown as HTMLIonModalElement);
 
     await TestBed.configureTestingModule({
@@ -64,7 +64,8 @@ describe('GoalPage (setup step)', () => {
       .compileComponents();
 
     const fixture = TestBed.createComponent(GoalPage);
-    await fixture.componentInstance.ngOnInit();
+    fixture.detectChanges(); // runs ngOnInit once
+    await fixture.whenStable();
     fixture.detectChanges();
     return fixture;
   }
@@ -157,5 +158,19 @@ describe('GoalPage (setup step)', () => {
     expect(fixture.componentInstance.ready()).toBeFalse();
     expect(fixture.nativeElement.querySelector('.gl-card')).toBeNull();
     expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+  });
+
+  it('still navigates back when the nudge is dismissed with the upgrade role', async () => {
+    spyOn(console, 'log');
+    await create({ type: 'HOUSE' }, { goals: [houseGoal(1)], tier: 'core', dismissRole: 'upgrade' });
+    expect(console.log).toHaveBeenCalledWith('[GoalPage] Plus upgrade requested');
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+  });
+
+  it('fails open and renders the form when user progress never arrives', async () => {
+    const fixture = await create({ type: 'HOUSE' }, { goals: [houseGoal(1)], noProgress: true });
+    expect(modalCtrl.create).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.ready()).toBeTrue();
+    expect(fixture.nativeElement.querySelector('.gl-card')).not.toBeNull();
   });
 });

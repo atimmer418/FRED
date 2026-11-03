@@ -288,8 +288,8 @@ export function validateForm(form: GoalForm, now: Date): Record<string, string> 
         const y = row.birthYear;
         if (y != null && currentYear - y >= 18) {
           errors[`kid.${i}.birthYear`] = 'Already 18 or older. Use Something else with a target year instead.';
-        } else if (y == null || y < currentYear - 17 || y > currentYear + 1) {
-          errors[`kid.${i}.birthYear`] = `Enter a year from ${currentYear - 17} to ${currentYear + 1}.`;
+        } else if (y == null || y < currentYear - 17 || y > currentYear + 10) {
+          errors[`kid.${i}.birthYear`] = `Enter a year from ${currentYear - 17} to ${currentYear + 10}.`;
         }
       });
       break;

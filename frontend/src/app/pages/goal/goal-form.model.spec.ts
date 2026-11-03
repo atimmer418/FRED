@@ -57,6 +57,15 @@ describe('goal-form.model', () => {
       .toBe('Already 18 or older. Use Something else with a target year instead.');
   });
 
+  it('accepts a birth year up to ten years out and rejects eleven', () => {
+    const f = defaultForm('KIDS', NOW);
+    f.kids.plan529Target = 10_000;
+    f.kids.kids[0] = { label: 'Kid 1', birthYear: 2036, birthMonth: null, undecided: false };
+    expect(validateForm(f, NOW)['kid.0.birthYear']).toBeUndefined();
+    f.kids.kids[0].birthYear = 2037;
+    expect(validateForm(f, NOW)['kid.0.birthYear']).toBe('Enter a year from 2009 to 2036.');
+  });
+
   it('requires at least one kids target', () => {
     const f = defaultForm('KIDS', NOW);
     expect(validateForm(f, NOW)['kidsTargets']).toBe('Enter at least one target for your kids.');

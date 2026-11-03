@@ -1,0 +1,19 @@
+<div class="gs-body">
+  <div class="gs-handle"></div>
+  <h3>What are you saving for?</h3>
+
+  <div class="gtp-grid">
+    <button
+      *ngFor="let tile of tiles"
+      class="gtp-tile"
+      type="button"
+      (click)="pick(tile.type)"
+    >
+      <span class="gtp-icon"><span class="material-symbols-outlined">{{ tile.icon }}</span></span>
+      <span class="gtp-title">{{ tile.title }}</span>
+      <span class="gtp-line">{{ tile.line }}</span>
+    </button>
+  </div>
+
+  <button class="gs-cancel" type="button" (click)="close()">Cancel</button>
+</div>

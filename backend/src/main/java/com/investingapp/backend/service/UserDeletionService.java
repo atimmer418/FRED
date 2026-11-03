@@ -5,6 +5,7 @@ import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.BeneficiaryRepository;
 import com.investingapp.backend.repository.DripExecutionRepository;
+import com.investingapp.backend.repository.GoalRepository;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.InvestmentTradeRepository;
@@ -30,8 +31,8 @@ import java.util.Optional;
  * and the transaction itself is a TransactionTemplate with default REQUIRED propagation, so a
  * caller that is already inside a transaction (the status poller) commits or rolls back as one.
  *
- * <p>Rows purged here are the ones with a foreign key to users and no ON DELETE CASCADE (V1), plus
- * the webhook inbox. Phase 2 tables created by V6 cascade on their own; ach_authorizations has no
+ * <p>Rows purged here are the ones with a foreign key to users and no ON DELETE CASCADE (V1, and
+ * goals from V9), plus the webhook inbox. Phase 2 tables created by V6 cascade on their own; ach_authorizations has no
  * writer in Phase 0 and detaches through ON DELETE SET NULL.
  */
 @Service
@@ -57,6 +58,7 @@ public class UserDeletionService {
     private final AlpacaApiService alpacaApiService;
     private final EncryptionService encryptionService;
     private final AnalyticsPersonDeletionService analyticsPersonDeletionService;
+    private final GoalRepository goalRepository;
     private final TransactionTemplate deleteTx;
 
     public UserDeletionService(
@@ -73,8 +75,10 @@ public class UserDeletionService {
             AlpacaApiService alpacaApiService,
             EncryptionService encryptionService,
             AnalyticsPersonDeletionService analyticsPersonDeletionService,
+            GoalRepository goalRepository,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
+        this.goalRepository = goalRepository;
         this.executionRepository = executionRepository;
         this.tradeRepository = tradeRepository;
         this.dripExecutionRepository = dripExecutionRepository;
@@ -156,6 +160,7 @@ public class UserDeletionService {
             investmentScheduleRepository.deleteAllByUser(user);
             userSessionRepository.deleteAllByUserId(userId);
             portfolioRepository.findByUser(user).ifPresent(portfolioRepository::delete);
+            goalRepository.deleteAllByUser(user);
             userRepository.delete(user);
         });
         logger.info("User deleted user={} reason={}", userId, reason);

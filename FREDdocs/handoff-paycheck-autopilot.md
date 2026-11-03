@@ -173,15 +173,16 @@ moved into `AchRelationshipServiceTest.firstAdoptionNeverRestartsAScheduleTheUse
 
 ---
 
-## 5. Migration numbers: **your next one is V9**
+## 5. Migration numbers: **your next one is V10**
 
 | Version | Owner |
 | --- | --- |
 | `V6__paycheck_autopilot.sql` | Paycheck Autopilot Phase 0 (yours, untouched) |
 | `V7__investment_schedule_status.sql` | analytics (the status replacement) |
 | `V8__analytics_person_deletions.sql` | analytics (vendor person-deletion queue) |
+| `V9__goals.sql` | goals v3 (2026-11-02) |
 
-**Start at `V9`.** Check `backend/src/main/resources/db/migration/` before you name it: this
+**Start at `V10`.** Check `backend/src/main/resources/db/migration/` before you name it: this
 collision happened once already, because two branches both chose V6, and git merges that cleanly
 (different filenames) while Flyway refuses to start. The failure only appears at boot, so a
 duplicate number will not be caught by tests or review.

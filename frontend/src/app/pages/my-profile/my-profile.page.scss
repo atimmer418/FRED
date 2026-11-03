@@ -420,7 +420,6 @@ $grad-z:    #0e3a96;
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
 .goals-card {
-  // Needed so the veil (position:absolute) clips to the card boundary.
   overflow: hidden;
 }
 
@@ -512,8 +511,9 @@ $grad-z:    #0e3a96;
 
   @media (prefers-reduced-motion: reduce) { transition: none; }
 
-  &.ok   { background: linear-gradient(90deg, #34d399, #16a34a); }
-  &.late { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  &.ok      { background: linear-gradient(90deg, #34d399, #16a34a); }
+  &.late    { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  &.neutral { background: linear-gradient(90deg, #93c5fd, #2563eb); }
 }
 
 .goal-right {
@@ -525,8 +525,9 @@ $grad-z:    #0e3a96;
   font-size: 11px;
   font-weight: 800;
 
-  &.ok   { color: #16a34a; }
-  &.late { color: #b45309; }
+  &.ok      { color: #16a34a; }
+  &.late    { color: #b45309; }
+  &.neutral { color: #2563eb; }
 }
 
 .fred-invests-badge {
@@ -572,47 +573,6 @@ $grad-z:    #0e3a96;
   font-weight: 500;
   color: #b3bccb;
   line-height: 1.55;
-}
-
-// Frosted veil over extra-goals area (Piggy tier)
-.goals-veil {
-  position: absolute;
-  inset: 0;
-  background: rgba(248, 250, 252, 0.6);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-  z-index: 5;
-  -webkit-tap-highlight-color: transparent;
-
-  @media (prefers-reduced-motion: reduce) {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: rgba(248, 250, 252, 0.9);
-  }
-
-  .material-symbols-outlined { font-size: 22px; color: #4553d8; }
-}
-
-.gv-title {
-  font-size: 12.5px;
-  font-weight: 800;
-  color: $text;
-  text-align: center;
-  padding: 0 16px;
-}
-
-.gv-sub {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: $gray;
-  text-align: center;
-  padding: 0 16px;
 }
 
 // ─── Tax Loss Harvesting ───────────────────────────────────────────────────────

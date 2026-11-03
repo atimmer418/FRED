@@ -176,8 +176,135 @@
 
       <!-- Step 2: plan view -->
       <ng-container *ngIf="step() === 2">
-        <!-- TODO(Task 11): plan view, save paths and my-profile integration -->
-        <div class="gl-card"><p class="gl-helper">Plan view arrives in Task 11.</p></div>
+        <ng-container *ngIf="view() as v">
+
+          <!-- Hero: the monthly figure -->
+          <div class="gl-hero">
+            <div class="gl-hero-amount">{{ fmtMoney(v.monthlyTotal) }}<span class="gl-hero-unit">/mo</span></div>
+            <p class="gl-hero-paycheck" *ngIf="v.perPaycheck !== null">about {{ fmtMoney(v.perPaycheck) }} a paycheck</p>
+            <p class="gl-hero-headline">{{ v.headline }}</p>
+          </div>
+
+          <!-- Return assumption (vacation money never grows, so it has none) -->
+          <div class="gl-card gl-rate" *ngIf="form().type !== 'VACATION'">
+            <ng-container *ngIf="v.rateKind === 'market'; else cashRate">
+              <div class="gl-rate-head">
+                <span class="gl-label">Return assumption, shared with your Freedom Date</span>
+                <button type="button" class="gl-reset" *ngIf="!isDefaultRate()" (click)="resetRate()">Reset to standard</button>
+              </div>
+              <div class="fd-scenario-chips">
+                <button type="button" *ngFor="let s of returnScenarios"
+                        [class.on]="selectedRate() === s.rate" (click)="selectRate(s.rate)">{{ s.label }}</button>
+              </div>
+            </ng-container>
+            <ng-template #cashRate>
+              <p class="gl-cash-note">Planned as cash at about 4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
+            </ng-template>
+          </div>
+
+          <!-- Collapsed inputs -->
+          <button type="button" class="gl-inputs-row" (click)="backToInputs()">
+            <span class="gl-inputs-text">{{ inputsSummary() }}</span>
+            <span class="gl-inputs-edit">Edit</span>
+          </button>
+
+          <p class="gl-reason" *ngIf="v.reasonLine">{{ v.reasonLine }}</p>
+
+          <!-- Status (edit mode) -->
+          <div class="gl-status" *ngIf="statusLine() as line" [class.behind]="v.status.kind === 'behind'">
+            <p class="gl-status-line">{{ line }}</p>
+            <p class="gl-catchup" *ngIf="catchUpLine() as catchUp">{{ catchUp }}</p>
+            <p class="gl-stale" *ngIf="showUpdateBalance()">Update your balance</p>
+          </div>
+
+          <!-- KIDS: one card per account, each kid on demand -->
+          <ng-container *ngIf="v.kids">
+            <div class="gl-card gl-account" *ngFor="let acct of v.kids; trackBy: trackAccount">
+              <div class="gl-account-title">{{ acct.label }}</div>
+              <p class="gl-account-line">{{ accountLine(acct.totals) }}</p>
+              <button type="button" class="gl-link" (click)="toggleKidDetails(acct.account)">
+                {{ kidDetailsOpen()[acct.account] ? 'Hide each kid' : 'Show each kid' }}
+              </button>
+
+              <ng-container *ngIf="kidDetailsOpen()[acct.account]">
+                <div class="gl-kid-card" *ngFor="let row of acct.perKid; let i = index; trackBy: trackIndex">
+                  <div class="gl-kid-name">{{ row.label }}</div>
+                  <div class="gl-ritual">
+                    <span>Every month</span><b>{{ fmtMoney(row.plan.monthly) }}</b>
+                  </div>
+                  <div class="gl-ritual" *ngIf="row.plan.birthdayLump > 0">
+                    <span *ngIf="!row.relative">Every birthday</span>
+                    <span *ngIf="row.relative">Every summer <small>(becomes the birthday gift once they arrive)</small></span>
+                    <b>{{ fmtMoney(row.plan.birthdayLump) }}</b>
+                  </div>
+                  <div class="gl-ritual" *ngIf="row.plan.newYearLump > 0">
+                    <span>Every New Year</span><b>{{ fmtMoney(row.plan.newYearLump) }}</b>
+                  </div>
+                  <div class="gl-milestones">
+                    <div class="gl-milestone" *ngFor="let m of milestones(row); trackBy: trackLabel">
+                      <span class="gl-ms-label">{{ m.label }}</span>
+                      <span class="gl-ms-year" *ngIf="m.year">{{ m.year }}</span>
+                      <b>{{ m.value }}</b>
+                    </div>
+                  </div>
+                  <div class="gl-field gl-balance" *ngIf="mode() === 'edit'">
+                    <label class="gl-label" [attr.for]="'gl-bal-' + acct.account + '-' + i">
+                      {{ acct.account === 'plan529' ? '529 balance' : 'Brokerage balance' }}
+                    </label>
+                    <div class="gl-money">
+                      <span class="gl-prefix">$</span>
+                      <input class="gl-input" type="text" inputmode="numeric" [id]="'gl-bal-' + acct.account + '-' + i"
+                             [value]="fmtNumber(row.balance)" (blur)="onBalanceBlur({ kid: i, account: acct.account }, $event)" />
+                    </div>
+                  </div>
+                </div>
+              </ng-container>
+            </div>
+            <p class="gl-note" *ngIf="hasUndecidedKid()">Undecided plans as if born this year, so you save a little more than you may need</p>
+          </ng-container>
+
+          <!-- Simple goals -->
+          <div class="gl-card gl-simple" *ngIf="v.simple as s">
+            <p class="gl-split">From you {{ fmtMoney(s.fromYou) }}, from growth {{ fmtMoney(s.fromGrowth) }}</p>
+            <div class="gl-field gl-balance" *ngIf="mode() === 'edit'">
+              <label class="gl-label" for="gl-bal-current">Saved so far</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-bal-current" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(existing()?.currentBalance ?? 0)" (blur)="onBalanceBlur('current', $event)" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Vacation (edit mode: progress this year) -->
+          <ng-container *ngIf="mode() === 'edit'">
+            <div class="gl-card gl-vacation" *ngIf="v.vacation as vac">
+              <label class="gl-reset-line" for="gl-bal-vacation" *ngIf="vac.resetNeeded">
+                New year, new trips. Saved so far resets, tap to update.
+              </label>
+              <p class="gl-split">On plan, {{ fmtMoney(vac.expectedSoFar) }} is set aside by now this year</p>
+              <div class="gl-field gl-balance">
+                <label class="gl-label" for="gl-bal-vacation">Saved so far this year</label>
+                <div class="gl-money">
+                  <span class="gl-prefix">$</span>
+                  <input id="gl-bal-vacation" class="gl-input" type="text" inputmode="numeric"
+                         [value]="fmtNumber(vac.savedThisYear)" (blur)="onBalanceBlur('vacation', $event)" />
+                </div>
+              </div>
+            </div>
+          </ng-container>
+
+          <!-- Footer -->
+          <div class="gl-footer">
+            <button type="button" class="gl-cta" [disabled]="saving()" (click)="save()">{{ ctaLabel() }}</button>
+            <button type="button" class="gl-complete" *ngIf="mode() === 'edit' && form().type !== 'VACATION'"
+                    [disabled]="saving()" (click)="markCompleted()">
+              {{ existing()?.completed ? 'Reopen goal' : 'Mark completed' }}
+            </button>
+            <button type="button" class="gl-remove" *ngIf="mode() === 'edit'" (click)="confirmRemove()">Remove goal</button>
+          </div>
+
+        </ng-container>
       </ng-container>
 
     </ng-container>

@@ -45,16 +45,13 @@
       </div>
     </div>
 
-    <!-- ── Goals (Plus+) ─────────────────────────────────────────────────────── -->
+    <!-- ── Goals (one active goal for everyone; more with Plus or Pro) ───────── -->
     <p class="zone-label">
       Goals
-      <span class="lockchip" *ngIf="isPiggy">
-        <span class="material-symbols-outlined">lock</span>Plus
-      </span>
-      <span class="zone-label-hint" *ngIf="isPlusOrPro">Tap for details</span>
+      <span class="zone-label-hint">Tap for details</span>
     </p>
     <div class="zone-card goals-card">
-      <!-- Freedom Date row (always first) — opens the Freedom detail sheet -->
+      <!-- Freedom Date row (always first), opens the Freedom detail sheet -->
       <div class="goal-row" data-tour="freedom-row" (click)="openFreedomSheet()">
         <div class="goal-tile goal-tile--freedom">
           <span class="material-symbols-outlined">savings</span>
@@ -74,56 +71,47 @@
         </div>
       </div>
 
-      <!-- User-added goals (Plus/Pro only — behind veil on Piggy) -->
-      <ng-container *ngIf="isPlusOrPro">
-        <div
-          *ngFor="let proj of goalProjections; trackBy: trackGoal"
-          class="goal-row"
-          [class.goal-done]="proj.goal.completed"
-          (click)="openAddGoalSheet(proj.goal)"
-        >
-          <div class="goal-tile">
-            <span class="material-symbols-outlined">{{ proj.goal.completed ? 'check_circle' : proj.goal.icon }}</span>
-          </div>
-          <div class="goal-mid">
-            <div class="goal-name ellipsis">{{ proj.goal.name }}</div>
-            <div class="goal-sub">
-              {{ proj.goal.targetAmount | currency:'USD':'symbol':'1.0-0' }} by {{ proj.goal.targetYear }} ·
-              ≈{{ proj.monthlyEquivalent | currency:'USD':'symbol':'1.0-0' }}/mo outside FRED
-            </div>
-            <div class="goal-bar">
-              <i
-                class="goal-bar-fill"
-                [class.ok]="proj.onTrack"
-                [class.late]="!proj.onTrack"
-                [style.width.%]="proj.progressPct"
-              ></i>
-            </div>
-          </div>
-          <div class="goal-right">
-            <div class="goal-proj" [class.ok]="proj.onTrack" [class.late]="!proj.onTrack">
-              <ng-container *ngIf="proj.goal.completed; else activeProj">Done</ng-container>
-              <ng-template #activeProj>{{ proj.onTrack ? 'On track' : 'Projected' }} · {{ proj.projectedLabel }}</ng-template>
-            </div>
+      <!-- Goal summaries: tap opens the goal page -->
+      <div
+        *ngFor="let s of goalSummaries(); trackBy: trackGoal"
+        class="goal-row"
+        [class.goal-done]="s.goal.completed"
+        (click)="openGoal(s.goal.id)"
+      >
+        <div class="goal-tile">
+          <span class="material-symbols-outlined">{{ s.goal.completed ? 'check_circle' : s.goal.icon }}</span>
+        </div>
+        <div class="goal-mid">
+          <div class="goal-name ellipsis">{{ s.goal.name }}</div>
+          <div class="goal-sub">{{ s.view.subtitle }}</div>
+          <div class="goal-bar">
+            <i
+              class="goal-bar-fill"
+              [class.ok]="s.view.status.kind === 'on_plan' || s.view.status.kind === 'ahead' || s.view.status.kind === 'done'"
+              [class.late]="s.view.status.kind === 'behind'"
+              [class.neutral]="s.view.status.kind === 'started' || s.view.status.kind === 'imported'"
+              [style.width.%]="s.view.progressPct"
+            ></i>
           </div>
         </div>
+        <div class="goal-right">
+          <div
+            class="goal-proj"
+            [class.ok]="s.view.status.kind === 'on_plan' || s.view.status.kind === 'ahead' || s.view.status.kind === 'done'"
+            [class.late]="s.view.status.kind === 'behind'"
+            [class.neutral]="s.view.status.kind === 'started' || s.view.status.kind === 'imported'"
+          >{{ statusChip(s.view.status.kind) }}</div>
+        </div>
+      </div>
 
-        <button class="add-goal-btn" (click)="openAddGoalSheet()" type="button">
-          <span class="material-symbols-outlined">add_circle</span>Add a goal
-        </button>
-      </ng-container>
+      <button class="add-goal-btn" (click)="addGoal()" type="button">
+        <span class="material-symbols-outlined">add_circle</span>Add a goal
+      </button>
 
       <!-- Compliance disclaimer -->
-      <p class="goals-disclaimer" *ngIf="isPlusOrPro">
-        FRED invests only toward your Freedom Date. Other goals are projections built from amounts you contribute outside FRED. FRED never holds or moves those funds.
+      <p class="goals-disclaimer">
+        FRED invests only toward your Freedom Date. Goal plans are projections at the rate you choose. FRED never holds or moves goal money.
       </p>
-
-      <!-- Frosted veil for Piggy — entire area tappable -->
-      <div class="goals-veil" *ngIf="isPiggy" (click)="openGoalsVeilNudge()">
-        <span class="material-symbols-outlined">lock</span>
-        <div class="gv-title">Track more than one goal with Piggy Plus</div>
-        <div class="gv-sub">House, college, emergency fund. Projected side by side.</div>
-      </div>
     </div>
 
     <!-- ── Tax Loss Harvesting ───────────────────────────────────────────────── -->

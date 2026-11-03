@@ -14,10 +14,15 @@
  * change detection, which intermittently failed to flush on WKWebView
  * keystrokes; signal writes schedule CD themselves via the hybrid scheduler.
  */
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { GoalTypePickerSheetComponent } from '../../components/goal-type-picker-sheet/goal-type-picker-sheet.component';
+import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
+import { Goal, LegacyGoalV2 } from '../../models/goal.model';
 import { MyProfilePage } from './my-profile.page';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../services/toast.service';
@@ -258,7 +263,13 @@ function setupDom(initialProgress: any, schedule$ = of(null as any)): DomHarness
           }))
       } },
       { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy('suspend'), freedomSheetClosed: jasmine.createSpy('freedomSheetClosed') } },
-      { provide: GoalsService, useValue: { getGoals: () => [], getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }) } },
+      { provide: GoalsService, useValue: {
+          goals: signal<Goal[]>([]),
+          load: () => of([]),
+          refresh: () => of([]),
+          readLegacyV2: () => [],
+          getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }),
+      } },
       { provide: FreedomStatsService, useValue: {
           birthYear: () => 0,
           stats: () => ({ freedomYear: '—', freedomAge: '—', dollarsAway: '—' })
@@ -358,7 +369,8 @@ describe('MyProfilePage — plan seeding resilience (DOM)', () => {
     const { fixture } = setupDom(null);
     expect(fixture.componentInstance.monthlyInvestGoal()).toBe(0);
     expect(fixture.componentInstance.retirementIncomeGoal()).toBe(0);
-    expect(fixture.componentInstance.freedomGoalSub).toContain('—');  // — placeholders
+    expect(fixture.componentInstance.freedomGoalSub).toContain('not set');
+    expect(fixture.componentInstance.freedomGoalSub).not.toContain('\u2014');
   });
 
   it('always applies the FIRST real DB emission even if the user typed pre-seed', () => {
@@ -399,5 +411,150 @@ describe('MyProfilePage — plan seeding resilience (DOM)', () => {
     const { fixture } = setupDom(noGoal, of({ investmentAmount: 100, frequency: 'WEEKLY' }));
     expect(fixture.componentInstance.monthlyInvestGoal()).toBe(433);  // $100 weekly × 4.33
     expect(fixture.componentInstance.isDirty()).toBeFalse();          // seeded, not an edit
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Goals card: navigation, tier nudge, picker, and the one-time v2 import
+// ---------------------------------------------------------------------------
+
+describe('MyProfilePage: goals card', () => {
+  const YEAR = new Date().getFullYear();
+  const ACTIVE: Goal = {
+    id: 3, clientId: null, type: 'WEDDING', name: 'Wedding', icon: 'favorite',
+    config: { targetAmount: 30_000, targetYear: YEAR + 3 },
+    currentBalance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 700,
+    planRate: 0.10, planRateKind: 'market', planAnchoredAt: `${YEAR}-01-01T00:00:00`,
+    completed: false, sortOrder: 0, createdAt: '', updatedAt: '',
+  };
+  const LEGACY: LegacyGoalV2 = {
+    id: 'v2-a', name: 'Old goal', icon: 'flag', targetAmount: 5_000, targetYear: YEAR + 2,
+    startingValue: 100, perPaycheckOutsideFRED: 20, completed: false,
+  };
+
+  interface GoalsHarness {
+    fixture: ComponentFixture<MyProfilePage>;
+    page: MyProfilePage;
+    router: { navigate: jasmine.Spy; navigateByUrl: jasmine.Spy };
+    modalCreate: jasmine.Spy;
+    showToast: jasmine.Spy;
+    importLegacy: jasmine.Spy;
+    clearLegacyV2: jasmine.Spy;
+    progress$: BehaviorSubject<any>;
+  }
+
+  function setupGoals(opts: {
+    userId?: string; tier?: string; goals?: Goal[]; legacy?: LegacyGoalV2[];
+    importResult?: () => Observable<Goal[]>; dismiss?: { role?: string; data?: unknown };
+  } = {}): GoalsHarness {
+    localStorage.setItem('userId', opts.userId ?? '40');
+    const progress$ = new BehaviorSubject<any>({ ...SAVED_PROGRESS, selectedTier: opts.tier ?? 'pro' });
+    const router = { navigate: jasmine.createSpy('navigate'), navigateByUrl: jasmine.createSpy('navigateByUrl') };
+    const modalCreate = jasmine.createSpy('create').and.returnValue(Promise.resolve({
+      present: () => Promise.resolve(),
+      onDidDismiss: () => Promise.resolve(opts.dismiss ?? { role: undefined }),
+    }));
+    const showToast = jasmine.createSpy('showToast');
+    const importLegacy = jasmine.createSpy('importLegacy')
+      .and.callFake(opts.importResult ?? (() => of([])));
+    const clearLegacyV2 = jasmine.createSpy('clearLegacyV2');
+
+    TestBed.configureTestingModule({
+      imports: [MyProfilePage],
+      providers: [
+        { provide: AuthService, useValue: {
+            userProgress$: progress$,
+            getCurrentInvestmentSchedule: () => of(null),
+            updateUserProfile: () => of({}),
+            loadUserProgress: jasmine.createSpy('loadUserProgress'),
+        } },
+        { provide: ToastService, useValue: { showToast } },
+        { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 0 } }) } },
+        { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
+        { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
+        { provide: Router, useValue: router },
+        { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
+        { provide: AlertController, useValue: {} },
+        { provide: ModalController, useValue: { create: modalCreate } },
+        { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy(), freedomSheetClosed: jasmine.createSpy() } },
+        { provide: GoalsService, useValue: {
+            goals: signal<Goal[]>(opts.goals ?? []),
+            load: () => of(opts.goals ?? []),
+            refresh: () => of(opts.goals ?? []),
+            readLegacyV2: () => opts.legacy ?? [],
+            importLegacy,
+            clearLegacyV2,
+            getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }),
+        } },
+        { provide: FreedomStatsService, useValue: {
+            birthYear: () => 0,
+            stats: () => ({ freedomYear: '', freedomAge: '', dollarsAway: '' }),
+        } },
+        { provide: AnalyticsService, useValue: analyticsStub() },
+      ],
+    });
+    const fixture = TestBed.createComponent(MyProfilePage);
+    fixture.detectChanges();
+    return {
+      fixture, page: fixture.componentInstance, router, modalCreate, showToast,
+      importLegacy, clearLegacyV2, progress$,
+    };
+  }
+
+  afterEach(() => localStorage.removeItem('userId'));
+
+  it('navigates to /goals/:id on row tap', () => {
+    const h = setupGoals({ goals: [ACTIVE] });
+    (h.fixture.nativeElement.querySelectorAll('.goal-row')[1] as HTMLElement).click();
+    expect(h.router.navigate).toHaveBeenCalledWith(['/goals', 3]);
+  });
+
+  it('opens the Plus nudge for a core user with one active goal', async () => {
+    const h = setupGoals({ tier: 'core', goals: [ACTIVE] });
+    await h.page.addGoal();
+    expect(h.modalCreate).toHaveBeenCalledTimes(1);
+    const args = h.modalCreate.calls.mostRecent().args[0];
+    expect(args.component).toBe(McInfoSheetComponent);
+    expect(args.componentProps.nudgeTitle).toBe('Plan more than one goal with Piggy Plus');
+    expect(h.router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('opens the picker for a core user with no active goal', async () => {
+    const h = setupGoals({ tier: 'core', goals: [{ ...ACTIVE, completed: true }] });
+    await h.page.addGoal();
+    expect(h.modalCreate.calls.mostRecent().args[0].component).toBe(GoalTypePickerSheetComponent);
+  });
+
+  it('opens the picker for a plus user and navigates to /goals/new/:type', async () => {
+    const h = setupGoals({ tier: 'plus', goals: [ACTIVE], dismiss: { role: 'picked', data: 'HOUSE' } });
+    await h.page.addGoal();
+    expect(h.modalCreate.calls.mostRecent().args[0].component).toBe(GoalTypePickerSheetComponent);
+    expect(h.router.navigate).toHaveBeenCalledWith(['/goals/new', 'HOUSE']);
+  });
+
+  it('imports v2 goals once, clears the key, and does not retry after a failure', () => {
+    // Success: one import, key cleared, one toast, and a later progress emission does not re-import.
+    const ok = setupGoals({ userId: 'import-ok', legacy: [LEGACY] });
+    expect(ok.importLegacy).toHaveBeenCalledOnceWith([LEGACY]);
+    expect(ok.clearLegacyV2).toHaveBeenCalledOnceWith('import-ok');
+    expect(ok.showToast).toHaveBeenCalledWith(
+      'Your goals moved to your account. FRED built a plan for each one, tap to review.', 'success');
+    ok.progress$.next({ ...SAVED_PROGRESS });
+    expect(ok.importLegacy).toHaveBeenCalledTimes(1);
+    TestBed.resetTestingModule();
+
+    // Failure: the key stays, and neither a re-emission nor a fresh page retries this session.
+    const failed = setupGoals({
+      userId: 'import-fail', legacy: [LEGACY],
+      importResult: () => throwError(() => new HttpErrorResponse({ status: 500 })),
+    });
+    expect(failed.importLegacy).toHaveBeenCalledTimes(1);
+    expect(failed.clearLegacyV2).not.toHaveBeenCalled();
+    failed.progress$.next({ ...SAVED_PROGRESS });
+    expect(failed.importLegacy).toHaveBeenCalledTimes(1);
+    TestBed.resetTestingModule();
+
+    const again = setupGoals({ userId: 'import-fail', legacy: [LEGACY] });
+    expect(again.importLegacy).not.toHaveBeenCalled();
   });
 });

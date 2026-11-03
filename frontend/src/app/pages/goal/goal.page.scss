@@ -222,3 +222,307 @@
 
   &:active { background: #1d4ed8; }
 }
+
+// ─── Plan view (step 2) ──────────────────────────────────────────────────────
+
+.gl-hero {
+  background: linear-gradient(160deg, #2563eb, #1d4ed8);
+  border-radius: 20px;
+  padding: 22px 20px 20px;
+  margin-bottom: 12px;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+
+  .gl-hero-amount {
+    font-size: 40px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+  }
+
+  .gl-hero-unit {
+    font-size: 18px;
+    font-weight: 700;
+    opacity: 0.8;
+    margin-left: 2px;
+  }
+
+  .gl-hero-paycheck {
+    margin: 6px 0 0;
+    font-size: 13px;
+    font-weight: 700;
+    opacity: 0.9;
+  }
+
+  .gl-hero-headline {
+    margin: 12px 0 0;
+    font-size: 13px;
+    font-weight: 700;
+    opacity: 0.85;
+  }
+}
+
+// Step 2 stacks several cards.
+.gl-card + .gl-card,
+.gl-inputs-row + .gl-card,
+.gl-status + .gl-card,
+.gl-reason + .gl-card {
+  margin-top: 12px;
+}
+
+.gl-rate-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  .gl-label { margin-bottom: 0; }
+}
+
+.gl-reset {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  color: #2563eb;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+// Copied from the freedom detail sheet so the shared rate looks the same in both places.
+.fd-scenario-chips {
+  display: flex;
+  background: #eef1f6;
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+
+  button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    border-radius: 10px;
+    padding: 8px 0;
+    font-family: 'Manrope', sans-serif;
+    font-size: 9.5px;
+    font-weight: 800;
+    color: #6b7280;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &.on {
+      background: #fff;
+      color: #2563eb;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
+    }
+  }
+}
+
+.gl-cash-note {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #374151;
+}
+
+.gl-inputs-row {
+  width: 100%;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  font-family: 'Manrope', sans-serif;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .gl-inputs-text {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #374151;
+  }
+
+  .gl-inputs-edit {
+    flex-shrink: 0;
+    font-size: 12.5px;
+    font-weight: 800;
+    color: #2563eb;
+  }
+}
+
+.gl-reason,
+.gl-note {
+  margin: 12px 4px 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+.gl-status {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: #f0fdf4;
+  font-family: 'Manrope', sans-serif;
+
+  &.behind { background: #fffbeb; }
+
+  p { margin: 0; }
+
+  .gl-status-line {
+    font-size: 13px;
+    font-weight: 800;
+    color: #111827;
+  }
+
+  .gl-catchup,
+  .gl-stale {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #4b5563;
+  }
+}
+
+.gl-account-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.gl-account-line {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #374151;
+}
+
+.gl-link {
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: 'Manrope', sans-serif;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.gl-kid-card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #eef1f6;
+  border-radius: 14px;
+
+  .gl-kid-name {
+    font-size: 13px;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+}
+
+.gl-ritual {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #374151;
+
+  small {
+    display: block;
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  b { font-weight: 800; color: #111827; white-space: nowrap; }
+}
+
+.gl-milestones {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.gl-milestone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  border-radius: 10px;
+  background: #f5f7fb;
+
+  .gl-ms-label { font-size: 10.5px; font-weight: 700; color: #6b7280; }
+  .gl-ms-year { font-size: 10px; font-weight: 600; color: #9ca3af; }
+  b { margin-top: 2px; font-size: 14px; font-weight: 800; color: #111827; }
+}
+
+.gl-balance {
+  margin: 12px 0 0;
+}
+
+.gl-split {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #374151;
+}
+
+.gl-reset-line {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.gl-footer {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .gl-cta:disabled { opacity: 0.6; }
+}
+
+.gl-complete,
+.gl-remove {
+  width: 100%;
+  height: 46px;
+  border-radius: 14px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gl-complete {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #111827;
+
+  &:disabled { opacity: 0.6; }
+}
+
+.gl-remove {
+  border: none;
+  background: transparent;
+  color: #dc2626;
+}

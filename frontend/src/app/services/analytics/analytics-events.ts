@@ -101,7 +101,10 @@ export type GoalIcon =
   | 'balance'
   | 'savings'
   | 'school'
-  | 'directions_car';
+  | 'directions_car'
+  | 'child_care'
+  | 'flight'
+  | 'favorite';
 
 /** What happened to a goal. 'completed' and 'reopened' are the two sides of the same toggle. */
 export type GoalAction = 'created' | 'updated' | 'completed' | 'reopened' | 'removed';

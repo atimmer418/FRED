@@ -20,28 +20,41 @@ import { EquityPigUtils } from '../../utils/equity-pig.utils';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
 import { FreedomStatsService } from '../../services/freedom-stats.service';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
-import { GoalsService, Goal, GoalIcon, RebalanceSchedule } from '../../services/goals.service';
+import { GoalsService, Goal, GoalType, RebalanceSchedule } from '../../services/goals.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
-import { GoalAddSheetComponent } from '../../components/goal-add-sheet/goal-add-sheet.component';
+import { GoalTypePickerSheetComponent } from '../../components/goal-type-picker-sheet/goal-type-picker-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { GoalPlanView, buildGoalPlanView } from '../goal/goal-plan.view-model';
+import { PlanStatusKind } from '../../utils/goal-plan.utils';
 import { RateAssumptionsService, DEFAULT_ANNUAL_RETURN, DEFAULT_WITHDRAWAL_RATE } from '../../services/rate-assumptions.service';
 import { monthsToTarget } from '../../utils/freedom-projection.utils';
 import { FreedomDetailSheetComponent, FreedomSheetResult } from '../../components/freedom-detail-sheet/freedom-detail-sheet.component';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
-import { ErrorCategory, GatedFeature, GoalAction, Tier } from '../../services/analytics/analytics-events';
-import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../services/analytics/analytics-bands';
+import { ErrorCategory, GatedFeature, Tier } from '../../services/analytics/analytics-events';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 
-/** Computed projection for a single user-added goal. */
-export interface GoalProjection {
+/** One goal row on the Goals card: the saved goal and its plan view. */
+export interface GoalSummary {
   goal: Goal;
-  onTrack: boolean;
-  projectedLabel: string;
-  progressPct: number;
-  /** Per-paycheck saving converted with the user's pay frequency. */
-  monthlyEquivalent: number;
+  view: GoalPlanView;
 }
+
+/** The one-word chip on a goal row. */
+const STATUS_CHIP: Record<PlanStatusKind, string> = {
+  started: 'Started',
+  imported: 'Plan updated',
+  on_plan: 'On plan',
+  ahead: 'Ahead',
+  behind: 'Behind',
+  done: 'Done',
+};
+
+/**
+ * v2 imports already attempted this app session, by userId. Module level so a
+ * re-created page does not retry a failed import before the next app launch.
+ */
+const importAttemptedThisSession = new Set<string>();
 
 /** Rebalance schedule options shown as chips. */
 const REBALANCE_SCHEDULES: RebalanceSchedule[] = ['Quarterly', 'Semi-annual', 'Annual'];
@@ -217,30 +230,33 @@ export class MyProfilePage implements OnInit, OnDestroy {
   }
 
   // ── Goals ─────────────────────────────────────────────────────────────────
-  goals: Goal[] = [];
+  /** Mirrors currentFrequency as a signal so goal rows recompute when the schedule lands. */
+  readonly frequencySig = signal('');
 
-  // Memoized projections. The getter runs on EVERY change-detection cycle;
-  // returning fresh objects each time made the trackBy-less *ngFor destroy and
-  // recreate every goal row per CD tick. On WKWebView that DOM churn runs
-  // mid-tap (each touch triggers CD) and iOS cancels the synthesized click —
-  // the entire page reads as frozen the moment one saved goal renders
-  // (2026-08-14 device freeze). Recompute only when inputs actually change.
-  private _projCache: GoalProjection[] = [];
-  private _projCacheGoals: Goal[] | null = null;
-  private _projCacheFreq = '';
+  // Memoized rows. Returning fresh objects on every change-detection cycle made
+  // the *ngFor destroy and recreate every goal row per CD tick. On WKWebView that
+  // DOM churn runs mid-tap (each touch triggers CD) and iOS cancels the
+  // synthesized click, so the page read as frozen the moment one saved goal
+  // rendered (2026-08-14 device freeze). A computed() only rebuilds when the
+  // goals, the frequency or the shared rate change; trackBy keeps the rows.
+  readonly goalSummaries: Signal<GoalSummary[]> = computed(() =>
+    this.goalsService.goals().map(g => ({
+      goal: g,
+      view: buildGoalPlanView(g, {
+        marketRate: this.AVG_MARKET_YIELD,
+        frequency: this.frequencySig(),
+        now: new Date(),
+        rateKindOverride: g.planRateKind,
+      }),
+    })));
 
-  get goalProjections(): GoalProjection[] {
-    if (this._projCacheGoals !== this.goals || this._projCacheFreq !== this.currentFrequency) {
-      this._projCache = this.goals.map(g => this._projectGoal(g));
-      this._projCacheGoals = this.goals;
-      this._projCacheFreq = this.currentFrequency;
-    }
-    return this._projCache;
+  /** trackBy: rows keyed by goal id, never recreated for identity-only changes. */
+  trackGoal(_index: number, s: GoalSummary): number {
+    return s.goal.id;
   }
 
-  /** trackBy: rows keyed by goal id — never recreated for identity-only changes. */
-  trackGoal(_index: number, proj: GoalProjection): string {
-    return proj.goal.id;
+  statusChip(kind: PlanStatusKind): string {
+    return STATUS_CHIP[kind];
   }
 
   // ── TLH ───────────────────────────────────────────────────────────────────
@@ -284,9 +300,9 @@ export class MyProfilePage implements OnInit, OnDestroy {
       ? (goalValue >= 1_000_000
           ? '$' + (goalValue / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
           : '$' + Math.round(goalValue / 1_000) + 'k')
-      : '—';
-    const yr = this.freedomYear() ?? '—';
-    const invest = this.monthlyInvestGoal() ? `$${this.monthlyInvestGoal().toLocaleString()}/mo` : '—';
+      : 'not set';
+    const yr = this.freedomYear() ?? 'not set';
+    const invest = this.monthlyInvestGoal() ? `$${this.monthlyInvestGoal().toLocaleString()}/mo` : 'not set';
     return `${goal} by ${yr} · ${invest} through FRED`;
   }
 
@@ -335,6 +351,11 @@ export class MyProfilePage implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  /** Coming back from a goal page: reload so its save, completion or removal shows. */
+  ionViewWillEnter(): void {
+    this.goalsService.refresh().subscribe({ error: () => {} });
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -432,6 +453,7 @@ export class MyProfilePage implements OnInit, OnDestroy {
         if (investment) {
           this.currentScheduledInvestment = investment.investmentAmount;
           this.currentFrequency = investment.frequency ? investment.frequency.toLowerCase() : '';
+          this.frequencySig.set(this.currentFrequency);
           this.formatScheduleText(investment);
           this.currentMonthlyEquivalent = InvestmentFrequencyUtils.toMonthlyEquivalent(
             this.currentScheduledInvestment, this.currentFrequency);
@@ -450,6 +472,7 @@ export class MyProfilePage implements OnInit, OnDestroy {
         this.currentScheduledInvestment = 0;
         this.investmentFrequencyText = '';
         this.currentFrequency = '';
+        this.frequencySig.set('');
         this.currentMonthlyEquivalent = 0;
       }
     });
@@ -734,106 +757,54 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
   // ── Goals ─────────────────────────────────────────────────────────────────
 
-  async openAddGoalSheet(editGoal?: Goal): Promise<void> {
-    if (!this.isPlusOrPro) {
+  openGoal(id: number): void {
+    this.router.navigate(['/goals', id]);
+  }
+
+  /**
+   * Everyone gets one active goal. A second one needs Plus or Pro; the backend
+   * enforces the same rule with a 403 TIER_LIMIT.
+   */
+  async addGoal(): Promise<void> {
+    const active = this.goalsService.goals().filter(g => !g.completed).length;
+    if (active >= 1 && !this.isPlusOrPro) {
       await this.openPlusNudge('goals');
       return;
     }
     const modal = await this.modalController.create({
-      component: GoalAddSheetComponent,
-      componentProps: {
-        payFrequency: this.currentFrequency,
-        ...(editGoal ? { editGoal } : {}),
-      },
+      component: GoalTypePickerSheetComponent,
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
-    const { role, data } = await modal.onDidDismiss();
-    if (role === 'saved' && data) {
-      const newGoal = this.goalsService.addGoal(this.userId, data);
-      this.goals = [...this.goals, newGoal];
-      this.toastService.showToast('Goal added. Projection tracked.', 'success');
-      this._trackGoalChanged('created', newGoal);
-    } else if (role === 'updated' && data) {
-      this.goalsService.updateGoal(this.userId, data);
-      this.goals = this.goals.map(g => g.id === data.id ? data : g);
-      this.toastService.showToast('Goal updated', 'success');
-      this._trackGoalChanged('updated', data);
-    } else if (role === 'completed' && data) {
-      this.goalsService.updateGoal(this.userId, data);
-      this.goals = this.goals.map(g => g.id === data.id ? data : g);
-      this.toastService.showToast(
-        data.completed ? 'Goal marked complete 🎉' : 'Goal reopened', 'success');
-      // Two sides of one toggle, told apart by the goal's new state.
-      this._trackGoalChanged(data.completed ? 'completed' : 'reopened', data);
-    } else if (role === 'deleted' && data) {
-      // Read the goal before it goes: the dismiss payload is the id alone, and the id is the one
-      // thing that must never be sent — the icon and the bands are what describe it.
-      const removed = this.goals.find(g => g.id === data);
-      this.deleteGoal(data);
-      if (removed) {
-        this._trackGoalChanged('removed', removed);
-      }
+    const { role, data } = await modal.onDidDismiss<GoalType>();
+    if (role === 'picked' && data) {
+      this.router.navigate(['/goals/new', data]);
     }
-  }
-
-  /**
-   * The single goal instrumentation point: every change arrives as a sheet dismiss role, so the
-   * five actions are reported from one place with one shape. Called AFTER `goals` has been
-   * updated, because `goal_count` is the count the user is left with.
-   *
-   * The goal's name is free text the user typed and its id is a UUID: neither is in the payload.
-   */
-  private _trackGoalChanged(action: GoalAction, goal: Goal): void {
-    const target = goal.targetAmount || 0;
-    const progress = target > 0
-      ? toPercentBand(((goal.startingValue || 0) / target) * 100)
-      : null;
-    this.analytics.track({
-      name: 'goal_changed',
-      props: {
-        action,
-        icon: goal.icon,
-        target_band: toAmountBand(target),
-        years_to_target: toYearsBand(
-          goal.targetYear ? goal.targetYear - new Date().getFullYear() : null),
-        progress,
-        goal_count: toCountBand(this.goals.length),
-      },
-    });
-  }
-
-  deleteGoal(goalId: string): void {
-    this.goalsService.deleteGoal(this.userId, goalId);
-    this.goals = this.goals.filter(g => g.id !== goalId);
-    this.toastService.showToast('Goal removed', 'success');
   }
 
   // ── Nudge sheets ───────────────────────────────────────────────────────────
 
   /**
-   * Goals area tapped on Piggy — presents the Plus upgrade sheet.
-   * Wired to: mc-info-sheet mode='nudge' with Plus-targeted copy.
-   * On 'upgrade' role: delegates to upgradeToPlusClicked() (same as tab2 pattern).
-   */
-  async openGoalsVeilNudge(): Promise<void> {
-    if (this.isPlusOrPro) return;
-    await this.openPlusNudge('goals');
-  }
-
-  /**
-   * Reusable Plus upgrade nudge — used by goals veil + rebalancing lock tap.
+   * Reusable Plus upgrade nudge, used by "Add a goal" and the rebalancing lock tap.
    *
-   * `feature` only names which gate was hit for analytics; the sheet, the copy and the upgrade
-   * path are identical for both and unchanged.
+   * `feature` names which gate was hit, for analytics and for the goals copy; the sheet and the
+   * upgrade path are the same for every feature.
    */
   async openPlusNudge(feature: GatedFeature = 'goals'): Promise<void> {
+    const copy = feature === 'goals'
+      ? {
+          nudgeTitle: 'Plan more than one goal with Piggy Plus',
+          nudgeBody: 'Kids, a house, a car, trips. Each gets its own plan, side by side.',
+        }
+      : {
+          nudgeTitle: 'Unlock multi-goal tracking with Piggy Plus',
+          nudgeBody: 'Track your house, emergency fund, college savings, and more, side by side with projected timelines.',
+        };
     const modal = await this.modalController.create({
       component: McInfoSheetComponent,
       componentProps: {
         mode: 'nudge',
-        nudgeTitle: 'Unlock multi-goal tracking with Piggy Plus',
-        nudgeBody: 'Track your house, emergency fund, college savings, and more, side by side with projected timelines.',
+        ...copy,
         nudgeCtaLabel: 'Upgrade to Piggy Plus',
         targetTier: 'plus',
       },
@@ -914,51 +885,32 @@ export class MyProfilePage implements OnInit, OnDestroy {
   private _loadGoalsAndPrefs(): void {
     const uid = this.userId;
     if (!uid) return;
-    this.goals = this.goalsService.getGoals(uid);
     const prefs = this.goalsService.getPrefs(uid);
     this.selectedSchedule = prefs.rebalanceSchedule;
+    // TTL-cached by the service, so the repeat calls from userProgress$ re-emissions are cheap.
+    this.goalsService.load().subscribe({
+      next: () => this._importLegacyGoals(uid),
+      error: () => {},
+    });
   }
 
-  private _projectGoal(g: Goal): GoalProjection {
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
-
-    // Per-paycheck saving → monthly, using the user's schedule frequency
-    // (FRED's invest-per-paycheck model makes that the pay frequency).
-    const monthly = InvestmentFrequencyUtils.toMonthlyEquivalent(
-      Math.max(0, g.perPaycheckOutsideFRED), this.currentFrequency);
-
-    if (g.completed) {
-      return { goal: g, onTrack: true, projectedLabel: 'Done', progressPct: 100, monthlyEquivalent: monthly };
-    }
-
-    // Progress bar: actual saved fraction (floor 2% so the bar reads as started).
-    const savedPct = g.targetAmount > 0
-      ? Math.max(2, Math.min(100, Math.round(((g.startingValue || 0) / g.targetAmount) * 100)))
-      : 100;
-
-    // Months needed to cover what's left after the starting value.
-    const remaining = Math.max(0, g.targetAmount - (g.startingValue || 0));
-
-    // $0/paycheck with an unmet target: no pace → no honest date to project
-    // (the old 9999-month sentinel rendered "Projected · Nov 2859").
-    if (remaining > 0 && monthly <= 0) {
-      return { goal: g, onTrack: false, projectedLabel: 'no pace set', progressPct: savedPct, monthlyEquivalent: monthly };
-    }
-
-    const monthsNeeded = remaining <= 0 ? 0 : Math.ceil(remaining / monthly);
-
-    const projYear = currentYear + Math.floor((currentMonth + monthsNeeded) / 12);
-    const projMonth = (currentMonth + monthsNeeded) % 12;
-
-    const projDate = new Date(projYear, projMonth, 1);
-    const targetDate = new Date(g.targetYear, 11, 31);
-
-    const onTrack = projDate <= targetDate;
-
-    const projectedLabel = projDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-
-    return { goal: g, onTrack, projectedLabel, progressPct: savedPct, monthlyEquivalent: monthly };
+  /**
+   * One-time move of v2 localStorage goals to the backend, after a successful GET.
+   * At most one attempt per user per app session; the local key is removed only on a 2xx,
+   * so a failed import is retried on the next launch. Nothing is shown on failure.
+   */
+  private _importLegacyGoals(uid: string): void {
+    if (importAttemptedThisSession.has(uid)) return;
+    const legacy = this.goalsService.readLegacyV2(uid);
+    if (legacy.length === 0) return;
+    importAttemptedThisSession.add(uid);
+    this.goalsService.importLegacy(legacy).subscribe({
+      next: () => {
+        this.goalsService.clearLegacyV2(uid);
+        this.toastService.showToast(
+          'Your goals moved to your account. FRED built a plan for each one, tap to review.', 'success');
+      },
+      error: () => {},
+    });
   }
 }

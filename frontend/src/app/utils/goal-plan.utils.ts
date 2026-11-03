@@ -8,6 +8,26 @@
  * UP to whole dollars. All functions are pure and framework-free.
  */
 
+import {
+  EmergencyFundConfig,
+  GoalConfig,
+  GoalType,
+  HouseCarConfig,
+  RateKind,
+  TargetConfig,
+  VacationConfig,
+} from '../models/goal.model';
+import { CASH_RATE } from '../services/rate-assumptions.service';
+
+// ---------------------------------------------------------------------------
+// Core
+// ---------------------------------------------------------------------------
+
+export const CASH_HORIZON_MONTHS = 36;
+export const RITUAL_MIN_MONTHS = 24;
+export const RITUAL_MIN_ANNUAL = 600;
+export const STALE_BALANCE_DAYS = 60;
+
 export interface LumpOccurrence {
   /** 1..n, the month the lump is posted (after that month's growth). */
   monthIndex: number;
@@ -16,21 +36,25 @@ export interface LumpOccurrence {
 
 /** Whole months from the month after `now` through the deadline month inclusive. Month is 1..12. Floors at 0. */
 export function horizonMonths(now: Date, deadlineYear: number, deadlineMonth: number): number {
+  if (!Number.isFinite(deadlineYear) || !Number.isFinite(deadlineMonth)) return 0;
   const months = (deadlineYear - now.getFullYear()) * 12 + (deadlineMonth - (now.getMonth() + 1));
   return Math.max(0, months);
 }
 
-/** Same counting as horizonMonths, between two ISO timestamps. Floors at 0. */
+/**
+ * Same counting as horizonMonths, between two ISO timestamps. Floors at 0.
+ * Inputs are local ISO timestamps without a Z suffix (yyyy-MM-ddTHH:mm:ss), which is what the backend sends.
+ */
 export function monthsBetween(fromIso: string, toIso: string): number {
   const from = new Date(fromIso);
   const to = new Date(toIso);
   const months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
-  return Math.max(0, months);
+  return Number.isFinite(months) ? Math.max(0, months) : 0;
 }
 
 /** Monthly contribution (rounded up to whole dollars) that grows pv into fv over n months. */
 export function requiredMonthly(pv: number, fv: number, n: number, annualRate: number): number {
-  if (n <= 0) return 0;
+  if (![pv, fv, n, annualRate].every(Number.isFinite) || n <= 0) return 0;
   const r = annualRate / 12;
   const growth = (1 + r) ** n;
   const gap = fv - pv * (r === 0 ? 1 : growth);
@@ -47,6 +71,7 @@ export function futureValue(
   annualRate: number,
   lumps: LumpOccurrence[],
 ): number {
+  if (![pv, monthly, n, annualRate].every(Number.isFinite)) return 0;
   const r = annualRate / 12;
   const lumpsByMonth = new Map<number, number>();
   for (const lump of lumps) {
@@ -64,6 +89,10 @@ export function friendlyRound(x: number): number {
   const step = x < 500 ? 50 : x < 2000 ? 100 : 250;
   return Math.round(x / step) * step;
 }
+
+// ---------------------------------------------------------------------------
+// Kid plan schedule
+// ---------------------------------------------------------------------------
 
 export interface KidLumpSchedule {
   /** Month indices of birthday lumps, within 1..n-1. */
@@ -85,6 +114,7 @@ export function kidLumpSchedule(
 ): KidLumpSchedule {
   const by = birthYear ?? now.getFullYear();
   const bm = birthMonth ?? 7;
+  if (![n, by, bm].every(Number.isFinite)) return { birthday: [], newYear: [] };
 
   const birthday: number[] = [];
   for (let year = by + 1; ; year++) {
@@ -112,4 +142,274 @@ export function kidDeadline(
     month: birthMonth ?? 7,
     assumedBirthYear: birthYear == null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Rate
+// ---------------------------------------------------------------------------
+
+/** forceCash wins; else the anchored override; else cash under 36 months and market from 36 up. */
+export function resolveRate(args: {
+  n: number;
+  forceCash: boolean;
+  marketRate: number;
+  rateKindOverride: RateKind | null;
+}): { rateKind: RateKind; rate: number } {
+  const rateKind: RateKind = args.forceCash
+    ? 'cash'
+    : (args.rateKindOverride ?? (args.n < CASH_HORIZON_MONTHS ? 'cash' : 'market'));
+  return { rateKind, rate: rateKind === 'cash' ? CASH_RATE : args.marketRate };
+}
+
+// ---------------------------------------------------------------------------
+// Kid account plan
+// ---------------------------------------------------------------------------
+
+export interface AccountPlan {
+  n: number;
+  rateKind: RateKind;
+  rate: number;
+  monthly: number;
+  birthdayLump: number;
+  newYearLump: number;
+  lumps: LumpOccurrence[];
+  ritualsReason: 'short_horizon' | 'small_plan' | null;
+  dueNow: number;
+  deadline: { year: number; month: number };
+  assumedBirthYear: boolean;
+  milestones: { at18: number; at22: number; at30: number };
+}
+
+/** One friendly notch down: the step size of the band the value sits in (500 steps by 50). */
+function lowerOneNotch(x: number): number {
+  const step = x <= 500 ? 50 : x <= 2000 ? 100 : 250;
+  return Math.max(0, x - step);
+}
+
+export function proposeKidAccountPlan(input: {
+  target: number;
+  balance: number;
+  birthYear: number | null;
+  birthMonth: number | null;
+  marketRate: number;
+  rateKindOverride: RateKind | null;
+  now: Date;
+}): AccountPlan {
+  const { target, balance, now } = input;
+  const dl = kidDeadline(now, input.birthYear, input.birthMonth);
+  const n = horizonMonths(now, dl.year, dl.month);
+  const { rateKind, rate } = resolveRate({
+    n,
+    forceCash: false,
+    marketRate: input.marketRate,
+    rateKindOverride: input.rateKindOverride,
+  });
+  const r = rate / 12;
+
+  let birthdayLump = 0;
+  let newYearLump = 0;
+  let ritualsReason: AccountPlan['ritualsReason'] = null;
+
+  const schedule = kidLumpSchedule(n, now, input.birthYear, input.birthMonth);
+  const buildLumps = (): LumpOccurrence[] =>
+    [
+      ...schedule.birthday.map((monthIndex) => ({ monthIndex, amount: birthdayLump })),
+      ...schedule.newYear.map((monthIndex) => ({ monthIndex, amount: newYearLump })),
+    ].filter((l) => l.amount > 0);
+  const lumpsOvershoot = (): boolean => target - futureValue(0, 0, n, rate, buildLumps()) <= 0;
+
+  // s0 is the yearly cost of the plain plan; rituals are carved out of it.
+  const s0 = 12 * requiredMonthly(balance, target, n, rate);
+  if (n < RITUAL_MIN_MONTHS) {
+    ritualsReason = 'short_horizon';
+  } else if (s0 < RITUAL_MIN_ANNUAL) {
+    ritualsReason = 'small_plan';
+  } else {
+    birthdayLump = schedule.birthday.length > 0 ? friendlyRound(0.2 * s0) : 0;
+    newYearLump = schedule.newYear.length > 0 ? friendlyRound(0.1 * s0) : 0;
+    for (let step = 0; step < 6 && lumpsOvershoot(); step++) {
+      if (step % 2 === 0) birthdayLump = lowerOneNotch(birthdayLump);
+      else newYearLump = lowerOneNotch(newYearLump);
+    }
+    if (lumpsOvershoot()) {
+      birthdayLump = 0;
+      newYearLump = 0;
+      ritualsReason = 'small_plan';
+    }
+  }
+
+  const lumps = buildLumps();
+  const monthly = requiredMonthly(balance, target - futureValue(0, 0, n, rate, lumps), n, rate);
+
+  return {
+    n,
+    rateKind,
+    rate,
+    monthly,
+    birthdayLump,
+    newYearLump,
+    lumps,
+    ritualsReason,
+    dueNow: n === 0 ? Math.max(0, target - balance) : 0,
+    deadline: { year: dl.year, month: dl.month },
+    assumedBirthYear: dl.assumedBirthYear,
+    milestones: { at18: target, at22: target * (1 + r) ** 48, at30: target * (1 + r) ** 144 },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Simple plan (house, car, emergency fund, wedding, custom)
+// ---------------------------------------------------------------------------
+
+export interface SimplePlan {
+  n: number;
+  rateKind: RateKind;
+  rate: number;
+  monthly: number;
+  target: number;
+  dueNow: number;
+  reaches: { year: number; month: number };
+  fromYou: number;
+  fromGrowth: number;
+}
+
+export function proposeSimplePlan(input: {
+  target: number;
+  balance: number;
+  targetYear: number;
+  marketRate: number;
+  forceCash: boolean;
+  rateKindOverride: RateKind | null;
+  now: Date;
+}): SimplePlan {
+  const { target, balance, targetYear, now } = input;
+  const n = horizonMonths(now, targetYear, 12);
+  const { rateKind, rate } = resolveRate({
+    n,
+    forceCash: input.forceCash,
+    marketRate: input.marketRate,
+    rateKindOverride: input.rateKindOverride,
+  });
+  const monthly = requiredMonthly(balance, target, n, rate);
+  const fromYou = monthly * n;
+  return {
+    n,
+    rateKind,
+    rate,
+    monthly,
+    target,
+    dueNow: n === 0 ? Math.max(0, target - balance) : 0,
+    reaches: { year: targetYear, month: 12 },
+    fromYou,
+    fromGrowth: Math.max(0, target - balance - fromYou),
+  };
+}
+
+/** The amount a simple goal needs. Types without a simple target return 0. */
+export function simpleTarget(type: GoalType, config: GoalConfig): number {
+  switch (type) {
+    case 'HOUSE':
+    case 'CAR': {
+      const c = config as HouseCarConfig;
+      return (c.price * (c.downPaymentPct ?? 100)) / 100;
+    }
+    case 'EMERGENCY_FUND': {
+      const c = config as EmergencyFundConfig;
+      return c.monthlyExpenses * c.months;
+    }
+    case 'WEDDING':
+    case 'CUSTOM':
+      return (config as TargetConfig).targetAmount;
+    default:
+      return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vacation plan
+// ---------------------------------------------------------------------------
+
+export interface VacationPlan {
+  annual: number;
+  monthly: number;
+  savedThisYear: number;
+  expectedSoFar: number;
+  resetNeeded: boolean;
+}
+
+export function proposeVacationPlan(cfg: VacationConfig, now: Date): VacationPlan {
+  const annual = cfg.tripsPerYear * cfg.budgetPerTrip;
+  const monthly = Math.ceil(annual / 12);
+  const resetNeeded = cfg.savedYear !== now.getFullYear();
+  return {
+    annual,
+    monthly,
+    savedThisYear: resetNeeded ? 0 : cfg.savedThisYear,
+    expectedSoFar: monthly * now.getMonth(),
+    resetNeeded,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
+export type PlanStatusKind = 'started' | 'imported' | 'ahead' | 'on_plan' | 'behind' | 'done';
+
+export interface PlanStatus {
+  kind: PlanStatusKind;
+  delta: number;
+  asOf: string | null;
+  stale: boolean;
+}
+
+function kindForDelta(delta: number, target: number): 'ahead' | 'on_plan' | 'behind' {
+  const tolerance = Math.max(50, 0.01 * target);
+  if (delta > tolerance) return 'ahead';
+  if (delta < -tolerance) return 'behind';
+  return 'on_plan';
+}
+
+export function planStatus(args: {
+  completed: boolean;
+  imported: boolean;
+  target: number;
+  balance: number;
+  anchorBalance: number;
+  anchorMonthly: number;
+  planAnchoredAt: string;
+  balanceUpdatedAt: string | null;
+  rate: number;
+  lumps: LumpOccurrence[];
+  now: Date;
+}): PlanStatus {
+  const { balanceUpdatedAt } = args;
+  const stale =
+    balanceUpdatedAt !== null &&
+    args.now.getTime() - new Date(balanceUpdatedAt).getTime() > STALE_BALANCE_DAYS * 86_400_000;
+  const base = { asOf: balanceUpdatedAt, stale };
+
+  if (args.completed || args.balance >= args.target) return { kind: 'done', delta: 0, ...base };
+  if (args.imported) return { kind: 'imported', delta: 0, ...base };
+  if (balanceUpdatedAt === null) return { kind: 'started', delta: 0, ...base };
+
+  const months = monthsBetween(args.planAnchoredAt, balanceUpdatedAt);
+  const expected = futureValue(
+    args.anchorBalance,
+    args.anchorMonthly,
+    months,
+    args.rate,
+    args.lumps.filter((l) => l.monthIndex <= months),
+  );
+  const delta = args.balance - expected;
+  return { kind: kindForDelta(delta, args.target), delta, ...base };
+}
+
+/** Vacation never reads done: the year resets, so the goal is always in progress. */
+export function vacationStatus(plan: VacationPlan, _now: Date): PlanStatus {
+  if (plan.savedThisYear === 0 && plan.expectedSoFar === 0) {
+    return { kind: 'started', delta: 0, asOf: null, stale: false };
+  }
+  const delta = plan.savedThisYear - plan.expectedSoFar;
+  return { kind: kindForDelta(delta, plan.annual), delta, asOf: null, stale: false };
 }

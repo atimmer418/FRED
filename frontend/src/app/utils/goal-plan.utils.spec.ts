@@ -5,7 +5,13 @@ import {
   kidDeadline,
   kidLumpSchedule,
   monthsBetween,
+  planStatus,
+  proposeKidAccountPlan,
+  proposeSimplePlan,
+  proposeVacationPlan,
   requiredMonthly,
+  simpleTarget,
+  vacationStatus,
 } from './goal-plan.utils';
 
 const NOW = new Date(2026, 10, 15);
@@ -60,4 +66,84 @@ describe('kidLumpSchedule', () => {
 
 describe('kidDeadline', () => {
   it('assumes born this year when undecided', () => expect(kidDeadline(NOW, null, null)).toEqual({ year: 2044, month: 7, assumedBirthYear: true }));
+});
+
+describe('non-finite guards', () => {
+  it('returns an empty schedule and zero horizon for NaN inputs', () => {
+    expect(kidLumpSchedule(NaN, NOW, 2026, 12)).toEqual({ birthday: [], newYear: [] });
+    expect(horizonMonths(NOW, NaN, 12)).toBe(0);
+  });
+  it('returns zero from the other math for NaN inputs', () => {
+    expect(monthsBetween('garbage', '2027-01-01T00:00:00')).toBe(0);
+    expect(requiredMonthly(0, NaN, 12, 0.1)).toBe(0);
+    expect(futureValue(0, 100, NaN, 0.1, [])).toBe(0);
+  });
+});
+
+describe('proposeKidAccountPlan', () => {
+  const base = { target: 250000, balance: 0, birthYear: 2026, birthMonth: 11, marketRate: 0.10, rateKindOverride: null, now: NOW };
+  it('pins the ritual example: $296 a month, $1,000 birthday, $500 New Year, FV $250,526', () => {
+    const p = proposeKidAccountPlan(base);
+    expect(p.n).toBe(216); expect(p.monthly).toBe(296); expect(p.birthdayLump).toBe(1000); expect(p.newYearLump).toBe(500);
+    expect(Math.round(futureValue(0, p.monthly, p.n, p.rate, p.lumps))).toBe(250526);
+  });
+  it('pins milestones from the target', () => { const p = proposeKidAccountPlan(base); expect(p.milestones.at18).toBe(250000); expect(p.milestones.at22).toBeCloseTo(372338.52, 0); expect(p.milestones.at30).toBeCloseTo(825912.24, 0); });
+  it('keeps lumps at or under 35% of the yearly plan across horizons', () => {
+    for (const birthYear of [2010, 2011, 2018, 2026]) {
+      const p = proposeKidAccountPlan({ ...base, birthYear });
+      if (p.ritualsReason === null) {
+        expect((p.birthdayLump + p.newYearLump) / (12 * p.monthly + p.birthdayLump + p.newYearLump)).toBeLessThanOrEqual(0.35);
+      }
+    }
+  });
+  it('drops rituals under 24 months with a reason', () => { const p = proposeKidAccountPlan({ ...base, birthYear: 2010, birthMonth: 1 }); expect(p.ritualsReason).toBe('short_horizon'); expect(p.birthdayLump).toBe(0); expect(p.newYearLump).toBe(0); });
+  it('drops rituals for a small plan', () => expect(proposeKidAccountPlan({ ...base, target: 3000 }).ritualsReason).toBe('small_plan'));
+  it('uses the cash rate under 36 months', () => expect(proposeKidAccountPlan({ ...base, birthYear: 2009, birthMonth: 6 }).rateKind).toBe('cash'));
+  it('keeps a market plan at market when overridden', () => expect(proposeKidAccountPlan({ ...base, birthYear: 2009, birthMonth: 6, rateKindOverride: 'market' }).rateKind).toBe('market'));
+  it('handles n = 0 as due now', () => { const p = proposeKidAccountPlan({ ...base, birthYear: 2008, birthMonth: 10 }); expect(p.n).toBe(0); expect(p.monthly).toBe(0); expect(p.dueNow).toBe(250000); });
+  it('flags an undecided birth year', () => expect(proposeKidAccountPlan({ ...base, birthYear: null, birthMonth: null }).assumedBirthYear).toBeTrue());
+});
+
+describe('proposeSimplePlan', () => {
+  const s = (targetYear: number, now: Date, extra = {}) => proposeSimplePlan({ target: 30000, balance: 0, targetYear, marketRate: 0.10, forceCash: false, rateKindOverride: null, now, ...extra });
+  it('uses market at 36 months and cash at 35', () => { expect(s(2029, new Date(2026, 11, 15)).n).toBe(36); expect(s(2029, new Date(2026, 11, 15)).rateKind).toBe('market'); expect(s(2029, new Date(2027, 0, 15)).rateKind).toBe('cash'); });
+  it('keeps the anchored kind until a re-plan', () => expect(s(2029, new Date(2027, 0, 15), { rateKindOverride: 'market' }).rateKind).toBe('market'));
+  it('forces cash for emergency funds even when overridden to market', () => expect(s(2032, NOW, { forceCash: true, rateKindOverride: 'market' }).rateKind).toBe('cash'));
+  it('splits from you and from growth', () => { const p = s(2036, NOW); expect(p.fromYou + p.fromGrowth).toBeGreaterThanOrEqual(30000); });
+});
+
+describe('simpleTarget', () => {
+  it('applies the down payment', () => expect(simpleTarget('HOUSE', { price: 1000000, downPaymentPct: 20, targetYear: 2032 })).toBe(200000));
+  it('uses the full price when null', () => expect(simpleTarget('CAR', { price: 40000, downPaymentPct: null, targetYear: 2029 })).toBe(40000));
+  it('multiplies emergency months', () => expect(simpleTarget('EMERGENCY_FUND', { monthlyExpenses: 4000, months: 6, targetYear: 2028 })).toBe(24000));
+});
+
+describe('proposeVacationPlan', () => {
+  it('is ceil of trips times budget over 12', () => expect(proposeVacationPlan({ tripsPerYear: 4, budgetPerTrip: 2500, savedThisYear: 0, savedYear: 2026 }, NOW).monthly).toBe(834));
+  it('resets saved so far in a new year', () => { const p = proposeVacationPlan({ tripsPerYear: 1, budgetPerTrip: 1200, savedThisYear: 900, savedYear: 2025 }, NOW); expect(p.resetNeeded).toBeTrue(); expect(p.savedThisYear).toBe(0); });
+});
+
+describe('planStatus', () => {
+  const A = { completed: false, imported: false, target: 250000, balance: 0, anchorBalance: 0, anchorMonthly: 417, planAnchoredAt: '2026-11-15T10:00:00', balanceUpdatedAt: null as string | null, rate: 0.10, lumps: [], now: new Date(2027, 10, 20) };
+  it('is started until a balance is logged', () => expect(planStatus(A).kind).toBe('started'));
+  it('is imported for a never-planned import', () => expect(planStatus({ ...A, imported: true }).kind).toBe('imported'));
+  it('is on plan at the anchor date with the anchor balance', () => expect(planStatus({ ...A, balanceUpdatedAt: A.planAnchoredAt }).kind).toBe('on_plan'));
+  it('is behind when the logged balance trails the plan', () => { const r = planStatus({ ...A, balanceUpdatedAt: '2027-11-15T10:00:00' }); expect(r.kind).toBe('behind'); expect(r.delta).toBeLessThan(-5000); });
+  it('uses one symmetric tolerance', () => {
+    // rate 0, 100 a month, 12 months: expected 1200; tolerance = max(50, 1% of 10000) = 100
+    const B = { ...A, target: 10000, anchorMonthly: 100, rate: 0, balanceUpdatedAt: '2027-11-15T10:00:00' };
+    expect(planStatus({ ...B, balance: 1300 }).kind).toBe('on_plan');
+    expect(planStatus({ ...B, balance: 1301 }).kind).toBe('ahead');
+    expect(planStatus({ ...B, balance: 1100 }).kind).toBe('on_plan');
+    expect(planStatus({ ...B, balance: 1099 }).kind).toBe('behind');
+  });
+  it('is done at the target', () => expect(planStatus({ ...A, balance: 250000 }).kind).toBe('done'));
+  it('is done when completed, ahead of imported', () => expect(planStatus({ ...A, completed: true, imported: true }).kind).toBe('done'));
+  it('flags a stale balance after 60 days', () => expect(planStatus({ ...A, balanceUpdatedAt: '2027-08-01T10:00:00' }).stale).toBeTrue());
+  it('is not stale when recent', () => expect(planStatus({ ...A, balanceUpdatedAt: '2027-11-10T10:00:00' }).stale).toBeFalse());
+});
+
+describe('vacationStatus', () => {
+  it('never reads done', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 10000, expectedSoFar: 8340, resetNeeded: false }, NOW).kind).toBe('ahead'));
+  it('is started at the top of the year', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 0, expectedSoFar: 0, resetNeeded: false }, new Date(2027, 0, 5)).kind).toBe('started'));
 });

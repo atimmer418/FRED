@@ -91,8 +91,16 @@ describe('proposeKidAccountPlan', () => {
   it('keeps lumps at or under 35% of the yearly plan across horizons', () => {
     for (const birthYear of [2010, 2011, 2018, 2026]) {
       const p = proposeKidAccountPlan({ ...base, birthYear });
-      if (p.ritualsReason === null) {
-        expect((p.birthdayLump + p.newYearLump) / (12 * p.monthly + p.birthdayLump + p.newYearLump)).toBeLessThanOrEqual(0.35);
+      expect(p.ritualsReason).toBeNull();
+      expect((p.birthdayLump + p.newYearLump) / (12 * p.monthly + p.birthdayLump + p.newYearLump)).toBeLessThanOrEqual(0.35);
+    }
+  });
+  it('reaches at least the target with the proposed plan across the grid', () => {
+    for (const birthYear of [2010, 2011, 2018, 2026]) {
+      for (const balance of [0, 20000]) {
+        const p = proposeKidAccountPlan({ ...base, birthYear, balance });
+        if (p.n === 0) continue;
+        expect(futureValue(balance, p.monthly, p.n, p.rate, p.lumps)).toBeGreaterThanOrEqual(250000);
       }
     }
   });
@@ -109,7 +117,8 @@ describe('proposeSimplePlan', () => {
   it('uses market at 36 months and cash at 35', () => { expect(s(2029, new Date(2026, 11, 15)).n).toBe(36); expect(s(2029, new Date(2026, 11, 15)).rateKind).toBe('market'); expect(s(2029, new Date(2027, 0, 15)).rateKind).toBe('cash'); });
   it('keeps the anchored kind until a re-plan', () => expect(s(2029, new Date(2027, 0, 15), { rateKindOverride: 'market' }).rateKind).toBe('market'));
   it('forces cash for emergency funds even when overridden to market', () => expect(s(2032, NOW, { forceCash: true, rateKindOverride: 'market' }).rateKind).toBe('cash'));
-  it('splits from you and from growth', () => { const p = s(2036, NOW); expect(p.fromYou + p.fromGrowth).toBeGreaterThanOrEqual(30000); });
+  it('splits from you and from growth', () => { const p = s(2036, NOW); expect(p.fromYou + p.fromGrowth).toBeGreaterThanOrEqual(30000); expect(p.fromGrowth).toBeGreaterThan(0); expect(p.fromYou).toBe(p.monthly * p.n); });
+  it('is due now when the deadline has passed', () => { const p = s(2026, new Date(2026, 11, 15)); expect(p.n).toBe(0); expect(p.dueNow).toBe(30000); });
 });
 
 describe('simpleTarget', () => {
@@ -120,6 +129,7 @@ describe('simpleTarget', () => {
 
 describe('proposeVacationPlan', () => {
   it('is ceil of trips times budget over 12', () => expect(proposeVacationPlan({ tripsPerYear: 4, budgetPerTrip: 2500, savedThisYear: 0, savedYear: 2026 }, NOW).monthly).toBe(834));
+  it('expects monthly times the months elapsed so far', () => expect(proposeVacationPlan({ tripsPerYear: 4, budgetPerTrip: 2500, savedThisYear: 0, savedYear: 2026 }, NOW).expectedSoFar).toBe(8340));
   it('resets saved so far in a new year', () => { const p = proposeVacationPlan({ tripsPerYear: 1, budgetPerTrip: 1200, savedThisYear: 900, savedYear: 2025 }, NOW); expect(p.resetNeeded).toBeTrue(); expect(p.savedThisYear).toBe(0); });
 });
 
@@ -145,5 +155,12 @@ describe('planStatus', () => {
 
 describe('vacationStatus', () => {
   it('never reads done', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 10000, expectedSoFar: 8340, resetNeeded: false }, NOW).kind).toBe('ahead'));
+  it('uses annual as the tolerance base (100 on 10000), symmetric', () => {
+    const v = (saved: number) => vacationStatus({ annual: 10000, monthly: 834, savedThisYear: saved, expectedSoFar: 8340, resetNeeded: false }, NOW).kind;
+    expect(v(8340 + 100)).toBe('on_plan');
+    expect(v(8340 + 101)).toBe('ahead');
+    expect(v(8340 - 100)).toBe('on_plan');
+    expect(v(8340 - 101)).toBe('behind');
+  });
   it('is started at the top of the year', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 0, expectedSoFar: 0, resetNeeded: false }, new Date(2027, 0, 5)).kind).toBe('started'));
 });

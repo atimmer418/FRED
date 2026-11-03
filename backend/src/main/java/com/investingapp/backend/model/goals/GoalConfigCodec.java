@@ -1,0 +1,61 @@
+package com.investingapp.backend.model.goals;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.investingapp.backend.model.GoalType;
+import com.investingapp.backend.service.GoalValidationException;
+import org.springframework.stereotype.Component;
+
+/** Parses and serializes the per-type goal config JSON stored in the goals TEXT column. */
+@Component
+public class GoalConfigCodec {
+
+    private static final String BAD_SHAPE = "Goal details are not in the expected shape.";
+
+    private final ObjectMapper mapper;
+
+    public GoalConfigCodec(ObjectMapper appMapper) {
+        this.mapper = appMapper.copy()
+                .registerModule(new JavaTimeModule())
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    }
+
+    public Object parse(GoalType type, String json) {
+        try {
+            return mapper.readValue(json, configClass(type));
+        } catch (JsonProcessingException e) {
+            throw new GoalValidationException(BAD_SHAPE);
+        }
+    }
+
+    public Object parse(GoalType type, JsonNode node) {
+        try {
+            return mapper.treeToValue(node, configClass(type));
+        } catch (JsonProcessingException e) {
+            throw new GoalValidationException(BAD_SHAPE);
+        }
+    }
+
+    public String write(Object config) {
+        try {
+            return mapper.writeValueAsString(config);
+        } catch (JsonProcessingException e) {
+            throw new GoalValidationException(BAD_SHAPE);
+        }
+    }
+
+    private static Class<?> configClass(GoalType type) {
+        return switch (type) {
+            case KIDS -> KidsConfig.class;
+            case HOUSE, CAR -> HouseCarConfig.class;
+            case VACATION -> VacationConfig.class;
+            case EMERGENCY_FUND -> EmergencyFundConfig.class;
+            case WEDDING, CUSTOM -> TargetConfig.class;
+        };
+    }
+}

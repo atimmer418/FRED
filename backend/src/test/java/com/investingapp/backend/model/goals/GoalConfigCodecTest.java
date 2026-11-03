@@ -59,6 +59,22 @@ class GoalConfigCodecTest {
     }
 
     @Test
+    void writeFailureIsServerFaultNotValidation() {
+        // An Object with no properties makes Jackson fail on empty beans.
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> codec.write(new Object()));
+        assertNotNull(ex.getCause());
+        assertEquals("Could not serialize goal config", ex.getMessage());
+    }
+
+    @Test
+    void parseFailureKeepsTheCause() {
+        GoalValidationException ex = assertThrows(GoalValidationException.class,
+                () -> codec.parse(GoalType.CUSTOM, "{\"extra\":1}"));
+        assertEquals("Goal details are not in the expected shape.", ex.getMessage());
+        assertNotNull(ex.getCause());
+    }
+
+    @Test
     void timestampsWriteAsIsoStrings() {
         String written = codec.write(codec.parse(GoalType.KIDS, KIDS_JSON));
         assertTrue(written.contains("\"2026-11-02T10:15:30\""), written);

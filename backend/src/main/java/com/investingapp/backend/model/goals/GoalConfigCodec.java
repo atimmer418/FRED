@@ -29,7 +29,7 @@ public class GoalConfigCodec {
         try {
             return mapper.readValue(json, configClass(type));
         } catch (JsonProcessingException e) {
-            throw new GoalValidationException(BAD_SHAPE);
+            throw new GoalValidationException(BAD_SHAPE, e);
         }
     }
 
@@ -37,7 +37,7 @@ public class GoalConfigCodec {
         try {
             return mapper.treeToValue(node, configClass(type));
         } catch (JsonProcessingException e) {
-            throw new GoalValidationException(BAD_SHAPE);
+            throw new GoalValidationException(BAD_SHAPE, e);
         }
     }
 
@@ -45,7 +45,7 @@ public class GoalConfigCodec {
         try {
             return mapper.writeValueAsString(config);
         } catch (JsonProcessingException e) {
-            throw new GoalValidationException(BAD_SHAPE);
+            throw new IllegalStateException("Could not serialize goal config", e);
         }
     }
 

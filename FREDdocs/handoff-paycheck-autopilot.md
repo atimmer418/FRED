@@ -1,13 +1,31 @@
 # Handoff: Paycheck Autopilot, after the analytics merge
 
-**Written 2026-10-22, updated 2026-10-25 for everything through Checkpoint J.** For whoever picks
+**Written 2026-10-22, updated 2026-11-02 for everything through Checkpoint J, and written to be
+self-contained.** For whoever picks
 Paycheck Autopilot back up. Phase 0 is merged and unchanged in behaviour. What changed underneath it
 is how a schedule says why it is not running, who else now writes a hold, and a filter that will
 silently drop an analytics property you have not declared. Read this before writing Phase 1 code; it
 is about 15 minutes and will save you a wrong assumption about money movement and a day chasing a
 missing dimension.
 
-Assume no prior context. Everything you need is here or named here.
+**Assume no prior context, and do not go reading the analytics documents.** This file is written
+to be the only thing you need. Everything the analytics work left behind that can affect Paycheck
+Autopilot is restated here in full, including the commands, the privacy rule and the SQL. Where
+another document is named it is for background you should not need; if you find yourself needing
+one of them to make progress, that is a bug in this file worth fixing for the next session.
+
+| | What is in it |
+| --- | --- |
+| 1 | `is_paused` is gone; there is a three-state `status` |
+| 2 | `hold_reason` is orthogonal to the status, and **2.1** a KYC rejection now sets a hold |
+| 3 | The one rule that decides whether money moves |
+| 4 | Every file of yours the merge touched, and how |
+| 5 | Migration numbers (**start at V9**), and **5.1** why the backend may not boot |
+| 6 | The churn view's two meanings of "active" |
+| 7 | If you add a schedule transition, it must emit an event |
+| 8 | The outbound privacy filter, what may never be sent, and **8.2** your own privacy consequence |
+| 9 | How to run the suites, and the 97 silently skipped tests |
+| 10 | State of the tree, and the live state of the analytics layer |
 
 ---
 
@@ -168,11 +186,40 @@ collision happened once already, because two branches both chose V6, and git mer
 (different filenames) while Flyway refuses to start. The failure only appears at boot, so a
 duplicate number will not be caught by tests or review.
 
-House rules, from `FREDdocs/flyway-baseline.md`: versioned migrations must be **idempotent**
-(`information_schema` guards plus `PREPARE`/`EXECUTE`/`DEALLOCATE`); views are **repeatable**
-migrations named `R__v_<name>.sql`; and `ddl-auto=validate` is on in every profile, so an entity
-that drifts from the schema fails at startup. That guardrail is worth trusting: it caught a
-`char(36)` versus `varchar(36)` mismatch in V5 and a missing column in V7.
+House rules: versioned migrations must be **idempotent** (`information_schema` guards plus
+`PREPARE`/`EXECUTE`/`DEALLOCATE`); views are **repeatable** migrations named `R__v_<name>.sql`; and
+`ddl-auto=validate` is on in every profile, so an entity that drifts from the schema fails at
+startup. That guardrail is worth trusting: it caught a `char(36)` versus `varchar(36)` mismatch in
+V5 and a missing column in V7. Copy the shape of any existing file in
+`backend/src/main/resources/db/migration/`.
+
+### 5.1 If the backend will not boot, read this before debugging it
+
+Two known causes, both environmental and neither your code.
+
+**Flyway checksum mismatch on version 6 or 7.** Your database applied the analytics migrations
+under their old numbers before they were renumbered behind your V6. The log says
+`Migration checksum mismatch for migration version 6`. **Do not run `flyway repair`**: it rewrites
+the stored checksum to match the file, which would record your V6 as applied when its seven tables
+were never created, and the schema would be silently short. Take a `mysqldump`, rehearse on a clone
+if you want to be careful, then delete the two mis-numbered rows and let the migrations re-run
+under their shipped numbers. All three are guarded, so the two that really ran are no-ops and V6
+does its work for the first time:
+
+```sql
+DELETE FROM flyway_schema_history WHERE version='6' AND description='investment schedule status';
+DELETE FROM flyway_schema_history WHERE version='7' AND description='analytics person deletions';
+```
+
+Expect `Successfully applied 4 migrations ... now at version v8`. Afterwards check that the history
+reads `1`..`8` in order, that `investment_schedules` has `status` and `hold_reason` and no
+`is_paused`, and that your seven Autopilot tables exist.
+
+**`Could not resolve placeholder 'plaid.webhook.url'`.** `application-local.properties` is
+**gitignored**, so a commit that adds a property to the tracked profiles cannot reach your copy of
+it. Add the missing ones by hand with env-var defaults, in the same shape as the tracked profiles.
+Any property added to `application.properties` has to be hand-added locally, every time, by
+everyone.
 
 One thing left undone deliberately: `paused_by_user_at`, which your V6 added, is **not backfilled**
 by V7. V7 had no evidence for when a historical pause happened, and inventing a timestamp seemed
@@ -239,7 +286,8 @@ Rules, all of them load-bearing:
    `ServerAnalyticsEvent.PROPERTY_KEYS` is now **stripped on the way out**; see section 8.
    The tests assert the **whole** map including key order, because a property that quietly appears
    is a privacy problem and one that quietly disappears breaks the view's `$.initiator` /
-   `$.reason` reads. Money amounts are never sent; see `FREDdocs/what-we-send.md`.
+   `$.reason` reads. Money amounts are never sent, ever, in any property: section 8 has the whole
+   rule.
 4. **Emit through the outbox, inside the transaction that changes the state.** Call
    `analyticsOutboxService.record(...)` from a method that already has a transaction.
    `AnalyticsOutboxService` **refuses to write without one**, by design, so the event and the state
@@ -249,7 +297,9 @@ Rules, all of them load-bearing:
    `REASON_ACH_CONFIRMED`, `REASON_ACCOUNT_CLOSED`, `REASON_KYC_REJECTED`); the frontend taxonomy in
    `frontend/src/app/services/analytics/analytics-events.ts` lists the server event names, and
    `frontend/scripts/docs/assert-events-documented.mjs` fails the build if an event or property is
-   undocumented. Document it in `FREDdocs/analytics-events.md` in the same change.
+   undocumented. Document it in `FREDdocs/analytics-events.md` in the same change: copy the shape of
+   the row above the one you are adding, and run `npm run test:events-documented`, which names
+   exactly what is missing rather than making you guess.
 
 A third name, `schedule_cancelled`, exists for a schedule that goes away entirely (account closure,
 KYC rejection). Do not reuse it for a stop.
@@ -301,41 +351,154 @@ What this means for you, concretely:
   and the rule, and never the value. If you see that line, the emitting code is the bug.
 
 The guard is a backstop, not a reviewer. It catches a known-shaped thing under a new name; it
-cannot catch a genuinely new kind of identifying data under an innocent name with no shape. The
-rule in `FREDdocs/what-we-send.md` still governs, and that document is the one counsel reads.
+cannot catch a genuinely new kind of identifying data under an innocent name with no shape. So here
+is the rule it is backing up, in full, because it is the one you have to apply yourself:
+
+**What may never be sent to analytics, from either side, in any property:**
+
+- A name, email address, phone number, postal address, date of birth, or any part of a Social
+  Security number.
+- A bank account or routing number, a card number, an institution or employer **name**, or a broker
+  account id.
+- **Any raw dollar amount.** Every amount goes as a band: `under_50`, `1k_2499`, `1m_plus` and the
+  rest, from `AnalyticsBands.amount(...)` on the server and `toAmountBand(...)` on the client. Never
+  the number, not even rounded.
+- **Any free text.** No error message, no rejection reason, no note, no user input. If you need to
+  know which of something happened, add a closed vocabulary and send one of its words.
+- Any identifier other than the analytics `public_id`. No row id, no schedule id, no Plaid item or
+  access token, no session id.
+- A date or timestamp. Dates go as day bands (`same_day`, `1_3`, `4_7`, ... `over_90`) via
+  `AnalyticsBands.daysBetween(...)`.
+
+### 8.1 Two more rules you can trip without touching an event
+
+1. **If you add a path that deletes a user, request the vendor person deletion in the same
+   transaction.** `UserDeletionService` does this at line 147 with
+   `analyticsPersonDeletionService.request(user)`, before the row deletes, and it covers every
+   `DeletionReason`. A deletion that skips it leaves the person's events with the vendor after we
+   have promised in writing that they go, which is a broken commitment rather than a bug. If you
+   add a second deletion path, make the same call from inside its transaction.
+2. **Do not reach for a hard delete at all without asking Andy.** That is a standing rule on this
+   repository, and it is why a rejected KYC applicant now keeps their row (section 2.1).
+
+### 8.2 Paycheck Autopilot has a privacy consequence of its own, and nobody has handled it
+
+This is the one thing in this file that is about your work rather than mine, so it is flagged rather
+than assumed. Detecting a paycheck means reading a person's **payroll deposits**: the amount, the
+date, and in practice the employer's name as it appears on the transaction. That is new collected
+data of a kind the app did not hold before.
+
+Three consequences, none of them started:
+
+- It must not reach analytics. `employer_name`, `amount` and a deposit date are all refused by the
+  guard in section 8, which is the backstop working, not permission to try.
+- It needs an entry in `FREDdocs/privacy-manifest-and-label.md` and in the iOS privacy manifest at
+  `frontend/ios/App/App/PrivacyInfo.xcprivacy`, under "Financial Info" and probably "Employment
+  Info", linked to the user, purpose "app functionality". That manifest currently declares
+  **analytics only**; the KYC, auth and banking data types are already owed and yours would be
+  another. Apple rejects a build whose manifest is incomplete.
+- It needs a line in the counsel-facing description of what we hold. **Tell Andy before Phase 1
+  ships, not after.** He is already taking privacy questions to counsel and this belongs in the same
+  conversation.
 
 ---
 
-## 9. State of the tree
+## 9. How to run the suites, and the trap in the backend one
 
-- Branch `feature/analytics` and `develop` are both at `ff71de8` and pushed. The merge that brought
+```bash
+# Frontend, from frontend/
+npx ng test --watch=false --browsers=ChromeHeadless
+npx tsc --noEmit
+npx ng lint
+npm run test:events-documented   # the taxonomy against FREDdocs/analytics-events.md
+npm run test:lint-rule           # the posthog-js import rule
+
+# Backend, from backend/
+./gradlew cleanTest test
+```
+
+**`./gradlew test` reports BUILD SUCCESSFUL with 97 tests skipped and does not say so loudly.**
+Those are the ones annotated `@RequiresCiDatabase`, which skip when no MySQL is reachable, and they
+are the tests that cover migrations, views, and outbox commit and rollback behaviour: exactly the
+things you will be changing. Point them at a scratch schema and drop it afterwards:
+
+```bash
+mysql -u root -p<pw> -e "CREATE DATABASE fred_scratch"
+SPRING_DATASOURCE_URL='jdbc:mysql://127.0.0.1:3306/fred_scratch?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC' \
+  SPRING_DATASOURCE_USERNAME=root SPRING_DATASOURCE_PASSWORD=<pw> ./gradlew cleanTest test
+mysql -u root -p<pw> -e "DROP DATABASE fred_scratch"
+```
+
+Count from the XML rather than the console, because the console does not total them:
+
+```bash
+grep -ho 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' build/test-results/test/*.xml
+```
+
+The frontend suite has **14 pre-existing failures** that are not yours and not analytics: eight
+`should create` smoke specs, `FreedomDetailSheetComponent`, `SecuritySettingsPage`, the `TabsPage`
+pager, and two `swipe-settle` velocity specs. They are tracked as FRED-226. Anything beyond those
+14 is yours. Karma also disconnects occasionally with "no message in 30000 ms"; that is
+environmental, so re-run before investigating.
+
+---
+
+## 10. State of the tree
+
+- Branch `feature/analytics` and `develop` are both at `fde4f7f` and pushed. The merge that brought
   these two lines of work together is `c3372d6`, which has both parents: analytics `ff0a317` and
   develop `2580767`.
-- **754 tests, 0 failures, 0 skipped**, including the database-gated ones. Those 97 skip silently
-  without a datasource, so run them with `SPRING_DATASOURCE_URL` pointed at a scratch schema before
-  believing a green build.
+- **756 backend tests, 0 failures, 0 skipped**, including the database-gated ones, and **955
+  frontend specs, 941 passing** with the 14 pre-existing failures named in section 9. See section 9
+  for how to reproduce both, and for why a green backend build can be hiding 97 skipped tests.
 - The migration chain was rehearsed against a database at your V6 carrying Autopilot's shape: all
   five row shapes backfilled correctly, including the Autopilot-only one (`is_paused = 0`, no ACH
   id, `BANK_CHANGE` hold) landing on `ACTIVE` with its hold intact. `is_paused` dropped, re-run
   clean, and the app booted over it with Flyway applying 7, 8 and the seven views under
   `ddl-auto=validate`.
 - Analytics work stops after Checkpoint J (the outbound privacy guard). Nothing further is queued
-  that will move these files again. What is still owed, and by whom, is the last section of
-  `FREDdocs/analytics-implementation-review.md`.
+  that will move these files again, so the files in section 4 are yours to change.
 - **Your local database may not boot, and it is not your code.** The analytics migrations were
   renumbered behind your V6, so a database that applied them under the old numbers fails Flyway's
   checksum check at startup for versions 6 and 7. `flyway repair` is the wrong tool and would mark
   your V6 as applied when its tables were never created. The two `DELETE` statements that fix it,
-  and the rehearsal procedure, are in `FREDdocs/flyway-baseline.md`. **`api-dev` very likely needs
-  the same repair**; nobody has been able to check it from a local session.
+  and what to check afterwards, are in section 5.1 above. **`api-dev` very likely needs the same
+  repair**; nobody has been able to check it from a local session, and it is open item 3 of the
+  analytics review.
+
+### 10.1 The live state of the analytics layer around you
+
+Worth thirty seconds, because it explains four innocent reasons an event you emitted correctly does
+not appear in PostHog. Check these before you debug your own code:
+
+| | |
+| --- | --- |
+| The outbox | An event is a row in `analytics_outbox`, written in your transaction. A publisher polls it and posts to PostHog. **The row is the source of truth; PostHog is a copy.** If the row is there with your properties, your work is done and correct. |
+| The publisher flag | `app.analytics.publisher.enabled`, from `ANALYTICS_PUBLISHER_ENABLED`, **defaults to false**. It is **true on the dev Railway service** as of 2026-11-02. Locally it is off unless you set it, so locally the outbox fills and nothing is sent, by design. |
+| Consent | A user can opt out, it is stored server-side, and the publisher reads it **live** just before sending. An opted-out user's rows are suppressed even if they were recorded before they opted out. Analytics is **on by default**. |
+| Retries | A failed row backs off `2^attempts` minutes and gives up after 10 attempts. `v_outbox_reconciliation` has a `pending_count` column; if it grows without bound, the publisher is the problem, not the emitter. |
+
+Four of the server events have **never been seen working end to end**: `kyc_submitted`,
+`kyc_decided`, `first_ach_transfer_completed` and `ach_transfer_completed`. They have unit and
+rollback coverage and nothing more. `FREDdocs/beta-qa-checklist.md` says each must be seen in the
+outbox **and** in PostHog from the first real beta account before more users are admitted. If you
+are the session that gets a real account through that flow, check them off.
+
+---
 
 ## Related reading
 
-- `FREDdocs/specs/2026-10-19-paycheck-autopilot-design.md`: your spec, still current
-- `FREDdocs/metrics.md`: the MySQL views, including `v_schedule_churn` column by column
-- `FREDdocs/analytics-events.md`: the event taxonomy and every property
-- `FREDdocs/what-we-send.md`: what leaves the building, and what never does
-- `FREDdocs/flyway-baseline.md`: migration conventions, and the renumbering repair
-- `FREDdocs/privacy-manifest-and-label.md`: the iOS privacy manifest and the App Store label answers
-- `FREDdocs/analytics-implementation-review.md`: what analytics built, what it deviated on, and what
-  is still owed
+**One of these you do need:** `FREDdocs/specs/2026-10-19-paycheck-autopilot-design.md`, your own
+spec, 23 approved decisions, still current.
+
+The rest is background. You should be able to finish Phase 1 without opening any of them, and if you
+cannot, say so and this file should be fixed.
+
+| If you want | Read |
+| --- | --- |
+| The event taxonomy, every event and property, and the table the build check pins to | `FREDdocs/analytics-events.md` (the one you touch when you add an event) |
+| The MySQL views, `v_schedule_churn` column by column | `FREDdocs/metrics.md` |
+| What leaves the building and what never does, written for counsel | `FREDdocs/what-we-send.md` |
+| Migration conventions in full, and the renumbering repair with its rehearsal | `FREDdocs/flyway-baseline.md` |
+| The iOS privacy manifest and the App Store label answers | `FREDdocs/privacy-manifest-and-label.md` |
+| What the analytics work built, deviated on, and still owes, item by item | `FREDdocs/analytics-implementation-review.md` |

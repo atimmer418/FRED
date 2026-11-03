@@ -5,8 +5,9 @@ diff. It covers the original analytics brief, the 13 decisions and 12 sections t
 Phase 0 discovery, the scope change that removed subscriptions, and every checkpoint instruction
 from B through H including the follow-ups.
 
-**Branch:** `feature/analytics`, merged to `develop` through `bdb2f42`.
+**Branch:** `feature/analytics`, merged to `develop` through `fde4f7f`.
 **Written:** 2026-10-23. **Decisions recorded and Checkpoint J built:** 2026-10-24.
+**Guard audit (7.8), publisher live on dev, and the handoff made self-contained:** 2026-11-02.
 **Author:** this session, reviewed against the code as it stands today.
 
 ## How to read the status column
@@ -118,7 +119,7 @@ Deferred by decision on 2026-10-24, with the scope each one needs. None is start
 | Item | One-line scope |
 |---|---|
 | **Acquisition attribution** (question 4) | A spec for the landing page's waitlist lookup, then FRED's half: `acquisition_*` columns on `users`, a short-timeout lookup at registration with a retry job, and the properties onto the person record |
-| **LTV/CAC** (question 3) | A recorded cost input from Andy and revenue from the billing session, then one definition written against both and a view or a dashboard tile on top |
+| **LTV/CAC** (question 3) | **Deferred until paid acquisition starts**, by decision on 2026-11-02: with no ad spend there is no CAC to compute and a definition written now would be guesswork. When it starts, it needs a recorded cost input from Andy and revenue from the billing session, then one definition written against both and a view or a dashboard tile on top. This is no longer an open item waiting on Andy |
 | **The transfer tables** (Section 7) | A `transfer` table with status history, a `contribution_attempt` table and a withdrawal record, then `deposit_failed`, `deposit_returned`, `withdrawal_requested` and `v_contribution_continuity` on top of them |
 | **Alerts** (9.1e) | The four named conditions added to `sync-dashboards.mjs` so they are code like the dashboards, not clicks that drift |
 | **Sentry** (9.3) | A project, the SDK keyed to the same `public_id`, and the disclosure row written into `what-we-send.md` **before** the key is configured |
@@ -566,6 +567,13 @@ In priority order. Each one says exactly what to do and where. Checkpoint J is b
 items it answered are gone from this list. What is left needs something only you, or another
 flow's owner, can supply.
 
+**Closed on 2026-11-02.** The dev Railway service now has `ANALYTICS_PUBLISHER_ENABLED=true`,
+`POSTHOG_PROJECT_KEY`, `POSTHOG_PROJECT_ID=667874` and `POSTHOG_PERSONAL_API_KEY` set, which closes
+both the publisher item and the deletion-credential item. Events flow on dev and person deletions
+can complete. Watch the `pending_count` column of `v_outbox_reconciliation` once: it should stop
+growing. Nothing has yet been seen arriving for the four server events listed under known gaps, so
+that confirmation is still owed.
+
 1. **Get the KYC, auth and banking data types into the privacy manifest and the label.** J5
    declared what analytics sends. The app also collects a name, date of birth, **Social Security
    number**, address, email, phone and bank account details, and none of that is declared yet. A
@@ -587,24 +595,10 @@ flow's owner, can supply.
    statements in `FREDdocs/flyway-baseline.md` against a backup-first clone and then the real
    database. Do **not** run `flyway repair`: it would record Autopilot's V6 as applied when its
    seven tables were never created, and the damage would be silent.
-4. **Provision the deletion credential.** Until it is set, every PostHog person deletion sits as
-   PENDING and we do not keep the promise `what-we-send.md` makes. **Action:** in PostHog, Settings
-   then Personal API keys, create a key scoped to project 667874 with `person:read` and
-   `person:write`. Set it on the dev Railway service as `POSTHOG_PERSONAL_API_KEY`, and set
-   `POSTHOG_PROJECT_ID=667874` beside it. Neither is the public `phc_` key; do not reuse that one.
-5. **Turn the publisher on wherever you want events to flow.** `ANALYTICS_PUBLISHER_ENABLED`
-   defaults to **false**, so the outbox fills and nothing is sent. **Action:** set
-   `ANALYTICS_PUBLISHER_ENABLED=true` and `POSTHOG_PROJECT_KEY=<the phc_ key>` on the dev Railway
-   service. Check it worked with the `pending_count` column of `v_outbox_reconciliation`: it should
-   stop growing.
-6. **Confirm the privacy policy and the App Store privacy label say analytics is on by default and
+4. **Confirm the privacy policy and the App Store privacy label say analytics is on by default and
    can be turned off.** Both live outside this repo, and J5 writes the nutrition-label answers that
    have to agree with them. **Action:** read them, or send them to me.
-7. **Set a CAC input, when the follow-on plan comes up.** LTV/CAC has no definition because it has
-   no cost input. **Action:** decide where ad spend, tooling cost and an hours-based cost for
-   content-driven users are recorded, even if it is a spreadsheet, and I will write the definition
-   against it.
-8. **Decide when the follow-on plan runs**, and in what order. The five items are listed above with
+5. **Decide when the follow-on plan runs**, and in what order. The five items are listed above with
    their scope. Acquisition attribution is the one with an external dependency: it needs a spec for
    the landing page side, which is a different repo and out of my scope. **Action:** tell me which
    of the five to plan first, and whether to write `FREDdocs/specs/waitlist-lookup-api.md` for the
@@ -634,6 +628,9 @@ exactly this, and it gates admitting more users.
 `ANALYTICS_PUBLISHER_ENABLED` false, or with no project key, every event still lands in the outbox
 and nothing reaches PostHog. This was designed to look like an outage rather than a success, so the
 rows sit PENDING. If nobody looks at `pending_count`, it looks like silence rather than a problem.
+**It is now true on the dev Railway service, as of 2026-11-02**, along with both keys and the
+project id, so dev should be sending. It remains false everywhere else, local included, which is
+deliberate: a laptop must not post to the project.
 
 **History moves under the snapshot columns.** Without `metrics_daily` (8.2), every view recomputes
 from current state. `v_schedule_churn`'s three month-end columns and `v_activation_funnel`'s step

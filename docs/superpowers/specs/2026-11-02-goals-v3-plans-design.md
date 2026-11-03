@@ -121,7 +121,7 @@ Pinned worked example (10%, $0 start, $250K brokerage, 18-year runway):
 
 | case | value |
 |---|---|
-| flat monthly, n = 216 | $416.28 → **$417/mo** (biweekly $191.83) |
+| flat monthly, n = 216 | $416.28 → **$417/mo** (biweekly $192.17, of the rounded monthly) |
 | flat monthly, n = 217 | $412.16 → $413/mo |
 | rituals, n = 216, born Nov 2026 (November birthday), start Dec 2026 | s0 $4,995 → **$296/mo + $1,000 birthday + $500 New Year**, FV $250,526, lumps = 30% of plan, biweekly $136.41 |
 | milestone at 22 | $372,338.52 |
@@ -137,11 +137,15 @@ goal stores a small anchor:
   `plan_rate_kind` ('market' | 'cash'), `anchor_monthly` (the monthly FRED proposed at anchor;
   KIDS: per account), and `balance_updated_at` (KIDS: per account).
 - Set on create. RESET (re-anchored to current balance, now) on any PUT that changes a plan
-  input (targets, kids, price, year, trips). A PUT that changes only balances keeps the anchor
-  and stamps `balance_updated_at`.
+  input (targets, kids, price, year, trips), or on the first PUT that gives a never-planned
+  (imported) goal a real `anchor_monthly`. The SERVER decides this by comparing the stored and
+  incoming plan inputs; the client sends no flag. A PUT that changes only balances keeps the
+  anchor and stamps `balance_updated_at`.
 - Expected balance at the logged date = `futureValue(anchor_balance, anchor_monthly, months
-  between plan_anchored_at and balance_updated_at, anchor rate, lumps)`.
-- Status: `balance_updated_at` null → **"Plan started"** (neutral, never Behind). Else
+  between plan_anchored_at and balance_updated_at, plan_rate, lumps)`. KIDS aggregate over the
+  sums of all account balances, anchors and monthlies, with the family total as the target.
+- Status: imported goal never planned (`anchor_monthly` = 0) → **"Plan updated"**;
+  `balance_updated_at` null → **"Plan started"** (neutral, never Behind). Else
   **Ahead / On plan / Behind by $X, as of Mon YYYY**, graded at the logged date only. Last log
   older than 60 days → a soft "Update your balance" prompt on the page, chip unchanged.
 - Catch-up: when Behind, the live hero monthly is already the catch-up figure; the page says so
@@ -169,9 +173,10 @@ V6-V8; rules in `FREDdocs/flyway-baseline.md`). One row per goal; kids are one g
 | balance_updated_at | DATETIME(6) NULL | simple goals; KIDS per account in config |
 | anchor_balance | DECIMAL(12,2) NOT NULL DEFAULT 0 | simple goals |
 | anchor_monthly | DECIMAL(10,2) NOT NULL DEFAULT 0 | simple goals |
+| plan_rate | DECIMAL(5,4) NOT NULL | the numeric rate the anchor was computed at (0.0800, 0.1000, 0.1200 or 0.0400); status math uses this, never the live chip |
 | plan_rate_kind | VARCHAR(10) NOT NULL | 'market' or 'cash' |
 | plan_anchored_at | DATETIME(6) NOT NULL | |
-| completed | BOOLEAN NOT NULL DEFAULT 0 | |
+| completed | BIT(1) NOT NULL DEFAULT b'0' | the baseline's boolean convention; a MySQL BOOLEAN would fail ddl-auto=validate against a Java boolean |
 | sort_order | INT NOT NULL DEFAULT 0 | |
 | created_at / updated_at | DATETIME(6) | `@PrePersist/@PreUpdate` with `EasternTime.now()` |
 
@@ -227,7 +232,8 @@ Optional future column `linked_account_id` is NOT added now.
 Standard pushed-page header from `theme/_settings-shell.scss`. Setup mode is two steps so the
 plan is never below an open keyboard (call):
 
-1. **Setup step 1, inputs.** One card. Kids: family targets (529, brokerage; either may be
+1. **Setup step 1, inputs.** One card. Every type starts with a "Goal name" field; Something
+   else also gets the icon row. Kids: family targets (529, brokerage; either may be
    empty), helper line "A 529 is a state college plan. The brokerage is a custodial or regular
    account. You open both outside FRED.", kid list with a +/− stepper (1..10), each kid a label
    and a Month + Year picker with "Undecided" (month may be "Not sure"). House/car: price,
@@ -263,8 +269,10 @@ ion-content. `/goals/:id` guards `Number.isInteger(+id) && +id > 0`, else back t
 
 On my-profile load, after a successful GET, if `fred.goals.v2.<userId>` has entries: POST
 `/goals/import` with each as CUSTOM (`clientId` = v2 id, name, icon, targetAmount, targetYear,
-currentBalance = startingValue, balanceUpdatedAt = now, completed). Only after a 2xx remove the
-local key. Toast once: "Your goals moved to your account. FRED built a plan for each one, tap to
+currentBalance = startingValue, balanceUpdatedAt = now, completed, anchorMonthly = 0). The server
+clamps legacy values into today's bounds (past target year → this year, unknown icon → flag,
+amount capped) so an old goal can never make the import fail. Only after a 2xx remove the
+local key; on any error do not retry in this session. Toast once: "Your goals moved to your account. FRED built a plan for each one, tap to
 review." The v2 `perPaycheckOutsideFRED` is dropped (FRED now proposes the amount).
 
 ## Files and conventions to follow

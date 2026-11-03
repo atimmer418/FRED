@@ -15,6 +15,7 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { CASH_RATE, RateAssumptionsService } from '../../services/rate-assumptions.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
+import { toCountBand } from '../../services/analytics/analytics-bands';
 import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.model';
 
 function houseGoal(id: number, completed = false): Goal {
@@ -497,15 +498,44 @@ describe('GoalPage', () => {
     expect(ev.props.action).toBe('created');
   });
 
-  it('tracks completed, reopened and removed with the count left behind', async () => {
+  it('tracks completed, reopened and removed, with the count the user is left with', async () => {
     const fixture = await create({ id: '7' }, { goals: [houseGoal(7), houseGoal(8)], dismissRole: 'remove' });
     const page = fixture.componentInstance;
+    // Patch the signal the way the real service does.
+    updateSpy.and.callFake((id: number, body: GoalWrite) => {
+      const updated = { ...(goals().find(g => g.id === id) as Goal), ...body } as Goal;
+      goals.update(list => list.map(g => g.id === id ? updated : g));
+      return of(updated);
+    });
+    removeSpy.and.callFake((id: number) => {
+      goals.update(list => list.filter(g => g.id !== id));
+      return of(undefined);
+    });
     await page.markCompleted();
     await page.markCompleted();
     await page.confirmRemove();
-    const actions = track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_changed')
-      .map(e => e.props.action);
-    expect(actions).toEqual(['completed', 'reopened', 'removed']);
+    const props = track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_changed').map(e => e.props);
+    expect(props.map(p => p.action)).toEqual(['completed', 'reopened', 'removed']);
+    expect(props.map(p => p.goal_count)).toEqual([toCountBand(2), toCountBand(2), toCountBand(1)]);
+  });
+
+  it('derives completed bands from the saved goal, not unsaved form edits', async () => {
+    const fixture = await create({ id: '7' }, { goals: [houseGoal(7)] });
+    const page = fixture.componentInstance;
+    page.patch({ price: 4_000_000 }); // unsaved edit, would move the target band
+    await page.markCompleted();
+    const ev = track.calls.allArgs().map(a => a[0]).find(e => e.name === 'goal_changed');
+    expect(ev.props.target_band).toBe('50k_249k');
+  });
+
+  it('still navigates and toasts when analytics throws', async () => {
+    const fixture = await weddingPlan();
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    track.and.throwError('boom');
+    await fixture.componentInstance.save();
+    expect(showToast).toHaveBeenCalledWith('Plan started', 'success');
+    expect(router.navigate).toHaveBeenCalledWith(['/my-profile']);
+    expect(trackErrorShown).not.toHaveBeenCalled();
   });
 
   it('has no em dash in rendered text', async () => {

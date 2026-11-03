@@ -370,9 +370,26 @@ export class GoalPage implements OnInit {
    * Fires goal_changed after a successful write. Bands only: no name, id, balance or raw amount.
    * The count is read after the service has patched its signal, so it is what the user is left with.
    */
-  private trackGoalChange(action: GoalAction, type: GoalType, icon: Goal['icon']): void {
-    const view = this.view();
-    const config = this.draftGoal().config;
+  private trackGoalChange(action: GoalAction, type: GoalType, icon: Goal['icon'], saved?: Goal): void {
+    // Analytics never breaks a user flow: a tracking bug must not turn a good write into an error.
+    try {
+      this.sendGoalChange(action, type, icon, saved);
+    } catch {
+      // Swallowed on purpose.
+    }
+  }
+
+  /** `saved` is the stored goal for completed/reopened/removed, so unsaved form edits never leak in. */
+  private sendGoalChange(action: GoalAction, type: GoalType, icon: Goal['icon'], saved?: Goal): void {
+    const view = saved
+      ? buildGoalPlanView(saved, {
+        marketRate: saved.planRate,
+        frequency: this.frequency(),
+        now: this.now,
+        rateKindOverride: saved.planRateKind,
+      })
+      : this.view();
+    const config = saved ? saved.config : this.draftGoal().config;
     const thisYear = this.now.getFullYear();
 
     let target: number;
@@ -423,7 +440,7 @@ export class GoalPage implements OnInit {
       const updated = await firstValueFrom(
         this.goalsService.update(goal.id, this.writeFrom(goal, { completed: !goal.completed })));
       this.existing.set(updated);
-      this.trackGoalChange(updated.completed ? 'completed' : 'reopened', updated.type, updated.icon);
+      this.trackGoalChange(updated.completed ? 'completed' : 'reopened', updated.type, updated.icon, updated);
       this.toastService.showToast(updated.completed ? 'Goal marked complete' : 'Goal reopened', 'success');
     } catch (err) {
       await this.handleWriteError(err);
@@ -445,7 +462,7 @@ export class GoalPage implements OnInit {
     if (role !== 'remove') return;
     try {
       await firstValueFrom(this.goalsService.remove(goal.id), { defaultValue: undefined });
-      this.trackGoalChange('removed', goal.type, goal.icon);
+      this.trackGoalChange('removed', goal.type, goal.icon, goal);
       this.toastService.showToast('Goal removed', 'success');
       this.goBack();
     } catch (err) {

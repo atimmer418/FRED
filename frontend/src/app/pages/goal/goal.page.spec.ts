@@ -12,7 +12,7 @@ import { AuthService } from '../../services/auth.service';
 import { GoalsService } from '../../services/goals.service';
 import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
-import { RateAssumptionsService } from '../../services/rate-assumptions.service';
+import { CASH_RATE, RateAssumptionsService } from '../../services/rate-assumptions.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.model';
@@ -268,7 +268,8 @@ describe('GoalPage', () => {
   it('writes the shared rate only on save', async () => {
     const fixture = await weddingPlan();
     const rates = TestBed.inject(RateAssumptionsService);
-    const setRates = spyOn(rates, 'setRates').and.callThrough();
+    // Stubbed: the real setRates persists to localStorage and could leak 12% into later specs.
+    const setRates = spyOn(rates, 'setRates');
     const page = fixture.componentInstance;
 
     page.selectRate(0.12);
@@ -311,6 +312,45 @@ describe('GoalPage', () => {
     expect(p529.perKid[0].plan.monthly).toBeGreaterThan(0);
     expect(body.currentBalance).toBe(0);
     expect(body.anchorMonthly).toBe(view.monthlyTotal);
+  });
+
+  it('sends a starting balance typed in setup step 2 with the POST', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    page.patch({ price: 400_000, targetYear: YEAR + 6 });
+    page.showPlan();
+    fixture.detectChanges();
+
+    const input = fixture.nativeElement.querySelector('#gl-bal-current') as HTMLInputElement;
+    expect(input).withContext('balance tile shown in setup').not.toBeNull();
+    input.value = '12000';
+    input.dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+    expect(updateSpy).not.toHaveBeenCalled(); // no goal yet: draft state only
+    expect(page.draftGoal().currentBalance).toBe(12_000);
+
+    await page.save();
+    const body = createSpy.calls.mostRecent().args[0] as GoalWrite;
+    expect(body.currentBalance).toBe(12_000);
+  });
+
+  it('plans a teen account as cash and a newborn as market, and saves planRateKind market', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.patchKids({ plan529Target: 100_000, brokerageTarget: 50_000 });
+    page.patchKid(0, { undecided: false, birthYear: YEAR - 16, birthMonth: 6 }); // under 36 months to 18
+    page.addKid();                                                                // undecided
+    page.selectRate(0.12);
+    page.showPlan();
+    fixture.detectChanges();
+
+    for (const acct of page.view().kids!) {
+      expect(acct.perKid[0].plan.rate).toBe(CASH_RATE);
+      expect(acct.perKid[1].plan.rate).toBe(0.12);
+    }
+    await page.save();
+    const body = createSpy.calls.mostRecent().args[0] as GoalWrite;
+    expect(body.planRateKind).toBe('market');
   });
 
   it('keeps the form and opens the nudge on a 403 TIER_LIMIT', async () => {

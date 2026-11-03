@@ -89,6 +89,15 @@ export class GoalPage implements OnInit {
   readonly frequency = signal('');
   readonly saving = signal(false);
   readonly kidDetailsOpen = signal<Record<KidAccountKey, boolean>>({ plan529: false, brokerage: false });
+  /**
+   * Starting balances typed in setup step 2, before the goal exists. They feed draftGoal() and so
+   * the POST body; the server anchors the new plan at them. Kid balances are keyed by kid index.
+   */
+  readonly setupBalances = signal<{
+    current: number;
+    vacation: number;
+    kids: Array<Partial<Record<KidAccountKey, number>>>;
+  }>({ current: 0, vacation: 0, kids: [] });
   private readonly now = new Date();
 
   /**
@@ -100,11 +109,11 @@ export class GoalPage implements OnInit {
     return this.mode() === 'edit' && goal && !planInputsChanged(this.form(), goal) ? goal.planRateKind : null;
   });
 
-  /** The goal as it would be saved now: live inputs, saved balances and anchor. */
+  /** The goal as it would be saved now: live inputs, saved (or, in setup, typed) balances and anchor. */
   readonly draftGoal = computed<GoalPlanInput>(() => {
     const form = this.form();
     const goal = this.existing();
-    const config = formToConfig(form, goal);
+    let config = formToConfig(form, goal);
     if (goal) {
       return {
         type: form.type,
@@ -120,10 +129,26 @@ export class GoalPage implements OnInit {
         balanceUpdatedAt: goal.balanceUpdatedAt,
       };
     }
+    const typed = this.setupBalances();
+    if (form.type === 'KIDS') {
+      const c = config as KidsConfig;
+      config = {
+        ...c,
+        kids: c.kids.map((kid, i) => ({
+          ...kid,
+          accounts: {
+            plan529: { ...kid.accounts.plan529, balance: typed.kids[i]?.plan529 ?? 0 },
+            brokerage: { ...kid.accounts.brokerage, balance: typed.kids[i]?.brokerage ?? 0 },
+          },
+        })),
+      };
+    } else if (form.type === 'VACATION') {
+      config = { ...(config as VacationConfig), savedThisYear: typed.vacation, savedYear: this.now.getFullYear() };
+    }
     return {
       type: form.type,
       config,
-      currentBalance: 0,
+      currentBalance: form.type === 'KIDS' || form.type === 'VACATION' ? 0 : typed.current,
       completed: false,
       clientId: null,
       anchorBalance: 0,
@@ -302,15 +327,17 @@ export class GoalPage implements OnInit {
       return;
     }
     const goal = this.existing();
+    const draft = this.draftGoal();
     const view = this.view();
     const wasImported = this.isImported();
     const body: GoalWrite = {
       type: form.type,
       name: form.name.trim(),
       icon: form.icon,
-      config: this.withAccountAnchors(formToConfig(form, goal), view),
+      // The draft carries saved balances in edit mode and typed starting balances in setup.
+      config: this.withAccountAnchors(draft.config, view),
       // KIDS balances live per account in config.
-      currentBalance: form.type === 'KIDS' ? 0 : (goal?.currentBalance ?? 0),
+      currentBalance: form.type === 'KIDS' ? 0 : draft.currentBalance,
       completed: goal?.completed ?? false,
       anchorMonthly: view.monthlyTotal,
       planRate: view.rate,
@@ -377,13 +404,23 @@ export class GoalPage implements OnInit {
   }
 
   /**
-   * Logs a balance (edit mode only). Sends the SAVED goal with just the balance changed, so
-   * unsaved plan-input edits never ride along; the server keeps the anchor and stamps the date.
+   * Setup: records a starting balance in draft state (sent with the POST).
+   * Edit: logs a balance. Sends the SAVED goal with just the balance changed, so unsaved
+   * plan-input edits never ride along; the server keeps the anchor and stamps the date.
    */
   async updateBalance(path: BalancePath, value: number): Promise<void> {
-    const goal = this.existing();
-    if (!goal) return;
     const amount = Math.max(0, Math.round(value));
+    const goal = this.existing();
+    if (!goal) {
+      this.setupBalances.update(b => {
+        if (path === 'current') return { ...b, current: amount };
+        if (path === 'vacation') return { ...b, vacation: amount };
+        const kids = [...b.kids];
+        kids[path.kid] = { ...kids[path.kid], [path.account]: amount };
+        return { ...b, kids };
+      });
+      return;
+    }
     let patch: Partial<GoalWrite>;
     if (path === 'current') {
       if (goal.currentBalance === amount) return;

@@ -1,5 +1,7 @@
 import { buildGoalPlanView, fmtCompact, GoalPlanInput } from './goal-plan.view-model';
 import { AccountState, KidsConfig } from '../../models/goal.model';
+import { futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
+import { CASH_RATE } from '../../services/rate-assumptions.service';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
 const Y = NOW.getFullYear();
@@ -150,6 +152,69 @@ describe('buildGoalPlanView', () => {
 
     expect(fmtCompact(372_338.52)).toBe('$372K');
     expect(fmtCompact(1_180_000)).toBe('$1.18M');
+  });
+
+  it('grades KIDS status the same at any chip rate', () => {
+    const goal = kidsGoal([
+      {
+        label: 'Ada', birthYear: Y - 2, birthMonth: 3,
+        accounts: {
+          plan529: account(9_000, { balanceUpdatedAt: '2026-09-01T00:00:00', anchorBalance: 5_000, anchorMonthly: 250 }),
+          brokerage: account(14_000, { balanceUpdatedAt: '2026-09-01T00:00:00', anchorBalance: 10_000, anchorMonthly: 400 }),
+        },
+      },
+    ]);
+    const at8 = buildGoalPlanView(goal, ctx({ marketRate: 0.08 }));
+    const at12 = buildGoalPlanView(goal, ctx({ marketRate: 0.12 }));
+    expect(at8.monthlyTotal).not.toBe(at12.monthlyTotal);
+    expect(at12.status).toEqual(at8.status);
+  });
+
+  it('reads on_plan when a kid account matches the anchor-time plan, birthday lump included', () => {
+    const anchoredAt = '2026-01-01T00:00:00';
+    const loggedAt = '2026-06-01T00:00:00'; // 5 months after the anchor
+    const anchorPlan = proposeKidAccountPlan({
+      target: 100_000, balance: 0, birthYear: Y - 3, birthMonth: 3,
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt),
+    });
+    const lumpsSoFar = anchorPlan.lumps.filter(l => l.monthIndex <= 5);
+    expect(lumpsSoFar.length).withContext('one March birthday lump inside the window').toBe(1);
+    const expected = futureValue(0, anchorPlan.monthly, 5, 0.10, lumpsSoFar);
+
+    const config: KidsConfig = {
+      plan529Target: 100_000,
+      brokerageTarget: 0,
+      kids: [{
+        label: 'Ada', birthYear: Y - 3, birthMonth: 3,
+        accounts: {
+          plan529: account(expected, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: anchorPlan.monthly }),
+          brokerage: account(0),
+        },
+      }],
+    };
+    const view = buildGoalPlanView(base({ type: 'KIDS', config, planAnchoredAt: anchoredAt }), ctx({ marketRate: 0.12 }));
+    expect(view.status.kind).toBe('on_plan');
+    expect(view.status.delta).toBeCloseTo(0, 6);
+  });
+
+  it('resolves a rate kind per kid account from the anchor date', () => {
+    const goal = kidsGoal([
+      { label: 'Teen', birthYear: 2010, birthMonth: 6, accounts: { plan529: account(), brokerage: account() } },
+      { label: 'Baby', birthYear: null, birthMonth: null, accounts: { plan529: account(), brokerage: account() } },
+    ], { planAnchoredAt: NOW.toISOString() });
+    const view = buildGoalPlanView(goal, ctx({ marketRate: 0.12 }));
+    for (const acct of view.kids!) {
+      expect(acct.perKid[0].plan.rateKind).toBe('cash');
+      expect(acct.perKid[0].plan.rate).toBe(CASH_RATE);
+      expect(acct.perKid[1].plan.rateKind).toBe('market');
+      expect(acct.perKid[1].plan.rate).toBe(0.12);
+    }
+    expect(view.rateKind).toBe('market');
+
+    // A goal planned as cash keeps every account in cash.
+    const cash = buildGoalPlanView({ ...goal, planRateKind: 'cash', planRate: CASH_RATE }, ctx({ marketRate: 0.12 }));
+    expect(cash.kids!.every(a => a.perKid.every(k => k.plan.rateKind === 'cash'))).toBeTrue();
+    expect(cash.rateKind).toBe('cash');
   });
 
   it('hides per paycheck without a frequency', () => {

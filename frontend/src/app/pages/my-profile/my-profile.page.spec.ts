@@ -369,7 +369,7 @@ describe('MyProfilePage — plan seeding resilience (DOM)', () => {
     const { fixture } = setupDom(null);
     expect(fixture.componentInstance.monthlyInvestGoal()).toBe(0);
     expect(fixture.componentInstance.retirementIncomeGoal()).toBe(0);
-    expect(fixture.componentInstance.freedomGoalSub).toContain('not set');
+    expect(fixture.componentInstance.freedomGoalSub).toBe('Set your Freedom Plan to see your date.');
     expect(fixture.componentInstance.freedomGoalSub).not.toContain('\u2014');
   });
 

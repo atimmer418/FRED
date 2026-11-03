@@ -247,7 +247,7 @@
                       <b>{{ m.value }}</b>
                     </div>
                   </div>
-                  <div class="gl-field gl-balance" *ngIf="mode() === 'edit'">
+                  <div class="gl-field gl-balance">
                     <label class="gl-label" [attr.for]="'gl-bal-' + acct.account + '-' + i">
                       {{ acct.account === 'plan529' ? '529 balance' : 'Brokerage balance' }}
                     </label>
@@ -265,34 +265,32 @@
 
           <!-- Simple goals -->
           <div class="gl-card gl-simple" *ngIf="v.simple as s">
-            <p class="gl-split">From you {{ fmtMoney(s.fromYou) }}, from growth {{ fmtMoney(s.fromGrowth) }}</p>
-            <div class="gl-field gl-balance" *ngIf="mode() === 'edit'">
+            <p class="gl-split">from you {{ fmtMoney(s.fromYou) }}, from growth {{ fmtMoney(s.fromGrowth) }}</p>
+            <div class="gl-field gl-balance">
               <label class="gl-label" for="gl-bal-current">Saved so far</label>
               <div class="gl-money">
                 <span class="gl-prefix">$</span>
                 <input id="gl-bal-current" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(existing()?.currentBalance ?? 0)" (blur)="onBalanceBlur('current', $event)" />
+                       [value]="fmtNumber(draftGoal().currentBalance)" (blur)="onBalanceBlur('current', $event)" />
               </div>
             </div>
           </div>
 
-          <!-- Vacation (edit mode: progress this year) -->
-          <ng-container *ngIf="mode() === 'edit'">
-            <div class="gl-card gl-vacation" *ngIf="v.vacation as vac">
-              <label class="gl-reset-line" for="gl-bal-vacation" *ngIf="vac.resetNeeded">
-                New year, new trips. Saved so far resets, tap to update.
-              </label>
-              <p class="gl-split">On plan, {{ fmtMoney(vac.expectedSoFar) }} is set aside by now this year</p>
-              <div class="gl-field gl-balance">
-                <label class="gl-label" for="gl-bal-vacation">Saved so far this year</label>
-                <div class="gl-money">
-                  <span class="gl-prefix">$</span>
-                  <input id="gl-bal-vacation" class="gl-input" type="text" inputmode="numeric"
-                         [value]="fmtNumber(vac.savedThisYear)" (blur)="onBalanceBlur('vacation', $event)" />
-                </div>
+          <!-- Vacation: saved so far this year (setup and edit), progress line in edit -->
+          <div class="gl-card gl-vacation" *ngIf="v.vacation as vac">
+            <label class="gl-reset-line" for="gl-bal-vacation" *ngIf="mode() === 'edit' && vac.resetNeeded">
+              New year, new trips. Saved so far resets, tap to update.
+            </label>
+            <p class="gl-split" *ngIf="mode() === 'edit'">On plan, {{ fmtMoney(vac.expectedSoFar) }} is set aside by now this year</p>
+            <div class="gl-field gl-balance">
+              <label class="gl-label" for="gl-bal-vacation">Saved so far this year</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-bal-vacation" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(vac.savedThisYear)" (blur)="onBalanceBlur('vacation', $event)" />
               </div>
             </div>
-          </ng-container>
+          </div>
 
           <!-- Footer -->
           <div class="gl-footer">

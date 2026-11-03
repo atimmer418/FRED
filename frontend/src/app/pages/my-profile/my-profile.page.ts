@@ -296,11 +296,13 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
   get freedomGoalSub(): string {
     const goalValue = this.portfolioGoal();
-    const goal = goalValue > 0
-      ? (goalValue >= 1_000_000
-          ? '$' + (goalValue / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-          : '$' + Math.round(goalValue / 1_000) + 'k')
-      : 'not set';
+    // No income goal means no target: one plain sentence instead of a line of blanks.
+    if (!(this.retirementIncomeGoal() > 0) || !(goalValue > 0)) {
+      return 'Set your Freedom Plan to see your date.';
+    }
+    const goal = goalValue >= 1_000_000
+      ? '$' + (goalValue / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+      : '$' + Math.round(goalValue / 1_000) + 'k';
     const yr = this.freedomYear() ?? 'not set';
     const invest = this.monthlyInvestGoal() ? `$${this.monthlyInvestGoal().toLocaleString()}/mo` : 'not set';
     return `${goal} by ${yr} · ${invest} through FRED`;

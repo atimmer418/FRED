@@ -18,10 +18,13 @@ import {
 } from '../../models/goal.model';
 import {
   AccountPlan,
+  CASH_HORIZON_MONTHS,
   LumpOccurrence,
   PlanStatus,
   SimplePlan,
   VacationPlan,
+  horizonMonths,
+  kidDeadline,
   planStatus,
   proposeKidAccountPlan,
   proposeSimplePlan,
@@ -51,6 +54,7 @@ export interface GoalPlanContext {
   marketRate: number;
   frequency: string;
   now: Date;
+  /** Simple goals only. KIDS resolve a kind per account from the anchor (see kidsView). */
   rateKindOverride: RateKind | null;
 }
 
@@ -169,21 +173,51 @@ function kidsView(
     { account: 'brokerage', label: 'Brokerage', target: cfg.brokerageTarget },
   ];
 
+  // The plan was anchored here (a setup draft anchors at "now").
+  const parsedAnchor = new Date(goal.planAnchoredAt);
+  const anchorDate = Number.isFinite(parsedAnchor.getTime()) ? parsedAnchor : ctx.now;
+
+  /**
+   * Each kid account has its own rate kind, fixed at the anchor: cash when the goal was planned as
+   * cash, or when the account had under 36 months to go at the anchor date; market otherwise.
+   */
+  const accountKind = (birthYear: number | null, birthMonth: number | null): RateKind => {
+    if (goal.planRateKind === 'cash') return 'cash';
+    const dl = kidDeadline(anchorDate, birthYear, birthMonth);
+    return horizonMonths(anchorDate, dl.year, dl.month) < CASH_HORIZON_MONTHS ? 'cash' : 'market';
+  };
+
+  // Status lumps come from the ANCHOR-time plan, so their month indices count from planAnchoredAt
+  // like planStatus does, and the chip can never move them.
+  const anchorLumps: LumpOccurrence[] = [];
+
   // An account with no target has nothing to plan (a 529-only family is valid).
   const accounts: KidAccountView[] = accountDefs
     .filter(def => def.target > 0)
     .map(def => {
       const perKid = kids.map(kid => {
-        const balance = kid.accounts[def.account].balance;
+        const account = kid.accounts[def.account];
+        const balance = account.balance;
+        const kind = accountKind(kid.birthYear, kid.birthMonth);
         const plan = proposeKidAccountPlan({
           target: def.target,
           balance,
           birthYear: kid.birthYear,
           birthMonth: kid.birthMonth,
           marketRate: ctx.marketRate,
-          rateKindOverride: ctx.rateKindOverride,
+          rateKindOverride: kind,
           now: ctx.now,
         });
+        const anchorPlan = proposeKidAccountPlan({
+          target: def.target,
+          balance: account.anchorBalance,
+          birthYear: kid.birthYear,
+          birthMonth: kid.birthMonth,
+          marketRate: goal.planRate,
+          rateKindOverride: kind,
+          now: anchorDate,
+        });
+        anchorLumps.push(...anchorPlan.lumps);
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);
         return { label: kid.label, plan, balance, relative };
       });
@@ -221,7 +255,6 @@ function kidsView(
     }
   }
   const target = kids.length * ((cfg.plan529Target || 0) + (cfg.brokerageTarget || 0));
-  const lumps: LumpOccurrence[] = plans.reduce<LumpOccurrence[]>((all, p) => all.concat(p.lumps), []);
   const status = planStatus({
     completed: goal.completed,
     imported,
@@ -232,7 +265,7 @@ function kidsView(
     planAnchoredAt: goal.planAnchoredAt,
     balanceUpdatedAt: latest,
     rate: statusRate,
-    lumps,
+    lumps: anchorLumps,
     now: ctx.now,
   });
 

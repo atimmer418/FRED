@@ -258,10 +258,12 @@ describe('the guard keeps every legitimate declared value', () => {
       'tax_loss_harvesting',
     ],
     goal_count: COUNT_BANDS,
+    goal_type: ['KIDS', 'HOUSE', 'VACATION', 'CAR', 'EMERGENCY_FUND', 'WEDDING', 'CUSTOM'],
     // Every status an HTTP client can hand us, plus the null that means "no response at all".
     http_status: [null, 0, 100, 204, 301, 400, 401, 403, 404, 409, 418, 422, 429, 499, 500, 502, 503, 504, 599],
     icon: [
       'home', 'health_and_safety', 'flag', 'balance', 'savings', 'school', 'directions_car',
+      'child_care', 'flight', 'favorite',
     ],
     included_outside_accounts: BOOLEANS,
     income_changed: BOOLEANS,
@@ -274,6 +276,7 @@ describe('the guard keeps every legitimate declared value', () => {
     monthly_income_band: [...AMOUNT_BANDS, null],
     monthly_invest_band: [...AMOUNT_BANDS, null],
     outcome: ['applied', 'cancelled', 'failed', 'strong', 'moderate', 'risk'],
+    plan_rate: ['8', '10', '12', 'cash'],
     platform: ['ios', 'web'],
     preset_changed: BOOLEANS,
     progress: [...PERCENT_BANDS, null],

@@ -116,19 +116,24 @@ The four education decks are ungated. `optimal_drawdown` is Pro only.
 
 | Event | Properties | When |
 |---|---|---|
-| `goal_changed` | `action`, `icon`, `target_band`, `years_to_target`, `progress`, `goal_count` | A goal was created, edited, completed, reopened or removed. |
+| `goal_changed` | `action`, `goal_type`, `icon`, `plan_rate`, `target_band`, `years_to_target`, `progress`, `goal_count` | A goal was created, edited, completed, reopened or removed. |
 
-Actions: `created`, `updated`, `completed`, `reopened`, `removed`. Icons: `home`,
-`health_and_safety`, `flag`, `balance`, `savings`, `school`, `directions_car`.
+Actions: `created`, `updated`, `completed`, `reopened`, `removed`. Goal types: `KIDS`, `HOUSE`,
+`VACATION`, `CAR`, `EMERGENCY_FUND`, `WEDDING`, `CUSTOM`. Icons: `home`, `health_and_safety`,
+`flag`, `balance`, `savings`, `school`, `directions_car`, `child_care`, `flight`, `favorite`.
+`plan_rate` is the return assumption the plan was proposed at: `8`, `10` or `12` (percent), or
+`cash` for short-horizon and emergency plans.
 
-A goal's **name is free text the user typed** and its **id is a UUID**: neither ever leaves the
-device. The icon is the safe descriptor. `completed` and `reopened` are the two sides of one toggle
-and are separate values so they can be told apart. Goals are stored in localStorage only, so the
-single save point is where the sheet is dismissed.
+A goal's **name is free text the user typed** and its **id is a server row id**: neither ever
+leaves the device. The type and icon are the safe descriptors. `completed` and `reopened` are the
+two sides of one toggle and are separate values so they can be told apart. Goals now live on the
+server, so the event fires only after the write succeeds, and the single save point is the goal
+page (not a sheet). `goal_count` is read after the local list reflects the change, so for `removed`
+it is the number of goals the user is left with. `years_to_target` is `never` for a vacation goal,
+which has no deadline, and for a kids goal it uses the latest kid's 18th-birthday year.
 
-The sheet is its own `surface` (`goals`), not the page that presented it. It is reachable from the
-goals list and from a goal row, and "the goal form was rejected" is a different fact from "the
-profile page failed to save".
+The goal page is its own `surface` (`goals`). "The goal write was rejected" is a different fact
+from "the profile page failed to save".
 
 ## Settings
 

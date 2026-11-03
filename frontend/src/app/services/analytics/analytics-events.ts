@@ -1,4 +1,5 @@
 import { AmountBand, CountBand, PercentBand, YearsBand } from './analytics-bands';
+import { GoalType } from '../../models/goal.model';
 
 /**
  * The one place a client-side analytics event is defined.
@@ -261,7 +262,9 @@ export type AnalyticsEvent =
       name: 'goal_changed';
       props: {
         action: GoalAction;
+        goal_type: GoalType;
         icon: GoalIcon;
+        plan_rate: '8' | '10' | '12' | 'cash';
         target_band: AmountBand;
         years_to_target: YearsBand;
         progress: PercentBand | null;
@@ -480,6 +483,7 @@ export const DECLARED_PROPERTY_KEYS = [
   'exit',
   'feature',
   'goal_count',
+  'goal_type',
   'http_status',
   'icon',
   'included_outside_accounts',
@@ -491,6 +495,7 @@ export const DECLARED_PROPERTY_KEYS = [
   'monthly_income_band',
   'monthly_invest_band',
   'outcome',
+  'plan_rate',
   'platform',
   'preset_changed',
   'progress',

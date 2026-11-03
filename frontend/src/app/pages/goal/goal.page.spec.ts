@@ -64,6 +64,7 @@ describe('GoalPage', () => {
   let removeSpy: jasmine.Spy;
   let showToast: jasmine.Spy;
   let trackErrorShown: jasmine.Spy;
+  let track: jasmine.Spy;
   let logout: jasmine.Spy;
   let progress: BehaviorSubject<{ selectedTier: string } | null>;
 
@@ -86,6 +87,7 @@ describe('GoalPage', () => {
     removeSpy = jasmine.createSpy('remove').and.returnValue(of(undefined));
     showToast = jasmine.createSpy('showToast');
     trackErrorShown = jasmine.createSpy('trackErrorShown');
+    track = jasmine.createSpy('track');
     logout = jasmine.createSpy('logout');
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     progress = new BehaviorSubject<{ selectedTier: string } | null>(opts.noProgress ? null : { selectedTier: opts.tier ?? 'plus' });
@@ -110,7 +112,7 @@ describe('GoalPage', () => {
             logout,
         } },
         { provide: ToastService, useValue: { showToast } },
-        { provide: AnalyticsService, useValue: { track: () => {}, trackErrorShown } },
+        { provide: AnalyticsService, useValue: { track, trackErrorShown } },
       ],
     })
       // Ionic standalone components need their own providers; render their children as plain DOM.
@@ -456,6 +458,54 @@ describe('GoalPage', () => {
     expect(removeSpy).toHaveBeenCalledWith(7);
     expect(showToast).toHaveBeenCalledWith('Goal removed', 'success');
     expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+  });
+
+  it('tracks goal_changed with goal_type and plan_rate and no raw amounts', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    page.patch({ price: 400_000, fullPrice: false, downPaymentPct: 20, targetYear: YEAR + 5 });
+    page.showPlan();
+    page.selectRate(0.1);
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    // The real service appends the created goal to the signal; the mock does not.
+    createSpy.and.callFake((body: GoalWrite) => {
+      const created = { ...houseGoal(99), ...body } as Goal;
+      goals.update(list => [...list, created]);
+      return of(created);
+    });
+    await page.save();
+    const events = track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_changed');
+    expect(events).toEqual([{
+      name: 'goal_changed',
+      props: {
+        action: 'created', goal_type: 'HOUSE', icon: 'home', plan_rate: '10',
+        target_band: '50k_249k', years_to_target: '3_5', progress: '0_9', goal_count: '1',
+      },
+    }]);
+  });
+
+  it('reports cash as the plan rate for an emergency fund', async () => {
+    const fixture = await create({ type: 'EMERGENCY_FUND' });
+    const page = fixture.componentInstance;
+    page.patch({ monthlyExpenses: 3_000, months: 6, targetYear: YEAR + 2 });
+    page.showPlan();
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    await page.save();
+    const ev = track.calls.allArgs().map(a => a[0]).find(e => e.name === 'goal_changed');
+    expect(ev.props.plan_rate).toBe('cash');
+    expect(ev.props.goal_type).toBe('EMERGENCY_FUND');
+    expect(ev.props.action).toBe('created');
+  });
+
+  it('tracks completed, reopened and removed with the count left behind', async () => {
+    const fixture = await create({ id: '7' }, { goals: [houseGoal(7), houseGoal(8)], dismissRole: 'remove' });
+    const page = fixture.componentInstance;
+    await page.markCompleted();
+    await page.markCompleted();
+    await page.confirmRemove();
+    const actions = track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_changed')
+      .map(e => e.props.action);
+    expect(actions).toEqual(['completed', 'reopened', 'removed']);
   });
 
   it('has no em dash in rendered text', async () => {

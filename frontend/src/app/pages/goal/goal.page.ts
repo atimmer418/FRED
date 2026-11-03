@@ -12,12 +12,16 @@ import { GoalsService } from '../../services/goals.service';
 import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
+import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../services/analytics/analytics-bands';
+import { GoalAction } from '../../services/analytics/analytics-events';
 import {
   DEFAULT_ANNUAL_RETURN, RETURN_SCENARIOS, RateAssumptionsService,
 } from '../../services/rate-assumptions.service';
 import {
-  EmergencyFundConfig, Goal, GoalConfig, GoalWrite, HouseCarConfig, KidsConfig, TargetConfig, VacationConfig,
+  EmergencyFundConfig, Goal, GoalConfig, GoalType, GoalWrite, HouseCarConfig, KidsConfig, TargetConfig,
+  VacationConfig,
 } from '../../models/goal.model';
+import { kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
@@ -351,6 +355,7 @@ export class GoalPage implements OnInit {
         : this.goalsService.create(body);
       await firstValueFrom(request$);
       this.rates.setRates(this.selectedRate(), this.rates.withdrawalRate());
+      this.trackGoalChange(goal ? 'updated' : 'created', form.type, form.icon);
       this.toastService.showToast(goal && !wasImported ? 'Plan updated' : 'Plan started', 'success');
       // my-profile's ionViewWillEnter refreshes the list; do not rely on the patched signal.
       this.router.navigate(['/my-profile']);
@@ -359,6 +364,54 @@ export class GoalPage implements OnInit {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /**
+   * Fires goal_changed after a successful write. Bands only: no name, id, balance or raw amount.
+   * The count is read after the service has patched its signal, so it is what the user is left with.
+   */
+  private trackGoalChange(action: GoalAction, type: GoalType, icon: Goal['icon']): void {
+    const view = this.view();
+    const config = this.draftGoal().config;
+    const thisYear = this.now.getFullYear();
+
+    let target: number;
+    let deadlineYear: number | null;
+    if (type === 'KIDS') {
+      const c = config as KidsConfig;
+      target = c.kids.length * (c.plan529Target + c.brokerageTarget);
+      deadlineYear = c.kids.length
+        ? Math.max(...c.kids.map(k => kidDeadline(this.now, k.birthYear, k.birthMonth).year))
+        : null;
+    } else if (type === 'VACATION') {
+      const c = config as VacationConfig;
+      target = c.tripsPerYear * c.budgetPerTrip;
+      deadlineYear = null;
+    } else {
+      target = simpleTarget(type, config);
+      deadlineYear = (config as TargetConfig).targetYear;
+    }
+
+    this.analytics.track({
+      name: 'goal_changed',
+      props: {
+        action,
+        goal_type: type,
+        icon,
+        plan_rate: this.planRateLabel(view.rateKind, view.rate),
+        target_band: toAmountBand(target),
+        years_to_target: toYearsBand(deadlineYear === null ? null : deadlineYear - thisYear),
+        progress: target > 0 ? toPercentBand(view.progressPct) : null,
+        goal_count: toCountBand(this.goalsService.goals().length),
+      },
+    });
+  }
+
+  /** The assumption the plan was proposed at. Snaps a legacy rate to the nearest chip so the set stays closed. */
+  private planRateLabel(kind: string, rate: number): '8' | '10' | '12' | 'cash' {
+    if (kind === 'cash') return 'cash';
+    const pct = Math.round(rate * 100);
+    return pct >= 11 ? '12' : pct >= 9 ? '10' : '8';
   }
 
   /** Toggles `completed`. Not offered for vacation goals. */
@@ -370,6 +423,7 @@ export class GoalPage implements OnInit {
       const updated = await firstValueFrom(
         this.goalsService.update(goal.id, this.writeFrom(goal, { completed: !goal.completed })));
       this.existing.set(updated);
+      this.trackGoalChange(updated.completed ? 'completed' : 'reopened', updated.type, updated.icon);
       this.toastService.showToast(updated.completed ? 'Goal marked complete' : 'Goal reopened', 'success');
     } catch (err) {
       await this.handleWriteError(err);
@@ -391,6 +445,7 @@ export class GoalPage implements OnInit {
     if (role !== 'remove') return;
     try {
       await firstValueFrom(this.goalsService.remove(goal.id), { defaultValue: undefined });
+      this.trackGoalChange('removed', goal.type, goal.icon);
       this.toastService.showToast('Goal removed', 'success');
       this.goBack();
     } catch (err) {

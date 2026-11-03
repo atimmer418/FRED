@@ -445,7 +445,7 @@ environmental, so re-run before investigating.
 
 ## 10. State of the tree
 
-- Branch `feature/analytics` and `develop` are both at `fde4f7f` and pushed. The merge that brought
+- Branch `feature/analytics` and `develop` are both at `597bb4f` and pushed (two documentation commits landed after `fde4f7f`; no code moved). The merge that brought
   these two lines of work together is `c3372d6`, which has both parents: analytics `ff0a317` and
   develop `2580767`.
 - **756 backend tests, 0 failures, 0 skipped**, including the database-gated ones, and **955

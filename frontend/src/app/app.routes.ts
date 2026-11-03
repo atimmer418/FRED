@@ -112,6 +112,14 @@ export const routes: Routes = [
     pathMatch: 'full'
   },
   {
+    path: 'goals/new/:type',
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+  },
+  {
+    path: 'goals/:id',
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+  },
+  {
     path: 'my-profile',
     loadComponent: () => import('./pages/my-profile/my-profile.page').then( m => m.MyProfilePage)
   },

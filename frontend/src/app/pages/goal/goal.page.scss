@@ -1,0 +1,224 @@
+@use '../../../theme/settings-shell';
+
+.gl-card {
+  background: #fff;
+  border-radius: 20px;
+  padding: 20px 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 6px 20px rgba(15, 23, 42, 0.05);
+  font-family: 'Manrope', sans-serif;
+  color: #111827;
+}
+
+.gl-field {
+  margin-bottom: 18px;
+}
+
+.gl-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  color: #374151;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.gl-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+  font-family: 'Manrope', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+
+  &:focus { border-color: #2563eb; background: #fff; }
+  &:disabled { opacity: 0.45; }
+  &::placeholder { color: #9ca3af; font-weight: 600; }
+}
+
+.gl-money {
+  position: relative;
+
+  .gl-prefix {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    font-weight: 700;
+    color: #6b7280;
+    pointer-events: none;
+  }
+
+  .gl-input { padding-left: 28px; }
+}
+
+.gl-helper {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+.gl-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+// Icon row (CUSTOM)
+.gl-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gl-icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .material-symbols-outlined { font-size: 22px; }
+
+  &.on {
+    background: #eef4ff;
+    border-color: #2563eb;
+    color: #2563eb;
+  }
+}
+
+// Chips (copied from the freedom sheet scenario chips)
+.gl-chips {
+  display: flex;
+  background: #eef1f6;
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+
+  button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    border-radius: 10px;
+    padding: 10px 0;
+    font-family: 'Manrope', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    color: #6b7280;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &.on {
+      background: #fff;
+      color: #2563eb;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
+    }
+  }
+}
+
+// Kids
+.gl-kids-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+
+  .gl-label { margin-bottom: 0; }
+}
+
+.gl-stepper {
+  display: flex;
+  align-items: center;
+  background: #eef1f6;
+  border-radius: 12px;
+
+  button {
+    width: 34px;
+    height: 34px;
+    border: none;
+    background: transparent;
+    color: #2563eb;
+    font-family: 'Manrope', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    border-radius: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &:active { background: rgba(37, 99, 235, 0.1); }
+    &:disabled { opacity: 0.4; pointer-events: none; }
+  }
+
+  .gl-stepper-val {
+    min-width: 24px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 800;
+    color: #111827;
+  }
+}
+
+.gl-kid {
+  border: 1px solid #eef1f6;
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.gl-kid-label { margin-bottom: 8px; }
+
+.gl-kid-row {
+  display: flex;
+  gap: 8px;
+
+  .gl-select { flex: 3; }
+  .gl-year { flex: 2; }
+}
+
+.gl-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+
+  input { width: 18px; height: 18px; accent-color: #2563eb; }
+}
+
+// CTA
+.gl-cta {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: #2563eb;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { background: #1d4ed8; }
+}

@@ -1,0 +1,185 @@
+<ion-header class="ion-no-border">
+  <div class="blue-hero-header">
+    <div class="hero-nav">
+      <button class="back-btn" (click)="goBack()" aria-label="Back">
+        <span class="material-symbols-outlined">arrow_back_ios_new</span>
+      </button>
+      <h2 class="header-title">{{ title }}</h2>
+      <div class="back-btn-spacer"></div>
+    </div>
+  </div>
+</ion-header>
+
+<ion-content class="shell-content" appKeyboardAvoid>
+  <div class="shell-inner">
+    <ng-container *ngIf="ready()">
+
+      <!-- Step 1: setup inputs -->
+      <ng-container *ngIf="step() === 1">
+        <div class="gl-card">
+
+          <!-- Goal name (every type) -->
+          <div class="gl-field">
+            <label class="gl-label" for="gl-name">Goal name</label>
+            <input id="gl-name" class="gl-input" type="text" maxlength="50"
+                   [ngModel]="form().name" (ngModelChange)="patch({ name: $event })" />
+            <p class="gl-error" *ngIf="errors()['name']">{{ errors()['name'] }}</p>
+          </div>
+
+          <!-- Icon row (CUSTOM only) -->
+          <div class="gl-field" *ngIf="form().type === 'CUSTOM'">
+            <span class="gl-label">Icon</span>
+            <div class="gl-icons">
+              <button type="button" *ngFor="let opt of iconOptions" class="gl-icon-btn"
+                      [class.on]="form().icon === opt.icon" [attr.aria-label]="opt.label"
+                      (click)="setIcon(opt.icon)">
+                <span class="material-symbols-outlined">{{ opt.icon }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- KIDS -->
+          <ng-container *ngIf="form().type === 'KIDS'">
+            <div class="gl-field">
+              <label class="gl-label" for="gl-529">529 target per kid</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-529" class="gl-input" type="text" inputmode="numeric" placeholder="Optional"
+                       [value]="fmtNumber(form().kids.plan529Target)" (input)="onKidsTarget('plan529Target', $event)" />
+              </div>
+            </div>
+            <div class="gl-field">
+              <label class="gl-label" for="gl-brokerage">Brokerage target per kid</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-brokerage" class="gl-input" type="text" inputmode="numeric" placeholder="Optional"
+                       [value]="fmtNumber(form().kids.brokerageTarget)" (input)="onKidsTarget('brokerageTarget', $event)" />
+              </div>
+              <p class="gl-error" *ngIf="errors()['kidsTargets']">{{ errors()['kidsTargets'] }}</p>
+              <p class="gl-helper">A 529 is a state college plan. The brokerage is a custodial or regular account. You open both outside FRED.</p>
+            </div>
+
+            <div class="gl-field">
+              <div class="gl-kids-head">
+                <span class="gl-label">Kids</span>
+                <div class="gl-stepper">
+                  <button type="button" (click)="removeKid(form().kids.kids.length - 1)"
+                          [disabled]="form().kids.kids.length <= 1" aria-label="Remove a kid">−</button>
+                  <span class="gl-stepper-val">{{ form().kids.kids.length }}</span>
+                  <button type="button" (click)="addKid()"
+                          [disabled]="form().kids.kids.length >= maxKids" aria-label="Add a kid">+</button>
+                </div>
+              </div>
+
+              <div class="gl-kid" *ngFor="let kid of form().kids.kids; let i = index">
+                <input class="gl-input gl-kid-label" type="text" maxlength="30" aria-label="Kid name"
+                       [ngModel]="kid.label" (ngModelChange)="patchKid(i, { label: $event })" />
+                <div class="gl-kid-row">
+                  <select class="gl-input gl-select" aria-label="Birth month" [disabled]="kid.undecided"
+                          [ngModel]="kid.birthMonth" (ngModelChange)="setKidMonth(i, $event)">
+                    <option [ngValue]="null">Not sure</option>
+                    <option *ngFor="let m of monthNames; let mi = index" [ngValue]="mi + 1">{{ m }}</option>
+                  </select>
+                  <input class="gl-input gl-year" type="text" inputmode="numeric" placeholder="Year" aria-label="Birth year"
+                         [disabled]="kid.undecided" [value]="fmtNumber(kid.birthYear)" (input)="onKidYear(i, $event)" />
+                </div>
+                <label class="gl-check">
+                  <input type="checkbox" [checked]="kid.undecided" (change)="toggleUndecided(i)" />
+                  <span>Undecided</span>
+                </label>
+                <p class="gl-error" *ngIf="errors()['kid.' + i + '.birthYear']">{{ errors()['kid.' + i + '.birthYear'] }}</p>
+              </div>
+            </div>
+          </ng-container>
+
+          <!-- HOUSE / CAR -->
+          <ng-container *ngIf="form().type === 'HOUSE' || form().type === 'CAR'">
+            <div class="gl-field">
+              <label class="gl-label" for="gl-price">Price</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-price" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(form().price)" (input)="onNumber('price', $event)" />
+              </div>
+              <p class="gl-error" *ngIf="errors()['price']">{{ errors()['price'] }}</p>
+            </div>
+            <div class="gl-field">
+              <span class="gl-label">Down payment</span>
+              <div class="gl-chips">
+                <button type="button" [class.on]="!form().fullPrice && form().downPaymentPct === 10" (click)="setDownPaymentPct(10)">10%</button>
+                <button type="button" [class.on]="!form().fullPrice && form().downPaymentPct === 20" (click)="setDownPaymentPct(20)">20%</button>
+                <button type="button" [class.on]="form().fullPrice" (click)="setFullPrice()">Full price</button>
+              </div>
+            </div>
+          </ng-container>
+
+          <!-- VACATION -->
+          <ng-container *ngIf="form().type === 'VACATION'">
+            <div class="gl-field">
+              <span class="gl-label">Trips a year</span>
+              <div class="gl-chips">
+                <button type="button" *ngFor="let n of tripChoices" [class.on]="form().tripsPerYear === n" (click)="setTrips(n)">{{ n }}</button>
+              </div>
+            </div>
+            <div class="gl-field">
+              <label class="gl-label" for="gl-budget">Budget per trip</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-budget" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(form().budgetPerTrip)" (input)="onNumber('budgetPerTrip', $event)" />
+              </div>
+              <p class="gl-error" *ngIf="errors()['budgetPerTrip']">{{ errors()['budgetPerTrip'] }}</p>
+            </div>
+          </ng-container>
+
+          <!-- EMERGENCY_FUND -->
+          <ng-container *ngIf="form().type === 'EMERGENCY_FUND'">
+            <div class="gl-field">
+              <label class="gl-label" for="gl-expenses">Monthly expenses</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-expenses" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(form().monthlyExpenses)" (input)="onNumber('monthlyExpenses', $event)" />
+              </div>
+              <p class="gl-error" *ngIf="errors()['monthlyExpenses']">{{ errors()['monthlyExpenses'] }}</p>
+            </div>
+            <div class="gl-field">
+              <span class="gl-label">Cover</span>
+              <div class="gl-chips">
+                <button type="button" *ngFor="let n of monthChoices" [class.on]="form().months === n" (click)="setMonths(n)">{{ n }} months</button>
+              </div>
+            </div>
+          </ng-container>
+
+          <!-- WEDDING / CUSTOM -->
+          <div class="gl-field" *ngIf="form().type === 'WEDDING' || form().type === 'CUSTOM'">
+            <label class="gl-label" for="gl-amount">Target amount</label>
+            <div class="gl-money">
+              <span class="gl-prefix">$</span>
+              <input id="gl-amount" class="gl-input" type="text" inputmode="numeric"
+                     [value]="fmtNumber(form().targetAmount)" (input)="onNumber('targetAmount', $event)" />
+            </div>
+            <p class="gl-error" *ngIf="errors()['targetAmount']">{{ errors()['targetAmount'] }}</p>
+          </div>
+
+          <!-- Target year (everything except KIDS and VACATION) -->
+          <div class="gl-field" *ngIf="form().type !== 'KIDS' && form().type !== 'VACATION'">
+            <label class="gl-label" for="gl-year">Target year</label>
+            <input id="gl-year" class="gl-input" type="text" inputmode="numeric" maxlength="4"
+                   [value]="fmtNumber(form().targetYear)" (input)="onNumber('targetYear', $event)" />
+            <p class="gl-error" *ngIf="errors()['targetYear']">{{ errors()['targetYear'] }}</p>
+          </div>
+
+          <button type="button" class="gl-cta" (click)="showPlan()">Show my plan</button>
+        </div>
+      </ng-container>
+
+      <!-- Step 2: plan view -->
+      <ng-container *ngIf="step() === 2">
+        <!-- TODO(Task 11): plan view, save paths and my-profile integration -->
+        <div class="gl-card"><p class="gl-helper">Plan view arrives in Task 11.</p></div>
+      </ng-container>
+
+    </ng-container>
+  </div>
+</ion-content>

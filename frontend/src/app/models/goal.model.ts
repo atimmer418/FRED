@@ -1,0 +1,106 @@
+// Shared Goals v3 types. Plain types only: no Angular imports, so pure utils can use them.
+
+export type GoalType = 'KIDS' | 'HOUSE' | 'VACATION' | 'CAR' | 'EMERGENCY_FUND' | 'WEDDING' | 'CUSTOM';
+
+export type GoalIcon =
+  | 'home'
+  | 'health_and_safety'
+  | 'flag'
+  | 'balance'
+  | 'savings'
+  | 'school'
+  | 'directions_car'
+  | 'child_care'
+  | 'flight'
+  | 'favorite';
+
+export type RateKind = 'market' | 'cash';
+
+export interface AccountState {
+  balance: number;
+  balanceUpdatedAt: string | null;
+  anchorBalance: number;
+  anchorMonthly: number;
+}
+
+export interface KidInput {
+  label: string;
+  birthYear: number | null;
+  birthMonth: number | null;
+  accounts: { brokerage: AccountState; plan529: AccountState };
+}
+
+export interface KidsConfig {
+  brokerageTarget: number;
+  plan529Target: number;
+  kids: KidInput[];
+}
+
+export interface HouseCarConfig {
+  price: number;
+  downPaymentPct: number | null;
+  targetYear: number;
+}
+
+export interface VacationConfig {
+  tripsPerYear: 1 | 2 | 3 | 4;
+  budgetPerTrip: number;
+  savedThisYear: number;
+  savedYear: number;
+}
+
+export interface EmergencyFundConfig {
+  monthlyExpenses: number;
+  months: 3 | 6;
+  targetYear: number;
+}
+
+export interface TargetConfig {
+  targetAmount: number;
+  targetYear: number;
+}
+
+export type GoalConfig = KidsConfig | HouseCarConfig | VacationConfig | EmergencyFundConfig | TargetConfig;
+
+export interface Goal {
+  id: number;
+  clientId: string | null;
+  type: GoalType;
+  name: string;
+  icon: GoalIcon;
+  config: GoalConfig;
+  currentBalance: number;
+  balanceUpdatedAt: string | null;
+  anchorBalance: number;
+  anchorMonthly: number;
+  planRate: number;
+  planRateKind: RateKind;
+  planAnchoredAt: string;
+  completed: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoalWrite {
+  type: GoalType;
+  name: string;
+  icon: GoalIcon;
+  config: GoalConfig;
+  currentBalance: number;
+  completed: boolean;
+  anchorMonthly: number;
+  planRate: number;
+  planRateKind: RateKind;
+}
+
+export interface LegacyGoalV2 {
+  id: string;
+  name: string;
+  icon: string;
+  targetAmount: number;
+  targetYear: number;
+  startingValue: number;
+  perPaycheckOutsideFRED: number;
+  completed: boolean;
+}

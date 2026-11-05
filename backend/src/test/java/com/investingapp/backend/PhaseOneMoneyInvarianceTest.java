@@ -229,4 +229,28 @@ class PhaseOneMoneyInvarianceTest {
     static String normalize(String text) {
         return text.replaceAll("\\s+", " ").trim();
     }
+
+    /**
+     * T11: detection writes its own stream rows and the schedule's detection mirror, never money,
+     * a stop or Item state. Read from source so a later edit that reaches for one of these fails
+     * here, by name.
+     */
+    @org.junit.jupiter.api.Test
+    void detectionEvaluateWritesOnlyTheMirror() throws java.io.IOException {
+        java.nio.file.Path root = java.nio.file.Path.of("src", "main", "java", "com", "investingapp", "backend");
+        for (String relative : java.util.List.of(
+                "service/PaycheckDetectionService.java",
+                "paycheck/EvaluationTrigger.java",
+                "paycheck/EvaluationOutcome.java")) {
+            String source = java.nio.file.Files.readString(root.resolve(relative));
+            for (String forbidden : java.util.List.of(
+                    "setHoldReason(", "setInvestmentAmount(", "setMonthlyAmount(",
+                    "setNextInvestmentDate(", "setAchRequestId(", "setFrequency(",
+                    "setPlaidItemStatus(", "setPlaidHistoryComplete(", "setPlaidSyncCursor(",
+                    "isReadyForInvestment(", "userRepository.save")) {
+                org.junit.jupiter.api.Assertions.assertFalse(source.contains(forbidden),
+                        relative + " must not contain " + forbidden);
+            }
+        }
+    }
 }

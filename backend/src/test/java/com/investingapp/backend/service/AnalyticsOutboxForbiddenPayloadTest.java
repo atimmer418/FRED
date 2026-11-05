@@ -214,7 +214,9 @@ class AnalyticsOutboxForbiddenPayloadTest {
                 ServerAnalyticsEvent.REASON_BANK_CHANGE,
                 ServerAnalyticsEvent.REASON_ACH_CONFIRMED,
                 ServerAnalyticsEvent.REASON_ACCOUNT_CLOSED,
-                ServerAnalyticsEvent.REASON_KYC_REJECTED));
+                ServerAnalyticsEvent.REASON_KYC_REJECTED,
+                // paycheck_stream_switched (spec 6.1 succession).
+                ServerAnalyticsEvent.REASON_SUCCESSION));
         domains.put("strategy", List.of("yield", "guardrails", "sbloc", "annuity"));
         domains.put("tier", tiers);
         domains.put("transfer_number_band", counts);

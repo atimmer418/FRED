@@ -66,6 +66,12 @@ public final class ServerAnalyticsEvent {
     /** A subscription was cancelled. NOT EMITTED YET: billing owns this. */
     public static final String SUBSCRIPTION_CANCELLED = "subscription_cancelled";
 
+    /**
+     * The detected paycheck moved to a new payer at the same bank (spec 6.1 succession). Carries
+     * the new primary's cadence and the reason, never the payer, the descriptor or an amount.
+     */
+    public static final String PAYCHECK_STREAM_SWITCHED = "paycheck_stream_switched";
+
     /** Every name, in funnel order. The outbox rejects anything not on this list. */
     public static final List<String> ALL = List.of(
             FREEDOM_PLAN_CREATED,
@@ -81,7 +87,8 @@ public final class ServerAnalyticsEvent {
             FIRST_ACH_TRANSFER_COMPLETED,
             ACH_TRANSFER_COMPLETED,
             SUBSCRIPTION_BILLED,
-            SUBSCRIPTION_CANCELLED);
+            SUBSCRIPTION_CANCELLED,
+            PAYCHECK_STREAM_SWITCHED);
 
     /** The three that billing will emit once it exists. Here so tests can assert they are inert. */
     public static final List<String> AWAITING_BILLING =
@@ -96,6 +103,8 @@ public final class ServerAnalyticsEvent {
     public static final String REASON_ACH_CONFIRMED = "ach_confirmed";
     public static final String REASON_ACCOUNT_CLOSED = "account_closed";
     public static final String REASON_KYC_REJECTED = "kyc_rejected";
+    /** paycheck_stream_switched only: a new payer took over as the primary paycheck (spec 6.1). */
+    public static final String REASON_SUCCESSION = "succession";
 
     /** Who caused it. 'user' is churn you can act on; 'system' is our own machinery. */
     public static final String INITIATOR_USER = "user";

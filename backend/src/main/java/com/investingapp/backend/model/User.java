@@ -27,7 +27,7 @@ import java.util.Set; // Import Set
 @Getter
 @Setter
 @NoArgsConstructor
-@ToString(exclude = "userProgress") // Exclude userProgress to avoid circular reference
+@ToString(exclude = {"userProgress", "plaidSyncCursor"}) // userProgress is circular; the cursor never goes in a log line (spec 12.3)
 public class User {
 
     @Id
@@ -175,7 +175,7 @@ public class User {
     @Column(length = 50)
     private String alpacaAchStatus; // "QUEUED", "APPROVED", "PENDING", etc.
 
-    // Paycheck Autopilot, Phase 0 (V6). The rest of spec 3.1 stays unmapped until a later phase.
+    // Paycheck Autopilot (V6, spec 3.1). Phase 0 mapped the fields below; Phase 1 maps the rest after previousAchRelationshipId.
     @Column(name = "plaid_account_mask", length = 4)
     private String plaidAccountMask;
 
@@ -198,6 +198,31 @@ public class User {
 
     @Column(name = "previous_ach_relationship_id", length = 512)
     private String previousAchRelationshipId; // Stored as ENC:<base64(iv+ciphertext)>, encrypted at rest
+
+    /** Plaid /transactions/sync cursor. Excluded from toString; never logged, sent or returned. */
+    @Column(name = "plaid_sync_cursor", columnDefinition = "TEXT")
+    private String plaidSyncCursor;
+
+    /** Flipped once by HISTORICAL_UPDATE_COMPLETE (spec 2.5); V6 TINYINT(1) NOT NULL DEFAULT 0. */
+    @Column(name = "plaid_history_complete", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private Boolean plaidHistoryComplete = false;
+
+    @Column(name = "plaid_transactions_update_status", length = 40)
+    private String plaidTransactionsUpdateStatus;
+
+    /** Eastern wall time Plaid will disconnect the Item (consent expiry); null when none is known. */
+    @Column(name = "plaid_disconnect_at")
+    private LocalDateTime plaidDisconnectAt;
+
+    @Column(name = "plaid_last_sync_at")
+    private LocalDateTime plaidLastSyncAt;
+
+    @Column(name = "plaid_streams_read_at")
+    private LocalDateTime plaidStreamsReadAt;
+
+    /** Written only when the user rejects a found paycheck (spec 5.9); detection skips them (R8). */
+    @Column(name = "paycheck_autopilot_opt_out", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private Boolean paycheckAutopilotOptOut = false;
 
     @Column(name = "account_status", length = 30)
     private String accountStatus; // SUBMITTED, APPROVAL_PENDING, APPROVED, ACTIVE, REJECTED, ACTION_REQUIRED

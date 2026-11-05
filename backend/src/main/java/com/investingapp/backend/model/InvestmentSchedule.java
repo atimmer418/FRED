@@ -84,6 +84,34 @@ public class InvestmentSchedule {
     @Column(name = "hold_reason", length = 32)
     private HoldReason holdReason;
 
+    // Paycheck Autopilot, Phase 1: the detection mirror (spec 3.2, ruling R1). Written in every mode
+    // once detection has run; mode stays MANUAL under shadow, and nothing reads these on the wire
+    // until Phase 2. Neither status nor holdReason is ever derived from them. The anchors,
+    // authorization, amount_source, snoozed_until and paused_by_user_at stay unmapped (decision 20).
+    @Enumerated(EnumType.STRING)
+    @Column(name = "detection_state", length = 16)
+    private DetectionState detectionState;
+
+    /** paycheck_streams.id; the V6 foreign key is ON DELETE SET NULL, so a stream purge nulls it. */
+    @Column(name = "primary_stream_id")
+    private Long primaryStreamId;
+
+    /** Display and the D-1 notice only, never a trigger. */
+    @Column(name = "next_expected_date")
+    private LocalDate nextExpectedDate;
+
+    @Column(name = "missed_count", nullable = false)
+    private short missedCount = 0;
+
+    @Column(name = "dormant_since")
+    private LocalDate dormantSince;
+
+    @Column(name = "last_cadence_check_at")
+    private LocalDateTime lastCadenceCheckAt;
+
+    @Column(name = "detection_started_at")
+    private LocalDateTime detectionStartedAt;
+
     @Column(name = "monthly_streak", nullable = false)
     private Integer monthlyStreak = 0;
 

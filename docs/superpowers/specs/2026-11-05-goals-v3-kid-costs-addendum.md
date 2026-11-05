@@ -38,7 +38,7 @@ Anti-goals: a cost figure with no source or year; a 2015 number presented as tod
 figure FRED derived presented as a government figure; a private-source figure under a
 government label; "Behind" shown to someone who followed the first-year plan; a first-year fund
 that keeps asking for money after the kid arrives; a default plan that tells an expecting parent
-to save thousands a month; a college chip that reads as "this covers college".
+who is months from a due date to save many thousands a month; a college chip that reads as "this covers college".
 
 ## The figures (all verified against the primary documents on 2026-11-04)
 
@@ -72,7 +72,8 @@ unrounded inputs and rounded once, last:
 - College presets, four years at 2025-26 prices: **$47,800** (in-state public tuition),
   **$123,960** (in-state public full cost), **$180,000** (private tuition). These are today's
   prices; the screen says so and says the future bill will be higher. FRED's example: at 3% a
-  year, $47,800 today is about $81,000 in 18 years.
+  year, $47,800 today is about $81,000 in 18 years (47,800 × 1.03^18 = 81,376, compounded
+  yearly; a fixed string in the copy, not plan math).
 
 All figures live in one constants file with their source, year and URL, and
 `FREDdocs/kid-cost-figures.md` says how to refresh them.
@@ -86,10 +87,11 @@ and the brokerage.
   after the current month. Eligibility is judged when the account is created, never again.
 - **Target:** by birth order as above, **snapshotted on the kid** (`firstYearTarget`). Targets
   are recomputed only when the kid count or any kid's timing changes; a constants refresh alone
-  never moves a stored plan.
+  never moves a stored plan. A kid gaining a fund gets its target computed at that moment.
 - **End date, stored on the kid** (`firstYearDueYear`, `firstYearDueMonth`): a decided kid's
   birth month and year; an undecided kid gets the month 36 months after the month the account
-  is created (call). Stored, so the runway counts down and survives re-plans.
+  is created (call). Stored, so the runway counts down and survives re-plans. For a new
+  fund on an undecided kid the server sets this date itself, 36 months after its own anchor month.
 - **Rate, per account:** horizon from the plan's anchor date to that account's end date under
   36 months → cash at 4%; 36 or more → the market chip. This rule now applies to every kid
   account (529, brokerage, first-year) with no goal-level shortcut, so adding a college plan to
@@ -99,7 +101,8 @@ and the brokerage.
 - **Plan shape:** monthly only.
 - **On/off:** a `firstYearFund` switch on the goal. Default ON only when at least one kid is
   eligible and every eligible kid is undecided or at least 12 months out; otherwise default OFF
-  (call). The quiz always shows what the fund adds per month before the user decides.
+  (call). The quiz always shows what the fund adds per month before the user decides. The default
+  applies to a new goal only; a saved goal keeps its switch until the user changes it.
 - **Pinned** (now = Nov 15 2026, $0 saved): rank 1 undecided at 10% → 36 months, **$616 a
   month**; rank 2 undecided → **$498**; rank 1 planned for Nov 2028 → 24 months, cash, **$1,031**;
   rank 2 planned for Nov 2028 → **$834**; rank 2 planned for Nov 2027 → 12 months, cash,
@@ -116,6 +119,8 @@ A fund whose end month has arrived (horizon 0) is **finished**: it asks for no m
 - Undecided kid: "{label}: $B saved of $T. Three years are up, so set a date to keep planning."
 - A finished fund stays stored until the user turns the fund off or removes the kid. Its row is
   hidden once the end date is more than 12 months past.
+- Correcting a kid's birth date never drops a stored fund or its balance: the fund keeps its
+  balance and takes the new end date.
 - The server never rejects a first-year account that is already stored. The "kid must not be
   born yet" rule applies only to an account that is new relative to the stored goal.
 
@@ -131,7 +136,8 @@ Balance and target sums include unfinished first-year accounts only.
 
 In edit mode, when a plan input has changed, the page drafts the goal as anchored now, exactly
 as the server will store it, so the monthly shown before "Save changes" is the monthly shown
-after.
+after. The draft mirrors the re-anchor in full (anchor balances reset to the current balances,
+no logged-balance date), so the status reads Plan started while the change is unsaved.
 
 ## Data model changes
 
@@ -220,18 +226,19 @@ Order: hero, return assumption, inputs row, status, **What a kid costs**, **Firs
   - "Where these numbers come from" lists the three cost sources (USDA, BLS, Peterson-KFF) with
     years. The College Board is credited on the college question.
 - **First-year fund** (when any kid holds a fund):
-  - Per kid: "{label}: about $T for birth costs and the first year, at today's prices."
+  - Per kid: "{label}: about $T for birth costs and the first year."
   - Decided, unfinished: "$M a month until Mon YYYY." Cash rows add "Planned as cash at about
     4%, since you need it within 3 years."
   - Undecided, unfinished: "$M a month until Mon YYYY. No date yet, so this one is invested at
-    your return assumption."
+    your return assumption." When that fund is planned as cash: "$M a month until Mon YYYY. No
+    date yet. Planned as cash at about 4%, since this runway ends within 3 years."
   - Finished rows use the two lines in "After the end date".
   - A "Saved so far" tile per fund.
-  - Under the card when any row is undecided: "Markets can be down when the day comes, so treat
+  - Under the card when any undecided row is invested: "Markets can be down when the day comes, so treat
     this as a head start. Once you pick a date less than three years away, FRED plans this fund
     as cash."
-  - Footer: "FRED estimate: first-year average (USDA, adjusted) plus birth costs (Peterson-KFF),
-    rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move
+  - Footer: "FRED estimate: first-year average (USDA, adjusted to September 2026 dollars) plus birth
+    costs (Peterson-KFF, 2023 dollars), rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move
     goal money."
 - **529 plans** and **Brokerage** cards: unchanged, each hidden when its target is 0. When a
   college preset is selected the 529 card adds "Based on 2025-26 college prices, which tend to
@@ -258,9 +265,9 @@ never produces or changes a dollar figure.
   and no due-now.
 - View-model specs: a fund counts down from its stored end date when viewed later; status reads
   on plan for a fully funded fund six months after its end date and for a cash fund beside a
-  market 529 (24 months of $834 at 4% is $20,802); a finished fund leaves the totals; adding a
-  529 to a cash first-year-only goal plans the 529 at the market rate ($80 a month for $47,800
-  over 216 months); a fund-only goal never says 18th birthday; the preview before save equals
+  market 529 (23 months of $834 at 4% is $19,902; at 10% it would be $21,047); a finished fund leaves the totals; adding a
+  529 to a cash first-year-only goal plans the 529 at the market rate (kid due Nov 2028 viewed Nov 15 2026: the 529
+  runs 240 months at the market rate, $46 a month with a $150 birthday and $100 New Year lump); a fund-only goal never says 18th birthday; the preview before save equals
   the plan after save; a stored goal with explicit nulls for every new field renders.
 - Backend tests: fund on needs a kid with a fund; a NEW fund on a kid born last year is rejected
   while a STORED one survives the new year; fund off strips every first-year field; anchors on

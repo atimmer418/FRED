@@ -140,10 +140,11 @@ git commit -m "feat(goals): verified kid cost figures with sources and a refresh
 **Interfaces:**
 - `KidsConfig(BigDecimal brokerageTarget, BigDecimal plan529Target, List<Kid> kids, Boolean firstYearFund)`; `Kid(String label, Integer birthYear, Integer birthMonth, Accounts accounts, BigDecimal firstYearTarget, Integer firstYearDueYear, Integer firstYearDueMonth)`; `Accounts(AccountState brokerage, AccountState plan529, AccountState firstYear)` (`firstYear` nullable).
 - In `GoalService`, the per-account helpers take an `enum AccountSlot { BROKERAGE, PLAN_529, FIRST_YEAR }` instead of a boolean; `mapAccounts` calls the mapper for `FIRST_YEAR` only when that account is non-null and otherwise writes null.
+- `validate(GoalRequest request, Object storedOrNull)`: `create` passes null; `update` parses the stored config first and passes it. `mapAccounts` and `validateKids` rebuild each `Kid` carrying its `firstYearTarget`, `firstYearDueYear` and `firstYearDueMonth` through.
 - `validateKids(KidsConfig incoming, KidsConfig storedOrNull, int year)`:
   - Fund OFF (`firstYearFund` false or null): returns a config with `firstYearFund = false` and every kid's `firstYear`, `firstYearTarget`, `firstYearDueYear`, `firstYearDueMonth` null.
   - Fund ON: at least one kid has a non-null `firstYear` ("Turn off the first-year fund or add a kid who is not here yet."). A kid with one needs `firstYearTarget` in `(0, 100_000_000]` scale <= 2 ("Enter a first-year amount greater than $0."), `firstYearDueMonth` 1..12 and a non-null `firstYearDueYear`; the account passes the existing balance and `anchorMonthly` bounds. A kid without one has its target and due fields nulled.
-  - NEW account rule (create, or `storedOrNull` has no `firstYear` at that kid index): the kid's `birthYear` is null or `>= year` ("The first-year fund is for kids who are not here yet.") and `firstYearDueYear` is in `[year, year + 11]`. A stored account skips this rule.
+  - NEW account rule (create, or `storedOrNull` has no `firstYear` at that kid index): the kid's `birthYear` is null or `>= year` ("The first-year fund is for kids who are not here yet.") and `firstYearDueYear` is in `[year, year + 11]`. A stored account skips this rule. For a NEW account on a kid whose `birthYear` is null the server sets `firstYearDueYear` and `firstYearDueMonth` itself to the month 36 months after its own anchor month (`EasternTime.now()`), ignoring the client values, so a month-boundary clock difference can never save a fresh undecided fund as cash.
   - Target rule: valid when `plan529Target > 0` or `brokerageTarget > 0` or the fund is on with a kid holding a fund; the existing message stays for the all-zero case.
 - `kidsPlanChanged` additionally compares `firstYearFund` (null as false) and, per kid index, first-year presence, `firstYearTarget` and the due year and month.
 - Anchor rules cover the third slot: create and re-anchor → `(balance, null, balance, anchorMonthly as sent)`; balance-only → keep stored anchors, stamp `balanceUpdatedAt` only when that balance changed.
@@ -161,6 +162,7 @@ git commit -m "feat(goals): verified kid cost figures with sources and a refresh
 @Test void kidsRejectANewFirstYearAccountOnAKidBornLastYear()   // create
 @Test void storedFirstYearAccountSurvivesTheNewYear()            // stored fund, kid birthYear = year - 1, balance-only PUT succeeds and keeps anchors
 @Test void kidsAllowFirstYearOnlyGoal()                          // both targets 0, fund on, one undecided kid
+@Test void newUndecidedFundGetsAServerDueDateThirtySixMonthsOut()
 @Test void kidsFundOffStripsEveryFirstYearField()
 @Test void kidsCreateAnchorsTheFirstYearAccount()
 @Test void updateReanchorsWhenTheFundIsSwitchedOff()
@@ -220,7 +222,8 @@ git commit -m "feat(goals): first-year fund as a third kid account on the server
   - `monthlyTotal` adds unfinished first-year monthlies. `headline`: when both account targets are 0 and a fund exists → "Ready for the first year"; otherwise unchanged. `subtitle`: fund-only → `"$M/mo · N kids · first-year fund"`; otherwise unchanged.
   - Status: `extraExpected = Σ over unfinished first-year accounts of futureValue(anchorBalance, anchorMonthly, min(monthsLogged, horizonMonths(anchorDate, due.year, due.month)), thatAccountRate, [])` where `monthsLogged = monthsBetween(goal.planAnchoredAt, balanceUpdatedAtUsed)` and `thatAccountRate = kind === 'cash' ? CASH_RATE : goal.planRate`. The balance and target sums add unfinished first-year accounts (`balance`, and `firstYearTarget`); `balanceUpdatedAt` candidates include theirs. Finished accounts are excluded from balance, target, expected and `progressPct`. First-year accounts contribute no lumps.
   - The 529 and brokerage account views are omitted from `kids` when their target is 0.
-- `goals-mock.ts`: the KIDS mock gains `firstYearFund: true` and, on the undecided kid, a `firstYear` account with `firstYearTarget: 20800` and a due date 30 months after the mock's `now` (so a countdown is visible).
+  - With no unfinished account plan the view reports `rateKind` 'market'. A KIDS goal with no unfinished account and no 529 or brokerage target has status `started` (never `done` from a 0 target) and `progressPct` 0.
+- `goals-mock.ts`: the KIDS mock gains `firstYearFund: true` and, on the undecided kid, a `firstYear` account with `firstYearTarget: 20800` and a due date 36 months after the mock's `planAnchoredAt` (32 months after `now`), so the fund is invested and a countdown is visible.
 
 - [ ] **Step 1: Write the failing spec cases**
 
@@ -260,9 +263,9 @@ it('adds unfinished first-year plans to the monthly total, one row per kid with 
 it('counts a fund down from its stored due date when viewed six months later')            // planAnchoredAt 2026-05-15T10:00:00, due { 2029, 5 }, ctx.now Nov 15 2026 -> rows[0].plan.n 30
 it('keeps a fresh undecided fund invested and a 24-month fund in cash')
 it('re-evaluates kinds at now when a re-anchor is pending')                                // reanchorPending true, due 30 months out -> cash
-it('plans a 529 added to a cash first-year-only goal at the market rate')                  // $47,800 over 216 months at 10% -> 80
-it('grades a cash fund beside a market 529 at the cash rate')                              // fund balance futureValue(0, 834, 24, 0.04, []) logged at month 24, 529 on plan -> on_plan
-it('reads on plan six months after a fully funded fund ended')                             // not behind
+it('plans a 529 added to a cash first-year-only goal at the market rate')                  // kid { 2028, 11 }, fund due { 2028, 11 } cash; plan529Target 47800, reanchorPending true, stored planRateKind 'cash' -> 529 row n 240, rateKind 'market', monthly 46, birthdayLump 150, newYearLump 100
+it('grades a cash fund beside a market 529 at the cash rate')                              // anchored 2026-11-15, fund due { 2028, 11 }, target 20800, anchorMonthly 834; ctx.now Oct 15 2028; fund balance futureValue(0, 834, 23, 0.04, []) logged 2028-10-10; 529 balance on its anchor path at month 23 -> on_plan, delta toBeCloseTo(0, 0)
+it('is not behind six months after a fully funded fund ended, beside a 529 that is on plan')
 it('drops a finished fund from the hero total, status and progress and hides it after 12 months')
 it('says Ready for the first year and never 18th birthday for a fund-only goal')
 it('names the fund share end month')                                                        // firstYear.endsLabel "Nov 2029"
@@ -305,7 +308,7 @@ git commit -m "feat(goals): first-year fund math and kid costs in the plan view 
   - `defaultFirstYearFund(kids: KidFormRow[], now: Date): boolean` (true only when at least one kid is eligible and every eligible kid is undecided or has `horizonMonths(now, birthYear, birthMonth ?? 7) >= 12`).
   - `defaultForm('KIDS', now)`: one undecided "Kid 1"; `collegeChoice: 'public_tuition'`, `plan529Target: 47800`; `at18Choice: 25000`, `brokerageTarget: 25000`; `firstYearFund: true`.
   - `formFromGoal(goal)`: choices inferred from stored targets (a target equal to a preset selects it; 0 → `'none'`; otherwise `'custom'`); `firstYearFund` from the config (missing or null → false).
-  - `formToConfig(form, existing, now)` (new third parameter): for KIDS with the fund on, per kid index: if `existing` has a `firstYear` account at that index and that kid's timing (`birthYear`, `birthMonth`, undecided) is unchanged → carry the account, `firstYearTarget` and due date over; else if `isKidNotYetBorn(...)` → a new account (zeroed, or the existing balance at that index if any), due date from `firstYearDue(birthYear, birthMonth, now)`; else none. Targets: when the kid count and every kid's timing are unchanged versus `existing`, stored targets are kept; otherwise every fund's target is `firstYearTargetForRank(kidRanks(kids)[i])`. `firstYearFund` in the config is true only when the switch is on and at least one kid ends up with an account. Fund off → no first-year fields.
+  - `formToConfig(form, existing, now)` (new third parameter): for KIDS with the fund on, per kid index: if `existing` has a `firstYear` account at that index, the kid always keeps an account (timing unchanged → carry the account, `firstYearTarget` and due date over; timing changed → keep the account and its balance and set the due date to `firstYearDue(birthYear, birthMonth, now)`, which simply reads finished when it is at or before this month); a kid with no stored account gets a new zeroed one only when `isKidNotYetBorn(...)`, with its due date from `firstYearDue(birthYear, birthMonth, now)`; otherwise none. Targets: a kid keeps its stored `firstYearTarget` only when it has a stored first-year account with a target greater than 0 AND the kid count and every kid's timing are unchanged versus `existing`; in every other case (including a kid gaining a fund for the first time) the target is `firstYearTargetForRank(kidRanks(kids)[i])`. `firstYearFund` in the config is true only when the switch is on and at least one kid ends up with an account. Fund off → no first-year fields.
   - `planInputsChanged(form, existing, now)` (new third parameter): for KIDS compares `formToConfig(form, existing, now)` against `existing.config` on the two targets, kids count, each kid's `birthYear`/`birthMonth`, `firstYearFund` (missing or null as false) and per kid first-year presence, target and due date. Name, icon and labels are never plan inputs.
   - `validateForm(form, now)`: the kids target error fires only when both targets are 0 or empty AND no kid would hold a fund; a `'custom'` choice requires its amount.
   - `kidsQuizErrors(form, card: 1 | 2 | 3 | 4 | 5, now): Record<string, string>` (1: none; 2: kid birth years; 3: none; 4: custom college amount; 5: custom at-18 amount, name, and the kids target rule).
@@ -313,13 +316,13 @@ git commit -m "feat(goals): first-year fund math and kid costs in the plan view 
   - `type KidBalanceKey = KidAccountKey | 'firstYear'`, used by the balance path type and `setupBalances`.
   - `quizCard = signal<1 | 2 | 3 | 4 | 5>(1)`; `nextQuizCard()` (validates the current card with `kidsQuizErrors`, then advances; on card 5 behaves as `showPlan()`); `prevQuizCard()`; `backToInputs()` sets `quizCard` to 1; a failed `showPlan()` or `save()` validation sets `quizCard` to the first card whose `kidsQuizErrors` is non-empty; while on the quiz, live revalidation uses `kidsQuizErrors` for the current card.
   - `setCollegeChoice(choice)`, `setAt18Choice(choice)`, `toggleFirstYearFund()`; `readonly anyKidEligible`, `readonly quizCosts = computed(() => kidCostFigures(form().kids.kids.length))`, `readonly fundPreview = computed(...)` (the total monthly the fund would add and the latest end label, from the view model run on a draft with the fund on), `readonly fundShortRunwayMonths` (the smallest horizon among eligible decided kids when under 12, else null), `readonly fundLoggedBalance` (sum of first-year balances on the saved goal).
-  - Changing the kid count or a kid's timing on cards 1 and 2 re-applies `defaultFirstYearFund` until the user has touched the switch.
-  - `draftGoal()`: when the mode is edit and `planInputsChanged(form, goal, now)` is true, the draft's `planAnchoredAt` is `now` in local ISO form; the view context passes `reanchorPending` (true in setup or when inputs changed). The setup branch keeps first-year accounts with their typed balances.
+  - In setup, changing the kid count or a kid's timing on cards 1 and 2 re-applies `defaultFirstYearFund` until the user has touched the switch. In edit mode the stored `firstYearFund` counts as touched and is never re-defaulted.
+  - `draftGoal()`: when the mode is edit and `planInputsChanged(form, goal, now)` is true, the draft mirrors the server's re-anchor in full: `planAnchoredAt` is `now` in local ISO form, goal-level `anchorBalance` = `currentBalance` and `balanceUpdatedAt` = null, and for KIDS every account (529, brokerage, first-year) gets `anchorBalance` = `balance` and `balanceUpdatedAt` = null, so the status reads Plan started as it will after the save (this applies to every goal type); the view context passes `reanchorPending` (true in setup or when inputs changed). The setup branch keeps first-year accounts with their typed balances.
   - `withAccountAnchors` also writes each unfinished first-year account's `anchorMonthly` from its plan. `updateBalance` handles `{ kid, account: 'firstYear' }`.
-  - `summarizeInputs` for KIDS: `"3 kids · $48K college · $25K at 18 · first-year fund · Edit"`, dropping any part that is off.
+  - `summarizeInputs` for KIDS: `"3 kids · $48K college · $25K at 18 · first-year fund"`, dropping any part that is off; the existing `.gl-inputs-edit` span supplies Edit.
 - Markup (KIDS only; every other type is untouched):
   - Step 1: the five cards in the spec's order (count, when, what a kid costs with the switch, college, at-18 with name and CTA) with the exact questions, selection-row labels, helper lines, live fund line, short-runway line, drop-balances line and all-born line from the spec; progress dots `.gl-dots`; Back hidden on card 1; Next on cards 1 to 4; "Show my plan" on card 5. Cards 4 and 5 use stacked selection rows (label left, amount right, selected border), not chips.
-  - Step 2 order: hero (with the fund-share line when a fund and other targets exist), return assumption, inputs row, status, "What a kid costs" (open in setup, collapsed in edit behind "Show costs by age"), "First-year fund", then the existing account cards; every string from the spec's "Plan view" section, including the headline by family size, the family line, the four stage rows, the birth row, the note with its conditional ending, the sources toggle (`costCardSources()`), the per-kid fund lines for decided, undecided and finished rows, the cash line, the undecided footnote, the fund footer, and the 529 card's preset line.
+  - Step 2 order: hero (with the fund-share line when a fund and other targets exist), return assumption, inputs row, status, "What a kid costs" (open in setup, collapsed in edit behind "Show costs by age"), "First-year fund", then the existing account cards; every string from the spec's "Plan view" section, including the headline by family size, the family line, the four stage rows, the birth row, the note with its conditional ending, the sources toggle (`costCardSources()`), the per-kid fund lines for decided, undecided (invested and cash variants) and finished rows, the cash line, the undecided footnote, the fund footer, and the 529 card's preset line.
 - Existing specs: update the KIDS cases in `goal-form.model.spec.ts` and `goal.page.spec.ts` to the new defaults, the quiz markup and the three-argument `formToConfig` and `planInputsChanged`.
 - Backlog: one new FRED- story, text: "Goals: AI-written personal plan summary. The backend sends a goal's computed plan (fixed numbers) to Claude, which writes a short personal summary through the compliance gate, the Monthly Market Breakdown pattern, plus a read-only get_goals tool for Ask FRED. The AI never produces or changes a dollar figure. Follows Goals v3 (kid costs and quiz shipped on feature/goals-v3)." Re-scan the highest FRED number right before inserting.
 
@@ -338,6 +341,8 @@ it('turns the fund off in the config when no kid would hold one')
 it('accepts a first-year-only kids plan')
 it('infers the choices from stored targets')                                    // 123960 -> public_full, 0 -> none, 70000 -> custom
 it('flags a plan-input change when the fund switch flips or a due date moves')
+it('gives a newly switched-on fund on a stored goal its rank target and flags a plan change')   // legacy goal, one undecided kid -> 25700
+it('keeps a stored fund and its balance when a born kid\'s birth month is corrected')
 it('validates one quiz card at a time')
 // goal.page.spec.ts
 it('walks the five quiz cards in order with the cost card third and blocks Next on an invalid card')
@@ -349,6 +354,10 @@ it('lists a decided fund until its month, an undecided fund with its date and th
 it('hides the fund switch and card when every kid is already born and no fund is stored')
 it('sends firstYearFund, per-kid targets, due dates and first-year anchors on save')
 it('shows the same first-year monthly before and after a re-plan save')
+it('reads Plan started, not Ahead or Behind, while a changed plan is unsaved')                   // one KIDS case, one HOUSE case
+it('keeps the stored fund switch in edit mode when a kid is added or a date moves')
+it('shows $616 a month next to the switch when the fund is turned on for a stored goal')
+it('uses the cash line, not the invested line, for an undecided fund planned as cash')
 it('drops the fund from the hero total when it is switched off and warns about logged balances')
 it('says the accounts and the fund live outside FRED')
 it('has no em dash in the quiz, the cost card or the fund card')

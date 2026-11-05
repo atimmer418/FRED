@@ -92,6 +92,9 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
     static final String KNOWN_DEV_JWT_SECRET_SHA256 =
             "4b79a3fc0365a540f6a991f59de187a7ce485b09203c12f7d4b65d4c9a59531f";
 
+    /** The throwaway admin key committed in application-ci.properties; never acceptable in prod. */
+    static final String CI_ADMIN_TOOLS_KEY = "ci-local-admin-tools";
+
     private static final Pattern SHA256_HEX = Pattern.compile("^[0-9a-fA-F]{64}$");
 
     private Environment environment;
@@ -144,6 +147,7 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
             checkProdDatasourceUrl(violations);
             checkProdJwtSecret(violations);
             checkProdOpsAlertProvider(violations);
+            checkProdAdminKey(violations);
         }
 
         if (!violations.isEmpty()) {
@@ -261,6 +265,20 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
         if (sha256Hex(value).equalsIgnoreCase(knownDigest)) {
             violations.add("jwt.secret is the development signing key that has been in git history since 2025; "
                     + "set JWT_SECRET_PROD");
+        }
+    }
+
+    /**
+     * The admin surface is registered in prod and guarded only by ADMIN_TOOLS_KEY (spec 12.1):
+     * blank fails closed, leaving support without tools in an incident; the ci default is in git
+     * history. The value is never echoed.
+     */
+    private void checkProdAdminKey(List<String> violations) {
+        String value = environment.getProperty("app.admin-tools.key", "");
+        if (value.isBlank()) {
+            violations.add("app.admin-tools.key is not set; set ADMIN_TOOLS_KEY");
+        } else if (CI_ADMIN_TOOLS_KEY.equals(value.trim())) {
+            violations.add("app.admin-tools.key is the ci default committed to this repo; set ADMIN_TOOLS_KEY");
         }
     }
 

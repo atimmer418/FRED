@@ -115,6 +115,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/passkey/**").permitAll()
                 .requestMatchers("/api/user/should-prompt-reauth").permitAll() // Allow checking reauth status without authentication
                 .requestMatchers("/api/dev/**").permitAll() // 🧪 DEV ONLY: registered only in local/dev/test/ci, and DevToolsKeyFilter requires X-Dev-Tools-Key
+                .requestMatchers("/api/admin/**").permitAll() // every profile; AdminKeyFilter is the guard; curl only (no CORS header)
                 .requestMatchers("/hello").permitAll()
                 .anyRequest().authenticated()
             )

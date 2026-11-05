@@ -23,8 +23,9 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
- * The one path that removes a FRED user (spec 7.9). Callers: AccountStatusService.handleRejected,
- * TradingController.closeAccount and the dev-profile admin verb in DevUserController.
+ * The one path that removes a FRED user (spec 7.9). Callers: TradingController.closeAccount and
+ * the admin verb in AdminUserController (POST /api/admin/users/{id}/delete). A KYC rejection keeps
+ * the row: AccountStatusService.handleRejected sets a MANUAL_REVIEW hold instead.
  *
  * <p>Not @Transactional on purpose: the broker call happens before the database transaction opens,
  * and the transaction itself is a TransactionTemplate with default REQUIRED propagation, so a

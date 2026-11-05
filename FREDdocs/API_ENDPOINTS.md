@@ -230,12 +230,28 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 ---
 
+## 15. Admin (`/api/admin`), every profile, curl only
+
+| Method | Endpoint | Description | Auth | Request Body | Response |
+|--------|----------|-------------|------|-------------|----------|
+| `GET` | `/api/admin/plaid/items` | One row per user holding a Plaid token, by `publicId`; never the token or cursor | `X-Admin-Key` + `X-Admin-Actor` | None | `PlaidItemRow[]` |
+| `POST` | `/api/admin/plaid/{userId}/remove-item?reason=` | Queue `/item/remove`, mark `REMOVED`; schedule, holds and ACH untouched | `X-Admin-Key` + `X-Admin-Actor` | None | 200 `{ result: "QUEUED" }`; 404; 409 `NO_PLAID_ITEM` or `ITEM_ALREADY_REMOVED` |
+| `POST` | `/api/admin/users/{id}/delete?reason=` | Delete the user (reason ADMIN); replaces `POST /api/dev/users/{id}/delete` | `X-Admin-Key` + `X-Admin-Actor` | None | 200 `{ deleted: true, userId }`; 404; 409 `DELETION_DEFERRED` |
+
+> **Every profile, prod included.** A missing or wrong `X-Admin-Key` (env `ADMIN_TOOLS_KEY`; prod
+> refuses to start without it) gets **404 with an empty body**; a blank `X-Admin-Actor` gets **400**.
+> Every call writes one `admin_actions` row. Curl only (no CORS). A write verb's user id comes from
+> `SELECT id FROM users WHERE public_id = ?`.
+
+---
+
 ## Authentication Notes
 
 - JWT tokens go in the `Authorization: Bearer <token>` header.
 - Tokens are 1-hour expiry, HS512 signed. Frontend refreshes proactively.
 - Primary auth is via passkey (biometric). Login with email/password triggers 2FA OTP.
 - `/api/dev/*` endpoints are development-only, disabled in production.
+- `/api/admin/*` endpoints exist in every profile and take `X-Admin-Key` plus `X-Admin-Actor`, never a JWT (section 15).
 - See AUTHENTICATION_AND_JWT.md for full auth system docs.
 
 *Last Updated: February 27, 2026*

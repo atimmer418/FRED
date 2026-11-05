@@ -1,0 +1,5 @@
+{{message}}
+
+Open FRED, go to Recurring Investments, and tap Reconnect.
+
+Questions? help@fredvested.com

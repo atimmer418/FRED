@@ -7,6 +7,7 @@ import { JwtTokenUtils } from '../utils/jwt-token.utils';
 import { DeviceIdService } from './device-id.service';
 import { AuthService } from './auth.service';
 import { Goal, GoalWrite, LegacyGoalV2 } from '../models/goal.model';
+import { ACTIVE_GOALS_MOCK, mockGoals } from './dev/goals-mock';
 
 // Existing imports of Goal, GoalIcon and friends from this file keep resolving.
 export * from '../models/goal.model';
@@ -67,6 +68,7 @@ export class GoalsService {
 
   /** GET the user's goals. Cached for 60 s per user, single flight. */
   load(): Observable<Goal[]> {
+    if (this.useMock()) return this.mockLoad();
     const userId = localStorage.getItem('userId') ?? '';
     if (!userId) return of([]);
     if (
@@ -81,6 +83,7 @@ export class GoalsService {
 
   /** Same as load() but ignores the TTL. */
   refresh(): Observable<Goal[]> {
+    if (this.useMock()) return this.mockLoad();
     const userId = localStorage.getItem('userId') ?? '';
     if (!userId) return of([]);
     return this.fetch(userId);
@@ -191,6 +194,18 @@ export class GoalsService {
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
+
+  /** Dev-only: true when the local build has a goals mock toggled on (always false under Karma). */
+  private useMock(): boolean {
+    return environment.local && !!ACTIVE_GOALS_MOCK;
+  }
+
+  private mockLoad(): Observable<Goal[]> {
+    const list = mockGoals(new Date());
+    this.goals.set(list);
+    this.loaded.set(true);
+    return of(list);
+  }
 
   private fetch(userId: string): Observable<Goal[]> {
     if (this.inFlight$) return this.inFlight$;

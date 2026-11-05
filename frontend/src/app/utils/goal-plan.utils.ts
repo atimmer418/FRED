@@ -258,6 +258,72 @@ export function proposeKidAccountPlan(input: {
 }
 
 // ---------------------------------------------------------------------------
+// First-year fund
+// ---------------------------------------------------------------------------
+
+/** An undecided kid's fund runs this many months from the month the fund was created. */
+export const FIRST_YEAR_UNDECIDED_MONTHS = 36;
+
+/** Cash under 36 months from the anchor date to the account's end month, market from 36 up. */
+export function kidAccountRateKind(anchorDate: Date, endYear: number, endMonth: number): RateKind {
+  return horizonMonths(anchorDate, endYear, endMonth) < CASH_HORIZON_MONTHS ? 'cash' : 'market';
+}
+
+/** True while the birth month has not started yet. An unknown birth year counts as not yet born. */
+export function isKidNotYetBorn(birthYear: number | null, birthMonth: number | null, now: Date): boolean {
+  if (birthYear === null) return true;
+  return horizonMonths(now, birthYear, birthMonth ?? 7) > 0;
+}
+
+/** The month a first-year fund ends: the birth month when decided, else 36 months after `createdAt`'s month. */
+export function firstYearDue(
+  birthYear: number | null,
+  birthMonth: number | null,
+  createdAt: Date,
+): { year: number; month: number } {
+  if (birthYear !== null) return { year: birthYear, month: birthMonth ?? 7 };
+  const total = createdAt.getFullYear() * 12 + createdAt.getMonth() + FIRST_YEAR_UNDECIDED_MONTHS;
+  return { year: Math.floor(total / 12), month: (total % 12) + 1 };
+}
+
+export interface FirstYearPlan {
+  n: number;
+  rateKind: RateKind;
+  rate: number;
+  monthly: number;
+  target: number;
+  /** True once the end month has arrived: nothing left to contribute. */
+  finished: boolean;
+  due: { year: number; month: number };
+  undecided: boolean;
+}
+
+/** Monthly contributions only, no lumps. The caller decides the rate kind. */
+export function proposeFirstYearPlan(input: {
+  target: number;
+  balance: number;
+  due: { year: number; month: number };
+  undecided: boolean;
+  marketRate: number;
+  rateKind: RateKind;
+  now: Date;
+}): FirstYearPlan {
+  const n = horizonMonths(input.now, input.due.year, input.due.month);
+  const rate = input.rateKind === 'cash' ? CASH_RATE : input.marketRate;
+  const finished = n === 0;
+  return {
+    n,
+    rateKind: input.rateKind,
+    rate,
+    monthly: finished ? 0 : requiredMonthly(input.balance, input.target, n, rate),
+    target: input.target,
+    finished,
+    due: input.due,
+    undecided: input.undecided,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Simple plan (house, car, emergency fund, wedding, custom)
 // ---------------------------------------------------------------------------
 
@@ -381,6 +447,8 @@ export function planStatus(args: {
   balanceUpdatedAt: string | null;
   rate: number;
   lumps: LumpOccurrence[];
+  /** Expected balance of accounts graded on their own path (first-year funds), added to this plan's. Default 0. */
+  extraExpected?: number;
   now: Date;
 }): PlanStatus {
   const { balanceUpdatedAt } = args;
@@ -394,13 +462,14 @@ export function planStatus(args: {
   if (balanceUpdatedAt === null) return { kind: 'started', delta: 0, ...base };
 
   const months = monthsBetween(args.planAnchoredAt, balanceUpdatedAt);
-  const expected = futureValue(
-    args.anchorBalance,
-    args.anchorMonthly,
-    months,
-    args.rate,
-    args.lumps.filter((l) => l.monthIndex <= months),
-  );
+  const expected =
+    futureValue(
+      args.anchorBalance,
+      args.anchorMonthly,
+      months,
+      args.rate,
+      args.lumps.filter((l) => l.monthIndex <= months),
+    ) + (args.extraExpected ?? 0);
   const delta = args.balance - expected;
   return { kind: kindForDelta(delta, args.target), delta, ...base };
 }

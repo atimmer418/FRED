@@ -16,6 +16,7 @@
  * Writes (create, update, remove, importLegacy) still go to the real backend.
  */
 import { AccountState, Goal, KidInput } from '../../models/goal.model';
+import { firstYearDue } from '../../utils/goal-plan.utils';
 
 export type MockGoalsChoice = 'one_of_each' | 'kids_only';
 
@@ -61,6 +62,8 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
     anchorMonthly: monthly,
   });
 
+  const fundDue = firstYearDue(null, null, addMonths(now, -4));
+
   const kids: KidInput[] = [
     {
       label: 'Maya',
@@ -75,9 +78,14 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       label: 'Second kid',
       birthYear: null,
       birthMonth: null,
+      // Not yet born: an invested first-year fund, due 36 months after the plan was anchored.
+      firstYearTarget: 20800,
+      firstYearDueYear: fundDue.year,
+      firstYearDueMonth: fundDue.month,
       accounts: {
         brokerage: account(0, 100, 0, null),
         plan529: account(0, 100, 0, null),
+        firstYear: account(0, 500, 0, null),
       },
     },
   ];
@@ -88,7 +96,7 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
     type: 'KIDS',
     name: 'Kids',
     icon: 'child_care',
-    config: { brokerageTarget: 50000, plan529Target: 80000, kids },
+    config: { brokerageTarget: 50000, plan529Target: 80000, kids, firstYearFund: true },
     currentBalance: 5500,
     balanceUpdatedAt: updatedAt,
     anchorBalance: 4000,

@@ -1,11 +1,15 @@
 import {
+  firstYearDue,
   friendlyRound,
   futureValue,
   horizonMonths,
+  isKidNotYetBorn,
+  kidAccountRateKind,
   kidDeadline,
   kidLumpSchedule,
   monthsBetween,
   planStatus,
+  proposeFirstYearPlan,
   proposeKidAccountPlan,
   proposeSimplePlan,
   proposeVacationPlan,
@@ -163,4 +167,53 @@ describe('vacationStatus', () => {
     expect(v(8340 - 101)).toBe('behind');
   });
   it('is started at the top of the year', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 0, expectedSoFar: 0, resetNeeded: false }, new Date(2027, 0, 5)).kind).toBe('started'));
+});
+
+describe('isKidNotYetBorn', () => {
+  it('is true for undecided', () => expect(isKidNotYetBorn(null, null, NOW)).toBeTrue());
+  it('is false for a birth month that has started', () => expect(isKidNotYetBorn(2026, 11, NOW)).toBeFalse());
+  it('is true from next month on', () => expect(isKidNotYetBorn(2026, 12, NOW)).toBeTrue());
+  it('assumes July when the month is unknown', () => { expect(isKidNotYetBorn(2026, null, NOW)).toBeFalse(); expect(isKidNotYetBorn(2027, null, NOW)).toBeTrue(); });
+});
+
+describe('firstYearDue', () => {
+  it('uses the birth month when decided', () => expect(firstYearDue(2028, 11, NOW)).toEqual({ year: 2028, month: 11 }));
+  it('assumes July for an unknown month', () => expect(firstYearDue(2028, null, NOW)).toEqual({ year: 2028, month: 7 }));
+  it('is 36 months after the creation month when undecided', () => expect(firstYearDue(null, null, NOW)).toEqual({ year: 2029, month: 11 }));
+});
+
+describe('kidAccountRateKind', () => {
+  it('is market at 36 months and cash at 35', () => {
+    expect(kidAccountRateKind(NOW, 2029, 11)).toBe('market');
+    expect(kidAccountRateKind(NOW, 2029, 10)).toBe('cash');
+  });
+});
+
+describe('proposeFirstYearPlan', () => {
+  const p = (target: number, due: { year: number; month: number }, rateKind: 'market' | 'cash', undecided = false, now = NOW) =>
+    proposeFirstYearPlan({ target, balance: 0, due, undecided, marketRate: 0.10, rateKind, now });
+  it('pins rank 1 undecided: 36 months invested, $616', () => { const r = p(25700, { year: 2029, month: 11 }, 'market', true); expect(r.n).toBe(36); expect(r.monthly).toBe(616); });
+  it('pins rank 2 undecided at $498', () => expect(p(20800, { year: 2029, month: 11 }, 'market', true).monthly).toBe(498));
+  it('pins rank 1 planned for Nov 2028 in cash at $1,031', () => { const r = p(25700, { year: 2028, month: 11 }, 'cash'); expect(r.n).toBe(24); expect(r.monthly).toBe(1031); });
+  it('pins rank 2 planned for Nov 2028 at $834 and Nov 2027 at $1,702', () => {
+    expect(p(20800, { year: 2028, month: 11 }, 'cash').monthly).toBe(834);
+    expect(p(20800, { year: 2027, month: 11 }, 'cash').monthly).toBe(1702);
+  });
+  it('asks for the whole target when the kid is due next month', () => { const r = p(20800, { year: 2026, month: 12 }, 'cash'); expect(r.n).toBe(1); expect(r.monthly).toBe(20800); });
+  it('counts down from the due date', () => expect(p(25700, { year: 2029, month: 11 }, 'market', true, new Date(2027, 4, 15)).n).toBe(30));
+  it('is finished at the due month with no monthly', () => { const r = p(20800, { year: 2026, month: 11 }, 'cash'); expect(r.finished).toBeTrue(); expect(r.monthly).toBe(0); });
+  it('uses the cash rate for cash and the market rate for market', () => {
+    expect(p(20800, { year: 2028, month: 11 }, 'cash').rate).toBe(0.04);
+    expect(p(20800, { year: 2029, month: 11 }, 'market').rate).toBe(0.10);
+  });
+  it('pins futureValue of the Nov 2028 monthly after 23 months', () => expect(futureValue(0, 834, 23, 0.04, [])).toBeCloseTo(19902, -1));
+});
+
+describe('planStatus extraExpected', () => {
+  it('adds to the expected balance, lowering the delta by exactly that amount', () => {
+    const args = { completed: false, imported: false, target: 250000, balance: 3000, anchorBalance: 0, anchorMonthly: 417, planAnchoredAt: '2026-11-15T10:00:00', balanceUpdatedAt: '2027-05-15T10:00:00' as string | null, rate: 0.10, lumps: [], now: new Date(2027, 10, 20) };
+    const without = planStatus(args);
+    const withExtra = planStatus({ ...args, extraExpected: 5000 });
+    expect(without.delta - withExtra.delta).toBeCloseTo(5000, 6);
+  });
 });

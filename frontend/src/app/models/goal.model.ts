@@ -27,13 +27,20 @@ export interface KidInput {
   label: string;
   birthYear: number | null;
   birthMonth: number | null;
-  accounts: { brokerage: AccountState; plan529: AccountState };
+  /** The first-year fund target, snapshotted when the fund was added. Missing and null both mean no fund. */
+  firstYearTarget?: number | null;
+  /** The fund's stored end month (year and month 1..12). */
+  firstYearDueYear?: number | null;
+  firstYearDueMonth?: number | null;
+  accounts: { brokerage: AccountState; plan529: AccountState; firstYear?: AccountState | null };
 }
 
 export interface KidsConfig {
   brokerageTarget: number;
   plan529Target: number;
   kids: KidInput[];
+  /** Whether the family plans a first-year fund for kids not yet born. Missing and null both mean off. */
+  firstYearFund?: boolean | null;
 }
 
 export interface HouseCarConfig {

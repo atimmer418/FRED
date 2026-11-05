@@ -1,5 +1,6 @@
 import { ACTIVE_GOALS_MOCK, buildMockGoals, mockGoals } from './goals-mock';
-import { GoalType } from '../../models/goal.model';
+import { GoalType, KidsConfig } from '../../models/goal.model';
+import { horizonMonths } from '../../utils/goal-plan.utils';
 
 describe('goals-mock (dev)', () => {
   const now = new Date(2026, 10, 4, 12, 0, 0);
@@ -30,6 +31,18 @@ describe('goals-mock (dev)', () => {
     const ef = goals.find(g => g.type === 'EMERGENCY_FUND')!;
     expect(ef.planRateKind).toBe('cash');
     expect(ef.planRate).toBe(0.04);
+  });
+
+  it('gives the undecided kid an invested first-year fund due 36 months after the anchor', () => {
+    const kids = buildMockGoals('kids_only', now)[0];
+    const cfg = kids.config as KidsConfig;
+    expect(cfg.firstYearFund).toBeTrue();
+    const kid = cfg.kids.find(k => k.birthYear === null)!;
+    expect(kid.firstYearTarget).toBe(20800);
+    expect(kid.accounts.firstYear).toBeTruthy();
+    // anchored 4 months before now (Jul 2026), so due Jul 2029: 32 months after Nov 2026
+    expect(horizonMonths(now, kid.firstYearDueYear!, kid.firstYearDueMonth!)).toBe(32);
+    expect(cfg.kids.filter(k => k.accounts.firstYear).length).toBe(1);
   });
 
   it('mockGoals returns an empty list while the toggle is off', () => {

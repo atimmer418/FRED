@@ -1,5 +1,5 @@
-import { buildGoalPlanView, fmtCompact, GoalPlanInput } from './goal-plan.view-model';
-import { AccountState, KidsConfig } from '../../models/goal.model';
+import { buildGoalPlanView, fmtCompact, GoalPlanContext, GoalPlanInput } from './goal-plan.view-model';
+import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
 import { futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
 
@@ -27,7 +27,7 @@ function base(partial: Partial<GoalPlanInput>): GoalPlanInput {
   };
 }
 
-const ctx = (extra: Partial<{ marketRate: number; frequency: string; rateKindOverride: 'market' | 'cash' | null }> = {}) => ({
+const ctx = (extra: Partial<GoalPlanContext> = {}): GoalPlanContext => ({
   marketRate: 0.10,
   frequency: 'biweekly',
   now: NOW,
@@ -211,14 +211,240 @@ describe('buildGoalPlanView', () => {
     }
     expect(view.rateKind).toBe('market');
 
-    // A goal planned as cash keeps every account in cash.
-    const cash = buildGoalPlanView({ ...goal, planRateKind: 'cash', planRate: CASH_RATE }, ctx({ marketRate: 0.12 }));
-    expect(cash.kids!.every(a => a.perKid.every(k => k.plan.rateKind === 'cash'))).toBeTrue();
-    expect(cash.rateKind).toBe('cash');
+    // A stored cash kind or a rate-kind override no longer decides a kids goal: every account
+    // resolves from its own distance at the anchor.
+    const cash = buildGoalPlanView(
+      { ...goal, planRateKind: 'cash', planRate: CASH_RATE },
+      ctx({ marketRate: 0.12, rateKindOverride: 'cash' }),
+    );
+    for (const acct of cash.kids!) {
+      expect(acct.perKid[0].plan.rateKind).toBe('cash');
+      expect(acct.perKid[1].plan.rateKind).toBe('market');
+    }
+    expect(cash.rateKind).toBe('market');
+
+    // Cash overall only when every account plan is under 36 months at the anchor.
+    const teenOnly = kidsGoal([
+      { label: 'Teen', birthYear: 2010, birthMonth: 6, accounts: { plan529: account(), brokerage: account() } },
+    ], { planAnchoredAt: NOW.toISOString() });
+    expect(buildGoalPlanView(teenOnly, ctx()).rateKind).toBe('cash');
   });
 
   it('hides per paycheck without a frequency', () => {
     expect(buildGoalPlanView(base({}), ctx({ frequency: '' })).perPaycheck).toBeNull();
     expect(buildGoalPlanView(base({}), ctx({ frequency: 'biweekly' })).perPaycheck).toBeGreaterThan(0);
+  });
+});
+
+// ── First-year fund and kid costs ────────────────────────────────────────────
+
+function fundKid(
+  label: string,
+  birthYear: number | null,
+  birthMonth: number | null,
+  due: [number, number],
+  target: number,
+  fund: AccountState = account(),
+  plan529: AccountState = account(),
+): KidInput {
+  return {
+    label, birthYear, birthMonth,
+    firstYearTarget: target,
+    firstYearDueYear: due[0],
+    firstYearDueMonth: due[1],
+    accounts: { plan529, brokerage: account(), firstYear: fund },
+  };
+}
+
+function fundGoal(
+  kids: KidInput[],
+  targets: { plan529Target: number; brokerageTarget: number },
+  extra: Partial<GoalPlanInput> = {},
+): GoalPlanInput {
+  const config: KidsConfig = { ...targets, kids, firstYearFund: true };
+  return base({ type: 'KIDS', config, planAnchoredAt: '2026-11-15T00:00:00', ...extra });
+}
+
+describe('buildGoalPlanView first-year fund', () => {
+  const noTargets = { plan529Target: 0, brokerageTarget: 0 };
+
+  it('always carries kid cost figures for a kids goal, sized by the kid count', () => {
+    const three = kidsGoal([0, 1, 2].map(i => ({
+      label: `K${i}`, birthYear: Y - 3 - i, birthMonth: 4, accounts: { plan529: account(), brokerage: account() },
+    })));
+    const view = buildGoalPlanView(three, ctx());
+    expect(view.kidCosts?.kidsCount).toBe(3);
+    expect(view.kidCosts?.perChildTotal).toBe(252393);
+    expect(view.firstYear).toBeUndefined();
+  });
+
+  it('adds unfinished first-year plans to the monthly total, one row per kid with a fund', () => {
+    const goal = fundGoal([
+      fundKid('A', null, null, [2029, 11], 20800),
+      fundKid('B', Y + 1, 5, [2027, 5], 25700),
+      { label: 'C', birthYear: Y - 4, birthMonth: 2, accounts: { plan529: account(), brokerage: account() } },
+    ], { plan529Target: 100_000, brokerageTarget: 250_000 });
+    const view = buildGoalPlanView(goal, ctx());
+    const accountsTotal = view.kids!.reduce((sum, a) => sum + a.totals.monthly, 0);
+    expect(view.firstYear!.rows.length).toBe(2);
+    expect(view.firstYear!.rows.map(r => r.kidIndex)).toEqual([0, 1]);
+    expect(view.firstYear!.rows[0].plan.monthly).toBe(498);
+    expect(view.firstYear!.rows[1].plan.rateKind).toBe('cash');
+    expect(view.firstYear!.totalMonthly).toBe(view.firstYear!.rows[0].plan.monthly + view.firstYear!.rows[1].plan.monthly);
+    expect(view.monthlyTotal).toBe(accountsTotal + view.firstYear!.totalMonthly);
+  });
+
+  it('counts a fund down from its stored due date when viewed six months later', () => {
+    const goal = fundGoal([fundKid('A', null, null, [2029, 5], 25700)], noTargets, { planAnchoredAt: '2026-05-15T10:00:00' });
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.firstYear!.rows[0].plan.n).toBe(30);
+    expect(view.firstYear!.rows[0].plan.rateKind).toBe('market');
+  });
+
+  it('keeps a fresh undecided fund invested and a 24-month fund in cash', () => {
+    const goal = fundGoal([
+      fundKid('A', null, null, [2029, 11], 20800),
+      fundKid('B', 2028, 11, [2028, 11], 20800),
+    ], noTargets);
+    const rows = buildGoalPlanView(goal, ctx()).firstYear!.rows;
+    expect(rows[0].plan.rateKind).toBe('market');
+    expect(rows[0].plan.rate).toBe(0.10);
+    expect(rows[1].plan.rateKind).toBe('cash');
+    expect(rows[1].plan.rate).toBe(CASH_RATE);
+  });
+
+  it('re-evaluates kinds at now when a re-anchor is pending', () => {
+    // Anchored May 2026 the 2029-05 fund was 36 months out (market); from now it is 30 (cash).
+    const goal = fundGoal([fundKid('A', null, null, [2029, 5], 25700)], noTargets, { planAnchoredAt: '2026-05-15T10:00:00' });
+    expect(buildGoalPlanView(goal, ctx()).firstYear!.rows[0].plan.rateKind).toBe('market');
+    expect(buildGoalPlanView(goal, ctx({ reanchorPending: true })).firstYear!.rows[0].plan.rateKind).toBe('cash');
+  });
+
+  it('plans a 529 added to a cash first-year-only goal at the market rate', () => {
+    const goal = fundGoal([fundKid('A', 2028, 11, [2028, 11], 20800)], { plan529Target: 47_800, brokerageTarget: 0 }, {
+      planRateKind: 'cash', planRate: CASH_RATE,
+    });
+    const view = buildGoalPlanView(goal, ctx({ reanchorPending: true }));
+    const row = view.kids!.find(k => k.account === 'plan529')!.perKid[0];
+    expect(row.plan.n).toBe(240);
+    expect(row.plan.rateKind).toBe('market');
+    expect(row.plan.monthly).toBe(46);
+    expect(row.plan.birthdayLump).toBe(150);
+    expect(row.plan.newYearLump).toBe(100);
+  });
+
+  it('grades a cash fund beside a market 529 at the cash rate', () => {
+    const anchoredAt = '2026-11-15T00:00:00';
+    const loggedAt = '2028-10-10T00:00:00';
+    const anchor529 = proposeKidAccountPlan({
+      target: 47_800, balance: 0, birthYear: 2028, birthMonth: 11,
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt),
+    });
+    const bal529 = futureValue(0, anchor529.monthly, 23, 0.10, anchor529.lumps.filter(l => l.monthIndex <= 23));
+    const balFund = futureValue(0, 834, 23, 0.04, []);
+    expect(balFund).toBeCloseTo(19_902, -1);
+    const goal = fundGoal([
+      fundKid('A', 2028, 11, [2028, 11], 20800,
+        account(balFund, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: 834 }),
+        account(bal529, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: anchor529.monthly })),
+    ], { plan529Target: 47_800, brokerageTarget: 0 }, { planAnchoredAt: anchoredAt });
+    const view = buildGoalPlanView(goal, ctx({ now: new Date(2028, 9, 15) }));
+    expect(view.status.kind).toBe('on_plan');
+    expect(view.status.delta).toBeCloseTo(0, 0);
+  });
+
+  it('is not behind six months after a fully funded fund ended, beside a 529 that is on plan', () => {
+    const anchoredAt = '2026-11-15T00:00:00';
+    const loggedAt = '2028-04-10T00:00:00'; // 17 months after the anchor
+    const anchor529 = proposeKidAccountPlan({
+      target: 47_800, balance: 0, birthYear: 2028, birthMonth: 11,
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt),
+    });
+    const bal529 = futureValue(0, anchor529.monthly, 17, 0.10, anchor529.lumps.filter(l => l.monthIndex <= 17));
+    const goal = fundGoal([
+      fundKid('A', 2028, 11, [2027, 11], 20800,
+        account(20_800, { balanceUpdatedAt: '2027-10-10T00:00:00', anchorBalance: 0, anchorMonthly: 1702 }),
+        account(bal529, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: anchor529.monthly })),
+    ], { plan529Target: 47_800, brokerageTarget: 0 }, { planAnchoredAt: anchoredAt });
+    const view = buildGoalPlanView(goal, ctx({ now: new Date(2028, 4, 15) }));
+    expect(view.firstYear!.rows[0].plan.finished).toBeTrue();
+    expect(view.status.kind).toBe('on_plan');
+    expect(view.status.delta).toBeCloseTo(0, 0);
+  });
+
+  it('drops a finished fund from the hero total, status and progress and hides it after 12 months', () => {
+    const targets = { plan529Target: 100_000, brokerageTarget: 0 };
+    const kids = [
+      fundKid('A', 2026, 11, [2026, 11], 20800, account(20_000, { balanceUpdatedAt: '2026-10-01T00:00:00', anchorMonthly: 800 }), account(10_000)),
+      fundKid('B', 2025, 10, [2025, 10], 20800),
+      fundKid('C', 2025, 11, [2025, 11], 20800),
+    ];
+    const withFund = buildGoalPlanView(fundGoal(kids, targets), ctx());
+    const noFund = buildGoalPlanView(
+      fundGoal(kids.map(k => ({ ...k, accounts: { ...k.accounts, firstYear: null } })), targets), ctx());
+    expect(withFund.monthlyTotal).toBe(noFund.monthlyTotal);
+    expect(withFund.firstYear!.totalMonthly).toBe(0);
+    expect(withFund.firstYear!.endsLabel).toBeNull();
+    expect(withFund.progressPct).toBeCloseTo((10_000 / 300_000) * 100, 6);
+    expect(withFund.status).toEqual(noFund.status);
+    expect(withFund.firstYear!.rows.map(r => r.plan.finished)).toEqual([true, true, true]);
+    expect(withFund.firstYear!.rows.map(r => r.hidden)).toEqual([false, true, false]);
+    expect(withFund.firstYear!.rows[0].plan.monthly).toBe(0);
+  });
+
+  it('says Ready for the first year and never 18th birthday for a fund-only goal', () => {
+    const goal = fundGoal([fundKid('A', null, null, [2029, 11], 20800)], noTargets);
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.headline).toBe('Ready for the first year');
+    expect(view.subtitle).toBe('$498/mo · 1 kid · first-year fund');
+    expect(view.kids).toEqual([]);
+    expect(view.rateKind).toBe('market');
+    expect(view.status.kind).toBe('started');
+
+    const two = fundGoal([fundKid('A', null, null, [2029, 11], 20800), fundKid('B', null, null, [2029, 11], 20800)], noTargets);
+    expect(buildGoalPlanView(two, ctx()).subtitle).toBe('$996/mo · 2 kids · first-year fund');
+  });
+
+  it('keeps the usual headline when a 529 target exists beside the fund', () => {
+    const goal = fundGoal([fundKid('A', 2028, 11, [2028, 11], 20800)], { plan529Target: 47_800, brokerageTarget: 0 });
+    expect(buildGoalPlanView(goal, ctx()).headline).toBe('Ready by their 18th birthday');
+  });
+
+  it('reads started with zero progress when only finished funds remain and there is no 529 or brokerage target', () => {
+    const goal = fundGoal([fundKid('A', 2026, 11, [2026, 11], 20800, account(20_800, { balanceUpdatedAt: '2026-10-01T00:00:00' }))], noTargets);
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.status.kind).toBe('started');
+    expect(view.progressPct).toBe(0);
+    expect(view.monthlyTotal).toBe(0);
+    expect(view.rateKind).toBe('market');
+  });
+
+  it('names the fund share end month', () => {
+    const goal = fundGoal([
+      fundKid('A', 2028, 11, [2028, 11], 20800),
+      fundKid('B', null, null, [2029, 11], 20800),
+      fundKid('C', 2026, 6, [2026, 6], 20800),
+    ], noTargets);
+    expect(buildGoalPlanView(goal, ctx()).firstYear!.endsLabel).toBe('Nov 2029');
+  });
+
+  it('omits the 529 card when its target is 0', () => {
+    const goal = fundGoal([fundKid('A', null, null, [2029, 11], 20800)], { plan529Target: 0, brokerageTarget: 50_000 });
+    expect(buildGoalPlanView(goal, ctx()).kids!.map(k => k.account)).toEqual(['brokerage']);
+  });
+
+  it('renders a stored kids goal whose new fields are explicit nulls', () => {
+    const config: KidsConfig = {
+      plan529Target: 100_000, brokerageTarget: 0, firstYearFund: null,
+      kids: [{
+        label: 'Ada', birthYear: Y - 2, birthMonth: 3,
+        firstYearTarget: null, firstYearDueYear: null, firstYearDueMonth: null,
+        accounts: { plan529: account(), brokerage: account(), firstYear: null },
+      }],
+    };
+    const view = buildGoalPlanView(base({ type: 'KIDS', config }), ctx());
+    expect(view.firstYear).toBeUndefined();
+    expect(view.kidCosts?.kidsCount).toBe(1);
+    expect(view.monthlyTotal).toBeGreaterThan(0);
   });
 });

@@ -503,6 +503,34 @@ describe('MyProfilePage: goals card', () => {
 
   afterEach(() => localStorage.removeItem('userId'));
 
+  it('plans a never-planned import at the horizon rule, not its stored kind', () => {
+    const imported: Goal = {
+      ...ACTIVE, id: 4, clientId: 'v2-a', type: 'CUSTOM', icon: 'flag', anchorMonthly: 0, planRateKind: 'market',
+      config: { targetAmount: 20_000, targetYear: YEAR + 1 },
+    };
+    const h = setupGoals({ goals: [imported, ACTIVE] });
+    const [importRow, planned] = h.page.goalSummaries();
+    expect(importRow.view.rateKind).toBe('cash');
+    // A planned goal keeps its anchored kind.
+    expect(planned.view.rateKind).toBe('market');
+  });
+
+  it('starts the subtitle with what is due now in the target month', () => {
+    const due: Goal = { ...ACTIVE, config: { targetAmount: 30_000, targetYear: YEAR - 1 }, currentBalance: 24_000 };
+    const h = setupGoals({ goals: [due] });
+    expect(h.page.goalSummaries()[0].view.subtitle.startsWith('$6,000 due now')).toBeTrue();
+  });
+
+  it('words the Freedom Date row as whole sentences for partial plans', () => {
+    const h = setupGoals();
+    h.page.monthlyInvestGoal.set(0);
+    h.page.currentPortfolioValue.set(0);
+    expect(h.page.freedomGoalSub).toBe('$1.5M goal. Add a monthly amount to see your date.');
+    h.page.currentPortfolioValue.set(200_000);
+    expect(h.page.freedomGoalSub).toMatch(/^\$1\.5M by \d{4}$/);
+    expect(h.page.freedomGoalSub).not.toContain('not set');
+  });
+
   it('navigates to /goals/:id on row tap', () => {
     const h = setupGoals({ goals: [ACTIVE] });
     (h.fixture.nativeElement.querySelectorAll('.goal-row')[1] as HTMLElement).click();

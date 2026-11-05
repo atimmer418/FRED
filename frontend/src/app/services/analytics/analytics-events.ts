@@ -158,8 +158,8 @@ export type Surface =
   | 'onboarding'
   | 'freedom_sheet'
   | 'my_profile'
-  // The goal sheet is its own surface, not the page that presents it: it is reachable from more
-  // than one place, and an error inside it is a different fact from an error on the profile page.
+  // The goal page is its own surface: an error on it is a different fact from an error on the
+  // profile page that links to it.
   | 'goals'
   | 'retirement_planning'
   | 'monte_carlo'

@@ -194,6 +194,40 @@ describe('GoalsService', () => {
     expect(localStorage.getItem('fred.goals.v2.40')).toBeNull();
   });
 
+  it('a GET in flight during a create does not drop the created goal', () => {
+    service.goals.set([goal(1)]);
+    service.load().subscribe();
+    const get = http.expectOne(r => r.method === 'GET' && r.url === url);
+
+    service.create(write('Second')).subscribe();
+    http.expectOne(r => r.method === 'POST' && r.url === url).flush(goal(2, 'Second'));
+    get.flush([goal(1)]);
+
+    expect(service.goals().map(g => g.id)).toEqual([1, 2]);
+  });
+
+  it('a GET that lands after logout does not repopulate', () => {
+    service.load().subscribe();
+    const get = http.expectOne(url);
+
+    loggedIn$.next(false);
+    get.flush([goal(1), goal(2)]);
+
+    expect(service.goals()).toEqual([]);
+    expect(service.loaded()).toBeFalse();
+  });
+
+  it('create and importLegacy do not append an id already present', () => {
+    service.goals.set([goal(1), goal(2)]);
+    service.create(write('Second')).subscribe();
+    http.expectOne(url).flush(goal(2, 'Second'));
+    expect(service.goals().map(g => g.id)).toEqual([1, 2]);
+
+    service.importLegacy([]).subscribe();
+    http.expectOne(`${url}/import`).flush([goal(2), goal(3)]);
+    expect(service.goals().map(g => g.id)).toEqual([1, 2, 3]);
+  });
+
   it('clears memory on logout', () => {
     service.goals.set([goal(1)]);
     service.loaded.set(true);

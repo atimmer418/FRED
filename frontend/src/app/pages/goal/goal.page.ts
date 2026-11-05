@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, InjectionToken, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -11,9 +11,9 @@ import { AuthService } from '../../services/auth.service';
 import { GoalsService } from '../../services/goals.service';
 import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
-import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
+import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../services/analytics/analytics-bands';
-import { GoalAction } from '../../services/analytics/analytics-events';
+import { GoalAction, Tier } from '../../services/analytics/analytics-events';
 import {
   DEFAULT_ANNUAL_RETURN, RETURN_SCENARIOS, RateAssumptionsService,
 } from '../../services/rate-assumptions.service';
@@ -23,7 +23,7 @@ import {
 } from '../../models/goal.model';
 import { horizonMonths, isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
 import { collegePresets, costCardSources, kidCostFigures } from '../../utils/kid-cost.utils';
-import { AT_18_PRESETS, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
+import { AT_18_PRESETS, CHILDBIRTH_DOLLAR_YEAR_LABEL, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
@@ -45,6 +45,12 @@ export type KidBalanceKey = KidAccountKey | 'firstYear';
 export type BalancePath = 'current' | 'vacation' | { kid: number; account: KidBalanceKey };
 
 type NumericField = 'price' | 'targetYear' | 'budgetPerTrip' | 'monthlyExpenses' | 'targetAmount';
+
+/** The page's clock. One value per page, read once; specs provide a fixed date. */
+export const GOAL_PAGE_NOW = new InjectionToken<() => Date>('GOAL_PAGE_NOW', {
+  providedIn: 'root',
+  factory: () => () => new Date(),
+});
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -110,12 +116,20 @@ export class GoalPage implements OnInit {
     vacation: number;
     kids: Array<Partial<Record<KidBalanceKey, number>>>;
   }>({ current: 0, vacation: 0, kids: [] });
-  private readonly now = new Date();
+  private readonly now = inject(GOAL_PAGE_NOW)();
+  /**
+   * The page's goal writes run one after another: a balance PUT, then Save or Mark completed,
+   * each built from the goal the previous write returned. Never rejects (see updateBalance).
+   */
+  private pendingWrite: Promise<void> = Promise.resolve();
 
-  /** True in edit mode once a plan input differs from the saved goal: saving will re-anchor. */
+  /**
+   * True in edit mode once saving will re-anchor: a plan input differs from the saved goal, or the
+   * goal was imported and never planned, so its first save is its first plan (the server rule).
+   */
   readonly planChanged = computed(() => {
     const goal = this.existing();
-    return this.mode() === 'edit' && !!goal && planInputsChanged(this.form(), goal, this.now);
+    return this.mode() === 'edit' && !!goal && this.reanchorsOnSave(this.form(), goal);
   });
 
   /**
@@ -167,8 +181,16 @@ export class GoalPage implements OnInit {
     }
   });
 
+  /**
+   * The deadline month (or later) with a shortfall: the hero shows what is due now in place of
+   * "$0/mo", and the per-paycheck, from-you/from-growth and catch-up lines are hidden.
+   */
+  readonly showDueNow = computed(() => this.view().monthlyTotal === 0 && this.view().dueNow > 0);
+
+  /** Re-solved plans only: a vacation's monthly is fixed, so it never catches anything up. */
   readonly catchUpLine = computed<string | null>(() =>
     this.mode() === 'edit' && this.view().status.kind === 'behind'
+      && this.form().type !== 'VACATION' && !this.showDueNow()
       ? `${fmtMoney(this.view().monthlyTotal)} a month gets you back on plan`
       : null);
 
@@ -222,7 +244,7 @@ export class GoalPage implements OnInit {
     if (form.type !== 'KIDS') return null;
     const on: GoalForm = { ...form, kids: { ...form.kids, firstYearFund: true } };
     const goal = this.existing();
-    const reanchor = this.mode() === 'setup' || (!!goal && planInputsChanged(on, goal, this.now));
+    const reanchor = this.mode() === 'setup' || (!!goal && this.reanchorsOnSave(on, goal));
     const fund = this.planViewOf(this.buildDraft(on), reanchor).firstYear;
     return fund?.endsLabel ? { monthly: fund.totalMonthly, endsLabel: fund.endsLabel } : null;
   });
@@ -240,6 +262,24 @@ export class GoalPage implements OnInit {
   /** Balances logged on the saved goal's first-year funds, which turning the fund off drops. */
   readonly fundLoggedBalance = computed(() =>
     this.storedKids().reduce((sum, kid) => sum + (kid.accounts.firstYear?.balance ?? 0), 0));
+
+  /** Edit mode, card 1: one line per stored kid the lower count drops who holds logged balances. */
+  readonly droppedKidLines = computed<string[]>(() => {
+    if (this.mode() !== 'edit') return [];
+    const stored = this.storedKids();
+    const count = this.form().kids.kids.length;
+    const lines: string[] = [];
+    stored.slice(count).forEach((kid, j) => {
+      const a = kid.accounts;
+      const logged = a.plan529.balance + a.brokerage.balance + (a.firstYear?.balance ?? 0);
+      if (!(logged > 0)) return;
+      const label = kid.label || `Kid ${count + j + 1}`;
+      lines.push(`Saving removes ${label} and the ${fmtMoney(logged)} you logged for them.`);
+    });
+    return lines;
+  });
+
+  readonly childbirthYearLabel = CHILDBIRTH_DOLLAR_YEAR_LABEL;
 
   readonly collegePresetSelected = computed(() =>
     this.collegeRows.some(p => p.key === this.form().kids.collegeChoice));
@@ -276,7 +316,7 @@ export class GoalPage implements OnInit {
         return;
       }
       this.mode.set('setup');
-      this.form.set(defaultForm(typeParam, new Date()));
+      this.form.set(defaultForm(typeParam, this.now));
       if (await this.isTierGated()) {
         const role = await this.openMultiGoalNudge();
         if (role === 'upgrade') {
@@ -297,7 +337,18 @@ export class GoalPage implements OnInit {
     }
     let goal = this.goalsService.goals().find(g => g.id === id);
     if (!goal) {
-      await firstValueFrom(this.goalsService.load());
+      try {
+        await firstValueFrom(this.goalsService.load());
+      } catch (err) {
+        if (httpStatusOf(err) === 401) {
+          this.toastService.showToast('Your session ended. Sign in again to save this plan.', 'danger');
+          this.authService.logout();
+          return;
+        }
+        this.toastService.showToast('Could not load this goal. Try again.', 'danger');
+        this.goBack();
+        return;
+      }
       goal = this.goalsService.goals().find(g => g.id === id);
     }
     if (!goal) {
@@ -430,30 +481,41 @@ export class GoalPage implements OnInit {
   /** POST in setup, PUT in edit. Commits the shared rate only once the write succeeds. */
   async save(): Promise<void> {
     if (this.saving()) return;
-    const form = this.form();
-    if (!this.validateAll()) {
-      this.step.set(1);
-      return;
-    }
-    const goal = this.existing();
-    const draft = this.draftGoal();
-    const view = this.view();
-    const wasImported = this.isImported();
-    const body: GoalWrite = {
-      type: form.type,
-      name: form.name.trim(),
-      icon: form.icon,
-      // The draft carries saved balances in edit mode and typed starting balances in setup.
-      config: this.withAccountAnchors(draft.config, view),
-      // KIDS balances live per account in config.
-      currentBalance: form.type === 'KIDS' ? 0 : draft.currentBalance,
-      completed: goal?.completed ?? false,
-      anchorMonthly: view.monthlyTotal,
-      planRate: view.rate,
-      planRateKind: view.rateKind,
-    };
-
+    // A balance typed and not yet blurred is written first, and Save waits for it, so this body
+    // is built from the goal that write returned.
+    this.flushFocusedInput();
     this.saving.set(true);
+    try {
+      await this.pendingWrite;
+      const form = this.form();
+      if (!this.validateAll()) {
+        this.step.set(1);
+        return;
+      }
+      const goal = this.existing();
+      const draft = this.draftGoal();
+      const view = this.view();
+      const wasImported = this.isImported();
+      const body: GoalWrite = {
+        type: form.type,
+        name: form.name.trim(),
+        icon: form.icon,
+        // The draft carries saved balances in edit mode and typed starting balances in setup.
+        config: this.withAccountAnchors(draft.config, view),
+        // KIDS balances live per account in config.
+        currentBalance: form.type === 'KIDS' ? 0 : draft.currentBalance,
+        completed: goal?.completed ?? false,
+        anchorMonthly: view.monthlyTotal,
+        planRate: view.rate,
+        planRateKind: view.rateKind,
+      };
+      await this.sendSave(goal, body, form, wasImported);
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  private async sendSave(goal: Goal | null, body: GoalWrite, form: GoalForm, wasImported: boolean): Promise<void> {
     try {
       const request$: Observable<Goal> = goal
         ? this.goalsService.update(goal.id, body)
@@ -466,8 +528,6 @@ export class GoalPage implements OnInit {
       this.router.navigate(['/my-profile']);
     } catch (err) {
       await this.handleWriteError(err);
-    } finally {
-      this.saving.set(false);
     }
   }
 
@@ -501,7 +561,11 @@ export class GoalPage implements OnInit {
     let deadlineYear: number | null;
     if (type === 'KIDS') {
       const c = config as KidsConfig;
-      target = c.kids.length * (c.plan529Target + c.brokerageTarget);
+      // Unfinished first-year funds are part of what the plan saves for.
+      const fundTargets = (view.firstYear?.rows ?? [])
+        .filter(r => !r.plan.finished)
+        .reduce((sum, r) => sum + r.plan.target, 0);
+      target = c.kids.length * (c.plan529Target + c.brokerageTarget) + fundTargets;
       deadlineYear = c.kids.length
         ? Math.max(...c.kids.map(k => kidDeadline(this.now, k.birthYear, k.birthMonth).year))
         : null;
@@ -538,10 +602,13 @@ export class GoalPage implements OnInit {
 
   /** Toggles `completed`. Not offered for vacation goals. */
   async markCompleted(): Promise<void> {
-    const goal = this.existing();
-    if (!goal || this.saving()) return;
+    if (!this.existing() || this.saving()) return;
+    this.flushFocusedInput();
     this.saving.set(true);
     try {
+      await this.pendingWrite;
+      const goal = this.existing();
+      if (!goal) return;
       const updated = await firstValueFrom(
         this.goalsService.update(goal.id, this.writeFrom(goal, { completed: !goal.completed })));
       this.existing.set(updated);
@@ -555,6 +622,9 @@ export class GoalPage implements OnInit {
   }
 
   async confirmRemove(): Promise<void> {
+    if (!this.existing()) return;
+    this.flushFocusedInput();
+    await this.pendingWrite;
     const goal = this.existing();
     if (!goal) return;
     const modal = await this.modalCtrl.create({
@@ -584,11 +654,16 @@ export class GoalPage implements OnInit {
    * Setup: records a starting balance in draft state (sent with the POST).
    * Edit: logs a balance. Sends the SAVED goal with just the balance changed, so unsaved
    * plan-input edits never ride along; the server keeps the anchor and stamps the date.
+   * Edit, for an account only the draft has (a kid added or a fund switched on since the last
+   * save): records it in the draft like setup does, and the re-anchoring save carries it.
+   *
+   * Edit-mode writes are chained on pendingWrite and build their body from existing() when their
+   * turn comes, so a second blur is built from the first write's response. The chain itself never
+   * rejects; the caller still sees its own outcome.
    */
   async updateBalance(path: BalancePath, value: number): Promise<void> {
     const amount = Math.max(0, Math.round(value));
-    const goal = this.existing();
-    if (!goal) {
+    if (!this.existing() || this.isDraftOnlyAccount(path)) {
       this.setupBalances.update(b => {
         if (path === 'current') return { ...b, current: amount };
         if (path === 'vacation') return { ...b, vacation: amount };
@@ -598,20 +673,31 @@ export class GoalPage implements OnInit {
       });
       return;
     }
+    const run = this.pendingWrite.then(() => this.writeBalance(path, amount));
+    this.pendingWrite = run.catch(() => undefined);
+    return run;
+  }
+
+  /** One balance PUT, built from the goal as it stands when this write's turn comes. */
+  private async writeBalance(path: BalancePath, amount: number): Promise<void> {
+    const goal = this.existing();
+    if (!goal) return;
     let patch: Partial<GoalWrite>;
+    // Fields show whole dollars, so a stored value with cents compares rounded: focus then blur
+    // never rewrites it.
     if (path === 'current') {
-      if (goal.currentBalance === amount) return;
+      if (Math.round(goal.currentBalance) === amount) return;
       patch = { currentBalance: amount };
     } else if (path === 'vacation') {
       const c = goal.config as VacationConfig;
-      const year = new Date().getFullYear();
-      if (c.savedThisYear === amount && c.savedYear === year) return;
+      const year = this.now.getFullYear();
+      if (Math.round(c.savedThisYear) === amount && c.savedYear === year) return;
       patch = { config: { ...c, savedThisYear: amount, savedYear: year } };
     } else {
       const c = goal.config as KidsConfig;
       const kid = c.kids[path.kid];
       const account = kid?.accounts[path.account];
-      if (!account || account.balance === amount) return;
+      if (!account || Math.round(account.balance) === amount) return;
       const kids = c.kids.map((k, i) => i !== path.kid ? k : {
         ...k,
         accounts: { ...k.accounts, [path.account]: { ...account, balance: amount } },
@@ -716,11 +802,30 @@ export class GoalPage implements OnInit {
     this.patch({ months: n });
   }
 
+  /** Whole dollars: the fields only ever hold digits, so a stored value with cents shows rounded. */
   fmtNumber(value: number | null): string {
-    return value == null ? '' : String(value);
+    return value == null ? '' : String(Math.round(value));
   }
 
   // ── Internals ───────────────────────────────────────────────────────────────
+
+  /** Saving re-anchors: a plan input changed, or this is an imported goal's first plan. */
+  private reanchorsOnSave(form: GoalForm, goal: Goal): boolean {
+    const pendingFirstPlan = goal.clientId !== null && goal.anchorMonthly === 0;
+    return pendingFirstPlan || planInputsChanged(form, goal, this.now);
+  }
+
+  /** Edit mode: a kid balance tile whose account the saved goal does not hold yet. */
+  private isDraftOnlyAccount(path: BalancePath): boolean {
+    if (!this.existing() || path === 'current' || path === 'vacation') return false;
+    const stored = this.storedKids()[path.kid];
+    return !stored || !stored.accounts[path.account];
+  }
+
+  /** Blurs a focused field so its blur handler (a balance write) runs before the action that follows. */
+  private flushFocusedInput(): void {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  }
 
   /** Digits only, capped, input rewritten in place. Empty input yields null. */
   private sanitize(event: Event, maxDigits: number): number | null {
@@ -781,6 +886,7 @@ export class GoalPage implements OnInit {
     const goal = this.existing();
     let config = formToConfig(form, goal, this.now);
     if (goal) {
+      if (form.type === 'KIDS') config = this.withDraftOnlyBalances(config as KidsConfig);
       const draft: GoalPlanInput = {
         type: form.type,
         config,
@@ -794,7 +900,7 @@ export class GoalPage implements OnInit {
         planAnchoredAt: goal.planAnchoredAt,
         balanceUpdatedAt: goal.balanceUpdatedAt,
       };
-      return planInputsChanged(form, goal, this.now) ? this.reanchored(draft) : draft;
+      return this.reanchorsOnSave(form, goal) ? this.reanchored(draft) : draft;
     }
     const typed = this.setupBalances();
     if (form.type === 'KIDS') {
@@ -827,6 +933,31 @@ export class GoalPage implements OnInit {
       planRateKind: 'market',
       planAnchoredAt: this.now.toISOString(),
       balanceUpdatedAt: null,
+    };
+  }
+
+  /**
+   * Edit mode: balances typed for accounts the saved goal does not hold yet (a kid added, a fund
+   * switched on). Stored accounts keep their saved balances; balance tiles log those directly.
+   */
+  private withDraftOnlyBalances(config: KidsConfig): KidsConfig {
+    const typed = this.setupBalances().kids;
+    const stored = this.storedKids();
+    const pick = (i: number, key: KidBalanceKey, a: AccountState): AccountState => {
+      const value = typed[i]?.[key];
+      const draftOnly = !stored[i] || !stored[i].accounts[key];
+      return draftOnly && value !== undefined ? { ...a, balance: value } : a;
+    };
+    return {
+      ...config,
+      kids: config.kids.map((kid, i) => ({
+        ...kid,
+        accounts: {
+          plan529: pick(i, 'plan529', kid.accounts.plan529),
+          brokerage: pick(i, 'brokerage', kid.accounts.brokerage),
+          ...(kid.accounts.firstYear ? { firstYear: pick(i, 'firstYear', kid.accounts.firstYear) } : {}),
+        },
+      })),
     };
   }
 
@@ -969,7 +1100,7 @@ export class GoalPage implements OnInit {
       return;
     }
     this.toastService.showToast('Could not save this goal. Try again.', 'danger');
-    this.analytics.trackErrorShown('save_failed', 'goals', 'toast', status, true);
+    this.analytics.trackErrorShown(isNetworkFailure(err) ? 'network' : 'save_failed', 'goals', 'toast', status, true);
   }
 
   private summarizeInputs(goal: GoalPlanInput): string {
@@ -1019,7 +1150,32 @@ export class GoalPage implements OnInit {
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
+    this.trackNudge('shown');
     const { role } = await modal.onDidDismiss();
+    this.trackNudge(role === 'upgrade' ? 'upgrade_tapped' : 'dismissed');
     return role;
+  }
+
+  /** Same event, feature and tier mapping as my-profile's goals nudge. */
+  private trackNudge(action: 'shown' | 'upgrade_tapped' | 'dismissed'): void {
+    try {
+      this.analytics.track({ name: 'paywall_nudge_shown', props: { feature: 'goals', tier: this.nudgeTier(), action } });
+    } catch {
+      // Analytics never breaks a user flow.
+    }
+  }
+
+  /** The user's tier as the taxonomy names it. 'piggy' is the legacy name for core; unknown is null. */
+  private nudgeTier(): Tier {
+    let selected: string | undefined;
+    // userProgress$ replays its latest value synchronously; nothing is waited for here.
+    this.authService.userProgress$.pipe(take(1)).subscribe(p => (selected = p?.selectedTier ?? undefined)).unsubscribe();
+    switch (selected) {
+      case 'piggy':
+      case 'core': return 'core';
+      case 'plus': return 'plus';
+      case 'pro': return 'pro';
+      default: return null;
+    }
   }
 }

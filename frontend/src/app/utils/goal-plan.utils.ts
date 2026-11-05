@@ -367,7 +367,8 @@ export function proposeSimplePlan(input: {
     dueNow: n === 0 ? Math.max(0, target - balance) : 0,
     reaches: { year: targetYear, month: 12 },
     fromYou,
-    fromGrowth: Math.max(0, target - balance - fromYou),
+    // No months left means no growth: the shortfall is due now, not from growth.
+    fromGrowth: n === 0 ? 0 : Math.max(0, target - balance - fromYou),
   };
 }
 
@@ -403,15 +404,23 @@ export interface VacationPlan {
   resetNeeded: boolean;
 }
 
-export function proposeVacationPlan(cfg: VacationConfig, now: Date): VacationPlan {
+/**
+ * Expected months count from the plan's anchor month when it was anchored this calendar year,
+ * else from January, so a plan started mid-year is not graded for months before it existed.
+ */
+export function proposeVacationPlan(cfg: VacationConfig, now: Date, planAnchoredAt?: string | null): VacationPlan {
   const annual = cfg.tripsPerYear * cfg.budgetPerTrip;
   const monthly = Math.ceil(annual / 12);
   const resetNeeded = cfg.savedYear !== now.getFullYear();
+  const anchor = planAnchoredAt ? new Date(planAnchoredAt) : null;
+  const startMonthIndex = anchor && Number.isFinite(anchor.getTime()) && anchor.getFullYear() === now.getFullYear()
+    ? anchor.getMonth()
+    : 0;
   return {
     annual,
     monthly,
     savedThisYear: resetNeeded ? 0 : cfg.savedThisYear,
-    expectedSoFar: monthly * now.getMonth(),
+    expectedSoFar: monthly * Math.max(0, now.getMonth() - startMonthIndex),
     resetNeeded,
   };
 }
@@ -449,6 +458,8 @@ export function planStatus(args: {
   lumps: LumpOccurrence[];
   /** Expected balance of accounts graded on their own path (first-year funds), added to this plan's. Default 0. */
   extraExpected?: number;
+  /** The plan's horizon from its anchor: no contributions are expected past the deadline. */
+  maxMonths?: number;
   now: Date;
 }): PlanStatus {
   const { balanceUpdatedAt } = args;
@@ -461,7 +472,8 @@ export function planStatus(args: {
   if (args.imported) return { kind: 'imported', delta: 0, ...base };
   if (balanceUpdatedAt === null) return { kind: 'started', delta: 0, ...base };
 
-  const months = monthsBetween(args.planAnchoredAt, balanceUpdatedAt);
+  const logged = monthsBetween(args.planAnchoredAt, balanceUpdatedAt);
+  const months = args.maxMonths !== undefined ? Math.min(logged, args.maxMonths) : logged;
   const expected =
     futureValue(
       args.anchorBalance,
@@ -474,9 +486,12 @@ export function planStatus(args: {
   return { kind: kindForDelta(delta, args.target), delta, ...base };
 }
 
-/** Vacation never reads done: the year resets, so the goal is always in progress. */
+/**
+ * Vacation never reads done: the year resets, so the goal is always in progress. Until an amount
+ * is logged for the current year it reads Plan started, never Behind.
+ */
 export function vacationStatus(plan: VacationPlan, _now: Date): PlanStatus {
-  if (plan.savedThisYear === 0 && plan.expectedSoFar === 0) {
+  if (plan.resetNeeded || plan.savedThisYear === 0) {
     return { kind: 'started', delta: 0, asOf: null, stale: false };
   }
   const delta = plan.savedThisYear - plan.expectedSoFar;

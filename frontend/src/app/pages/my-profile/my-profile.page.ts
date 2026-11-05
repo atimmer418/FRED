@@ -246,7 +246,8 @@ export class MyProfilePage implements OnInit, OnDestroy {
         marketRate: this.AVG_MARKET_YIELD,
         frequency: this.frequencySig(),
         now: new Date(),
-        rateKindOverride: g.planRateKind,
+        // An imported goal that was never planned has no anchored kind to keep: the horizon decides.
+        rateKindOverride: g.clientId !== null && g.anchorMonthly === 0 ? null : g.planRateKind,
       }),
     })));
 
@@ -303,9 +304,11 @@ export class MyProfilePage implements OnInit, OnDestroy {
     const goal = goalValue >= 1_000_000
       ? '$' + (goalValue / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
       : '$' + Math.round(goalValue / 1_000) + 'k';
-    const yr = this.freedomYear() ?? 'not set';
-    const invest = this.monthlyInvestGoal() ? `$${this.monthlyInvestGoal().toLocaleString()}/mo` : 'not set';
-    return `${goal} by ${yr} · ${invest} through FRED`;
+    // Partial states read as whole sentences, never a line with blanks in it.
+    const yr = this.freedomYear();
+    if (yr === null) return `${goal} goal. Add a monthly amount to see your date.`;
+    if (!this.monthlyInvestGoal()) return `${goal} by ${yr}`;
+    return `${goal} by ${yr} · $${this.monthlyInvestGoal().toLocaleString()}/mo through FRED`;
   }
 
   // ── Referral upgrade offers ────────────────────────────────────────────────

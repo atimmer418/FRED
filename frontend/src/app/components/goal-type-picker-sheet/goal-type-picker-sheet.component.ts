@@ -16,7 +16,7 @@ export const GOAL_TYPE_TILES: ReadonlyArray<GoalTypeTile> = [
   { type: 'HOUSE', icon: 'home', title: 'House', line: 'The down payment, planned to the month.' },
   { type: 'EMERGENCY_FUND', icon: 'health_and_safety', title: 'Emergency fund', line: 'Three or six months of expenses, kept in cash.' },
   { type: 'CAR', icon: 'directions_car', title: 'Car', line: 'Down payment or the full price.' },
-  { type: 'VACATION', icon: 'flight', title: 'Vacation', line: 'Trips a year and a budget each. We set the monthly aside.' },
+  { type: 'VACATION', icon: 'flight', title: 'Vacation', line: 'Trips a year and a budget each. FRED works out the monthly amount.' },
   { type: 'WEDDING', icon: 'favorite', title: 'Wedding', line: 'One date, one number, one plan.' },
   { type: 'CUSTOM', icon: 'flag', title: 'Something else', line: 'Any amount by any year.' },
 ];

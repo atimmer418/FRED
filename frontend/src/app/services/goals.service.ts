@@ -51,6 +51,8 @@ export class GoalsService {
 
   private entry: { fetchedAt: number; userId: string } | null = null;
   private inFlight$: Observable<Goal[]> | null = null;
+  /** Bumped by every write and logout, so a GET that started before one never overwrites newer state. */
+  private generation = 0;
 
   constructor(
     private http: HttpClient,
@@ -93,7 +95,7 @@ export class GoalsService {
     return this.http.post<Goal>(this.apiUrl, body, { headers: this.getAuthHeaders() }).pipe(
       tap(created => {
         this.invalidate();
-        this.goals.update(list => [...list, created]);
+        this.goals.update(list => list.some(g => g.id === created.id) ? list : [...list, created]);
       })
     );
   }
@@ -132,7 +134,10 @@ export class GoalsService {
     return this.http.post<Goal[]>(`${this.apiUrl}/import`, body, { headers: this.getAuthHeaders() }).pipe(
       tap(imported => {
         this.invalidate();
-        this.goals.update(list => [...list, ...imported]);
+        this.goals.update(list => {
+          const ids = new Set(list.map(g => g.id));
+          return [...list, ...imported.filter(g => !ids.has(g.id))];
+        });
       })
     );
   }
@@ -209,8 +214,11 @@ export class GoalsService {
 
   private fetch(userId: string): Observable<Goal[]> {
     if (this.inFlight$) return this.inFlight$;
+    const generation = this.generation;
     const obs: Observable<Goal[]> = this.http.get<Goal[]>(this.apiUrl, { headers: this.getAuthHeaders() }).pipe(
       tap(list => {
+        // A write or logout happened while this GET was in flight: its list is older than the signal.
+        if (generation !== this.generation) return;
         this.goals.set(list);
         this.loaded.set(true);
         this.entry = { fetchedAt: Date.now(), userId };
@@ -227,6 +235,7 @@ export class GoalsService {
   }
 
   private invalidate(): void {
+    this.generation++;
     this.entry = null;
     this.inFlight$ = null;
   }

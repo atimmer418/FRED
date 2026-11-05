@@ -387,18 +387,25 @@ function amountError(value: number | null): string | null {
 
 /**
  * Field-keyed error messages. Empty object means the form is valid. `existing` (edit mode) lets a
- * stored first-year fund on a kid who has since arrived count toward a valid kids plan.
+ * stored first-year fund on a kid who has since arrived count toward a valid kids plan, and lets
+ * an unchanged stored target year or kid birth year stand once the calendar has passed it (the
+ * server accepts those the same way).
  */
 export function validateForm(form: GoalForm, now: Date, existing: Goal | null = null): Record<string, string> {
   const errors: Record<string, string> = {};
   const currentYear = now.getFullYear();
   const yearMessage = `Enter a year from ${currentYear} to ${currentYear + 50}.`;
+  const storedTargetYear = existing && existing.type === form.type && form.type !== 'KIDS' && form.type !== 'VACATION'
+    ? (existing.config as HouseCarConfig | EmergencyFundConfig | TargetConfig).targetYear
+    : null;
+  const storedKids = kidsOf(existing);
 
   if (!form.name.trim()) errors['name'] = 'Give this goal a name.';
 
   const checkYear = (): void => {
     const y = form.targetYear;
-    if (y == null || !Number.isInteger(y) || y < currentYear || y > currentYear + 50) {
+    const pastAndNew = y != null && y < currentYear && y !== storedTargetYear;
+    if (y == null || !Number.isInteger(y) || pastAndNew || y > currentYear + 50) {
       errors['targetYear'] = yearMessage;
     }
   };
@@ -418,16 +425,21 @@ export function validateForm(form: GoalForm, now: Date, existing: Goal | null = 
         if (e) errors['brokerageTarget'] = e;
       }
       const holdsFund = form.kids.firstYearFund && kidsToConfig(form.kids, existing, now).firstYearFund === true;
+      // An amount over the cap already shows its own error on its field; say it once.
+      const overCap = ((a ?? 0) > MAX_AMOUNT && !errors['brokerageTarget'])
+        || ((b ?? 0) > MAX_AMOUNT && !errors['plan529Target']);
       if (!hasA && !hasB && !holdsFund) errors['kidsTargets'] = 'Enter at least one target for your kids.';
-      else if ((a ?? 0) > MAX_AMOUNT || (b ?? 0) > MAX_AMOUNT) {
+      else if (overCap) {
         errors['kidsTargets'] = 'That is more than we can plan for. Try a smaller amount.';
       }
       form.kids.kids.forEach((row, i) => {
         if (row.undecided) return;
         const y = row.birthYear;
-        if (y != null && currentYear - y >= 18) {
+        // A stored kid who has since turned 18 keeps the plan writable until it is changed.
+        const storedSame = y != null && storedKids[i]?.birthYear === y;
+        if (y != null && currentYear - y >= 18 && !storedSame) {
           errors[`kid.${i}.birthYear`] = 'Already 18 or older. Use Something else with a target year instead.';
-        } else if (y == null || y < currentYear - 17 || y > currentYear + 10) {
+        } else if (y == null || (y < currentYear - 17 && !storedSame) || y > currentYear + 10) {
           errors[`kid.${i}.birthYear`] = `Enter a year from ${currentYear - 17} to ${currentYear + 10}.`;
         }
       });

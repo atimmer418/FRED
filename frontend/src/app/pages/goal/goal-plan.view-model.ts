@@ -95,6 +95,11 @@ export interface FirstYearRow {
 
 export interface GoalPlanView {
   monthlyTotal: number;
+  /**
+   * What is due now in a deadline month or after it: the shortfall the plan can no longer spread
+   * over months. Simple goals: the plan's dueNow. KIDS: the 529 and brokerage accounts' dueNow.
+   */
+  dueNow: number;
   perPaycheck: number | null;
   rateKind: RateKind;
   rate: number;
@@ -156,6 +161,11 @@ function clampPct(part: number, whole: number): number {
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/** The subtitle's lead: "$X/mo", or "$X due now" when nothing is left to spread over months. */
+function amountLead(monthly: number, dueNow: number): string {
+  return monthly === 0 && dueNow > 0 ? `${fmtMoney(dueNow)} due now` : `${fmtMoney(monthly)}/mo`;
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────────
@@ -270,12 +280,14 @@ function kidsView(
 
   // Status: one family plan over the sums of every 529 and brokerage account, plus unfinished
   // first-year funds, which are graded on their own path and added to the expected balance.
+  // An account with no target is left out, the same as on the plan cards.
+  const plannedKeys = accountDefs.filter(def => def.target > 0).map(def => def.account);
   let balance = 0;
   let anchorBalance = 0;
   let anchorMonthly = 0;
   const loggedAt: string[] = [];
   for (const kid of kids) {
-    for (const key of ['plan529', 'brokerage'] as const) {
+    for (const key of plannedKeys) {
       const a = kid.accounts[key];
       balance += a.balance;
       anchorBalance += a.anchorBalance;
@@ -297,6 +309,14 @@ function kidsView(
     const months = Math.min(monthsLogged, horizonMonths(anchorDate, f.row.plan.due.year, f.row.plan.due.month));
     return sum + futureValue(f.account.anchorBalance, f.account.anchorMonthly, months, fundRate, []);
   }, 0);
+  // No contributions are expected past the last 529 or brokerage deadline, counted from the anchor.
+  const accountHorizons = plannedKeys.length > 0
+    ? kids.map(kid => {
+        const dl = kidDeadline(anchorDate, kid.birthYear, kid.birthMonth);
+        return horizonMonths(anchorDate, dl.year, dl.month);
+      })
+    : [];
+  const maxMonths = accountHorizons.length > 0 ? Math.max(...accountHorizons) : undefined;
   // A 0 target (every fund finished, no 529 or brokerage target) is never "done".
   const status: PlanStatus = target > 0 || goal.completed
     ? planStatus({
@@ -311,6 +331,7 @@ function kidsView(
         rate: statusRate,
         lumps: anchorLumps,
         extraExpected,
+        maxMonths,
         now: ctx.now,
       })
     : { kind: 'started', delta: 0, asOf: null, stale: false };
@@ -345,17 +366,20 @@ function kidsView(
     .map(f => f.row.plan.due)
     .sort((a, b) => a.year * 12 + a.month - (b.year * 12 + b.month));
   const lastDue = unfinishedDue[unfinishedDue.length - 1];
+  const dueNow = plans.reduce((sum, p) => sum + p.dueNow, 0);
+  const lead = amountLead(monthlyTotal, dueNow);
 
   return {
     monthlyTotal,
+    dueNow,
     rateKind,
     rate,
     headline: fundOnly
       ? 'Ready for the first year'
       : kids.length === 1 ? 'Ready by their 18th birthday' : 'Ready by each 18th birthday',
     subtitle: fundOnly
-      ? `${fmtMoney(monthlyTotal)}/mo · ${kidsLabel} · first-year fund`
-      : `${fmtMoney(monthlyTotal)}/mo · ${kidsLabel} · ${span}`,
+      ? `${lead} · ${kidsLabel} · first-year fund`
+      : `${lead} · ${kidsLabel} · ${span}`,
     status,
     progressPct: clampPct(balance, target),
     relative: perKidRelative.some(Boolean),
@@ -413,9 +437,10 @@ function firstYearRows(
 
 function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): Omit<GoalPlanView, 'perPaycheck'> {
   const cfg = goal.config as VacationConfig;
-  const plan = proposeVacationPlan(cfg, ctx.now);
+  const plan = proposeVacationPlan(cfg, ctx.now, goal.planAnchoredAt);
   return {
     monthlyTotal: plan.monthly,
+    dueNow: 0,
     // Trip money is short-term cash with no growth assumed.
     rateKind: 'cash',
     rate: CASH_RATE,
@@ -427,6 +452,12 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): Omit<GoalPlanV
     reasonLine: null,
     vacation: plan,
   };
+}
+
+/** The date a simple goal's plan was anchored, or `now` for a pending re-anchor or an unreadable date. */
+function statusAnchorDate(goal: GoalPlanInput, ctx: GoalPlanContext): Date {
+  const parsed = new Date(goal.planAnchoredAt);
+  return ctx.reanchorPending || !Number.isFinite(parsed.getTime()) ? ctx.now : parsed;
 }
 
 function targetYearOf(goal: GoalPlanInput): number {
@@ -461,22 +492,29 @@ function simpleView(
     balanceUpdatedAt: goal.balanceUpdatedAt,
     rate: statusRate,
     lumps: [],
+    // No contributions are expected after the target month, counted from the anchor.
+    maxMonths: horizonMonths(statusAnchorDate(goal, ctx), targetYear, 12),
     now: ctx.now,
   });
 
+  const lead = amountLead(plan.monthly, plan.dueNow);
   let subtitle: string;
   if (goal.type === 'HOUSE' || goal.type === 'CAR') {
     const pct = (goal.config as HouseCarConfig).downPaymentPct;
-    subtitle = `${fmtMoney(plan.monthly)}/mo · ${pct == null ? 'full price' : `${pct}% down`} · ${targetYear}`;
+    subtitle = `${lead} · ${pct == null ? 'full price' : `${pct}% down`} · ${targetYear}`;
   } else {
-    subtitle = `${fmtMoney(plan.monthly)}/mo · ${fmtCompact(target)} by ${targetYear}`;
+    subtitle = `${lead} · ${fmtCompact(target)} by ${targetYear}`;
   }
+  const dueNowOnly = plan.monthly === 0 && plan.dueNow > 0;
 
   return {
     monthlyTotal: plan.monthly,
+    dueNow: plan.dueNow,
     rateKind: plan.rateKind,
     rate: plan.rate,
-    headline: `Reaches ${fmtCompact(target)} in ${MONTH_ABBR[plan.reaches.month - 1]} ${plan.reaches.year}`,
+    headline: dueNowOnly
+      ? 'Target month reached'
+      : `Reaches ${fmtCompact(target)} in ${MONTH_ABBR[plan.reaches.month - 1]} ${plan.reaches.year}`,
     subtitle,
     status,
     progressPct: clampPct(goal.currentBalance, target),

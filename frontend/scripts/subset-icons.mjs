@@ -36,6 +36,8 @@ const DYNAMIC_ICONS = [
   'home', 'health_and_safety', 'flag', 'energy_savings_leaf', 'savings', 'school', 'directions_car',
   // my-profile UI icons (FRED-216): camera badge + add-goal button
   'photo_camera', 'add_circle',
+  // goals v3: Kids, Vacation and Wedding icons live in TS (picker tiles, goal-form.model)
+  'child_care', 'flight', 'favorite',
 ];
 
 // Material Symbols renamed some legacy icon glyphs. The ligature text (used in templates)

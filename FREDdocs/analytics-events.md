@@ -333,8 +333,10 @@ Counts (`toCountBand`): `0`, `1`, `2_3`, `4_9`, `10_plus`. Years (`toYearsBand`)
 - **`validation` collapses distinct rejections.** Nine different field errors on one form all
   report as one category, because the only thing that separates them is the message, which is
   never sent. A bounded `field` slug would fix it if the funnel ever needs that detail.
-- **One nudge, two affordances.** `goals` covers both the frosted veil and the add-goal button,
-  and they share a modal, so a `shown` event cannot say which one the user hit.
+- **One nudge, several affordances.** `goals` covers the Add a goal button on my-profile and the
+  goal page's nudge (opening a new goal at the limit, or a save or reopen the server refused with
+  `TIER_LIMIT`). They share a modal and a feature value, so a `shown` event cannot say which one
+  the user hit.
 - **No event describes a plan saved from the my-profile page itself.** `freedom_plan_changed` is
   restricted to `onboarding` and `freedom_sheet`. Harmless today, since the page's tiles live only
   in the sheet.

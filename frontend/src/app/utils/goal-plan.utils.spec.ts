@@ -209,6 +209,53 @@ describe('proposeFirstYearPlan', () => {
   it('pins futureValue of the Nov 2028 monthly after 23 months', () => expect(futureValue(0, 834, 23, 0.04, [])).toBeCloseTo(19902, -1));
 });
 
+describe('final review: deadline month, vacation start, status cap', () => {
+  it('attributes nothing to growth in the deadline month', () => {
+    const p = proposeSimplePlan({ target: 30000, balance: 24000, targetYear: 2026, marketRate: 0.10, forceCash: false, rateKindOverride: null, now: new Date(2026, 11, 5) });
+    expect(p.n).toBe(0);
+    expect(p.dueNow).toBe(6000);
+    expect(p.fromYou).toBe(0);
+    expect(p.fromGrowth).toBe(0);
+  });
+
+  it('counts vacation months from the anchor month when the plan started this year', () => {
+    const cfg = { tripsPerYear: 2 as const, budgetPerTrip: 3000, savedThisYear: 0, savedYear: 2026 };
+    expect(proposeVacationPlan(cfg, NOW, '2026-11-15T10:00:00').expectedSoFar).toBe(0);
+    expect(proposeVacationPlan(cfg, NOW, '2026-06-02T10:00:00').expectedSoFar).toBe(500 * 5);
+    // Anchored in an earlier year: counted from January.
+    expect(proposeVacationPlan(cfg, NOW, '2025-06-02T10:00:00').expectedSoFar).toBe(500 * 10);
+    // Never negative.
+    expect(proposeVacationPlan(cfg, new Date(2026, 3, 1), '2026-06-02T10:00:00').expectedSoFar).toBe(0);
+  });
+
+  it('reads Plan started for a vacation created in November with nothing saved', () => {
+    const p = proposeVacationPlan({ tripsPerYear: 2, budgetPerTrip: 3000, savedThisYear: 0, savedYear: 2026 }, NOW, '2026-11-15T10:00:00');
+    expect(vacationStatus(p, NOW).kind).toBe('started');
+  });
+
+  it('reads Plan started in February of a new year before any log', () => {
+    const feb = new Date(2027, 1, 10);
+    const p = proposeVacationPlan({ tripsPerYear: 2, budgetPerTrip: 3000, savedThisYear: 2500, savedYear: 2026 }, feb, '2026-03-01T10:00:00');
+    expect(p.resetNeeded).toBeTrue();
+    expect(vacationStatus(p, feb).kind).toBe('started');
+  });
+
+  it('reads On plan when the logged amount equals the expected amount', () => {
+    const p = proposeVacationPlan({ tripsPerYear: 2, budgetPerTrip: 3000, savedThisYear: 2500, savedYear: 2026 }, NOW, '2026-06-02T10:00:00');
+    expect(p.expectedSoFar).toBe(2500);
+    expect(vacationStatus(p, NOW).kind).toBe('on_plan');
+  });
+
+  it('stops the expected balance at maxMonths', () => {
+    // rate 0, 100 a month, logged 18 months after the anchor, plan ran 12 months.
+    const args = { completed: false, imported: false, target: 1250, balance: 1200, anchorBalance: 0, anchorMonthly: 100, planAnchoredAt: '2026-01-15T10:00:00', balanceUpdatedAt: '2027-07-15T10:00:00' as string | null, rate: 0, lumps: [], now: new Date(2027, 6, 20) };
+    expect(planStatus(args).kind).toBe('behind');
+    const capped = planStatus({ ...args, maxMonths: 12 });
+    expect(capped.kind).toBe('on_plan');
+    expect(capped.delta).toBe(0);
+  });
+});
+
 describe('planStatus extraExpected', () => {
   it('adds to the expected balance, lowering the delta by exactly that amount', () => {
     const args = { completed: false, imported: false, target: 250000, balance: 3000, anchorBalance: 0, anchorMonthly: 417, planAnchoredAt: '2026-11-15T10:00:00', balanceUpdatedAt: '2027-05-15T10:00:00' as string | null, rate: 0.10, lumps: [], now: new Date(2027, 10, 20) };

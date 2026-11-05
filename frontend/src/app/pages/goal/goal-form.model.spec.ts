@@ -341,4 +341,33 @@ describe('goal-form.model', () => {
     form.kids.plan529Target = 50_000;
     expect(planInputsChanged(form, existing, NOW)).toBeTrue();
   });
+
+  it('accepts an unchanged stored target year the calendar has passed, and rejects a new past year', () => {
+    const existing = goalOf({ type: 'CUSTOM', config: { targetAmount: 5_000, targetYear: 2025 } });
+    const form = formFromGoal(existing);
+    expect(validateForm(form, NOW, existing)['targetYear']).toBeUndefined();
+    form.targetYear = 2024;
+    expect(validateForm(form, NOW, existing)['targetYear']).toBe('Enter a year from 2026 to 2076.');
+    // Setup has no stored year: a past year is still an error.
+    expect(validateForm({ ...form, targetYear: 2025 }, NOW)['targetYear']).toBe('Enter a year from 2026 to 2076.');
+  });
+
+  it('accepts an unchanged stored kid birth year that has turned 18, and rejects a changed one', () => {
+    const existing = kidsGoal();
+    (existing.config as KidsConfig).kids[0].birthYear = 2008;
+    const form = formFromGoal(existing);
+    expect(validateForm(form, NOW, existing)['kid.0.birthYear']).toBeUndefined();
+    form.kids.kids[0].birthYear = 2007;
+    expect(validateForm(form, NOW, existing)['kid.0.birthYear']).toContain('Already 18 or older');
+    expect(validateForm(formFromGoal(existing), NOW)['kid.0.birthYear']).toContain('Already 18 or older');
+  });
+
+  it('shows one error, not two, for a custom amount over the cap', () => {
+    const form = defaultForm('KIDS', NOW);
+    form.kids.collegeChoice = 'custom';
+    form.kids.plan529Target = 100_000_001;
+    const errors = validateForm(form, NOW);
+    expect(errors['plan529Target']).toBe('That is more than we can plan for. Try a smaller amount.');
+    expect(errors['kidsTargets']).toBeUndefined();
+  });
 });

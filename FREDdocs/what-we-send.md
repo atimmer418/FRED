@@ -82,7 +82,7 @@ These describe what someone did in the app. The full list with per-event propert
 | `plan_strategy_selected` | which of four drawdown strategies was chosen |
 | `strategy_viewed` | an explainer deck was read, how far, and how it was closed |
 | `freedom_plan_changed` | the plan was saved, with **banded** amounts and which controls moved |
-| `goal_changed` | a goal was created, edited, completed, reopened or removed, with a **banded** target and an icon name |
+| `goal_changed` | a goal was created, edited, completed, reopened or removed, with its type (such as kids or house), a **banded** target, an icon name and the return assumption it was planned at (8, 10 or 12 percent, or cash) |
 | `setting_changed` | which setting, the new on/off state, and whether it saved |
 | `monte_carlo_opened`, `_step_completed`, `_result_viewed`, `_acted` | use of the retirement simulator, with a **verdict word** rather than the percentage |
 | `paywall_nudge_shown` | which locked feature was hit, and what the user did about it |

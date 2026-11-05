@@ -448,3 +448,96 @@ describe('buildGoalPlanView first-year fund', () => {
     expect(view.monthlyTotal).toBeGreaterThan(0);
   });
 });
+
+describe('buildGoalPlanView final review fixes', () => {
+  it('is not Behind for a simple goal logged six months after its deadline at the planned amount', () => {
+    // Rate 0, $1,100 a month for the 11 months to Dec 2026 plans $12,100 against a $12,000 target.
+    const goal = base({
+      config: { targetAmount: 12_000, targetYear: 2026 },
+      currentBalance: 11_990, anchorBalance: 0, anchorMonthly: 1_100, planRate: 0,
+      planAnchoredAt: '2026-01-15T00:00:00', balanceUpdatedAt: '2027-06-15T00:00:00',
+    });
+    const view = buildGoalPlanView(goal, ctx({ now: new Date(2027, 5, 20) }));
+    expect(view.status.kind).toBe('on_plan');
+  });
+
+  it('stops a kids goal expected balance at the latest account deadline', () => {
+    // One account, rate 0, $100 a month for the 12 months to the 18th birthday in Jan 2027.
+    const goal = base({
+      type: 'KIDS',
+      config: {
+        plan529Target: 1_250, brokerageTarget: 0,
+        kids: [{
+          label: 'Teen', birthYear: 2009, birthMonth: 1,
+          accounts: {
+            plan529: account(1_190, { anchorMonthly: 100, balanceUpdatedAt: '2027-07-15T00:00:00' }),
+            brokerage: account(0),
+          },
+        }],
+      } as KidsConfig,
+      planRate: 0, planAnchoredAt: '2026-01-15T00:00:00',
+    });
+    const view = buildGoalPlanView(goal, ctx({ now: new Date(2027, 6, 20) }));
+    expect(view.status.kind).toBe('on_plan');
+  });
+
+  it('shows what is due in the deadline month for a simple goal', () => {
+    const goal = base({ config: { targetAmount: 30_000, targetYear: 2026 }, currentBalance: 24_000 });
+    const view = buildGoalPlanView(goal, ctx({ now: new Date(2026, 11, 5) }));
+    expect(view.monthlyTotal).toBe(0);
+    expect(view.dueNow).toBe(6_000);
+    expect(view.headline).toBe('Target month reached');
+    expect(view.subtitle).toBe('$6,000 due now · $30K by 2026');
+    expect(view.simple!.fromGrowth).toBe(0);
+  });
+
+  it('sums what is due on kid accounts in their deadline month', () => {
+    const goal = base({
+      type: 'KIDS',
+      config: {
+        plan529Target: 50_000, brokerageTarget: 0,
+        kids: [{ label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000), brokerage: account(0) } }],
+      } as KidsConfig,
+    });
+    const view = buildGoalPlanView(goal, ctx({ now: new Date(2026, 11, 5) }));
+    expect(view.monthlyTotal).toBe(0);
+    expect(view.dueNow).toBe(20_000);
+    expect(view.subtitle.startsWith('$20,000 due now · 1 kid')).toBeTrue();
+  });
+
+  it('keeps the monthly subtitle and no due amount while months remain', () => {
+    const view = buildGoalPlanView(base({}), ctx());
+    expect(view.dueNow).toBe(0);
+    expect(view.subtitle).toMatch(/^\$[\d,]+\/mo · /);
+  });
+
+  it('reads Plan started for a vacation created in November with nothing saved', () => {
+    const goal = base({
+      type: 'VACATION',
+      config: { tripsPerYear: 2, budgetPerTrip: 3_000, savedThisYear: 0, savedYear: Y },
+      planAnchoredAt: '2026-11-10T00:00:00',
+    });
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.status.kind).toBe('started');
+    expect(view.vacation!.expectedSoFar).toBe(0);
+  });
+
+  it('leaves a zero-target kid account out of the status and progress', () => {
+    const goal = base({
+      type: 'KIDS',
+      config: {
+        plan529Target: 100_000, brokerageTarget: 0,
+        kids: [{
+          label: 'Ada', birthYear: Y - 2, birthMonth: 3,
+          accounts: {
+            plan529: account(1_000, { anchorBalance: 1_000, balanceUpdatedAt: '2026-06-01T00:00:00' }),
+            brokerage: account(5_000, { anchorBalance: 5_000, anchorMonthly: 50, balanceUpdatedAt: '2026-09-01T00:00:00' }),
+          },
+        }],
+      } as KidsConfig,
+    });
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.progressPct).toBeCloseTo(1, 6);
+    expect(view.status.asOf).toBe('2026-06-01T00:00:00');
+  });
+});

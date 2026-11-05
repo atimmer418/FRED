@@ -5,9 +5,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { ModalController, NavController } from '@ionic/angular/standalone';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
 
-import { GoalPage } from './goal.page';
+import { GOAL_PAGE_NOW, GoalPage } from './goal.page';
 import { AuthService } from '../../services/auth.service';
 import { GoalsService } from '../../services/goals.service';
 import { ToastService } from '../../services/toast.service';
@@ -21,7 +21,7 @@ import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.m
 function houseGoal(id: number, completed = false): Goal {
   return {
     id, clientId: null, type: 'HOUSE', name: 'First home', icon: 'home',
-    config: { price: 400_000, downPaymentPct: 20, targetYear: new Date().getFullYear() + 5 },
+    config: { price: 400_000, downPaymentPct: 20, targetYear: YEAR + 5 },
     currentBalance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0,
     planRate: 0.07, planRateKind: 'market', planAnchoredAt: '2026-01-01',
     completed, sortOrder: 0, createdAt: '', updatedAt: '',
@@ -34,7 +34,9 @@ function localIso(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
 }
 
-const YEAR = new Date().getFullYear();
+/** The page's clock in every spec: monthsOut and the fixtures count from the same instant. */
+const NOW = new Date();
+const YEAR = NOW.getFullYear();
 
 function kidsGoalFixture(id: number, birthYear: number | null): Goal {
   const fresh = { balance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 };
@@ -53,7 +55,7 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 
 /** The month `n` months from this one (negative for past months). */
 function monthsOut(n: number): { year: number; month: number } {
-  const d = new Date();
+  const d = NOW;
   const total = d.getFullYear() * 12 + d.getMonth() + n;
   return { year: Math.floor(total / 12), month: (total % 12) + 1 };
 }
@@ -104,7 +106,7 @@ function fundKidsGoal(
   };
   return {
     ...houseGoal(id), type: 'KIDS', name: 'Our kids', icon: 'child_care', config,
-    planAnchoredAt: opts.anchoredAt ?? localIso(new Date()), anchorMonthly: 500,
+    planAnchoredAt: opts.anchoredAt ?? localIso(NOW), anchorMonthly: 500,
   };
 }
 
@@ -132,11 +134,12 @@ describe('GoalPage', () => {
     params: Record<string, string>,
     opts: {
       goals?: Goal[]; loaded?: Goal[]; tier?: string; noProgress?: boolean; dismissRole?: string;
-      createResult?: Observable<Goal>; updateResult?: Observable<Goal>;
+      createResult?: Observable<Goal>; updateResult?: Observable<Goal>; loadError?: unknown;
     } = {},
   ): Promise<ComponentFixture<GoalPage>> {
     goals = signal<Goal[]>(opts.goals ?? []);
     load = jasmine.createSpy('load').and.callFake(() => {
+      if (opts.loadError) return throwError(() => opts.loadError);
       if (opts.loaded) goals.set(opts.loaded);
       return of(goals());
     });
@@ -173,6 +176,7 @@ describe('GoalPage', () => {
         } },
         { provide: ToastService, useValue: { showToast } },
         { provide: AnalyticsService, useValue: { track, trackErrorShown } },
+        { provide: GOAL_PAGE_NOW, useValue: () => NOW },
       ],
     })
       // Ionic standalone components need their own providers; render their children as plain DOM.
@@ -469,7 +473,7 @@ describe('GoalPage', () => {
     expect(cardText).toContain('At 22');
     expect(cardText).toContain('At 30');
     expect(cardText).not.toMatch(/\b\d{4}\b/);
-    expect(text(fixture)).toContain('Undecided plans as if born this year, so you save a little more than you may need');
+    expect(text(fixture)).toContain('A kid with no date yet is planned as if born this year, so you save a little more than you may need.');
   });
 
   it('hides Mark completed for a vacation goal and writes savedYear on a balance edit', async () => {
@@ -490,7 +494,7 @@ describe('GoalPage', () => {
   });
 
   it('prompts to update a balance logged more than 60 days ago', async () => {
-    const logged = localIso(new Date(Date.now() - 90 * 86_400_000));
+    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
     const goal: Goal = {
       ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500,
       planAnchoredAt: logged, balanceUpdatedAt: logged,
@@ -502,7 +506,7 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     // A fresh log has no prompt.
-    const fresh = localIso(new Date());
+    const fresh = localIso(NOW);
     const fixture2 = await create({ id: '8' }, { goals: [{ ...goal, planAnchoredAt: fresh, balanceUpdatedAt: fresh }] });
     expect(text(fixture2)).not.toContain('Update your balance');
   });
@@ -948,7 +952,7 @@ describe('GoalPage', () => {
 
     // What the server stores on a re-anchor: anchored now, no logged-balance date.
     const saved: Goal = {
-      ...goal, ...body, planAnchoredAt: localIso(new Date()), balanceUpdatedAt: null, anchorBalance: body.currentBalance,
+      ...goal, ...body, planAnchoredAt: localIso(NOW), balanceUpdatedAt: null, anchorBalance: body.currentBalance,
     };
     const after = await create({ id: '5' }, { goals: [saved] });
     expect(after.componentInstance.view().firstYear!.totalMonthly).toBe(before.firstYear!.totalMonthly);
@@ -956,9 +960,9 @@ describe('GoalPage', () => {
   });
 
   it('reads Plan started, not Ahead or Behind, while a changed plan is unsaved', async () => {
-    const logged = localIso(new Date(Date.now() - 90 * 86_400_000));
+    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
     const kids = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(40), balance: 9_000, logged }],
-      { plan529Target: 47_800, anchoredAt: localIso(new Date(Date.now() - 200 * 86_400_000)) });
+      { plan529Target: 47_800, anchoredAt: localIso(new Date(NOW.getTime() - 200 * 86_400_000)) });
     const fixture = await create({ id: '5' }, { goals: [kids] });
     const page = fixture.componentInstance;
     expect(['ahead', 'on_plan', 'behind']).toContain(page.view().status.kind);
@@ -970,7 +974,7 @@ describe('GoalPage', () => {
 
     const house: Goal = {
       ...houseGoal(8), currentBalance: 10_000, anchorBalance: 1_000, anchorMonthly: 500,
-      planAnchoredAt: localIso(new Date(Date.now() - 200 * 86_400_000)), balanceUpdatedAt: logged,
+      planAnchoredAt: localIso(new Date(NOW.getTime() - 200 * 86_400_000)), balanceUpdatedAt: logged,
     };
     const houseFixture = await create({ id: '8' }, { goals: [house] });
     const housePage = houseFixture.componentInstance;
@@ -1022,7 +1026,7 @@ describe('GoalPage', () => {
   });
 
   it('drops the fund from the hero total when it is switched off and warns about logged balances', async () => {
-    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36), balance: 1_200, logged: localIso(new Date()) }],
+    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36), balance: 1_200, logged: localIso(NOW) }],
       { plan529Target: 47_800 });
     const fixture = await create({ id: '5' }, { goals: [goal] });
     const page = fixture.componentInstance;
@@ -1030,6 +1034,11 @@ describe('GoalPage', () => {
     const fundMonthly = before.firstYear!.totalMonthly;
     expect(fundMonthly).toBeGreaterThan(0);
     expect(page.fundLoggedBalance()).toBe(1_200);
+
+    // The warning shows while the switch is on, before it is turned off.
+    showCard(fixture, 3);
+    expect(text(fixture)).toContain('Turning this off removes the $1,200 you logged for it from this plan.');
+    page.step.set(2);
 
     page.toggleFirstYearFund();
     fixture.detectChanges();
@@ -1039,7 +1048,7 @@ describe('GoalPage', () => {
     expect(fixture.nativeElement.querySelector('.gl-fund')).toBeNull();
 
     showCard(fixture, 3);
-    expect(text(fixture)).toContain('Turning this off removes the $1,200 you logged for it from this plan.');
+    expect(text(fixture)).not.toContain('Turning this off removes');
   });
 
   it('says the accounts and the fund live outside FRED', async () => {
@@ -1070,5 +1079,279 @@ describe('GoalPage', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.gl-fund')).not.toBeNull();
     expect(text(fixture)).not.toContain('\u2014');
+  });
+
+  // \u2500\u2500 Final review fixes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+  /** A stored house goal whose PUTs echo the body, patching the goals signal like the real service. */
+  function echoUpdates(): void {
+    updateSpy.and.callFake((id: number, body: GoalWrite) => {
+      const updated = { ...(goals().find(g => g.id === id) as Goal), ...body } as Goal;
+      goals.update(list => list.map(g => g.id === id ? updated : g));
+      return of(updated);
+    });
+  }
+
+  function blurWith(fixture: ComponentFixture<GoalPage>, selector: string, value: string): void {
+    const input = fixture.nativeElement.querySelector(selector) as HTMLInputElement;
+    expect(input).withContext(selector).not.toBeNull();
+    input.value = value;
+    input.dispatchEvent(new Event('blur'));
+  }
+
+  it('waits for a pending balance write before Save builds its body', async () => {
+    const goal: Goal = { ...houseGoal(8), currentBalance: 1_000, anchorBalance: 1_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    const pending = new Subject<Goal>();
+    let calls = 0;
+    updateSpy.and.callFake((id: number, body: GoalWrite) => {
+      calls++;
+      return calls === 1 ? pending.asObservable() : of({ ...goal, ...body } as Goal);
+    });
+
+    blurWith(fixture, '#gl-bal-current', '12000');
+    const saving = page.save();
+    await Promise.resolve();
+    expect(updateSpy).toHaveBeenCalledTimes(1); // Save has not sent yet
+
+    pending.next({ ...goal, currentBalance: 12_000 });
+    pending.complete();
+    await saving;
+
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+    const body = updateSpy.calls.mostRecent().args[1] as GoalWrite;
+    expect(body.currentBalance).toBe(12_000);
+    expect(page.saving()).toBeFalse();
+  });
+
+  it('blurs a focused balance field on Save so the typed amount is written first', async () => {
+    const goal: Goal = { ...houseGoal(8), currentBalance: 1_000, anchorBalance: 1_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    echoUpdates();
+    const input = fixture.nativeElement.querySelector('#gl-bal-current') as HTMLInputElement;
+    input.focus();
+    input.value = '7000';
+    const blurred = spyOn(input, 'blur').and.callFake(() => input.dispatchEvent(new Event('blur')));
+    spyOnProperty(document, 'activeElement', 'get').and.returnValue(input);
+
+    await page.save();
+
+    expect(blurred).toHaveBeenCalled();
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+    expect((updateSpy.calls.argsFor(0)[1] as GoalWrite).currentBalance).toBe(7_000);
+    expect((updateSpy.calls.argsFor(1)[1] as GoalWrite).currentBalance).toBe(7_000);
+  });
+
+  it('builds the second of two quick tile blurs from the first write', async () => {
+    const goal = kidsGoalFixture(5, YEAR - 2);
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    const pending = new Subject<Goal>();
+    let calls = 0;
+    updateSpy.and.callFake((id: number, body: GoalWrite) => {
+      calls++;
+      return calls === 1 ? pending.asObservable() : of({ ...goal, ...body } as Goal);
+    });
+    page.toggleKidDetails('plan529');
+    page.toggleKidDetails('brokerage');
+    fixture.detectChanges();
+
+    blurWith(fixture, '#gl-bal-plan529-0', '300');
+    const second = page.updateBalance({ kid: 0, account: 'brokerage' }, 900);
+    await Promise.resolve();
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+
+    const first = (updateSpy.calls.argsFor(0)[1] as GoalWrite).config as KidsConfig;
+    pending.next({ ...goal, config: first });
+    pending.complete();
+    await second;
+
+    const config = (updateSpy.calls.mostRecent().args[1] as GoalWrite).config as KidsConfig;
+    expect(config.kids[0].accounts.plan529.balance).toBe(300);
+    expect(config.kids[0].accounts.brokerage.balance).toBe(900);
+  });
+
+  it('keeps writing after a rejected balance write', async () => {
+    const goal: Goal = { ...houseGoal(8), currentBalance: 1_000 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    updateSpy.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+    await page.updateBalance('current', 2_000);
+    expect(showToast).toHaveBeenCalledWith('Could not save this goal. Try again.', 'danger');
+
+    echoUpdates();
+    await page.markCompleted();
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+    expect(page.existing()!.completed).toBeTrue();
+  });
+
+  it('opens the Plus nudge when Reopen is refused with TIER_LIMIT, and tracks it', async () => {
+    const err = new HttpErrorResponse({ status: 403, error: { code: 'TIER_LIMIT' } });
+    const fixture = await create({ id: '7' }, { goals: [houseGoal(7, true)], tier: 'core', updateResult: throwError(() => err) });
+    expect(text(fixture, '.gl-complete')).toContain('Reopen goal');
+    await fixture.componentInstance.markCompleted();
+    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
+    expect(modalCtrl.create.calls.mostRecent().args[0].component).toBe(McInfoSheetComponent);
+    expect(showToast).not.toHaveBeenCalled();
+    const nudges = track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'paywall_nudge_shown');
+    expect(nudges).toEqual([
+      { name: 'paywall_nudge_shown', props: { feature: 'goals', tier: 'core', action: 'shown' } },
+      { name: 'paywall_nudge_shown', props: { feature: 'goals', tier: 'core', action: 'dismissed' } },
+    ]);
+  });
+
+  it('counts an unfinished first-year fund in the kids target band', async () => {
+    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36), target: 25_700 }],
+      { plan529Target: 47_800 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    await fixture.componentInstance.markCompleted();
+    const ev = track.calls.allArgs().map(a => a[0]).find(e => e.name === 'goal_changed');
+    // 47,800 alone is 10k_49k; with the 25,700 fund it is 73,500.
+    expect(ev.props.target_band).toBe('50k_249k');
+  });
+
+  it('reports a network failure as network, not save_failed', async () => {
+    const fixture = await weddingPlan({ createResult: throwError(() => new HttpErrorResponse({ status: 0 })) });
+    await fixture.componentInstance.save();
+    // httpStatusOf reports Angular's status 0 as no status.
+    expect(trackErrorShown).toHaveBeenCalledWith('network', 'goals', 'toast', null, true);
+  });
+
+  it('shows what is due now for a past-year target with a shortfall', async () => {
+    const goal: Goal = {
+      ...houseGoal(8), type: 'CUSTOM', icon: 'flag', name: 'Boat',
+      config: { targetAmount: 30_000, targetYear: YEAR - 1 },
+      currentBalance: 24_000, anchorBalance: 1_000, anchorMonthly: 500,
+      planAnchoredAt: localIso(new Date(YEAR - 2, 0, 15)), balanceUpdatedAt: localIso(new Date(YEAR - 1, 5, 15)),
+    };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    expect(text(fixture, '.gl-hero')).toContain('$6,000 due now');
+    expect(text(fixture, '.gl-hero')).not.toContain('/mo');
+    expect(text(fixture, '.gl-hero')).not.toContain('a paycheck');
+    expect(text(fixture, '.gl-hero')).toContain('Target month reached');
+    expect(text(fixture)).not.toContain('from growth');
+    expect(page.catchUpLine()).toBeNull();
+    await page.markCompleted();
+    expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).completed).toBeTrue();
+    // The stored past year is valid for the page too: Save is not bounced to step 1.
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    await page.save();
+    expect(page.step()).toBe(2);
+    expect(page.errors()).toEqual({});
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('never shows a catch-up sentence for a vacation goal', async () => {
+    const goal: Goal = {
+      ...vacationGoalFixture(6),
+      config: { tripsPerYear: 2, budgetPerTrip: 30_000, savedThisYear: 100, savedYear: YEAR },
+      planAnchoredAt: localIso(new Date(YEAR, 0, 1)),
+    };
+    const fixture = await create({ id: '6' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    if (NOW.getMonth() > 0) expect(page.view().status.kind).toBe('behind');
+    expect(page.catchUpLine()).toBeNull();
+    expect(text(fixture)).not.toContain('gets you back on plan');
+  });
+
+  it('plans a never-planned import 13 months out as cash and saves cash', async () => {
+    const goal: Goal = {
+      ...houseGoal(9), clientId: 'v2-a', type: 'CUSTOM', icon: 'flag', name: 'Old goal',
+      config: { targetAmount: 20_000, targetYear: YEAR + 1 }, currentBalance: 2_000, anchorBalance: 2_000,
+      anchorMonthly: 0, planRate: 0.1, planRateKind: 'market',
+    };
+    const fixture = await create({ id: '9' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    expect(page.planChanged()).toBeTrue();
+    expect(page.view().rateKind).toBe('cash');
+    expect(fixture.nativeElement.querySelector('.gl-cash-note')).not.toBeNull();
+    expect(page.ctaLabel()).toBe('Start this plan');
+    await page.save();
+    const body = updateSpy.calls.mostRecent().args[1] as GoalWrite;
+    expect(body.planRateKind).toBe('cash');
+    expect(body.planRate).toBe(CASH_RATE);
+  });
+
+  it('carries a balance typed for a kid added in edit mode into the save', async () => {
+    const fixture = await create({ id: '5' }, { goals: [kidsGoalFixture(5, YEAR - 2)] });
+    const page = fixture.componentInstance;
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    page.addKid();
+    page.toggleKidDetails('plan529');
+    fixture.detectChanges();
+
+    blurWith(fixture, '#gl-bal-plan529-1', '4500');
+    fixture.detectChanges();
+    expect(updateSpy).not.toHaveBeenCalled(); // not stored yet: draft only
+    expect(page.view().kids!.find(a => a.account === 'plan529')!.perKid[1].balance).toBe(4_500);
+
+    await page.save();
+    const config = (updateSpy.calls.mostRecent().args[1] as GoalWrite).config as KidsConfig;
+    expect(config.kids.length).toBe(2);
+    expect(config.kids[1].accounts.plan529.balance).toBe(4_500);
+    expect(config.kids[0].accounts.plan529.balance).toBe(0);
+  });
+
+  it('shows whole dollars and never rewrites a stored balance with cents on focus and blur', async () => {
+    const goal: Goal = { ...houseGoal(8), currentBalance: 1_234.56 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const input = fixture.nativeElement.querySelector('#gl-bal-current') as HTMLInputElement;
+    expect(input.value).toBe('1235');
+    input.dispatchEvent(new Event('blur'));
+    await fixture.componentInstance.updateBalance('current', 1_235);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('toasts and goes back when a deep-linked goal cannot load, and signs out on 401', async () => {
+    const failing = await create({ id: '7' }, { loadError: new HttpErrorResponse({ status: 500 }) });
+    expect(showToast).toHaveBeenCalledWith('Could not load this goal. Try again.', 'danger');
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+    expect(failing.componentInstance.ready()).toBeFalse();
+    TestBed.resetTestingModule();
+
+    await create({ id: '7' }, { loadError: new HttpErrorResponse({ status: 401 }) });
+    expect(logout).toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('Your session ended. Sign in again to save this plan.', 'danger');
+    expect(showToast).not.toHaveBeenCalledWith('Could not load this goal. Try again.', 'danger');
+  });
+
+  it('warns on card 1 before a lower kid count drops a kid with logged balances', async () => {
+    const goal = kidsGoalFixture(5, YEAR - 2);
+    const config = goal.config as KidsConfig;
+    const second = { ...config.kids[0], label: 'Ben', accounts: {
+      plan529: { balance: 800, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 },
+      brokerage: { balance: 400, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 },
+    } };
+    const fixture = await create({ id: '5' }, { goals: [{ ...goal, config: { ...config, kids: [config.kids[0], second] } }] });
+    const page = fixture.componentInstance;
+    showCard(fixture, 1);
+    expect(text(fixture)).not.toContain('Saving removes');
+    page.removeKid(1);
+    fixture.detectChanges();
+    expect(text(fixture)).toContain('Saving removes Ben and the $1,200 you logged for them.');
+  });
+
+  it('exposes selection state and errors to assistive technology', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    showCard(fixture, 4);
+    const rows = Array.from(fixture.nativeElement.querySelectorAll('.gl-select-row')) as HTMLElement[];
+    expect(rows[0].getAttribute('aria-pressed')).toBe('true');
+    expect(rows[1].getAttribute('aria-pressed')).toBe('false');
+    page.setCollegeChoice('custom');
+    page.patchKids({ plan529Target: null });
+    page.nextQuizCard();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.gl-error').getAttribute('role')).toBe('alert');
+    showCard(fixture, 2);
+    page.patchKid(0, { label: 'Ava' });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.gl-year').getAttribute('aria-label')).toBe('Birth year for Ava');
   });
 });

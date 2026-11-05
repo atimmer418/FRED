@@ -1,6 +1,7 @@
 import { ACTIVE_GOALS_MOCK, buildMockGoals, mockGoals } from './goals-mock';
-import { GoalType, KidsConfig } from '../../models/goal.model';
+import { GoalType, HouseCarConfig, KidsConfig } from '../../models/goal.model';
 import { horizonMonths } from '../../utils/goal-plan.utils';
+import { buildGoalPlanView } from '../../pages/goal/goal-plan.view-model';
 
 describe('goals-mock (dev)', () => {
   const now = new Date(2026, 10, 4, 12, 0, 0);
@@ -43,6 +44,20 @@ describe('goals-mock (dev)', () => {
     // anchored 4 months before now (Jul 2026), so due Jul 2029: 32 months after Nov 2026
     expect(horizonMonths(now, kid.firstYearDueYear!, kid.firstYearDueMonth!)).toBe(32);
     expect(cfg.kids.filter(k => k.accounts.firstYear).length).toBe(1);
+  });
+
+  it('gives down payments as whole percents and shows every status chip in one_of_each', () => {
+    const goals = buildMockGoals('one_of_each', now);
+    const house = goals.find(g => g.type === 'HOUSE')!.config as HouseCarConfig;
+    const car = goals.find(g => g.type === 'CAR')!.config as HouseCarConfig;
+    expect([house.downPaymentPct, car.downPaymentPct]).toEqual([20, 25]);
+
+    const kinds = new Set(goals.map(g => buildGoalPlanView(g, {
+      marketRate: 0.10, frequency: 'biweekly', now, rateKindOverride: g.planRateKind,
+    }).status.kind));
+    for (const kind of ['started', 'on_plan', 'ahead', 'behind', 'done'] as const) {
+      expect(kinds.has(kind)).withContext(kind).toBeTrue();
+    }
   });
 
   it('mockGoals returns an empty list while the toggle is off', () => {

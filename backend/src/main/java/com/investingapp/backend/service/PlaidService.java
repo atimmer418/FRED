@@ -101,6 +101,10 @@ public class PlaidService {
     @Autowired
     private PlaidItemLifecycleService plaidItemLifecycleService;
 
+    /** Item-state writer; the exchange calls its relink reset inside this class's transaction. */
+    @Autowired
+    private PlaidItemStateService plaidItemStateService;
+
     /** Bounded Plaid pool (SchedulingConfig.plaidExecutor); the TaskScheduler is also an Executor, hence the qualifier. */
     @Autowired
     @Qualifier("plaidExecutor")
@@ -254,6 +258,9 @@ public class PlaidService {
 
         // Reset investment schedule and trigger ACH creation if account is already ACTIVE
         accountStatusService.handleBankAccountChange(appUser);
+        // Spec 2.4 step 3 and 7.9: the new Item starts with no cursor, no history flag and no
+        // detection data; the old Item's cycles, events and streams go in this transaction.
+        plaidItemStateService.resetForNewItem(appUser);
 
         // Spec 2.4 step 6: /item/get runs after commit on the Plaid pool, never inside this
         // transaction. With no synchronization active (plain unit tests) it goes to the pool now.

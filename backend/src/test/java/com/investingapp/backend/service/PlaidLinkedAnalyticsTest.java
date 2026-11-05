@@ -81,6 +81,7 @@ class PlaidLinkedAnalyticsTest {
         ReflectionTestUtils.setField(plaidService, "accountStatusService", accountStatusService);
         ReflectionTestUtils.setField(plaidService, "analyticsOutboxService", analyticsOutboxService);
         ReflectionTestUtils.setField(plaidService, "plaidItemLifecycleService", mock(PlaidItemLifecycleService.class));
+        ReflectionTestUtils.setField(plaidService, "plaidItemStateService", mock(PlaidItemStateService.class));
         ReflectionTestUtils.setField(plaidService, "plaidExecutor", (Executor) runnable -> { });
         ReflectionTestUtils.setField(plaidService, "entityManager", mock(EntityManager.class));
 

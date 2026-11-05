@@ -253,4 +253,36 @@ class PhaseOneMoneyInvarianceTest {
             }
         }
     }
+
+    /** Decision 41 (T13): hold_reason has a closed writer list; Phase 0 keeps its four sites. */
+    @org.junit.jupiter.api.Test
+    void onlyAllowlistedFilesCallSetHoldReason() throws java.io.IOException {
+        java.nio.file.Path root = java.nio.file.Paths.get("src/main/java/com/investingapp/backend");
+        java.util.Set<String> allowed = java.util.Set.of(
+                "service/InvestmentScheduleService.java",
+                "service/AccountStatusService.java",
+                "service/AchRelationshipService.java",
+                "service/PlaidItemStateService.java",
+                "service/AdminPaycheckService.java");
+        java.util.Map<String, Integer> sites = new java.util.TreeMap<>();
+        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(root)) {
+            for (java.nio.file.Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                String text = java.nio.file.Files.readString(file);
+                int count = text.split("setHoldReason\\(", -1).length - 1;
+                if (count > 0) {
+                    sites.put(root.relativize(file).toString().replace('\\', '/'), count);
+                }
+            }
+        }
+        org.assertj.core.api.Assertions.assertThat(sites.keySet())
+                .as("files calling setHoldReason( outside the allowlist")
+                .isSubsetOf(allowed);
+        org.assertj.core.api.Assertions.assertThat(
+                sites.getOrDefault("service/InvestmentScheduleService.java", 0)
+                        + sites.getOrDefault("service/AccountStatusService.java", 0)
+                        + sites.getOrDefault("service/AchRelationshipService.java", 0))
+                .as("Phase 0 hold-writer sites")
+                .isEqualTo(4);
+        org.assertj.core.api.Assertions.assertThat(sites).containsKey("service/PlaidItemStateService.java");
+    }
 }

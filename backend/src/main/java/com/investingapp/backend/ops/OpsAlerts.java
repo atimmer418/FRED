@@ -38,6 +38,9 @@ public final class OpsAlerts {
     /** PlaidGateway: the fifth consecutive TRANSIENT or RATE_LIMIT Plaid result (spec 2.1, 12.3). Subject: global. */
     public static final String PLAID_OUTAGE = "plaid.outage";
 
+    /** Plaid refused /transactions/sync with TRANSACTIONS_SYNC_ITEM_LIMIT_EXCEEDED (raised by PlaidItemStateService.onSyncLimit). */
+    public static final String PLAID_SYNC_ITEM_LIMIT = "plaid.sync.item_limit";
+
     private OpsAlerts() {
     }
 }

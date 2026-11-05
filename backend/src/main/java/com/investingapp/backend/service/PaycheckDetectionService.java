@@ -13,6 +13,7 @@ import com.investingapp.backend.model.PaycheckStreamState;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.paycheck.EvaluationOutcome;
 import com.investingapp.backend.paycheck.EvaluationTrigger;
+import com.investingapp.backend.paycheck.cycle.MatchDecision;
 import com.investingapp.backend.paycheck.detect.AmountPrefill;
 import com.investingapp.backend.paycheck.detect.CadenceDeriver;
 import com.investingapp.backend.paycheck.detect.CadenceResult;
@@ -103,19 +104,22 @@ public class PaycheckDetectionService {
     private final PaycheckEventRepository eventRepository;
     private final AnalyticsOutboxService analyticsOutboxService;
     private final PaycheckAutopilotProperties props;
+    private final PaycheckCycleService cycleService;
 
     public PaycheckDetectionService(UserRepository userRepository,
                                     InvestmentScheduleRepository scheduleRepository,
                                     PaycheckStreamRepository streamRepository,
                                     PaycheckEventRepository eventRepository,
                                     AnalyticsOutboxService analyticsOutboxService,
-                                    PaycheckAutopilotProperties props) {
+                                    PaycheckAutopilotProperties props,
+                                    PaycheckCycleService cycleService) {
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
         this.streamRepository = streamRepository;
         this.eventRepository = eventRepository;
         this.analyticsOutboxService = analyticsOutboxService;
         this.props = props;
+        this.cycleService = cycleService;
     }
 
     /**
@@ -125,6 +129,38 @@ public class PaycheckDetectionService {
      */
     @Transactional
     public EvaluationOutcome evaluate(Long userId, EvaluationTrigger trigger, LocalDate todayET) {
+        EvaluationOutcome outcome = evaluateWithoutCycles(userId, trigger, todayET);
+        if (cyclesApply(outcome)) { // T11's applyGroup already keeps a missed stream DORMANT
+            cycleService.openCycleForPrimary(userId, outcome.primaryStreamId());
+        }
+        return outcome;
+    }
+
+    /** No cycle work when excluded, without a primary, or under T13's NEEDS_CONSENT mirror. */
+    private static boolean cyclesApply(EvaluationOutcome o) {
+        return o.excluded().isEmpty() && o.primaryStreamId() != null && o.state() != DetectionState.NEEDS_CONSENT;
+    }
+
+    @Transactional
+    public EvaluationOutcome evaluateAndApply(Long userId, List<Long> newPostedInflowEventIds, LocalDate todayET) {
+        EvaluationOutcome outcome = evaluate(userId, EvaluationTrigger.INCREMENTAL, todayET);
+        if (!cyclesApply(outcome) || newPostedInflowEventIds == null || newPostedInflowEventIds.isEmpty()) {
+            return outcome;
+        }
+        List<MatchDecision> decisions = cycleService.applyNewDeposits(userId, outcome.primaryStreamId(),
+                newPostedInflowEventIds, EasternTime.now());
+        return outcome.state() == DetectionState.DORMANT && decisions.contains(MatchDecision.CONFIRMABLE)
+                ? withCycleState(outcome, DetectionState.PROVISIONAL)
+                : outcome;
+    }
+
+    private static EvaluationOutcome withCycleState(EvaluationOutcome outcome, DetectionState state) {
+        return new EvaluationOutcome(state, outcome.primaryStreamId(), outcome.primaryChanged(), outcome.switched(),
+                outcome.excluded());
+    }
+
+    /** T11's evaluation, unchanged. Package-private so the wiring test can stand in for it. */
+    EvaluationOutcome evaluateWithoutCycles(Long userId, EvaluationTrigger trigger, LocalDate todayET) {
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new IllegalArgumentException("No user " + userId));
         Optional<ExclusionReason> excluded = DetectionEligibility.exclusion(user, props);

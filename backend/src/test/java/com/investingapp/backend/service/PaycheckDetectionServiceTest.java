@@ -106,7 +106,7 @@ class PaycheckDetectionServiceTest {
                 .thenAnswer(i -> storedEvents.stream().sorted(Comparator.comparing(PaycheckEvent::getPostedDate)).toList());
 
         service = new PaycheckDetectionService(userRepository, scheduleRepository, streamRepository,
-                eventRepository, analyticsOutboxService, props);
+                eventRepository, analyticsOutboxService, props, mock(PaycheckCycleService.class));
     }
 
     @Test

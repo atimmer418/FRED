@@ -54,8 +54,10 @@ public class EmailService {
             message.setFrom(fromEmail);
         }
         if (!emailEnabled) {
-            logger.info("Email disabled. Would send to {}: '{}' [type={}, period={}]",
-                    message.getTo(), message.getSubject(), emailType, periodKey);
+            // The recipient address stays out of the log: an email address is personal data, and the
+            // email_log row written below is the record of who it was for.
+            logger.info("Email disabled. Would send to user {}: '{}' [type={}, period={}]",
+                    userId, message.getSubject(), emailType, periodKey);
             record(userId, message.getTo(), message.getSubject(), emailType, periodKey,
                     EmailLog.STATUS_MOCKED, null);
             return;

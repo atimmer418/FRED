@@ -33,7 +33,8 @@ public class SchedulingConfig {
     @Bean(name = "plaidExecutor")
     public ThreadPoolTaskExecutor plaidExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
+        // Core = max: threads past core start only on a full queue, so core 2 capped the drainer at two Items.
+        executor.setCorePoolSize(4);
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("plaid-");

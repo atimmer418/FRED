@@ -91,10 +91,7 @@ public class PlaidWebhookProcessor {
         }
         try {
             LocalDateTime startET = LocalDateTime.now(clock);
-            Integer reclaimed = requiresNew.execute(status -> eventRepository.reclaimStale(startET.minus(STALE_CLAIM_AGE)));
-            if (reclaimed != null && reclaimed > 0) {
-                logger.warn("plaid.webhook.reclaimed rows={}", reclaimed);
-            }
+            reclaimStaleClaims(startET);
             List<PlaidWebhookEvent> claimed = claim(startET);
             if (!claimed.isEmpty()) {
                 int unstarted = dispatchGroups(groupByItem(claimed), startET.plus(DISPATCH_BUDGET));
@@ -120,6 +117,42 @@ public class PlaidWebhookProcessor {
         }).orElse(ReplayResult.NOT_FOUND));
         logger.info("plaid.webhook.replay id={} result={}", eventId, result);
         return result;
+    }
+
+    /**
+     * Ruling R-d: a PROCESSING claim older than STALE_CLAIM_AGE lost its worker. The reclaim counts
+     * as an attempt, so a row that keeps killing its worker ends FAILED after MAX_ATTEMPTS and
+     * raises the inbox-failed alert like any other failure. Returns how many claims were reclaimed.
+     */
+    int reclaimStaleClaims(LocalDateTime startET) {
+        List<PlaidWebhookEvent> failed = new ArrayList<>();
+        Integer reclaimed = requiresNew.execute(status -> {
+            List<Long> ids = eventRepository.lockStaleClaimIds(startET.minus(STALE_CLAIM_AGE));
+            if (ids.isEmpty()) {
+                return 0;
+            }
+            for (PlaidWebhookEvent row : eventRepository.findAllById(ids)) {
+                row.setAttempts((short) (row.getAttempts() + 1));
+                row.setLastError("reclaimed_stale");
+                if (row.getAttempts() >= MAX_ATTEMPTS) {
+                    close(row, PlaidWebhookEventStatus.FAILED, startET);
+                    failed.add(row);
+                } else {
+                    row.setStatus(PlaidWebhookEventStatus.RECEIVED);
+                    row.setProcessedAt(null);
+                }
+                eventRepository.save(row);
+            }
+            return ids.size();
+        });
+        int count = reclaimed == null ? 0 : reclaimed;
+        if (count > 0) {
+            logger.warn("plaid.webhook.reclaimed rows={} failed={}", count, failed.size());
+        }
+        for (PlaidWebhookEvent row : failed) {
+            alertInboxFailed(row.getId(), row.getWebhookCode(), row.getAttempts());
+        }
+        return count;
     }
 
     private List<PlaidWebhookEvent> claim(LocalDateTime claimedAt) {
@@ -229,11 +262,15 @@ public class PlaidWebhookProcessor {
             return row.getStatus() == PlaidWebhookEventStatus.FAILED ? row.getAttempts() : null;
         }).orElse(null));
         if (failedAttempts != null) {
-            logger.error("alert.plaid.webhook.inbox_failed id={} code={} attempts={}", claimed.getId(), claimed.getWebhookCode(), failedAttempts);
-            opsAlertService.raise(OpsAlerts.INBOX_FAILED, String.valueOf(claimed.getId()),
-                    "Plaid webhook inbox row failed after " + failedAttempts + " attempts",
-                    Map.of("code", claimed.getWebhookCode(), "attempts", failedAttempts));
+            alertInboxFailed(claimed.getId(), claimed.getWebhookCode(), failedAttempts);
         }
+    }
+
+    private void alertInboxFailed(Long id, String code, short attempts) {
+        logger.error("alert.plaid.webhook.inbox_failed id={} code={} attempts={}", id, code, attempts);
+        opsAlertService.raise(OpsAlerts.INBOX_FAILED, String.valueOf(id),
+                "Plaid webhook inbox row failed after " + attempts + " attempts",
+                Map.of("code", code, "attempts", attempts));
     }
 
     private static void close(PlaidWebhookEvent row, PlaidWebhookEventStatus status, LocalDateTime now) {

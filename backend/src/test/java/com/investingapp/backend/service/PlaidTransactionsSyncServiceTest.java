@@ -430,6 +430,57 @@ class PlaidTransactionsSyncServiceTest {
         assertNothingPersisted(null);
     }
 
+    /**
+     * Final review TXC-1: an Item-state handler can commit between the fetch and the apply. The
+     * pre-fetch read said OK; the locked, refreshed row says otherwise, so nothing is applied.
+     */
+    private void lockedRowBecomes(Runnable committedMeanwhile) {
+        doAnswer(i -> {
+            committedMeanwhile.run();
+            return null;
+        }).when(entityManager).refresh(user);
+    }
+
+    @Test
+    void loginBrokenBetweenFetchAndApplyIsRefused() {
+        user.setPlaidSyncCursor("c0");
+        // onLoginRequired keeps the cursor, so the cursor compare alone would pass.
+        lockedRowBecomes(() -> user.setPlaidItemStatus(PlaidItemStatus.LOGIN_REQUIRED));
+        ok(page("c1", false, TransactionsUpdateStatus.INITIAL_UPDATE_COMPLETE, deposit("t1", null)));
+
+        SyncOutcome outcome = service.syncItem(USER_ID, ITEM, SyncReason.RECONCILE);
+
+        assertThat(outcome).isEqualTo(SyncOutcome.of(SyncStatus.REFUSED_ITEM_STATUS));
+        assertNothingPersisted("c0");
+    }
+
+    @Test
+    void revokedBetweenAFirstFetchAndApplyIsRefused() {
+        // revoke nulls the cursor, so a first sync's null-to-null compare would pass.
+        lockedRowBecomes(() -> {
+            user.setPlaidItemStatus(PlaidItemStatus.REVOKED);
+            user.setPlaidSyncCursor(null);
+        });
+        ok(page("c1", false, TransactionsUpdateStatus.HISTORICAL_UPDATE_COMPLETE, deposit("t1", null)));
+
+        SyncOutcome outcome = service.syncItem(USER_ID, ITEM, SyncReason.INIT);
+
+        assertThat(outcome).isEqualTo(SyncOutcome.of(SyncStatus.REFUSED_ITEM_STATUS));
+        assertNothingPersisted(null);
+    }
+
+    @Test
+    void consentRefusedBetweenFetchAndApplyIsRefused() {
+        user.setPlaidSyncCursor("c0");
+        lockedRowBecomes(() -> user.setPlaidTransactionsConsented(Boolean.FALSE));
+        ok(page("c1", false, TransactionsUpdateStatus.INITIAL_UPDATE_COMPLETE, deposit("t1", null)));
+
+        SyncOutcome outcome = service.syncItem(USER_ID, ITEM, SyncReason.WEBHOOK);
+
+        assertThat(outcome).isEqualTo(SyncOutcome.of(SyncStatus.REFUSED_CONSENT));
+        assertNothingPersisted("c0");
+    }
+
     @Test
     void cursorMovedByAnotherSyncDropsThisBuffer() {
         user.setPlaidSyncCursor("c0");

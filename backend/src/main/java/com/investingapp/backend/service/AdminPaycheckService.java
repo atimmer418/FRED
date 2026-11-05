@@ -100,6 +100,7 @@ public class AdminPaycheckService {
     private final PlaidWebhookProcessor webhookProcessor;
     private final AdminAuditService adminAuditService;
     private final AnalyticsOutboxService analyticsOutboxService;
+    private final UserRowLock userRowLock;
     private final TransactionTemplate writeTx;
 
     public AdminPaycheckService(UserRepository userRepository, InvestmentScheduleRepository scheduleRepository,
@@ -108,7 +109,7 @@ public class AdminPaycheckService {
                                 PaycheckDetectionStatusService statusService, PaycheckSyncPipeline pipeline,
                                 PaycheckDetectionService detectionService, PaycheckReconcileService reconcileService,
                                 PlaidWebhookProcessor webhookProcessor, AdminAuditService adminAuditService,
-                                AnalyticsOutboxService analyticsOutboxService,
+                                AnalyticsOutboxService analyticsOutboxService, UserRowLock userRowLock,
                                 PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
@@ -122,6 +123,7 @@ public class AdminPaycheckService {
         this.webhookProcessor = webhookProcessor;
         this.adminAuditService = adminAuditService;
         this.analyticsOutboxService = analyticsOutboxService;
+        this.userRowLock = userRowLock;
         this.writeTx = new TransactionTemplate(transactionManager);
     }
 
@@ -165,8 +167,9 @@ public class AdminPaycheckService {
             adminAuditService.record(actor, null, VERB_WEBHOOKS, ColumnText.fit(wanted, TARGET_MAX), null, null, "BAD_STATUS");
             return done(VERB_WEBHOOKS, VerbResult.refusal(400, "BAD_STATUS", "unknown inbox status"));
         }
-        List<AdminUserStatusView.InboxRow> rows = webhookEventRepository.findByStatusOrderByReceivedAtAsc(parsed)
-                .stream().limit(WEBHOOK_LIST_MAX).map(AdminUserStatusView.InboxRow::of).toList();
+        // R-c: bounded in SQL, newest first; findTop200 is WEBHOOK_LIST_MAX.
+        List<AdminUserStatusView.InboxRow> rows = webhookEventRepository.findTop200ByStatusOrderByReceivedAtDesc(parsed)
+                .stream().map(AdminUserStatusView.InboxRow::of).toList();
         adminAuditService.record(actor, null, VERB_WEBHOOKS, parsed.name(), null, null, null);
         return done(VERB_WEBHOOKS, VerbResult.ok(rows));
     }
@@ -184,7 +187,8 @@ public class AdminPaycheckService {
             adminAuditService.record(actor, userId, VERB_SYNC, null, before, before, "NO_ITEM");
             return done(VERB_SYNC, VerbResult.refusal(409, "NO_ITEM", "the user has no linked Plaid Item"));
         }
-        var outcome = pipeline.run(userId, itemId, SyncReason.MANUAL);
+        var outcome = auditingFailure(actor, userId, VERB_SYNC, null, before,
+                () -> pipeline.run(userId, itemId, SyncReason.MANUAL));
         Map<String, Object> body = new LinkedHashMap<>();
         if (outcome != null) {
             body.put("sync", outcome.sync() == null ? null : name(outcome.sync().status()));
@@ -204,7 +208,8 @@ public class AdminPaycheckService {
             return refuseUnknownUser(actor, userId, VERB_EVALUATE);
         }
         ScheduleSnapshot before = ScheduleSnapshot.of(scheduleOf(found.get()));
-        var outcome = detectionService.evaluate(userId, EvaluationTrigger.RECONCILE, EasternTime.today());
+        var outcome = auditingFailure(actor, userId, VERB_EVALUATE, null, before,
+                () -> detectionService.evaluate(userId, EvaluationTrigger.RECONCILE, EasternTime.today()));
         Map<String, Object> body = new LinkedHashMap<>();
         if (outcome != null) {
             body.put("state", name(outcome.state()));
@@ -223,7 +228,8 @@ public class AdminPaycheckService {
             return refuseUnknownUser(actor, userId, VERB_RECONCILE);
         }
         ScheduleSnapshot before = ScheduleSnapshot.of(scheduleOf(found.get()));
-        PaycheckReconcileService.ReconcileReport report = reconcileService.runForUser(userId, EasternTime.today());
+        PaycheckReconcileService.ReconcileReport report = auditingFailure(actor, userId, VERB_RECONCILE, null, before,
+                () -> reconcileService.runForUser(userId, EasternTime.today()));
         auditInOwnTransaction(actor, userId, VERB_RECONCILE, null, before, snapshotFor(userId), null);
         return done(VERB_RECONCILE, VerbResult.ok(report));
     }
@@ -237,7 +243,8 @@ public class AdminPaycheckService {
         Long userId = row.get().getUserId();
         String previousStatus = name(row.get().getStatus());
         ScheduleSnapshot before = snapshotFor(userId);
-        ReplayResult replayed = webhookProcessor.replay(eventId);
+        ReplayResult replayed = auditingFailure(actor, userId, VERB_REPLAY, String.valueOf(eventId), before,
+                () -> webhookProcessor.replay(eventId));
         if (replayed != ReplayResult.REQUEUED) {
             boolean inFlight = replayed == ReplayResult.IN_FLIGHT;
             String code = inFlight ? "WEBHOOK_IN_FLIGHT" : "WEBHOOK_NOT_FOUND";
@@ -334,7 +341,10 @@ public class AdminPaycheckService {
                 }
             }
             stream.setRole(PaycheckStreamRole.PRIMARY);
-            stream.setState(PaycheckStreamState.PROVISIONAL);
+            if (stream.getState() != PaycheckStreamState.CONFIRMED && stream.getState() != PaycheckStreamState.PROVISIONAL) {
+                // R-b: never a downgrade. CANDIDATE and DORMANT become PROVISIONAL; RETIRED and REJECTED were refused above.
+                stream.setState(PaycheckStreamState.PROVISIONAL);
+            }
             stream.setUpdatedAt(now);
             streamRepository.save(stream);
             if (schedule != null) {
@@ -410,25 +420,55 @@ public class AdminPaycheckService {
     private VerbResult mutate(String actor, Long userId, String verb, String targetId, String note, Mutation mutation) {
         String reason = ColumnText.fit(note, NOTE_MAX);
         ScheduleSnapshot[] before = {ScheduleSnapshot.NONE};
-        VerbResult result = writeTx.execute(tx -> {
-            Optional<User> locked = userRepository.findByIdForUpdate(userId);
-            if (locked.isEmpty()) {
-                return VerbResult.refusal(404, USER_NOT_FOUND, "no user with that id");
-            }
-            InvestmentSchedule schedule = scheduleOf(locked.get());
-            before[0] = ScheduleSnapshot.of(schedule);
-            VerbResult outcome = mutation.apply(locked.get(), schedule);
-            if (!outcome.isRefusal()) {
-                adminAuditService.recordInTransaction(actor, userId, verb, targetId, before[0],
-                        ScheduleSnapshot.of(schedule), reason);
-            }
-            return outcome;
-        });
+        VerbResult result;
+        try {
+            result = writeTx.execute(tx -> {
+                // Locked and re-read (MS-1, MS-2): open-in-view may hold copies loaded before the lock.
+                Optional<User> locked = userRowLock.lockFresh(userId);
+                if (locked.isEmpty()) {
+                    return VerbResult.refusal(404, USER_NOT_FOUND, "no user with that id");
+                }
+                InvestmentSchedule schedule = scheduleOf(locked.get());
+                if (schedule != null) {
+                    userRowLock.refreshLocked(schedule);
+                }
+                before[0] = ScheduleSnapshot.of(schedule);
+                VerbResult outcome = mutation.apply(locked.get(), schedule);
+                if (!outcome.isRefusal()) {
+                    adminAuditService.recordInTransaction(actor, userId, verb, targetId, before[0],
+                            ScheduleSnapshot.of(schedule), reason);
+                }
+                return outcome;
+            });
+        } catch (RuntimeException e) {
+            // R-a: the state change and its audit row rolled back together; the failure is still recorded.
+            recordFailure(actor, userId, verb, targetId, before[0], e);
+            throw e;
+        }
         if (result.isRefusal()) {
             // The template wrote nothing; the refusal is still recorded, in its own transaction.
             adminAuditService.record(actor, userId, verb, targetId, before[0], before[0], result.code());
         }
         return done(verb, result);
+    }
+
+    /** R-a: a downstream call that throws still leaves its admin_actions row, then the exception goes on. */
+    private <T> T auditingFailure(String actor, Long userId, String verb, String targetId, ScheduleSnapshot before,
+                                  java.util.function.Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (RuntimeException e) {
+            recordFailure(actor, userId, verb, targetId, before, e);
+            throw e;
+        }
+    }
+
+    /** FAILED and the exception's class name only: a message can quote a descriptor or a Plaid body. */
+    private void recordFailure(String actor, Long userId, String verb, String targetId, ScheduleSnapshot before,
+                               RuntimeException e) {
+        String outcome = "FAILED:" + e.getClass().getSimpleName();
+        adminAuditService.record(actor, userId, verb, targetId, before, before, outcome);
+        logger.warn("admin.action verb={} outcome={}", verb, outcome);
     }
 
     private void voidAsAdmin(PaycheckCycle cycle, LocalDateTime now) {

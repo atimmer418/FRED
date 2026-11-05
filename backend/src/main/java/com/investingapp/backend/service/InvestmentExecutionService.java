@@ -407,8 +407,8 @@ public class InvestmentExecutionService {
             execution.setStatus(InvestmentExecution.ExecutionStatus.FUNDING_FAILED);
             execution.setErrorMessage(details);
         });
-        logger.error("alert.batch_no_relationship user={} rows={} total={}",
-                batchUser.userId(), batchUser.executionIds().size(), batchUser.totalAmount());
+        logger.error("alert.batch_no_relationship user={} rows={}",
+                batchUser.userId(), batchUser.executionIds().size());
         opsAlertService.raise(OpsAlerts.BATCH_NO_RELATIONSHIP, String.valueOf(batchUser.userId()),
                 "no ACH relationship on file; rows marked FUNDING_FAILED",
                 Map.of("user", String.valueOf(batchUser.userId()), "rows", batchUser.executionIds().size()));

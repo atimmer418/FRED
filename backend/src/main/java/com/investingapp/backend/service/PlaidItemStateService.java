@@ -69,6 +69,7 @@ public class PlaidItemStateService {
     private final PlaidItemLifecycleService plaidItemLifecycleService;
     private final NotificationService notificationService;
     private final OpsAlertService opsAlertService;
+    private final UserRowLock userRowLock;
     private final TransactionTemplate writeTx;
 
     public PlaidItemStateService(UserRepository userRepository,
@@ -79,6 +80,7 @@ public class PlaidItemStateService {
             PlaidItemLifecycleService plaidItemLifecycleService,
             NotificationService notificationService,
             OpsAlertService opsAlertService,
+            UserRowLock userRowLock,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
@@ -88,6 +90,7 @@ public class PlaidItemStateService {
         this.plaidItemLifecycleService = plaidItemLifecycleService;
         this.notificationService = notificationService;
         this.opsAlertService = opsAlertService;
+        this.userRowLock = userRowLock;
         this.writeTx = new TransactionTemplate(transactionManager);
     }
 
@@ -140,13 +143,25 @@ public class PlaidItemStateService {
         return run("revoked", userId, itemId, true, (user, schedule) -> revoke(user, schedule, source));
     }
 
-    /** USER_ACCOUNT_REVOKED: the funding account is a full revoke; another account drops its events only (spec 2.8). */
+    /**
+     * USER_ACCOUNT_REVOKED: the funding account is a full revoke; another account drops its events
+     * (spec 2.8) and, as when an Item breaks (spec 7.9), its streams lose the bank's description and
+     * the raw Plaid record (final review PAL-1). The rest of those streams stays until a relink,
+     * a full revoke or account deletion.
+     */
     public ItemStateResult onAccountRevoked(Long userId, String itemId, String accountId) {
         return run("account_revoked", userId, itemId, true, (user, schedule) -> {
             if (accountId != null && accountId.equals(user.getPlaidAccountId())) {
                 return revoke(user, schedule, "USER_ACCOUNT_REVOKED");
             }
             eventRepository.deleteByUserIdAndPlaidAccountId(user.getId(), accountId);
+            for (PaycheckStream stream : streamRepository.findByUserIdOrderByIdAsc(user.getId())) {
+                if (accountId != null && accountId.equals(stream.getPlaidAccountId())) {
+                    stream.setRawDescriptor(null);
+                    stream.setPlaidSnapshotJson(null);
+                    streamRepository.save(stream);
+                }
+            }
             logApplied("account_revoked_other", user, false);
             return Outcome.applied(user);
         });
@@ -320,7 +335,8 @@ public class PlaidItemStateService {
 
     private ItemStateResult run(String handler, Long userId, String itemId, boolean refuseTerminal, Writes writes) {
         Outcome outcome = writeTx.execute(status -> {
-            Optional<User> locked = userRepository.findByIdForUpdate(userId);
+            // Locked and re-read: the guards and the save below must see the committed row (MS-2).
+            Optional<User> locked = userRowLock.lockFresh(userId);
             if (locked.isEmpty() || itemId == null || !itemId.equals(locked.get().getPlaidItemId())) {
                 logger.info("plaid.stale_item_event handler={} user_id={}", handler, userId);
                 return Outcome.of(ItemStateResult.STALE_ITEM);
@@ -332,6 +348,9 @@ public class PlaidItemStateService {
                 return Outcome.of(ItemStateResult.NO_OP);
             }
             Optional<InvestmentSchedule> schedule = scheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
+            // The Phase 0 MANUAL_REVIEW writers do not take the user lock: re-read the schedule under
+            // its own lock so writeItemHold never writes over a hold committed after a request's read (MS-1).
+            schedule.ifPresent(userRowLock::refreshLocked);
             Outcome result = writes.apply(user, schedule);
             if (result.result() == ItemStateResult.APPLIED) {
                 userRepository.save(user);

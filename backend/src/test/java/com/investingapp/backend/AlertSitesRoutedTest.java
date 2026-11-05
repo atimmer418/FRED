@@ -88,6 +88,43 @@ class AlertSitesRoutedTest {
         assertThat(offenders).as("raise arguments naming an amount or free-text error").isEmpty();
     }
 
+    /** Final review PAL-2: the alert.* log line itself is held to the same rule as its raise (spec 12.3). */
+    @Test
+    void alertLogLinesCarryNoAmountOrErrorText() throws IOException {
+        Pattern alertCall = Pattern.compile("logger\\.(error|warn)\\(\"alert\\.");
+        List<String> offenders = new ArrayList<>();
+        int lines = 0;
+        for (Path file : sources()) {
+            if (LOG_ONLY.contains(file.getFileName().toString())) {
+                continue;
+            }
+            String text = Files.readString(file);
+            Matcher call = alertCall.matcher(text);
+            while (call.find()) {
+                int open = text.indexOf('(', call.start());
+                int close = matchingParen(text, open);
+                lines++;
+                Matcher m = FORBIDDEN_ARGUMENT.matcher(text.substring(open + 1, close));
+                if (m.find()) {
+                    int line = (int) text.substring(0, call.start()).chars().filter(c -> c == '\n').count() + 1;
+                    offenders.add(MAIN.relativize(file) + ":" + line + " names " + m.group(1));
+                }
+            }
+        }
+        assertThat(lines).as("alert.* log lines found").isGreaterThanOrEqualTo(PHASE_ZERO_SITES);
+        assertThat(offenders).as("alert.* log lines naming an amount or free-text error").isEmpty();
+    }
+
+    @Test
+    void scanCatchesAnAmountOrErrorTextInAnAlertLine() {
+        String bad = "logger.error(\"alert.x user={} total={}\", id, batch.totalAmount());";
+        int open = bad.indexOf('(');
+        assertThat(FORBIDDEN_ARGUMENT.matcher(bad.substring(open + 1, matchingParen(bad, open))).find()).isTrue();
+        String lastError = "logger.error(\"alert.y id={} last={}\", row.getId(), row.getLastError());";
+        open = lastError.indexOf('(');
+        assertThat(FORBIDDEN_ARGUMENT.matcher(lastError.substring(open + 1, matchingParen(lastError, open))).find()).isTrue();
+    }
+
     private static int matchingParen(String text, int open) {
         int depth = 0;
         boolean inString = false;

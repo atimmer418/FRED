@@ -78,9 +78,10 @@ public class PlaidController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorCodeResponse(
                     "UPDATE_MODE_UNAVAILABLE", "Plaid could not reopen this bank connection. Link the bank again."));
         } catch (IOException e) {
+            // The message carries the Plaid status and code only (PlaidService); never echo Plaid text to the client.
             logger.error("Error creating Plaid link token for user {}: {}", user.getId(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new MessageResponse("Error creating Plaid link token: " + e.getMessage()));
+                    .body(new MessageResponse("Error creating Plaid link token."));
         }
     }
 

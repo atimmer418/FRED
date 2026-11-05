@@ -248,7 +248,8 @@ public class PaycheckEventService {
     /**
      * Spec 4.8 modified: amount, date, pending, descriptor and modified_at. The status is kept
      * (MODIFIED is not written in Phase 1); amount stays -raw_amount, so a restatement to money out
-     * reads negative and spec 4.1's raw_amount filter drops it.
+     * reads negative and spec 4.1's raw_amount filter drops it. That filter lives where grouping
+     * reads events, PaycheckDetectionService.evaluateLocked; the cycle code applies the same sign test.
      */
     private boolean applyModification(Long userId, PaycheckEvent e, Transaction t, LocalDateTime nowET, Tally tally) {
         if (!userId.equals(e.getUserId())) {

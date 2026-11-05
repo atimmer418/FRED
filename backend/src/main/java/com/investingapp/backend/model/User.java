@@ -21,6 +21,9 @@ import java.util.HashSet; // Import HashSet
 import java.util.Set; // Import Set
 
 @Entity
+// An UPDATE names only the columns changed in this unit of work, so a writer holding a stale copy
+// cannot write back a column another transaction moved (final review MS-2; R19 does the same for schedules).
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "users", uniqueConstraints = {
         @UniqueConstraint(columnNames = "email")
 })

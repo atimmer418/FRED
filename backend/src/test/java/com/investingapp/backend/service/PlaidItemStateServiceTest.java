@@ -82,7 +82,8 @@ class PlaidItemStateServiceTest {
     void setUp() {
         when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new PlaidItemStateService(userRepository, scheduleRepository, streamRepository,
-                eventRepository, cycleRepository, lifecycleService, notificationService, opsAlertService, txManager);
+                eventRepository, cycleRepository, lifecycleService, notificationService, opsAlertService,
+                new UserRowLock(userRepository, mock(jakarta.persistence.EntityManager.class)), txManager);
 
         user = new User("item-state@fredvested.com");
         user.setId(USER_ID);
@@ -239,6 +240,28 @@ class PlaidItemStateServiceTest {
         assertThat(schedule.getHoldReason()).isEqualTo(HoldReason.PERMISSION_REVOKED);
         verify(streamRepository).deleteByUserId(USER_ID);
         verify(lifecycleService).enqueueRemoval(user);
+    }
+
+    // Final review PAL-1 / SCTF-2: the withdrawn account's descriptors go with its events.
+    @Test
+    void otherAccountRevokedBlanksOnlyThatAccountsDescriptors() {
+        PaycheckStream savings = stream(PaycheckStreamState.PROVISIONAL);
+        savings.setPlaidAccountId("acc-savings");
+        PaycheckStream funding = stream(PaycheckStreamState.CONFIRMED);
+        funding.setPlaidAccountId(FUNDING_ACCOUNT);
+        when(streamRepository.findByUserIdOrderByIdAsc(USER_ID)).thenReturn(List.of(savings, funding));
+
+        assertThat(service.onAccountRevoked(USER_ID, ITEM_ID, "acc-savings")).isEqualTo(ItemStateResult.APPLIED);
+
+        assertThat(savings.getRawDescriptor()).isNull();
+        assertThat(savings.getPlaidSnapshotJson()).isNull();
+        assertThat(savings.getPayerToken()).as("the skeleton stays").isEqualTo("acme");
+        assertThat(funding.getRawDescriptor()).isEqualTo("ACME PAYROLL PPD");
+        assertThat(funding.getPlaidSnapshotJson()).isNotNull();
+        verify(streamRepository).save(savings);
+        verify(streamRepository, never()).save(funding);
+        verify(streamRepository, never()).deleteByUserId(any());
+        verify(eventRepository).deleteByUserIdAndPlaidAccountId(USER_ID, "acc-savings");
     }
 
     // Row 3 of 5.7.

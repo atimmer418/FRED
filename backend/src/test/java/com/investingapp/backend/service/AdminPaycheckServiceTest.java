@@ -62,7 +62,8 @@ class AdminPaycheckServiceTest {
     @BeforeEach
     void setUp() {
         service = new AdminPaycheckService(users, schedules, streams, cycles, inbox,
-                mock(PaycheckDetectionStatusService.class), pipeline, detection, reconcile, processor, audit, outbox, tx);
+                mock(PaycheckDetectionStatusService.class), pipeline, detection, reconcile, processor, audit, outbox,
+                new UserRowLock(users, mock(jakarta.persistence.EntityManager.class)), tx);
         user = new User();
         user.setId(UID);
         user.setAccountStatus("ACTIVE");
@@ -352,6 +353,90 @@ class AdminPaycheckServiceTest {
 
         assertEquals(13, seen.size(), "one row per call, refusals included");
         assertEquals(new TreeSet<>(AdminPaycheckService.VERBS), new TreeSet<>(seen));
+    }
+
+    // Ruling R-a: a verb whose downstream call throws still leaves an admin_actions row, then rethrows.
+    @Test
+    void downstreamVerbThatThrowsIsAuditedAsFailedThenRethrown() {
+        schedule(Status.ACTIVE, null);
+        failedInboxRow();
+        IllegalStateException boom = new IllegalStateException("secret descriptor ACME PAYROLL in the message");
+        when(pipeline.run(eq(UID), eq("item-1"), eq(SyncReason.MANUAL))).thenThrow(boom);
+        when(detection.evaluate(eq(UID), eq(EvaluationTrigger.RECONCILE), any())).thenThrow(boom);
+        when(reconcile.runForUser(eq(UID), any())).thenThrow(boom);
+        when(processor.replay(5L)).thenThrow(boom);
+        List<String> reasons = new ArrayList<>();
+        List<String> verbs = new ArrayList<>();
+        onAudit(inv -> {
+            verbs.add(inv.getArgument(2));
+            reasons.add(inv.getArgument(6));
+        });
+
+        assertSame(boom, assertThrows(IllegalStateException.class, () -> service.sync(ACTOR, UID)));
+        assertSame(boom, assertThrows(IllegalStateException.class, () -> service.evaluate(ACTOR, UID)));
+        assertSame(boom, assertThrows(IllegalStateException.class, () -> service.reconcile(ACTOR, UID)));
+        assertSame(boom, assertThrows(IllegalStateException.class, () -> service.replay(ACTOR, 5L)));
+
+        assertEquals(List.of(AdminPaycheckService.VERB_SYNC, AdminPaycheckService.VERB_EVALUATE,
+                AdminPaycheckService.VERB_RECONCILE, AdminPaycheckService.VERB_REPLAY), verbs);
+        assertEquals(Collections.nCopies(4, "FAILED:IllegalStateException"), reasons);
+        verify(audit).record(eq(ACTOR), eq(UID), eq(AdminPaycheckService.VERB_REPLAY), eq("5"), any(), any(),
+                eq("FAILED:IllegalStateException"));
+    }
+
+    @Test
+    void mutatingVerbThatThrowsIsAuditedAsFailedThenRethrown() {
+        schedule(Status.ACTIVE, null);
+        stream(11L, PaycheckStreamState.CANDIDATE, PaycheckStreamRole.NONE);
+        when(streams.findByUserIdOrderByIdAsc(UID)).thenReturn(List.of());
+        IllegalStateException boom = new IllegalStateException("row text");
+        when(streams.save(any())).thenThrow(boom);
+
+        assertSame(boom, assertThrows(IllegalStateException.class, () -> service.promoteStream(ACTOR, UID, 11L, "note")));
+
+        verify(audit).record(eq(ACTOR), eq(UID), eq(AdminPaycheckService.VERB_PROMOTE_STREAM), eq("11"), any(), any(),
+                eq("FAILED:IllegalStateException"));
+        verify(audit, never()).recordInTransaction(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    // Ruling R-b: promote never downgrades a stream.
+    @Test
+    void promoteKeepsAConfirmedStreamConfirmed() {
+        schedule(Status.ACTIVE, null);
+        PaycheckStream confirmed = stream(11L, PaycheckStreamState.CONFIRMED, PaycheckStreamRole.SECONDARY);
+        PaycheckStream provisional = stream(12L, PaycheckStreamState.PROVISIONAL, PaycheckStreamRole.NONE);
+        PaycheckStream dormant = stream(13L, PaycheckStreamState.DORMANT, PaycheckStreamRole.NONE);
+        PaycheckStream candidate = stream(14L, PaycheckStreamState.CANDIDATE, PaycheckStreamRole.NONE);
+        when(streams.findByUserIdOrderByIdAsc(UID)).thenReturn(List.of(confirmed, provisional, dormant, candidate));
+
+        assertEquals(200, service.promoteStream(ACTOR, UID, 11L, null).httpStatus());
+        assertEquals(PaycheckStreamState.CONFIRMED, confirmed.getState());
+        assertEquals(PaycheckStreamRole.PRIMARY, confirmed.getRole());
+
+        assertEquals(200, service.promoteStream(ACTOR, UID, 12L, null).httpStatus());
+        assertEquals(PaycheckStreamState.PROVISIONAL, provisional.getState());
+
+        assertEquals(200, service.promoteStream(ACTOR, UID, 13L, null).httpStatus());
+        assertEquals(PaycheckStreamState.PROVISIONAL, dormant.getState());
+
+        assertEquals(200, service.promoteStream(ACTOR, UID, 14L, null).httpStatus());
+        assertEquals(PaycheckStreamState.PROVISIONAL, candidate.getState());
+    }
+
+    // Ruling R-c: the list is bounded in SQL, newest first.
+    @Test
+    void webhooksListIsBoundedInTheQuery() {
+        PlaidWebhookEvent row = new PlaidWebhookEvent();
+        row.setId(5L);
+        row.setStatus(PlaidWebhookEventStatus.FAILED);
+        when(inbox.findTop200ByStatusOrderByReceivedAtDesc(PlaidWebhookEventStatus.FAILED)).thenReturn(List.of(row));
+
+        VerbResult result = service.webhooks(ACTOR, "failed");
+
+        assertEquals(200, result.httpStatus());
+        assertEquals(1, ((List<?>) result.body()).size());
+        verify(inbox).findTop200ByStatusOrderByReceivedAtDesc(PlaidWebhookEventStatus.FAILED);
+        assertEquals(200, AdminPaycheckService.WEBHOOK_LIST_MAX, "the derived query's Top200 is this bound");
     }
 
     @Test

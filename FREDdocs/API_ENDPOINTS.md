@@ -254,10 +254,10 @@ Every profile, prod included; curl only. Each call needs `X-Admin-Key` (`ADMIN_T
 | `POST` | `/{userId}/sync`, `/evaluate`, `/reconcile` | Pipeline (MANUAL), detection (RECONCILE), one-user reconcile | 409 `NO_ITEM` (sync) |
 | `POST` | `/{userId}/hold` `{ reason, note }` | Sets ITEM_LOGIN_REQUIRED, PERMISSION_REVOKED, CONSENT_REQUIRED, BANK_CHANGE or null; no event | 422 `HOLD_RESERVED`; 409 `HOLD_BLOCKING`, `NO_SCHEDULE` |
 | `POST` | `/{userId}/clear-review` `{ note }` | Clears MANUAL_REVIEW; `schedule_resumed` (system, `review_cleared`) only when ACTIVE | 409 `ACCOUNT_REJECTED`, `NOT_IN_REVIEW`, `NO_SCHEDULE` |
-| `POST` | `/{userId}/promote-stream/{streamId}` | PRIMARY PROVISIONAL, old primary SECONDARY, mirrored | 404; 409 `STREAM_NOT_PROMOTABLE` |
+| `POST` | `/{userId}/promote-stream/{streamId}` | PRIMARY (a CANDIDATE or DORMANT stream becomes PROVISIONAL; PROVISIONAL and CONFIRMED keep their state), old primary SECONDARY, mirrored | 404; 409 `STREAM_NOT_PROMOTABLE` |
 | `POST` | `/{userId}/retire-stream/{streamId}` | RETIRED `ADMIN`, its OPEN cycle VOIDED `ADMIN`, mirror cleared | 404 |
 | `POST` | `/{userId}/cycles/{cycleId}/void` | VOIDED `ADMIN` for OPEN or CONFIRMED with no execution | 404; 409 `CYCLE_HAS_EXECUTION`, `CYCLE_NOT_VOIDABLE` |
-| `GET` | `/webhooks?status=FAILED` | Inbox rows in one status, oldest first, at most 200 | 400 `BAD_STATUS` |
+| `GET` | `/webhooks?status=FAILED` | Inbox rows in one status, newest first, at most 200 (bounded in the query) | 400 `BAD_STATUS` |
 | `POST` | `/webhooks/{eventId}/replay` | Row back to RECEIVED, attempts 0 | 404 `WEBHOOK_NOT_FOUND`; 409 `WEBHOOK_IN_FLIGHT` |
 
 ---

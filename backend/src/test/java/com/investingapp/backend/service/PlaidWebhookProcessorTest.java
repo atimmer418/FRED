@@ -290,9 +290,33 @@ class PlaidWebhookProcessorTest {
         processor().drainInbox();
 
         InOrder order = inOrder(repo);
-        order.verify(repo).reclaimStale(START.minus(PlaidWebhookProcessor.STALE_CLAIM_AGE));
+        order.verify(repo).lockStaleClaimIds(START.minus(PlaidWebhookProcessor.STALE_CLAIM_AGE));
         order.verify(repo).claimReceivedIds(PlaidWebhookProcessor.BATCH_SIZE);
         order.verify(repo).markProcessing(List.of(1L), START);
+    }
+
+    // Ruling R-d: a stale claim is an attempt; the third ends FAILED with the inbox-failed alert.
+    @Test
+    void reclaimedRowCountsAnAttemptAndFailsAtTheLimit() {
+        PlaidWebhookEvent poisoned = add(1, "item-a", SYNC, PlaidWebhookProcessor.MAX_ATTEMPTS - 1);
+        poisoned.setStatus(PlaidWebhookEventStatus.PROCESSING);
+        poisoned.setProcessedAt(START.minusMinutes(30));
+        PlaidWebhookEvent once = add(2, "item-b", SYNC, 0);
+        once.setStatus(PlaidWebhookEventStatus.PROCESSING);
+        once.setProcessedAt(START.minusMinutes(30));
+        when(repo.lockStaleClaimIds(START.minus(PlaidWebhookProcessor.STALE_CLAIM_AGE))).thenReturn(List.of(1L, 2L));
+
+        processor().drainInbox();
+
+        assertThat(poisoned.getStatus()).isEqualTo(PlaidWebhookEventStatus.FAILED);
+        assertThat(poisoned.getAttempts()).isEqualTo((short) PlaidWebhookProcessor.MAX_ATTEMPTS);
+        assertThat(poisoned.getProcessedAt()).isEqualTo(START);
+        verify(alerts).raise(eq(OpsAlerts.INBOX_FAILED), eq("1"), any(), any());
+        verify(pipeline, never()).run(USER_ID, "item-a", SyncReason.WEBHOOK);
+        // The other row went back to RECEIVED with one attempt, and this same drain then processed it.
+        assertThat(once.getAttempts()).isEqualTo((short) 1);
+        assertThat(once.getStatus()).isEqualTo(PlaidWebhookEventStatus.PROCESSED);
+        verify(alerts, never()).raise(eq(OpsAlerts.INBOX_FAILED), eq("2"), any(), any());
     }
 
     @Test

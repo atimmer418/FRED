@@ -59,7 +59,9 @@ class AdminPlaidControllerTest {
         txManager = mock(PlatformTransactionManager.class);
         when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(audit.actor(any())).thenReturn(ACTOR);
-        controller = new AdminPlaidController(jdbc, userRepository, lifecycle, audit, txManager);
+        controller = new AdminPlaidController(jdbc, userRepository, lifecycle, audit,
+                new com.investingapp.backend.service.UserRowLock(userRepository, mock(jakarta.persistence.EntityManager.class)),
+                txManager);
         user = new User("item-owner@fredvested.test");
         user.setId(7L);
         user.setPlaidAccessToken("ENC:tok");

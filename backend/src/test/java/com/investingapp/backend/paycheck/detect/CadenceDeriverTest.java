@@ -64,6 +64,54 @@ class CadenceDeriverTest {
         assertThat(derive(null, "2026-01-02", "2026-01-09", "2026-01-16", "2026-01-23").orElseThrow().source()).isEqualTo(OBSERVED);
     }
 
+    // Final review DC-1: one skipped biweekly period splits into two periods only against a known cadence.
+    @Test
+    void skippedBiweeklyPeriodHoldsAgainstTheStoredCadence() {
+        String[] skipped = {"2026-08-14", "2026-08-28", "2026-09-11", "2026-09-25", "2026-10-09", "2026-11-06"};
+        assertThat(CadenceDeriver.derive(dates(skipped), Optional.empty(), Optional.of(BIWEEKLY)).orElseThrow().cadence())
+                .isEqualTo(BIWEEKLY);
+        assertThat(CadenceDeriver.derive(dates(skipped), Optional.empty(), Optional.empty())).isEmpty();
+        assertThat(derive(null, skipped)).isEmpty();
+    }
+
+    // Final review DC-5: a 1st moved back onto the previous month's last business day is still the 1st.
+    @Test
+    void firstAndFifteenthAcrossAWeekendFirst() {
+        // Aug 1 2026 is a Saturday (paid Fri Jul 31); Aug 15 is a Saturday (paid Fri Aug 14).
+        CadenceResult result = derive("SEMI_MONTHLY",
+                "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-07-31", "2026-08-14").orElseThrow();
+        assertThat(result.cadence()).isEqualTo(SEMI_MONTHLY);
+        assertThat(result.anchorDay1()).isEqualTo("1");
+        assertThat(result.anchorDay2()).isEqualTo("15");
+    }
+
+    @Test
+    void monthlyOnTheFirstAcrossWeekendFirsts() {
+        // Mar 1 2026 is a Sunday (paid Fri Feb 27); Aug 1 2026 is a Saturday (paid Fri Jul 31).
+        CadenceResult result = derive(null,
+                "2026-02-27", "2026-04-01", "2026-05-01", "2026-06-01", "2026-07-01", "2026-07-31").orElseThrow();
+        assertThat(result.cadence()).isEqualTo(MONTHLY);
+        assertThat(result.anchorDay1()).isEqualTo("1");
+    }
+
+    @Test
+    void monthlyOnTheFirstAcrossNewYear() {
+        // Nov 1 2026 is a Sunday (paid Fri Oct 30); Jan 1 2027 is a holiday (paid Thu Dec 31).
+        CadenceResult result = derive(null,
+                "2026-09-01", "2026-10-01", "2026-10-30", "2026-12-01", "2026-12-31", "2027-02-01").orElseThrow();
+        assertThat(result.cadence()).isEqualTo(MONTHLY);
+        assertThat(result.anchorDay1()).isEqualTo("1");
+    }
+
+    @Test
+    void fifteenthAndLastBusinessDayEndingOnAMovedBackFirstKeepsLastBd() {
+        CadenceResult result = derive(null,
+                "2026-05-15", "2026-05-29", "2026-06-15", "2026-06-30", "2026-07-15", "2026-07-31").orElseThrow();
+        assertThat(result.cadence()).isEqualTo(SEMI_MONTHLY);
+        assertThat(result.anchorDay1()).isEqualTo("15");
+        assertThat(result.anchorDay2()).isEqualTo(ANCHOR_LAST_BD);
+    }
+
     @Test
     void oneLateDepositIsOneOutside() {
         assertThat(derive(null, "2026-01-09", "2026-01-23", "2026-02-06", "2026-02-20", "2026-03-06", "2026-03-23"))

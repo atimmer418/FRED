@@ -104,6 +104,7 @@ public class PlaidRecurringService {
     private final PlaidApi plaidApi;
     private final PlaidGateway plaidGateway;
     private final EncryptionService encryptionService;
+    private final UserRowLock userRowLock;
     private final TransactionTemplate writeTx;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -113,6 +114,7 @@ public class PlaidRecurringService {
             PlaidApi plaidApi,
             PlaidGateway plaidGateway,
             EncryptionService encryptionService,
+            UserRowLock userRowLock,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.streamRepository = streamRepository;
@@ -120,6 +122,7 @@ public class PlaidRecurringService {
         this.plaidApi = plaidApi;
         this.plaidGateway = plaidGateway;
         this.encryptionService = encryptionService;
+        this.userRowLock = userRowLock;
         this.writeTx = new TransactionTemplate(transactionManager);
     }
 
@@ -182,7 +185,7 @@ public class PlaidRecurringService {
 
     /** Runs inside writeTx: lock, re-check, match, write. */
     private StreamsReadOutcome apply(Long userId, String itemId, List<TransactionStream> inflow, LocalDateTime nowET) {
-        Optional<User> lockedUser = userRepository.findByIdForUpdate(userId);
+        Optional<User> lockedUser = userRowLock.lockFresh(userId);
         if (lockedUser.isEmpty() || !itemId.equals(lockedUser.get().getPlaidItemId())
                 || isBlank(lockedUser.get().getPlaidAccessToken())) {
             // A relink won the race while Plaid answered: this read belongs to an Item the user no longer has.

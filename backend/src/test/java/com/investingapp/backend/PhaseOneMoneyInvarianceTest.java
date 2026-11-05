@@ -19,7 +19,9 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -51,11 +53,30 @@ class PhaseOneMoneyInvarianceTest {
             "service/DetectionEligibility.java", "service/ShadowReportService.java",
             "config/PaycheckAutopilotProperties.java",
             "controller/admin/", "controller/PaycheckDetectionController.java", "controller/DevPaycheckController.java",
-            "paycheck/", "plaid/", "ops/");
+            "paycheck/", "plaid/", "ops/",
+            "service/UserRowLock.java", "scheduler/Paycheck*", "security/Admin*", "util/");
 
     /** An InvestmentSchedule.Status write; PlaidWebhookEvent.setStatus(status) stays legal. */
     static final Pattern SCHEDULE_STATUS_WRITE = Pattern.compile("setStatus\\(\\s*(InvestmentSchedule\\.)?Status\\.");
-    static final List<String> FORBIDDEN_CALLS = List.of("setMode(", "getIsPaused(", "isPausedForAnyReason(");
+    static final List<String> FORBIDDEN_CALLS = List.of("setMode(", "getIsPaused(", "isPausedForAnyReason(",
+            "setNextInvestmentDate(", "setInvestmentAmount(", "setMonthlyAmount(", "setAchRequestId(",
+            "setStartDate(", "setFrequency(", "UPDATE investment_schedules", "SET status");
+
+    /**
+     * Final review SCTF-1: every setStatus( in a walked file, counted per file. A variable argument
+     * (s.setStatus(target)) slips past SCHEDULE_STATUS_WRITE, so a new site anywhere fails here.
+     * None of these is an InvestmentSchedule: inbox rows, events and HTTP responses.
+     */
+    static final Map<String, Integer> SET_STATUS_SITES = Map.of(
+            "service/PaycheckEventService.java", 3,
+            "service/PlaidWebhookInboxService.java", 1,
+            "service/PlaidWebhookProcessor.java", 5,
+            "security/AdminKeyFilter.java", 2);
+
+    /** The money path by name: no walked file may reach it. PlaidToAlpacaService is Phase 0 and is itself one. */
+    static final List<String> MONEY_PATH_TYPES = List.of("AlpacaApiService", "AlpacaService",
+            "ScheduledInvestmentProcessor", "InvestmentExecutionService", "PlaidToAlpacaService");
+    static final String MONEY_PATH_EXEMPT = "service/PlaidToAlpacaService.java";
 
     private static final String READY_SIGNATURE = "public boolean isReadyForInvestment(LocalDate todayET)";
     private static final String PINNED_READY_RULE = """
@@ -125,6 +146,24 @@ class PhaseOneMoneyInvarianceTest {
     }
 
     @Test
+    void onlyAllowlistedFilesCallSetStatus() throws IOException {
+        Map<String, String> sources = new TreeMap<>();
+        for (Path file : phaseOneFiles()) {
+            sources.put(MAIN.relativize(file).toString().replace('\\', '/'), Files.readString(file));
+        }
+        assertThat(unexpectedSetStatusSites(sources)).as("setStatus( sites outside the closed list").isEmpty();
+    }
+
+    @Test
+    void phaseOneSourcesNeverNameTheMoneyPath() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        for (Path file : phaseOneFiles()) {
+            offenders.addAll(moneyPathReferences(MAIN.relativize(file).toString().replace('\\', '/'), Files.readString(file)));
+        }
+        assertThat(offenders).as("Phase 1 sources referring to the Alpaca or execution path").isEmpty();
+    }
+
+    @Test
     void walkSeesThisTasksFilesAndThePhaseZeroPlaidServices() throws IOException {
         // A walk that matched nothing would pass vacuously.
         assertThat(phaseOneFiles()).extracting(p -> p.getFileName().toString()).contains(
@@ -143,6 +182,46 @@ class PhaseOneMoneyInvarianceTest {
                 .containsExactly("c.java:2 writes InvestmentSchedule.status");
         assertThat(forbiddenCalls("d.java", "s.setMode(ScheduleMode.DETECTED);\nif (s.getIsPaused()) {}\ns.isPausedForAnyReason();"))
                 .containsExactly("d.java:1 calls setMode(", "d.java:2 calls getIsPaused(", "d.java:3 calls isPausedForAnyReason(");
+        assertThat(forbiddenCalls("e.java", "s.setInvestmentAmount(x);"))
+                .containsExactly("e.java:1 calls setInvestmentAmount(");
+        assertThat(forbiddenCalls("f.java", "jdbc.update(\"UPDATE investment_schedules SET status = 'ACTIVE'\");"))
+                .containsExactly("f.java:1 calls UPDATE investment_schedules", "f.java:1 calls SET status");
+        // A variable argument passes the regex but not the closed list.
+        assertThat(forbiddenCalls("g.java", "s.setStatus(target);")).isEmpty();
+        assertThat(unexpectedSetStatusSites(Map.of("service/Paycheck/New.java", "s.setStatus(target);")))
+                .containsExactly("service/Paycheck/New.java has 1 setStatus( sites, allowed 0");
+        assertThat(unexpectedSetStatusSites(Map.of("service/PlaidWebhookInboxService.java",
+                "event.setStatus(status);\ns.setStatus(target);")))
+                .containsExactly("service/PlaidWebhookInboxService.java has 2 setStatus( sites, allowed 1");
+        assertThat(moneyPathReferences("service/PaycheckX.java", "private final AlpacaApiService alpaca;"))
+                .containsExactly("service/PaycheckX.java:1 names AlpacaApiService");
+        assertThat(moneyPathReferences(MONEY_PATH_EXEMPT, "private AlpacaApiService alpacaApiService;")).isEmpty();
+    }
+
+    static List<String> unexpectedSetStatusSites(Map<String, String> sourcesByPath) {
+        List<String> offenders = new ArrayList<>();
+        sourcesByPath.forEach((path, source) -> {
+            int count = source.split("setStatus\\(", -1).length - 1;
+            int allowed = SET_STATUS_SITES.getOrDefault(path, 0);
+            if (count != allowed && (count > 0 || allowed > 0)) {
+                offenders.add(path + " has " + count + " setStatus( sites, allowed " + allowed);
+            }
+        });
+        return offenders;
+    }
+
+    static List<String> moneyPathReferences(String relPath, String source) {
+        List<String> found = new ArrayList<>();
+        if (relPath.equals(MONEY_PATH_EXEMPT)) {
+            return found;
+        }
+        for (String type : MONEY_PATH_TYPES) {
+            Matcher m = Pattern.compile("\\b" + type + "\\b").matcher(source);
+            while (m.find()) {
+                found.add(relPath + ":" + lineOf(source, m.start()) + " names " + type);
+            }
+        }
+        return found;
     }
 
     /** An ACTIVE, linked MANUAL schedule due today, with no hold. */

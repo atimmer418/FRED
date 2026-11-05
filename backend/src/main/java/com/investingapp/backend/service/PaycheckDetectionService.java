@@ -2,6 +2,7 @@ package com.investingapp.backend.service;
 
 import com.investingapp.backend.config.PaycheckAutopilotProperties;
 import com.investingapp.backend.model.DetectionState;
+import com.investingapp.backend.model.InvestmentFrequency;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.PaycheckEvent;
 import com.investingapp.backend.model.PaycheckEventStatus;
@@ -192,8 +193,12 @@ public class PaycheckDetectionService {
                 .orElse(null);
         Long previousPrimaryId = previousPrimary == null ? null : previousPrimary.getId();
 
+        // Spec 4.1: ACTIVE, posted AND raw_amount < 0. A modified[] restatement can flip a row's sign
+        // and leave it ACTIVE; it is not a deposit (final review DC-6).
         List<PaycheckEvent> deposits = eventRepository
-                .findByUserIdAndStatusAndPendingFalseOrderByPostedDateAsc(userId, PaycheckEventStatus.ACTIVE);
+                .findByUserIdAndStatusAndPendingFalseOrderByPostedDateAsc(userId, PaycheckEventStatus.ACTIVE).stream()
+                .filter(e -> e.getRawAmount() != null && e.getRawAmount().signum() < 0)
+                .toList();
         // Each grouped stream's cadence, by stream id. T12 opens the primary's cycle from this map.
         Map<Long, CadenceResult> cadences = new HashMap<>();
         List<PaycheckEvent> relinked = new ArrayList<>();
@@ -346,6 +351,9 @@ public class PaycheckDetectionService {
         List<BigDecimal> amounts = trailing.stream().map(PaycheckEvent::getAmount).toList();
         BigDecimal median = DepositStats.trailingMedian(amounts);
         BigDecimal cv = amounts.size() < 2 ? null : DepositStats.trailingCv(amounts);
+        // DC-4: a login break deleted this stream's events but kept its skeleton (spec 7.9, decision 11).
+        // Until a full trailing window has arrived again, a too-short history must not restart detection.
+        PurgedHistory purged = PurgedHistory.of(stream, all.size());
 
         String displayName = PayerTokenizer.displayName(latest.getCounterpartyName(),
                 latest.getCounterpartyType(), latest.getMerchantName(), stream.getPayerToken());
@@ -365,13 +373,24 @@ public class PaycheckDetectionService {
             return Optional.empty();
         }
         if (all.size() < 2) {
+            if (purged != null) {
+                return purged.keep(stream);
+            }
             // Spec 4.2 gate 9: fewer than 2 posted deposits is a candidate, never rejected.
             markCandidate(stream);
             return Optional.empty();
         }
         Optional<StreamFacts> facts = StreamFacts.of(stream);
-        Optional<CadenceResult> cadence = CadenceDeriver.derive(dates, facts.map(StreamFacts::plaidFrequency));
+        // DC-1: a stream that holds the primary role, or carries a miss, is read against its own
+        // cadence, so one skipped paycheck is a skipped period and not an underivable payer.
+        Optional<InvestmentFrequency> storedCadence = stream.getCadence() != null
+                && (stream.getMissedCount() > 0 || stream.getRole() == PaycheckStreamRole.PRIMARY)
+                ? Optional.of(stream.getCadence()) : Optional.empty();
+        Optional<CadenceResult> cadence = CadenceDeriver.derive(dates, facts.map(StreamFacts::plaidFrequency), storedCadence);
         Optional<PaycheckRejectReason> reject = HardGates.evaluate(group, facts, cadence, median, todayET);
+        if (purged != null && (cadence.isEmpty() || reject.filter(r -> r == PaycheckRejectReason.CADENCE_UNSUPPORTED).isPresent())) {
+            return purged.keep(stream);
+        }
         if (reject.isPresent()) {
             stream.setState(PaycheckStreamState.REJECTED);
             stream.setRejectReason(reject.get());
@@ -389,9 +408,19 @@ public class PaycheckDetectionService {
         int onCadence = StreamStateRule.onCadenceCount(dates, result);
         boolean plaidMature = facts.map(f -> "MATURE".equals(f.plaidStatus())).orElse(false);
         PaycheckStreamState state = StreamStateRule.state(breakdown.total(), onCadence, plaidMature, facts.isPresent(), props);
+        if (purged != null && state == PaycheckStreamState.CANDIDATE) {
+            return purged.keep(stream);
+        }
         if (stream.getMissedCount() > 0 && QUALIFYING.contains(state)) {
-            // A miss stands until T12 matches the next deposit and resets missed_count (spec 6.4).
-            state = PaycheckStreamState.DORMANT;
+            if (stream.getRole() == PaycheckStreamRole.PRIMARY) {
+                // A miss stands until T12 matches the next deposit and resets missed_count (spec 6.4).
+                state = PaycheckStreamState.DORMANT;
+            } else {
+                // DC-2: missed_count only means something for the primary (SuccessionRule reads it on
+                // S1 only). A stream that lost the role and qualifies again starts clean, or it could
+                // never be selected again.
+                stream.setMissedCount((short) 0);
+            }
         }
         stream.setState(state);
         stream.setRejectReason(null);
@@ -405,6 +434,40 @@ public class PaycheckDetectionService {
         stream.setAnchorDay2(result.anchorDay2());
         stream.setPredictedNextDate(PayCalendar.predictedNext(result, latest.getPostedDate()));
         return cadence;
+    }
+
+    /**
+     * DC-4: what a stream held before its events were purged. Present only for a stream with a
+     * cadence, in a state that keeps a role, with fewer events now than it had counted and fewer
+     * than a full trailing window (so a long history trimmed by the 24-month rule is recomputed as
+     * usual). keep() leaves state, cadence, anchors, score, first date, count, median and CV as
+     * stored, takes the newest deposit's date and amount, and predicts from the stored cadence.
+     */
+    private record PurgedHistory(short depositsFound, LocalDate firstDate, LocalDate lastDate, BigDecimal lastAmount,
+                                 BigDecimal median, BigDecimal cv) {
+
+        static PurgedHistory of(PaycheckStream stream, int events) {
+            boolean purged = stream.getCadence() != null && KEEPS_ROLE.contains(stream.getState())
+                    && events < stream.getDepositsFound() && events < TRAILING_DEPOSITS;
+            return purged ? new PurgedHistory(stream.getDepositsFound(), stream.getFirstDate(), stream.getLastDate(),
+                    stream.getLastAmount(), stream.getTrailingMedian(), stream.getTrailingCv()) : null;
+        }
+
+        Optional<CadenceResult> keep(PaycheckStream stream) {
+            stream.setDepositsFound((short) Math.max(depositsFound, stream.getDepositsFound()));
+            if (firstDate != null) {
+                stream.setFirstDate(firstDate);
+            }
+            if (lastDate != null && stream.getLastDate() != null && lastDate.isAfter(stream.getLastDate())) {
+                stream.setLastDate(lastDate);
+                stream.setLastAmount(lastAmount);
+            }
+            stream.setTrailingMedian(median);
+            stream.setTrailingCv(cv);
+            CadenceResult kept = PaycheckCycleService.cadenceOf(stream);
+            stream.setPredictedNextDate(PayCalendar.predictedNext(kept, stream.getLastDate()));
+            return Optional.of(kept);
+        }
     }
 
     private static void markCandidate(PaycheckStream stream) {

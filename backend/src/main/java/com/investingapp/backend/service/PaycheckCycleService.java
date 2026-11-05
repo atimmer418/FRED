@@ -61,6 +61,9 @@ public class PaycheckCycleService {
             EnumSet.of(PaycheckCycleState.SKIPPED, PaycheckCycleState.CONFIRMED, PaycheckCycleState.QUEUED);
     private static final Set<PaycheckStreamState> TRUSTED =
             EnumSet.of(PaycheckStreamState.PROVISIONAL, PaycheckStreamState.CONFIRMED, PaycheckStreamState.DORMANT);
+    /** Mirror states that describe the Item, not the payer; a miss never writes DORMANT over them. */
+    private static final Set<DetectionState> ITEM_STATE_MIRRORS =
+            EnumSet.of(DetectionState.ITEM_BROKEN, DetectionState.NEEDS_CONSENT, DetectionState.UNDETECTABLE);
 
     private final PaycheckCycleRepository cycleRepository;
     private final PaycheckStreamRepository streamRepository;
@@ -195,7 +198,8 @@ public class PaycheckCycleService {
                 stream.setState(PaycheckStreamState.DORMANT);
                 stream.setUpdatedAt(nowET);
                 streamRepository.save(stream);
-                schedule.filter(s -> mirrors(s, stream)).ifPresent(s -> {
+                // An Item-state mirror (PlaidItemStateService owns it) is not a missed paycheck (DC-3).
+                schedule.filter(s -> mirrors(s, stream) && !ITEM_STATE_MIRRORS.contains(s.getDetectionState())).ifPresent(s -> {
                     s.setDetectionState(DetectionState.DORMANT);
                     s.setMissedCount(stream.getMissedCount());
                     if (s.getDormantSince() == null) {

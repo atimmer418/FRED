@@ -174,6 +174,32 @@ class PlaidItemLifecycleServiceTest {
         verify(jobLockService).release(JobLocks.PLAID_ITEM_REMOVALS);
     }
 
+    // Final review PAL-2: last_error (and the log lines built from it) keep the status, code and request id only.
+    @Test
+    void failedRemovalKeepsNoFreeTextFromPlaid() throws IOException {
+        PlaidItemRemoval failing = pending(EasternTime.now().minusHours(1));
+        PlaidItemRemoval thrown = pending(EasternTime.now().minusHours(1));
+        when(removalRepository.findByRemovedAtIsNullAndRequestedAtAfterOrderByRequestedAtAsc(any()))
+                .thenReturn(List.of(failing, thrown));
+        @SuppressWarnings("unchecked")
+        Call<ItemRemoveResponse> refused = mock(Call.class);
+        when(refused.execute()).thenReturn(Response.error(400, ResponseBody.create(
+                "{\"error_type\":\"INVALID_REQUEST\",\"error_code\":\"INVALID_FIELD\",\"request_id\":\"req-77\","
+                        + "\"error_message\":\"MARKER-FIRST-NATIONAL-BANK\",\"display_message\":\"MARKER-DISPLAY\"}",
+                MediaType.parse("application/json"))));
+        @SuppressWarnings("unchecked")
+        Call<ItemRemoveResponse> broken = mock(Call.class);
+        when(broken.execute()).thenThrow(new IOException("MARKER-SOCKET-DETAIL"));
+        when(plaidApi.itemRemove(any(ItemRemoveRequest.class))).thenReturn(refused, broken);
+
+        service.drainRemovals();
+
+        assertThat(failing.getLastError()).isEqualTo("HTTP 400 INVALID_FIELD request_id=req-77");
+        assertThat(thrown.getLastError()).isEqualTo("IOException");
+        assertThat(failing.getRemovedAt()).isNull();
+        assertThat(failing.getAttempts()).isEqualTo(1);
+    }
+
     @Test
     void drainAlertsOnRowsOlderThanSevenDaysInsteadOfCallingPlaid() {
         PlaidItemRemoval stale = pending(EasternTime.now().minusDays(8));

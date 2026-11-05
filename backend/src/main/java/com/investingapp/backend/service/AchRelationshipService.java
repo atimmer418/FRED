@@ -202,7 +202,9 @@ public class AchRelationshipService {
         try {
             active = alpacaApiService.listAchRelationships(alpacaAccountId, ACTIVE_STATUSES);
         } catch (RestClientException | IllegalStateException e) {
-            logger.error("alert.ach.cancel_failed user={} stage=list error={}", user.getId(), e.getMessage());
+            // Spec 12.3: free-text vendor messages stay below INFO; the alert line names the class only.
+            logger.debug("ach.cancel_failed.detail user={} stage=list detail={}", user.getId(), e.getMessage());
+            logger.error("alert.ach.cancel_failed user={} stage=list cause={}", user.getId(), e.getClass().getSimpleName());
             opsAlertService.raise(OpsAlerts.ACH_CANCEL_FAILED, String.valueOf(user.getId()),
                     "listing ACH relationships for the bank-change cancel failed",
                     Map.of("user", String.valueOf(user.getId()), "stage", "list"));
@@ -244,7 +246,8 @@ public class AchRelationshipService {
         try {
             existing = alpacaApiService.listAchRelationships(alpacaAccountId, POLL_STATUSES);
         } catch (RestClientException | IllegalStateException e) {
-            logger.error("alert.ach.poll_list_failed user={} error={}", user.getId(), e.getMessage());
+            logger.debug("ach.poll_list_failed.detail user={} detail={}", user.getId(), e.getMessage());
+            logger.error("alert.ach.poll_list_failed user={} cause={}", user.getId(), e.getClass().getSimpleName());
             opsAlertService.raise(OpsAlerts.ACH_POLL_LIST_FAILED, String.valueOf(user.getId()),
                     "listing ACH relationships for the 15-minute poll failed",
                     Map.of("user", String.valueOf(user.getId()), "stage", "poll_list"));
@@ -287,8 +290,9 @@ public class AchRelationshipService {
                 alpacaAccountId, user.getPlaidAccountId(), user.getFirstName() + " " + user.getLastName(), user);
         Object id = result == null ? null : result.get("id");
         if (id == null || result.containsKey("error")) {
-            // Log only the error text: raw_response carries bank details.
-            logger.error("alert.ach.create_failed user={} error={}", user.getId(), result == null ? "null result" : result.get("error"));
+            // Never raw_response (bank details); the vendor's free text stays below INFO (spec 12.3).
+            logger.debug("ach.create_failed.detail user={} detail={}", user.getId(), result == null ? null : result.get("error"));
+            logger.error("alert.ach.create_failed user={} outcome={}", user.getId(), result == null ? "null_result" : "vendor_refused");
             opsAlertService.raise(OpsAlerts.ACH_CREATE_FAILED, String.valueOf(user.getId()),
                     "creating the ACH relationship failed; the poll retries in 15 minutes",
                     Map.of("user", String.valueOf(user.getId()), "stage", "create"));

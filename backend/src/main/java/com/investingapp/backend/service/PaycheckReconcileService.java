@@ -122,6 +122,7 @@ public class PaycheckReconcileService {
     private final EncryptionService encryptionService;
     private final OpsAlertService opsAlertService;
     private final PaycheckAutopilotProperties props;
+    private final UserRowLock userRowLock;
     private final TransactionTemplate writeTx;
     private final TransactionTemplate readTx;
 
@@ -141,6 +142,7 @@ public class PaycheckReconcileService {
             EncryptionService encryptionService,
             OpsAlertService opsAlertService,
             PaycheckAutopilotProperties props,
+            UserRowLock userRowLock,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
@@ -155,6 +157,7 @@ public class PaycheckReconcileService {
         this.encryptionService = encryptionService;
         this.opsAlertService = opsAlertService;
         this.props = props;
+        this.userRowLock = userRowLock;
         this.writeTx = new TransactionTemplate(transactionManager);
         this.readTx = new TransactionTemplate(transactionManager);
         this.readTx.setReadOnly(true);
@@ -256,17 +259,22 @@ public class PaycheckReconcileService {
         return ids == null ? List.of() : ids;
     }
 
-    /** R8: phase A leaves REJECTED and opted-out users alone; a broken or missing Item does not stop it. */
+    /**
+     * R8 and spec 5.6: phase A leaves REJECTED and opted-out users alone, and runs no miss pass or
+     * 120-day retirement while the Item is not OK (a break is not a missed paycheck; final review
+     * DC-3). PENDING_DISCONNECT is still OK there. A missing token does not stop it.
+     */
     private boolean skippedInPhaseA(User user) {
         Optional<ExclusionReason> reason = DetectionEligibility.exclusion(user, props);
         return reason.isPresent()
-                && (reason.get() == ExclusionReason.ACCOUNT_REJECTED || reason.get() == ExclusionReason.OPTED_OUT);
+                && (reason.get() == ExclusionReason.ACCOUNT_REJECTED || reason.get() == ExclusionReason.OPTED_OUT
+                        || reason.get() == ExclusionReason.ITEM_STATUS);
     }
 
     /** One pass for one user, in its own transaction under the user row lock. Never throws. */
     private int phaseAForUser(Long userId, ToIntFunction<User> pass) {
         try {
-            Integer changed = writeTx.execute(status -> userRepository.findByIdForUpdate(userId)
+            Integer changed = writeTx.execute(status -> userRowLock.lockFresh(userId)
                     .filter(user -> !skippedInPhaseA(user))
                     .map(pass::applyAsInt)
                     .orElse(0));
@@ -292,7 +300,7 @@ public class PaycheckReconcileService {
     /** R8: queue a REJECTED applicant's Item once and mark it REMOVED (off the billable gauge). */
     private int retireRejectedItem(Long userId) {
         try {
-            Boolean queued = writeTx.execute(status -> userRepository.findByIdForUpdate(userId).map(user -> {
+            Boolean queued = writeTx.execute(status -> userRowLock.lockFresh(userId).map(user -> {
                 if (!REJECTED.equals(user.getAccountStatus()) || user.getPlaidAccessToken() == null
                         || user.getPlaidItemStatus() == PlaidItemStatus.REMOVED) {
                     return false;
@@ -390,7 +398,8 @@ public class PaycheckReconcileService {
      * PENDING_DISCONNECT date), sync reason, and the INIT stamp for SEARCHING_24H. Null = no sync.
      */
     private SyncReason prepare(Long userId, String itemId, LocalDateTime consentExpiresAt, LocalDateTime nowET) {
-        User user = userRepository.findByIdForUpdate(userId).orElse(null);
+        // Locked and re-read: the admin verb runs this on a request thread (MS-2).
+        User user = userRowLock.lockFresh(userId).orElse(null);
         if (user == null || !itemId.equals(user.getPlaidItemId())) {
             logger.debug("plaid.stale_item_event source=reconcile user={}", userId);
             return null;

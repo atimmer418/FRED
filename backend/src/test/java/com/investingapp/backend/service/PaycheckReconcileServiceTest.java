@@ -139,7 +139,8 @@ class PaycheckReconcileServiceTest {
 
         service = new PaycheckReconcileService(userRepository, scheduleRepository, eventRepository, cycleService,
                 pipeline, itemStateService, lifecycleService, gateway, breaker, plaidApi, encryptionService,
-                opsAlertService, props, txManager);
+                opsAlertService, props, new UserRowLock(userRepository, mock(jakarta.persistence.EntityManager.class)),
+                txManager);
         ReflectionTestUtils.setField(service, "clock", (Supplier<LocalDateTime>) clock::get);
     }
 
@@ -264,6 +265,28 @@ class PaycheckReconcileServiceTest {
             verify(cycleService, never()).retireDormantForUser(skipped, TODAY);
         }
         verify(gateway, never()).call(anyString(), any());
+    }
+
+    // Final review DC-3 (spec 5.6, R8): no miss pass and no 120-day retirement while the Item is not OK.
+    @Test
+    void phaseASkipsBrokenItems() {
+        user(1).setPlaidItemStatus(PlaidItemStatus.LOGIN_REQUIRED);
+        user(2).setPlaidItemStatus(PlaidItemStatus.SYNC_LIMIT);
+        user(3).setPlaidItemStatus(PlaidItemStatus.PENDING_DISCONNECT);
+        List<Long> all = List.of(1L, 2L, 3L);
+        when(cycleService.usersWithOverdueOpenCycles(TODAY)).thenReturn(all);
+        when(cycleService.usersWithStaleConfirmed(START)).thenReturn(all);
+        when(cycleService.usersWithDormantStreamsOver(TODAY)).thenReturn(all);
+
+        runNightly();
+
+        verify(cycleService).markMissesForUser(3L, TODAY);
+        verify(cycleService).retireDormantForUser(3L, TODAY);
+        for (long skipped : new long[] {1L, 2L}) {
+            verify(cycleService, never()).markMissesForUser(skipped, TODAY);
+            verify(cycleService, never()).markStaleForUser(skipped, START);
+            verify(cycleService, never()).retireDormantForUser(skipped, TODAY);
+        }
     }
 
     @Test

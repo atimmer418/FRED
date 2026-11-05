@@ -32,13 +32,16 @@ public interface PlaidWebhookEventRepository extends JpaRepository<PlaidWebhookE
             nativeQuery = true)
     int markProcessing(@Param("ids") List<Long> ids, @Param("claimedAt") LocalDateTime claimedAt);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = "UPDATE plaid_webhook_events SET status = 'RECEIVED' WHERE status = 'PROCESSING' AND processed_at < :before",
-            nativeQuery = true)
-    int reclaimStale(@Param("before") LocalDateTime before);
+    /**
+     * PROCESSING claims stamped before the cut-off (their worker died), locked until the caller's
+     * transaction ends. The drainer counts each reclaim as an attempt (ruling R-d).
+     */
+    @Query(value = "SELECT id FROM plaid_webhook_events WHERE status = 'PROCESSING' AND processed_at < :before "
+            + "ORDER BY received_at FOR UPDATE", nativeQuery = true)
+    List<Long> lockStaleClaimIds(@Param("before") LocalDateTime before);
 
-    /** For the admin GET /webhooks?status=FAILED verb (T18). */
-    List<PlaidWebhookEvent> findByStatusOrderByReceivedAtAsc(PlaidWebhookEventStatus status);
+    /** For the admin GET /webhooks?status=FAILED verb (T18): newest first, bounded in SQL (ruling R-c). */
+    List<PlaidWebhookEvent> findTop200ByStatusOrderByReceivedAtDesc(PlaidWebhookEventStatus status);
 
     /** Used by UserDeletionService (T11). A derived delete needs a read-write transaction. */
     @Transactional

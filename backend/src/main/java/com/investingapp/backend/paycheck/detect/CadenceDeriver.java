@@ -42,10 +42,24 @@ public final class CadenceDeriver {
     }
 
     public static Optional<CadenceResult> derive(List<LocalDate> postedDatesAsc, Optional<String> plaidFrequencyWire) {
+        return derive(postedDatesAsc, plaidFrequencyWire, Optional.empty());
+    }
+
+    /**
+     * As {@link #derive(List, Optional)}; with a cadence the stream already holds, one gap of k whole
+     * periods (k at least 2, within OUTLIER_MAX_DAYS) counts as k periods, so a single skipped
+     * paycheck does not make a known payer underivable (spec 4.7 rule 1, 6.2; final review DC-1).
+     * More than one such gap is read as a change of cadence and is not split.
+     */
+    public static Optional<CadenceResult> derive(List<LocalDate> postedDatesAsc, Optional<String> plaidFrequencyWire,
+            Optional<InvestmentFrequency> storedCadence) {
         if (postedDatesAsc == null || postedDatesAsc.size() < 2) { return Optional.empty(); }
         List<LocalDate> dates = postedDatesAsc.subList(Math.max(0, postedDatesAsc.size() - MAX_DEPOSITS), postedDatesAsc.size());
         List<Integer> gaps = new ArrayList<>();
         for (int i = 1; i < dates.size(); i++) { gaps.add((int) ChronoUnit.DAYS.between(dates.get(i - 1), dates.get(i))); }
+        if (storedCadence != null && storedCadence.isPresent()) {
+            gaps = splitSkippedPeriod(gaps, PayCalendar.periodDays(storedCadence.get()));
+        }
         Optional<List<String>> labels = anchorLabels(dates);
         List<Fit> fits = new ArrayList<>();
         for (InvestmentFrequency f : InvestmentFrequency.values()) {
@@ -73,6 +87,31 @@ public final class CadenceDeriver {
                 ? PaycheckCadenceSource.OBSERVED : PaycheckCadenceSource.PLAID;
         return Optional.of(new CadenceResult(chosen.cadence(), source, chosen.dow(), chosen.parity(), chosen.a1(), chosen.a2(),
                 gaps.size(), chosen.outside() == 0, chosen.outside()));
+    }
+
+    /** The one gap that is k whole periods becomes k near-equal intervals; anything else is returned as given. */
+    static List<Integer> splitSkippedPeriod(List<Integer> gaps, int periodDays) {
+        int multiples = 0;
+        for (int g : gaps) {
+            if (skippedPeriods(g, periodDays) >= 2) { multiples++; }
+        }
+        if (multiples != 1) { return gaps; }
+        List<Integer> split = new ArrayList<>();
+        for (int g : gaps) {
+            int k = skippedPeriods(g, periodDays);
+            if (k < 2) {
+                split.add(g);
+                continue;
+            }
+            for (int i = 0; i < k; i++) { split.add(g / k + (i < g % k ? 1 : 0)); }
+        }
+        return split;
+    }
+
+    /** k when the gap is k periods within OUTLIER_MAX_DAYS, else 1. */
+    private static int skippedPeriods(int gap, int periodDays) {
+        int k = (int) Math.round((double) gap / periodDays);
+        return k >= 2 && Math.abs(gap - k * periodDays) <= OUTLIER_MAX_DAYS ? k : 1;
     }
 
     private static int outsideCount(List<Integer> gaps, InvestmentFrequency f) {
@@ -104,14 +143,31 @@ public final class CadenceDeriver {
     static Optional<List<String>> anchorLabels(List<LocalDate> dates) {
         List<Integer> numericDays = dates.stream().filter(d -> fixedClass(d) == null).map(LocalDate::getDayOfMonth).toList();
         Map<Integer, String> numericAnchor = numericAnchors(numericDays);
+        // Spec 4.4: a 1-to-3 cluster is "1" with backward business-day adjustment, so a 1st paid on the
+        // previous month's last business day is still the 1st. Only when the series has a "1" and no
+        // last-business-day date that is anything else, so a real 15th/LAST_BD payer is untouched (DC-5).
+        boolean movedBackFirsts = dates.stream().anyMatch(d -> ANCHOR_FIRST.equals(fixedClass(d)))
+                && dates.stream().noneMatch(d -> ANCHOR_LAST_BD.equals(fixedClass(d)) && !isMovedBackFirst(d));
         List<String> labels = new ArrayList<>();
         for (LocalDate d : dates) {
-            String label = fixedClass(d) != null ? fixedClass(d) : numericAnchor.get(d.getDayOfMonth());
-            LocalDate target = BusinessDays.adjustBackward(PayCalendar.nominal(YearMonth.from(d), label));
+            String label;
+            LocalDate target;
+            if (movedBackFirsts && ANCHOR_LAST_BD.equals(fixedClass(d))) {
+                label = ANCHOR_FIRST;
+                target = BusinessDays.adjustBackward(PayCalendar.nominal(YearMonth.from(d).plusMonths(1), ANCHOR_FIRST));
+            } else {
+                label = fixedClass(d) != null ? fixedClass(d) : numericAnchor.get(d.getDayOfMonth());
+                target = BusinessDays.adjustBackward(PayCalendar.nominal(YearMonth.from(d), label));
+            }
             if (Math.abs(BusinessDays.between(target, d)) > ANCHOR_TOLERANCE_BUSINESS_DAYS) { return Optional.empty(); }
             labels.add(label);
         }
         return Optional.of(labels);
+    }
+
+    /** d is the business day the next month's 1st moves back to (the 1st falls on a weekend or holiday). */
+    private static boolean isMovedBackFirst(LocalDate d) {
+        return d.equals(BusinessDays.adjustBackward(YearMonth.from(d).plusMonths(1).atDay(1)));
     }
 
     private static String fixedClass(LocalDate d) {

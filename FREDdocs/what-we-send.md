@@ -63,8 +63,11 @@ How long it is kept:
   records are kept so that detection can resume when they reconnect.
 - When the user revokes FRED's access at their bank, or links a different bank, everything
   detected from the old connection is deleted. If they withdraw access to just one account that
-  FRED does not invest from, that account's deposit records are marked removed and then fall
-  under the 24-month rule above.
+  FRED does not invest from, that account's deposit records are deleted at once, and the bank's
+  full descriptions and the raw Plaid records for the payers seen on that account are blanked.
+  What FRED worked out about those payers (the display name, the normalized payer name, the
+  cadence, the typical and most recent amounts and their dates) is kept until the user links a
+  different bank, revokes FRED's access at their bank, or deletes their account.
 - When the account is deleted, all of it is deleted with the user row.
 - When the broker rejects the application, FRED disconnects the bank and reads no new deposits,
   but what it already holds stays with the rest of the rejected application (see "Retention"):

@@ -230,6 +230,23 @@ class PaycheckCycleServiceTest {
         assertThat(next.getExpectedDate()).isEqualTo(PayCalendar.predictedNext(PaycheckCycleService.cadenceOf(primary), EXPECTED));
     }
 
+    // Final review DC-3: an Item-state mirror is not overwritten by a miss.
+    @Test
+    void missKeepsItemBrokenMirror() {
+        for (DetectionState itemState : List.of(DetectionState.ITEM_BROKEN, DetectionState.NEEDS_CONSENT,
+                DetectionState.UNDETECTABLE)) {
+            setUp();
+            schedule.setDetectionState(itemState);
+
+            assertThat(service.markMissesForUser(USER_ID, LocalDate.of(2026, 10, 14))).isEqualTo(1);
+
+            assertThat(schedule).as(itemState.name())
+                    .extracting(InvestmentSchedule::getDetectionState, InvestmentSchedule::getMissedCount,
+                            InvestmentSchedule::getDormantSince)
+                    .containsExactly(itemState, (short) 0, null);
+        }
+    }
+
     @Test
     void missedPeriodWithALaterDepositDoesNotMakeTheStreamDormant() {
         primary.setLastDate(LocalDate.of(2026, 10, 2)); // a deposit landed after the missed period's expected date

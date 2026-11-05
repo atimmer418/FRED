@@ -42,7 +42,8 @@ class AdminVerbsAuditTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         when(jdbc.query(eq(AdminPlaidController.ITEMS_SQL), any(RowMapper.class))).thenReturn(List.of());
         UserDeletionService deletion = mock(UserDeletionService.class);
-        AdminPlaidController plaid = new AdminPlaidController(jdbc, users, mock(PlaidItemLifecycleService.class), audit, tx);
+        AdminPlaidController plaid = new AdminPlaidController(jdbc, users, mock(PlaidItemLifecycleService.class), audit,
+                new com.investingapp.backend.service.UserRowLock(users, mock(jakarta.persistence.EntityManager.class)), tx);
         AdminUserController userVerbs = new AdminUserController(users, deletion, audit);
         User linked = new User("linked@fredvested.test");
         linked.setId(7L);

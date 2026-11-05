@@ -371,6 +371,123 @@ class PaycheckDetectionServiceTest {
         assertThat(tx.readOnly()).isFalse();
     }
 
+    // Final review DC-6: spec 4.1 groups raw_amount < 0 only, so a sign-flipped restatement is not a deposit.
+    @Test
+    void signFlippedRestatementIsNotGrouped() {
+        PaycheckStream acme = acmeCatalogRow();
+        acmeHistory("acc-1");
+        PaycheckEvent flipped = deposit("acme-flip", "acc-1", "ACME CORP PAYROLL", "Acme Corp", "2418.37",
+                LocalDate.of(2026, 10, 30));
+        flipped.setRawAmount(new BigDecimal("2418.37"));
+        flipped.setAmount(new BigDecimal("-2418.37"));
+
+        EvaluationOutcome outcome = service.evaluate(USER_ID, EvaluationTrigger.FULL, TODAY);
+
+        assertThat(acme.getState()).isEqualTo(PaycheckStreamState.CONFIRMED);
+        assertThat(acme.getRejectReason()).isNull();
+        assertThat(acme.getRole()).isEqualTo(PaycheckStreamRole.PRIMARY);
+        assertThat(acme.getLastDate()).isEqualTo(LocalDate.of(2026, 10, 23));
+        assertThat(acme.getLastAmount()).isEqualByComparingTo("2418.37");
+        assertThat(acme.getTrailingMedian()).isEqualByComparingTo("2418.37");
+        assertThat(acme.getDepositsFound()).isEqualTo((short) 6);
+        assertThat(outcome.state()).isEqualTo(DetectionState.CONFIRMED);
+    }
+
+    // Final review DC-2: a leftover missed_count does not lock a requalifying non-primary stream out.
+    @Test
+    void requalifiedStreamWithALeftoverMissIsPromotable() {
+        PaycheckStream acme = acmeCatalogRow();
+        acme.setState(PaycheckStreamState.REJECTED);
+        acme.setRejectReason(PaycheckRejectReason.STALE);
+        acme.setRole(PaycheckStreamRole.NONE);
+        acme.setMissedCount((short) 1);
+        acme.setCadence(InvestmentFrequency.BIWEEKLY);
+        acmeHistory("acc-1");
+        InvestmentSchedule schedule = withSchedule(manualSchedule(InvestmentSchedule.Status.ACTIVE, null));
+
+        EvaluationOutcome outcome = service.evaluate(USER_ID, EvaluationTrigger.FULL, TODAY);
+
+        assertThat(acme.getState()).isIn(PaycheckStreamState.PROVISIONAL, PaycheckStreamState.CONFIRMED);
+        assertThat(acme.getRole()).isEqualTo(PaycheckStreamRole.PRIMARY);
+        assertThat(acme.getMissedCount()).isZero();
+        assertThat(outcome.primaryStreamId()).isEqualTo(acme.getId());
+        assertThat(schedule.getPrimaryStreamId()).isEqualTo(acme.getId());
+        assertThat(schedule.getDetectionState()).isIn(DetectionState.PROVISIONAL, DetectionState.CONFIRMED);
+    }
+
+    @Test
+    void primaryWithAnUnmatchedMissStaysDormant() {
+        PaycheckStream acme = acmeCatalogRow();
+        acme.setState(PaycheckStreamState.DORMANT);
+        acme.setRole(PaycheckStreamRole.PRIMARY);
+        acme.setMissedCount((short) 1);
+        acmeHistory("acc-1");
+
+        EvaluationOutcome outcome = service.evaluate(USER_ID, EvaluationTrigger.RECONCILE, TODAY);
+
+        assertThat(acme.getState()).isEqualTo(PaycheckStreamState.DORMANT);
+        assertThat(acme.getRole()).isEqualTo(PaycheckStreamRole.PRIMARY);
+        assertThat(acme.getMissedCount()).isEqualTo((short) 1);
+        assertThat(outcome.state()).isEqualTo(DetectionState.DORMANT);
+    }
+
+    // Final review DC-4: after a login break purged the events, the first new deposit keeps the stream.
+    @Test
+    void purgedHistoryKeepsTheConfirmedPrimaryOnItsFirstNewDeposit() {
+        PaycheckStream acme = confirmedAcmePrimary();
+        deposit("acme-new", "acc-1", "ACME CORP PAYROLL", "Acme Corp", "2430.00", LocalDate.of(2026, 11, 6));
+
+        EvaluationOutcome outcome = service.evaluate(USER_ID, EvaluationTrigger.INCREMENTAL, LocalDate.of(2026, 11, 6));
+
+        assertThat(acme.getState()).isEqualTo(PaycheckStreamState.CONFIRMED);
+        assertThat(acme.getRole()).isEqualTo(PaycheckStreamRole.PRIMARY);
+        assertThat(acme.getDepositsFound()).isEqualTo((short) 6);
+        assertThat(acme.getFirstDate()).isEqualTo(LocalDate.of(2026, 8, 14));
+        assertThat(acme.getLastDate()).isEqualTo(LocalDate.of(2026, 11, 6));
+        assertThat(acme.getLastAmount()).isEqualByComparingTo("2430.00");
+        assertThat(acme.getTrailingMedian()).isEqualByComparingTo("2418.37");
+        assertThat(acme.getScore()).isEqualTo((short) 85);
+        assertThat(acme.getCadence()).isEqualTo(InvestmentFrequency.BIWEEKLY);
+        assertThat(acme.getPredictedNextDate()).isEqualTo(LocalDate.of(2026, 11, 20));
+        assertThat(outcome.state()).isEqualTo(DetectionState.CONFIRMED);
+        assertThat(outcome.primaryStreamId()).isEqualTo(acme.getId());
+    }
+
+    @Test
+    void retentionTrimmedHistoryIsStillRecomputed() {
+        PaycheckStream acme = confirmedAcmePrimary();
+        acme.setDepositsFound((short) 30);
+        acme.setFirstDate(LocalDate.of(2024, 9, 1));
+        acme.setScore((short) 61);
+        acmeHistory("acc-1");
+
+        service.evaluate(USER_ID, EvaluationTrigger.RECONCILE, TODAY);
+
+        assertThat(acme.getDepositsFound()).isEqualTo((short) 6);
+        assertThat(acme.getFirstDate()).isEqualTo(ACME_FRIDAYS.get(0));
+        assertThat(acme.getState()).isEqualTo(PaycheckStreamState.CONFIRMED);
+        assertThat(acme.getScore()).as("recomputed, not kept").isGreaterThanOrEqualTo((short) 70);
+    }
+
+    /** The stream as it stood before a login break purged its events: six deposits, CONFIRMED, primary. */
+    private PaycheckStream confirmedAcmePrimary() {
+        PaycheckStream acme = acmeCatalogRow();
+        acme.setState(PaycheckStreamState.CONFIRMED);
+        acme.setRole(PaycheckStreamRole.PRIMARY);
+        acme.setCadence(InvestmentFrequency.BIWEEKLY);
+        acme.setCadenceSource(com.investingapp.backend.model.PaycheckCadenceSource.OBSERVED);
+        acme.setAnchorDow((short) 5);
+        acme.setAnchorParityDate(LocalDate.of(2026, 10, 23));
+        acme.setScore((short) 85);
+        acme.setDepositsFound((short) 6);
+        acme.setFirstDate(LocalDate.of(2026, 8, 14));
+        acme.setLastDate(LocalDate.of(2026, 10, 23));
+        acme.setTrailingMedian(new BigDecimal("2418.37"));
+        acme.setPlaidSnapshotJson(null);
+        acme.setRawDescriptor(null);
+        return acme;
+    }
+
     // ---------------------------------------------------------------------------------------------
 
     private void assertSkipped(Consumer<User> change, ExclusionReason expected) {

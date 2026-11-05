@@ -7,6 +7,7 @@ import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.AdminAuditService;
 import com.investingapp.backend.service.PlaidItemLifecycleService;
+import com.investingapp.backend.service.UserRowLock;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -60,15 +61,17 @@ public class AdminPlaidController {
     private final UserRepository userRepository;
     private final PlaidItemLifecycleService plaidItemLifecycleService;
     private final AdminAuditService adminAuditService;
+    private final UserRowLock userRowLock;
     private final TransactionTemplate writeTx;
 
     public AdminPlaidController(JdbcTemplate jdbc, UserRepository userRepository,
             PlaidItemLifecycleService plaidItemLifecycleService, AdminAuditService adminAuditService,
-            PlatformTransactionManager transactionManager) {
+            UserRowLock userRowLock, PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.userRepository = userRepository;
         this.plaidItemLifecycleService = plaidItemLifecycleService;
         this.adminAuditService = adminAuditService;
+        this.userRowLock = userRowLock;
         this.writeTx = new TransactionTemplate(transactionManager);
     }
 
@@ -85,7 +88,7 @@ public class AdminPlaidController {
     public ResponseEntity<?> removeItem(@PathVariable("userId") Long userId,
             @RequestParam(value = "reason", required = false) String reason, HttpServletRequest request) {
         String actor = adminAuditService.actor(request);
-        RemoveResult result = writeTx.execute(status -> userRepository.findByIdForUpdate(userId)
+        RemoveResult result = writeTx.execute(status -> userRowLock.lockFresh(userId)
                 .map(user -> removeLocked(user, actor, reason))
                 .orElseGet(() -> new RemoveResult(RemoveOutcome.NOT_FOUND, null, null)));
         if (result.outcome() != RemoveOutcome.QUEUED) {

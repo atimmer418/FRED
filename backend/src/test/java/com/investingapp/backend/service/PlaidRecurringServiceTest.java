@@ -86,7 +86,7 @@ class PlaidRecurringServiceTest {
         when(encryptionService.decrypt(any())).thenAnswer(i -> "raw-of-" + i.getArgument(0));
         txManager = new RecordingTransactionManager();
         service = new PlaidRecurringService(userRepository, streamRepository, eventRepository, plaidApi, gateway,
-                encryptionService, txManager);
+                encryptionService, new UserRowLock(userRepository, mock(jakarta.persistence.EntityManager.class)), txManager);
 
         recurringCall = mock(Call.class);
         when(plaidApi.transactionsRecurringGet(any())).thenReturn(recurringCall);

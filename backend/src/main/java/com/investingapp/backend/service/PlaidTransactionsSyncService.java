@@ -167,7 +167,7 @@ public class PlaidTransactionsSyncService {
         return apply(userId, itemId, reason, originalCursor, fetched);
     }
 
-    /** Spec 2.5 step 1, checked against the row as read before any Plaid call. */
+    /** Spec 2.5 step 1, checked against the row as read before any Plaid call, and again on the locked row. */
     private static Optional<SyncStatus> refusal(User user, String itemId) {
         if (user == null || itemId == null || !itemId.equals(user.getPlaidItemId())
                 || user.getPlaidAccessToken() == null || user.getPlaidAccessToken().isBlank()) {
@@ -294,6 +294,14 @@ public class PlaidTransactionsSyncService {
         if (locked == null || !itemId.equals(locked.getPlaidItemId())) {
             logger.info("plaid.stale_item_event source=sync_apply user_id={} item_id={} reason={}", userId, itemId, reason);
             return SyncOutcome.of(SyncStatus.REFUSED_STALE_ITEM);
+        }
+        // Final review TXC-1: an Item-state handler (login break, revoke, consent refusal) can commit
+        // between the fetch and this lock; its purge must not be undone by applying the buffer.
+        Optional<SyncStatus> refused = refusal(locked, itemId);
+        if (refused.isPresent()) {
+            logger.info("plaid.sync.refused_at_apply user_id={} item_id={} reason={} status={}",
+                    userId, itemId, reason, refused.get());
+            return SyncOutcome.of(refused.get());
         }
         if (!Objects.equals(originalCursor, locked.getPlaidSyncCursor())) {
             // Another sync of this Item committed while this one paged. Its cursor stands; this buffer

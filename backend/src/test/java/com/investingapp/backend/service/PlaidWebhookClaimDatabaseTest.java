@@ -1,5 +1,6 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.PlaidWebhookEventRepository;
 import com.investingapp.backend.support.RequiresCiDatabase;
 import org.junit.jupiter.api.AfterEach;
@@ -32,6 +33,8 @@ class PlaidWebhookClaimDatabaseTest {
     @Autowired
     private PlaidWebhookEventRepository repository;
     @Autowired
+    private PlaidWebhookProcessor processor;
+    @Autowired
     private PlatformTransactionManager transactionManager;
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -56,7 +59,11 @@ class PlaidWebhookClaimDatabaseTest {
 
     @AfterEach
     void deleteOurRows() {
-        ours.forEach(id -> jdbcTemplate.update("DELETE FROM plaid_webhook_events WHERE id = ?", id));
+        ours.forEach(id -> {
+            jdbcTemplate.update("DELETE FROM ops_alerts WHERE alert_type = ? AND subject_id = ?",
+                    OpsAlerts.INBOX_FAILED, String.valueOf(id));
+            jdbcTemplate.update("DELETE FROM plaid_webhook_events WHERE id = ?", id);
+        });
     }
 
     @Test
@@ -99,15 +106,39 @@ class PlaidWebhookClaimDatabaseTest {
                     Boolean.class, id)).isTrue();
         }
 
-        transactions.execute(status -> repository.reclaimStale(claimedAt));
-        for (Long id : ours) {
-            assertThat(statusOf(id)).as("a claim stamped exactly at the cut-off is not stale").isEqualTo("PROCESSING");
-        }
+        List<Long> atCutOff = transactions.execute(status -> repository.lockStaleClaimIds(claimedAt));
+        assertThat(atCutOff).as("a claim stamped exactly at the cut-off is not stale").doesNotContainAnyElementsOf(ours);
+        List<Long> later = transactions.execute(status -> repository.lockStaleClaimIds(claimedAt.plusMinutes(10)));
+        assertThat(later).containsAll(ours);
+    }
 
-        transactions.execute(status -> repository.reclaimStale(claimedAt.plusMinutes(10)));
-        for (Long id : ours) {
+    /**
+     * Ruling R-d: a reclaimed claim counts as an attempt, so a row that keeps killing its worker
+     * ends FAILED after MAX_ATTEMPTS and raises the inbox-failed alert instead of looping forever.
+     */
+    @Test
+    void reclaimRaisesAttemptsAndFailsTheThirdReclaim() {
+        LocalDateTime claimedAt = LocalDateTime.of(2026, 11, 3, 9, 0);
+        transactions.execute(status -> repository.markProcessing(ours, claimedAt));
+        Long poisoned = ours.get(0);
+        jdbcTemplate.update("UPDATE plaid_webhook_events SET attempts = 2 WHERE id = ?", poisoned);
+
+        int reclaimed = processor.reclaimStaleClaims(claimedAt.plusMinutes(10).plus(PlaidWebhookProcessor.STALE_CLAIM_AGE));
+
+        assertThat(reclaimed).isGreaterThanOrEqualTo(ours.size());
+        assertThat(statusOf(poisoned)).isEqualTo("FAILED");
+        assertThat(attemptsOf(poisoned)).isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_alerts WHERE alert_type = ? AND subject_id = ?",
+                Integer.class, OpsAlerts.INBOX_FAILED, String.valueOf(poisoned))).isEqualTo(1);
+        for (Long id : ours.subList(1, ours.size())) {
             assertThat(statusOf(id)).isEqualTo("RECEIVED");
+            assertThat(attemptsOf(id)).isEqualTo(1);
         }
+    }
+
+    private int attemptsOf(Long id) {
+        Integer attempts = jdbcTemplate.queryForObject("SELECT attempts FROM plaid_webhook_events WHERE id = ?", Integer.class, id);
+        return attempts == null ? 0 : attempts;
     }
 
     private String statusOf(Long id) {

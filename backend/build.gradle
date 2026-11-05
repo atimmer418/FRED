@@ -56,6 +56,9 @@ dependencies {
 }
 
 tasks.withType(JavaCompile).configureEach {
+	// Source files carry non-ASCII test data (a surrogate pair in ColumnTextTest), so the compiler
+	// must not fall back to the platform default encoding on a build runner.
+	options.encoding = 'UTF-8'
 	options.compilerArgs += ['-Xlint:deprecation']
 }
 

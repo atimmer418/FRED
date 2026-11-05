@@ -18,6 +18,12 @@ Five task files hit the 75,000 character size target and give some tests, handle
 
 Ruling on identifiers in ops alerts (raised while writing the T04 appendix): an ops alert may carry FRED's internal ids (user id, inbox row id, schedule id) and the opaque Plaid `item_id`, because the operator needs them to act and none identifies a person on its own. It never carries an access token, a payer name or descriptor, an amount, a deposit date, an email address or free-text Plaid error text. The two T04 sites that send `item_id` are correct as written.
 
+## Tasks added during execution
+
+`task-24-detection-review-fixes.md` (runs after T12, before T13): three defects the T10 and T12 reviews found in plan-mandated code (an unrecognized Plaid status rejected a stream, a stream with no payer token was seeded onto a shared row, a missed period made a stream dormant although a later deposit had arrived).
+
+Known detection limits recorded for shadow tuning, not fixed in Phase 1: (1) cadence derivation rejects a payer when one off-cycle deposit from the same payer (a bonus or reimbursement) sits among its last six deposits, so that payer reads as undetectable until the extra deposit ages out; (2) the holiday calendar copies the existing schedule one, which has no Juneteenth and no observed-day shifts, so a predicted date can be one business day off near those dates; (3) when Plaid's stream description tokenizes differently from the transactions' descriptors, the first streams read can seed a second row for the same payer.
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.

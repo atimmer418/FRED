@@ -1,6 +1,7 @@
 package com.investingapp.backend.config;
 
 import com.investingapp.backend.controller.DevAuthController;
+import com.investingapp.backend.controller.DevPaycheckController;
 import com.investingapp.backend.controller.DevPlaidController;
 import com.investingapp.backend.service.SimulatedAttestationService;
 import org.springframework.beans.BeansException;
@@ -43,6 +44,7 @@ public class DevToolsProdGuard implements BeanFactoryPostProcessor, EnvironmentA
         List<String> offenders = new ArrayList<>();
         addIfPresent(beanFactory, DevAuthController.class, offenders);
         addIfPresent(beanFactory, DevPlaidController.class, offenders);
+        addIfPresent(beanFactory, DevPaycheckController.class, offenders);
         addIfPresent(beanFactory, SimulatedAttestationService.class, offenders);
         addIfPresent(beanFactory, DevToolsConfig.class, offenders);
 

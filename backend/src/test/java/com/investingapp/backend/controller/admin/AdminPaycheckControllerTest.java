@@ -3,6 +3,7 @@ package com.investingapp.backend.controller.admin;
 import com.investingapp.backend.service.AdminAuditService;
 import com.investingapp.backend.service.AdminPaycheckService;
 import com.investingapp.backend.service.AdminPaycheckService.VerbResult;
+import com.investingapp.backend.service.ShadowReportService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,7 @@ class AdminPaycheckControllerTest {
     @BeforeEach
     void setUp() {
         when(audit.actor(any(HttpServletRequest.class))).thenReturn("ops-test");
-        mvc = MockMvcBuilders.standaloneSetup(new AdminPaycheckController(service, audit)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new AdminPaycheckController(service, audit, mock(ShadowReportService.class))).build();
     }
 
     @Test

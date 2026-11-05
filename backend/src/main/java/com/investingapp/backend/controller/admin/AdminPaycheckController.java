@@ -1,15 +1,23 @@
 package com.investingapp.backend.controller.admin;
 
+import com.investingapp.backend.dto.admin.ShadowReport;
 import com.investingapp.backend.service.AdminAuditService;
 import com.investingapp.backend.service.AdminPaycheckService;
 import com.investingapp.backend.service.AdminPaycheckService.VerbResult;
+import com.investingapp.backend.service.ShadowReportService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/paycheck")
 public class AdminPaycheckController {
+
+    static final String VERB_SHADOW_REPORT = "paycheck.shadow-report";
 
     public record HoldRequest(String reason, String note) {
     }
@@ -19,10 +27,13 @@ public class AdminPaycheckController {
 
     private final AdminPaycheckService service;
     private final AdminAuditService adminAuditService;
+    private final ShadowReportService shadowReportService;
 
-    public AdminPaycheckController(AdminPaycheckService service, AdminAuditService adminAuditService) {
+    public AdminPaycheckController(AdminPaycheckService service, AdminAuditService adminAuditService,
+                                   ShadowReportService shadowReportService) {
         this.service = service;
         this.adminAuditService = adminAuditService;
+        this.shadowReportService = shadowReportService;
     }
 
     @GetMapping("/{userId}/status")
@@ -96,6 +107,17 @@ public class AdminPaycheckController {
     @PostMapping("/webhooks/{eventId}/replay")
     public ResponseEntity<Object> replay(@PathVariable("eventId") Long eventId, HttpServletRequest request) {
         return respond(service.replay(actor(request), eventId));
+    }
+
+    /** Spec 12.4 weekly shadow review (R13). A GET, so audited through the REQUIRES_NEW path. */
+    @GetMapping("/shadow-report")
+    public ResponseEntity<ShadowReport> shadowReport(@RequestParam(value = "since", required = false)
+                                                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since,
+                                                     HttpServletRequest request) {
+        ShadowReport report = shadowReportService.build(since);
+        adminAuditService.record(adminAuditService.actor(request), null, VERB_SHADOW_REPORT, null, null,
+                Map.of("users", report.users().size(), "shadowCycles", report.summary().shadowCycles()), null);
+        return ResponseEntity.ok(report);
     }
 
     private String actor(HttpServletRequest request) {

@@ -23,6 +23,9 @@ run_suite "Investments"    investments.sh
 run_suite "Alpaca"         alpaca.sh
 run_suite "Trading"        trading.sh
 run_suite "Beneficiaries"  beneficiaries.sh
+run_suite "Paycheck shadow (Sandbox, self-skipping)"       paycheck_shadow.sh
+run_suite "Paycheck webhooks (Sandbox, self-skipping)"     paycheck_webhooks.sh
+run_suite "Paycheck lost webhook (Sandbox, self-skipping)" paycheck_lost_webhook.sh
 
 echo "=============================="
 if [ ${#FAILED_SUITES[@]} -eq 0 ]; then

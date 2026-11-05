@@ -35,6 +35,8 @@ public final class OpsAlerts {
     /** Raised by the 22:30 reconcile once per run, subject "nightly" (T15); T05 reads it. */
     public static final String RECONCILE_RAN = "paycheck.reconcile.ran";
 
+    /** PlaidGateway: the fifth consecutive TRANSIENT or RATE_LIMIT Plaid result (spec 2.1, 12.3). Subject: global. */
+    public static final String PLAID_OUTAGE = "plaid.outage";
 
     private OpsAlerts() {
     }

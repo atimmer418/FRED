@@ -12,7 +12,8 @@ either: it is the kind of disagreement that reads as carelessness about the exac
 question is asking about.
 
 This page is the answer sheet for both, and the reason for each answer. **Last reviewed:**
-2026-10-24. **Owner:** Andrew Timmer.
+2026-10-24, and again when Paycheck Autopilot Phase 1 added the payroll-deposit row. **Owner:**
+Andrew Timmer.
 
 ---
 
@@ -24,6 +25,7 @@ This page is the answer sheet for both, and the reason for each answer. **Last r
 | `NSPrivacyTrackingDomains` | **empty** | Follows from the above. A non-empty list here would require App Tracking Transparency. |
 | Product interaction | collected, **not linked**, not for tracking, purpose **analytics** | Which screens were reached, which steps were completed, which controls were used. |
 | User ID | collected, **not linked**, not for tracking, purpose **analytics** | The opaque `public_id` UUID. |
+| Other financial info: payroll deposits | collected, **linked**, not for tracking, purpose **app functionality** | Paycheck Autopilot reads the deposits on the linked bank account, through Plaid, to find the user's paycheck. To tell the paycheck apart it stores every incoming deposit on that bank's deposit accounts, not only paychecks: the payer's name as the bank and Plaid describe it, a normalized form of it used for matching and a shorter display name derived from it, each deposit's amount and date, and the pay cadence worked out from those dates. It is stored in FRED's own database against the account, which is why it is linked. None of it is sent to analytics except the pay cadence, as one word on one event (see [what-we-send.md](what-we-send.md)). Apple's definition of Other Financial Info names salary and income, which is what a paycheck is. Whether the employer's name also needs a declaration of its own is with counsel (see the table below). |
 | `NSPrivacyAccessedAPITypes` | UserDefaults, reason **CA92.1** | Capacitor's bridge keeps preferences in UserDefaults and the WebView's local storage sits behind it. CA92.1 is "information from the app itself", which is the only use here. The Capacitor pods do ship manifests, but both declare an **empty** `NSPrivacyAccessedAPITypes`, so if the app does not declare this, nobody does. FRED's own Swift code never touches UserDefaults. |
 
 ### Why "not linked" is the honest answer
@@ -39,6 +41,11 @@ name, no free text, and no dollar amount (every amount is a band such as `1k_249
 list is in [what-we-send.md](what-we-send.md), and the code is held to it by a deny-list and a
 value-shape filter on both the client and the server, with a test on each side that fires a
 forbidden payload and proves it never leaves.
+
+The argument above is about the analytics rows. The payroll-deposit row is **linked**, on purpose:
+those records sit in FRED's own database against the account they belong to, which is what Apple
+means by linked, and none of them is part of what analytics sends except the pay cadence, as one
+word on one event.
 
 ### What would make it false
 
@@ -59,8 +66,9 @@ it needs its own row here and in `what-we-send.md` **before** a key is configure
 
 ## What is NOT declared yet, and who owns it
 
-The manifest covers analytics. It does **not** cover the data the rest of the app collects, and
-that has to be declared before any submission. This is listed rather than quietly omitted.
+The manifest covers analytics and the payroll deposits above. It does **not** cover the rest of
+the data the app collects, and that has to be declared before any submission. This is listed
+rather than quietly omitted.
 
 | Data type | Where it is collected | Owner |
 |---|---|---|
@@ -69,7 +77,8 @@ that has to be declared before any submission. This is listed rather than quietl
 | Email address | registration and account recovery | auth |
 | Phone number | the KYC form, where collected | the KYC flow |
 | Bank account details | the Plaid link | banking |
-| Other financial info (portfolio, contributions) | the app's own screens | investing |
+| Other financial info (portfolio, contributions). The type is now declared for payroll deposits, linked, for app functionality; confirm those answers also fit this data, then delete this row | the app's own screens | investing |
+| Employer name, if counsel says it needs its own declaration. Apple's list of collected data types has no employment type that we could find; if one is wanted, the nearest is `NSPrivacyCollectedDataTypeOtherDataTypes` | the deposit description Paycheck Autopilot reads | Andy, with counsel |
 
 None of it goes to analytics; all of it goes to our own servers and, for KYC, to the broker. The
 manifest and the label still have to say it is collected, with a purpose of "app functionality",
@@ -89,9 +98,11 @@ Answer these to match the manifest exactly:
    the user's identity. **Not** used for tracking.
 3. **Usage Data:** Product Interaction. Used for **analytics**. **Not** linked. **Not** used for
    tracking.
-4. **Diagnostics:** nothing, while Sentry is absent. Revisit the day it lands.
-5. **Tracking:** No. The app does not track users, so no ATT prompt is required or shown.
-6. Every other category: answered by the KYC, auth and banking owners per the table above, not by
+4. **Financial Info:** Other Financial Info (payroll deposits). Used for **app functionality**.
+   **Linked** to the user's identity. **Not** used for tracking.
+5. **Diagnostics:** nothing, while Sentry is absent. Revisit the day it lands.
+6. **Tracking:** No. The app does not track users, so no ATT prompt is required or shown.
+7. Every other category: answered by the KYC, auth and banking owners per the table above, not by
    this work.
 
 ### The two things that must also be true in writing

@@ -9,7 +9,8 @@ check in CI fails the build if the taxonomy in the code and the per-event list i
 [analytics-events.md](analytics-events.md) ever disagree. This page summarises that one by kind, so
 it is kept true by review against it rather than by the check itself.
 
-**Last reviewed:** 2026-10-24 (second revision: the outbound filter now exists). **Owner:** Andrew Timmer.
+**Last reviewed:** 2026-10-24 (second revision: the outbound filter now exists; third revision, for
+Paycheck Autopilot Phase 1: the payroll data FRED holds). **Owner:** Andrew Timmer.
 
 ---
 
@@ -24,6 +25,57 @@ it is kept true by review against it rather than by the check itself.
   no purpose other than analytics and cannot be used to look anyone up outside our database.
 - A user can **turn it off** in Settings. Turning it off stops everything, on every device, and is
   honoured by the server as well as the app.
+
+---
+
+## What FRED holds and never sends
+
+FRED reads the payroll deposits on a user's linked bank account to detect their paycheck, keeps
+that payroll data on its own servers, and never sends a deposit, its amount, its date or the
+employer's name to analytics or to any other third party.
+
+To tell the paycheck apart from everything else, FRED keeps every incoming deposit on the user's
+checking, savings and other deposit accounts at that bank, not only paychecks, so a transfer from
+a friend is kept the same way. That data, in full:
+
+- the name of whoever paid each deposit (for a paycheck, the employer) as the bank and Plaid
+  describe it, a normalized form of that name FRED uses to recognise the same payer again, and a
+  shorter display name FRED derives from it;
+- each deposit's amount and its date;
+- the pay cadence FRED works out from those dates (weekly, every two weeks, twice a month or
+  monthly) and the date it expects the next one;
+- for each pay period, the deposit it matched and what a paycheck-based schedule would have
+  invested from it.
+
+It arrives from the bank through Plaid, over the connection the user already made when they linked
+their bank, and it is stored against their account. The App Store label therefore declares it as
+Other Financial Info, linked to the user, used for app functionality; see
+[privacy-manifest-and-label.md](privacy-manifest-and-label.md).
+
+How long it is kept:
+
+- Individual deposit records older than 24 months are deleted by the nightly job that runs while
+  Paycheck Autopilot is switched on. The per-pay-period records, which keep that period's deposit
+  amount, stay until one of the events below.
+- When the bank connection breaks and the user has to sign in to their bank again, the deposit
+  records are deleted and the bank's full descriptions are blanked. The display name, the
+  normalized payer name, the cadence, the typical and most recent amounts, and the per-pay-period
+  records are kept so that detection can resume when they reconnect.
+- When the user revokes FRED's access at their bank, or links a different bank, everything
+  detected from the old connection is deleted. If they withdraw access to just one account that
+  FRED does not invest from, that account's deposit records are marked removed and then fall
+  under the 24-month rule above.
+- When the account is deleted, all of it is deleted with the user row.
+- When the broker rejects the application, FRED disconnects the bank and reads no new deposits,
+  but what it already holds stays with the rest of the rejected application (see "Retention"):
+  deposit records until the 24-month rule, the rest until the account is deleted.
+
+One analytics event concerns paychecks at all. `paycheck_stream_switched` says that the paycheck
+FRED follows moved to a different payer, and carries only the new pay cadence as a word (such as
+`biweekly`) and the word `succession`. No name, amount, date or identifier is in it.
+
+Whether the employer's name also counts as employment information, which may need its own App
+Store declaration, is with counsel; see open item 4.
 
 ---
 
@@ -251,6 +303,13 @@ These are the gaps in this document, listed rather than quietly omitted:
 3. **Alerts and a daily metrics snapshot do not exist.** Neither affects what is sent; both are
    listed because this page is also read as a statement of how carefully the data is handled, and
    nothing today would tell us that an event stopped arriving.
+4. **Payroll deposits have not been reviewed by counsel.** The payroll data in "What FRED holds and
+   never sends" is new collected data. Andy takes it to counsel with the other privacy questions,
+   including whether the employer's name must also be declared as employment information, whether
+   the cadence word on `paycheck_stream_switched` means the declaration also needs an analytics
+   purpose, and the fact that deposits other than paychecks, which can carry another person's
+   name, are kept too. The privacy policy must list it before Paycheck Autopilot moves any money
+   (the design puts that before its Phase 2).
 
 ---
 

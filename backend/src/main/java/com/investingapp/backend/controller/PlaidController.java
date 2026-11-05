@@ -8,7 +8,9 @@ import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
 import com.investingapp.backend.service.PlaidService;
+import com.investingapp.backend.service.PlaidUpdateModeService;
 import com.investingapp.backend.service.UpdateModeUnavailableException;
+import com.investingapp.backend.util.EasternTime;
 import com.plaid.client.model.ItemPublicTokenExchangeResponse; // Make sure this is imported
 import com.plaid.client.model.LinkTokenCreateResponse;
 import org.slf4j.Logger;
@@ -37,6 +39,9 @@ public class PlaidController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private PlaidUpdateModeService plaidUpdateModeService;
 
     // --- AUTHENTICATED FLOW ENDPOINTS ---
     
@@ -119,6 +124,36 @@ public class PlaidController {
         }
     }
 
+    /** After an update-mode Link onSuccess (spec 2.3, 8.8): no body, no exchange. */
+    @PostMapping("/update-mode-complete")
+    public ResponseEntity<?> completeUpdateMode(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof UserDetailsImpl userDetails)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new MessageResponse("User not authenticated"));
+        }
+        User user = userRepository.findById(userDetails.getId()).orElse(null);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponse("User not found in database"));
+        }
+        try {
+            PlaidUpdateModeService.UpdateModeResult result = plaidUpdateModeService.complete(user);
+            return switch (result) {
+                case STALE_ITEM -> ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorCodeResponse(
+                        "STALE_ITEM", "This bank connection changed while you were reconnecting. Try again."));
+                case PLAID_ERROR -> ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(new ErrorCodeResponse(
+                        "PLAID_ERROR", "Plaid could not confirm the bank connection. Try again in a moment."));
+                default -> ResponseEntity.ok(Map.of("result", result.name()));
+            };
+        } catch (UpdateModeUnavailableException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorCodeResponse(
+                    "UPDATE_MODE_UNAVAILABLE", "Plaid could not reopen this bank connection. Link the bank again."));
+        } catch (RuntimeException e) {
+            logger.error("plaid.update_mode.failed user_id={} error_class={}", user.getId(), e.getClass().getSimpleName());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new MessageResponse("Error completing the bank reconnection"));
+        }
+    }
+
     @GetMapping("/primary-bank-account")
     public ResponseEntity<?> getPrimaryBankAccount(Authentication authentication) {
         try {
@@ -141,6 +176,11 @@ public class PlaidController {
             bankAccount.put("accountSubtype", user.getPlaidAccountSubtype());
             bankAccount.put("mask", user.getPlaidAccountMask());
             bankAccount.put("itemStatus", user.getPlaidItemStatus().name());
+            // Phase 1 (spec 8.8, R10): the reconnect card reads both. consentExpiresAt is
+            // users.plaid_disconnect_at, an Eastern wall time, sent with its offset.
+            bankAccount.put("transactionsConsented", user.getPlaidTransactionsConsented());
+            bankAccount.put("consentExpiresAt", user.getPlaidDisconnectAt() == null ? null
+                    : user.getPlaidDisconnectAt().atZone(EasternTime.ZONE).toOffsetDateTime().toString());
 
             return ResponseEntity.ok(bankAccount);
         } catch (Exception e) {

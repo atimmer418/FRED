@@ -71,7 +71,6 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | `POST` | `/api/investment-schedule/create` | Create or update schedule (upsert) | Yes | `CreateInvestmentScheduleRequest` | `InvestmentScheduleResponse` |
 | `GET` | `/api/investment-schedule/current` | Get current schedule | Yes | None | `InvestmentScheduleResponse` |
 | `GET` | `/api/investment-schedule/all` | Get all schedules | Yes | None | `List<InvestmentScheduleResponse>` |
-| `POST` | `/api/investment-schedule/update-ach-request-id` | Update ACH request ID | Yes | `{ achRequestId, userEmail }` | `InvestmentScheduleResponse` |
 | `POST` | `/api/investment-schedule/{scheduleId}/pause` | Pause schedule | Yes | None | `InvestmentScheduleResponse` |
 | `POST` | `/api/investment-schedule/{scheduleId}/resume` | Resume paused schedule | Yes | None | `InvestmentScheduleResponse` |
 
@@ -130,7 +129,9 @@ All available API endpoints in the backend. Keep this file updated when adding n
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/plaid/create_link_token` | Create Plaid link token | Yes | None | LinkTokenResponse |
 | `POST` | `/api/plaid/exchange_public_token` | Exchange public token for access token | Yes | `{ public_token }` | Success/Error |
-| `GET` | `/api/plaid/primary-bank-account` | Primary bank account, display fields only (never the Plaid access token) | Yes | None | `{ accountId, institutionName, accountName, accountType, accountSubtype, mask, itemStatus }` |
+| `GET` | `/api/plaid/primary-bank-account` | Primary bank account, display fields only (never the Plaid access token) | Yes | None | `{ accountId, institutionName, accountName, accountType, accountSubtype, mask, itemStatus, transactionsConsented, consentExpiresAt }` (`transactionsConsented` true, false or null for unknown; `consentExpiresAt` ISO date-time with offset, or null) |
+| `POST` | `/api/plaid/update-mode-complete` | Finish an update-mode Link (reconnect or consent): re-reads consent and its expiry, re-registers the webhook, repairs a login. Never exchanges a token | Yes | None | `{ result }`: `CONSENT_GRANTED`, `CONSENT_STILL_MISSING`, `REPAIRED` or `NO_CHANGE`; 409 `STALE_ITEM` or `UPDATE_MODE_UNAVAILABLE`; 502 `PLAID_ERROR` |
+| `GET` | `/api/paycheck-detection/status` | Paycheck detection state (spec 8.1), database only; the first call for a user with no sync cursor starts the initial sync in the background. Not called by the app yet (Phase 1) | Yes | None | the spec 8.1 body (`PaycheckDetectionStatusResponse`) |
 
 ---
 

@@ -18,6 +18,24 @@ public final class OpsAlerts {
     public static final String PLAID_ITEM_REMOVE_EXHAUSTED = "plaid.item_remove.exhausted";
     public static final String PLAID_WEBHOOK_AMBIGUOUS_ITEM = "plaid.webhook.ambiguous_item";
 
+    /** The 09:07 ET digest (T05): raised every morning with every gauge, subject "digest". */
+    public static final String HEARTBEAT = "ops.heartbeat";
+    /** Webhook inbox rows in FAILED (T05 daily, subject "global"; T14 also raises it per row). */
+    public static final String INBOX_FAILED = "plaid.inbox.failed";
+    /** The oldest RECEIVED or PROCESSING inbox row is older than 30 minutes (T05). */
+    public static final String INBOX_OLDEST_AGE = "plaid.inbox.oldest_age";
+    /** No webhook row received in 24 hours while billable Items exist (T05). */
+    public static final String WEBHOOKS_NONE_24H = "plaid.webhooks.none_24h";
+    /** detection_started_at is over 24 hours old and the mirror is SEARCHING or still null; REJECTED users excluded (T05). */
+    public static final String SEARCHING_24H = "paycheck.searching_24h";
+    /** A MANUAL_REVIEW hold exists on a user who is not a rejected KYC applicant (T05). */
+    public static final String HOLDS_MANUAL_REVIEW_PRESENT = "holds.manual_review_present";
+    /** No RECONCILE_RAN row for yesterday's Eastern day (T05, subject "nightly"). */
+    public static final String RECONCILE_LATE = "paycheck.reconcile.late";
+    /** Raised by the 22:30 reconcile once per run, subject "nightly" (T15); T05 reads it. */
+    public static final String RECONCILE_RAN = "paycheck.reconcile.ran";
+
+
     private OpsAlerts() {
     }
 }

@@ -260,11 +260,15 @@ when it was written, used only when the user is gone.
 | `paycheck_stream_switched` | `frequency`, `reason` | The detected paycheck moved to a new payer at the same bank (spec 6.1 succession), in shadow and live alike. |
 
 The three schedule transitions carry `initiator` (`user` or `system`) and `reason`
-(`user_request`, `bank_change`, `ach_confirmed`, `account_closed`, `kyc_rejected`). The split
+(`user_request`, `bank_change`, `ach_confirmed`, `account_closed`, `kyc_rejected`, `review_cleared`). The split
 matters: a user pausing is churn, and us pausing while their bank changes is lifecycle. Only real
 transitions are recorded, so pausing an already-paused schedule emits nothing, and a schedule being
 created paused emits nothing at all because that is how a schedule is born. See
 FREDdocs/metrics.md for how `v_schedule_churn` reads them.
+
+`review_cleared` is a system resume: an operator lifted a `MANUAL_REVIEW` hold with the admin
+`clear-review` verb on a schedule whose status was already `ACTIVE`. It is never recorded for a
+schedule the user paused or that is still waiting for its bank, and never for a rejected applicant.
 
 `paycheck_stream_switched` carries the new primary paycheck's cadence as `frequency` (`weekly`,
 `biweekly`, `semi_monthly`, `monthly`) and a `reason` whose only value is `succession`. It never

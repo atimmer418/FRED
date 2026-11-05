@@ -18,6 +18,9 @@ public interface PlaidWebhookEventRepository extends JpaRepository<PlaidWebhookE
 
     Optional<PlaidWebhookEvent> findByDedupeKey(String dedupeKey);
 
+    /** The admin status dump's inbox tail for one user (T18). Read only. */
+    List<PlaidWebhookEvent> findTop20ByUserIdOrderByReceivedAtDesc(Long userId);
+
     /** RECEIVED rows, oldest first, locked until the caller's transaction ends; rows another claimer holds are skipped (MySQL 8.0). */
     @Query(value = "SELECT id FROM plaid_webhook_events WHERE status = 'RECEIVED' ORDER BY received_at "
             + "LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)

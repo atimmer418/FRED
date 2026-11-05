@@ -103,6 +103,8 @@ public final class ServerAnalyticsEvent {
     public static final String REASON_ACH_CONFIRMED = "ach_confirmed";
     public static final String REASON_ACCOUNT_CLOSED = "account_closed";
     public static final String REASON_KYC_REJECTED = "kyc_rejected";
+    /** An operator cleared MANUAL_REVIEW with the admin clear-review verb (system resume, R3). */
+    public static final String REASON_REVIEW_CLEARED = "review_cleared";
     /** paycheck_stream_switched only: a new payer took over as the primary paycheck (spec 6.1). */
     public static final String REASON_SUCCESSION = "succession";
 

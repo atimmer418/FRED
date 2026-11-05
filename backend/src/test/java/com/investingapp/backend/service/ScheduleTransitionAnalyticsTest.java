@@ -5,6 +5,7 @@ import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.InvestmentSchedule.Status;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
+import com.investingapp.backend.util.ServerAnalyticsEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -453,6 +454,13 @@ class ScheduleTransitionAnalyticsTest {
     // --- Site 5: the system resume, which now lives in AchRelationshipService.adopt -------------
     // updateWithAchRequestId is gone (Phase 0 made AchRelationshipService the single writer of the
     // ACH fields), and its resume cases are AchRelationshipServiceTest's.
+
+    // --- Site 6: clear-review (cases in AdminPaycheckServiceTest and its RollbackTest) -----------
+
+    @Test
+    void reviewClearedIsAClosedReasonWithItsWireSpelling() {
+        assertEquals("review_cleared", ServerAnalyticsEvent.REASON_REVIEW_CLEARED);
+    }
 
     // --- Site 1: the trap. A schedule is BORN paused, which is not a pause. ---------------------
 

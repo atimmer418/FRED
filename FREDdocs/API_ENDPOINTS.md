@@ -243,6 +243,23 @@ All available API endpoints in the backend. Keep this file updated when adding n
 > Every call writes one `admin_actions` row. Curl only (no CORS). A write verb's user id comes from
 > `SELECT id FROM users WHERE public_id = ?`.
 
+## Admin: Paycheck Autopilot (`/api/admin/paycheck`)
+
+Every profile, prod included; curl only. Each call needs `X-Admin-Key` (`ADMIN_TOOLS_KEY`; else 404, empty body) and a non-blank `X-Admin-Actor` (else 400), and writes one `admin_actions` row, refusals included. No verb writes the schedule status or a blocking hold, or moves money. Unknown user: 404 `USER_NOT_FOUND`.
+
+| Method | Path under `/api/admin/paycheck` | Does | Refusals |
+|--------|------|------|----------|
+| `GET` | `/{userId}/status` | 8.1 status, streams with raw descriptors, 50 cycles, 20 inbox rows | |
+| `GET` | `/{userId}/plaid-item` | `plaid_*` user columns, token and cursor as presence only | |
+| `POST` | `/{userId}/sync`, `/evaluate`, `/reconcile` | Pipeline (MANUAL), detection (RECONCILE), one-user reconcile | 409 `NO_ITEM` (sync) |
+| `POST` | `/{userId}/hold` `{ reason, note }` | Sets ITEM_LOGIN_REQUIRED, PERMISSION_REVOKED, CONSENT_REQUIRED, BANK_CHANGE or null; no event | 422 `HOLD_RESERVED`; 409 `HOLD_BLOCKING`, `NO_SCHEDULE` |
+| `POST` | `/{userId}/clear-review` `{ note }` | Clears MANUAL_REVIEW; `schedule_resumed` (system, `review_cleared`) only when ACTIVE | 409 `ACCOUNT_REJECTED`, `NOT_IN_REVIEW`, `NO_SCHEDULE` |
+| `POST` | `/{userId}/promote-stream/{streamId}` | PRIMARY PROVISIONAL, old primary SECONDARY, mirrored | 404; 409 `STREAM_NOT_PROMOTABLE` |
+| `POST` | `/{userId}/retire-stream/{streamId}` | RETIRED `ADMIN`, its OPEN cycle VOIDED `ADMIN`, mirror cleared | 404 |
+| `POST` | `/{userId}/cycles/{cycleId}/void` | VOIDED `ADMIN` for OPEN or CONFIRMED with no execution | 404; 409 `CYCLE_HAS_EXECUTION`, `CYCLE_NOT_VOIDABLE` |
+| `GET` | `/webhooks?status=FAILED` | Inbox rows in one status, oldest first, at most 200 | 400 `BAD_STATUS` |
+| `POST` | `/webhooks/{eventId}/replay` | Row back to RECEIVED, attempts 0 | 404 `WEBHOOK_NOT_FOUND`; 409 `WEBHOOK_IN_FLIGHT` |
+
 ---
 
 ## Authentication Notes

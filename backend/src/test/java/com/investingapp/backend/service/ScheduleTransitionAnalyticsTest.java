@@ -425,6 +425,31 @@ class ScheduleTransitionAnalyticsTest {
         verify(analyticsOutboxService, never()).record(any(), any(), any());
     }
 
+    /**
+     * Ruling R20: a bank change never downgrades a blocking hold. BANK_CHANGE is not blocking, and
+     * AchRelationshipService.adopt clears it when the new relationship lands, so overwriting
+     * MANUAL_REVIEW (a KYC rejection, a refused adoption) or an ACH return with it would let an
+     * ordinary relink restart money a person or the bank had stopped. The stale relationship id
+     * still goes, the status is still left alone, and nothing is counted: a schedule under a
+     * blocking hold was not running, so this call stopped nothing.
+     */
+    @Test
+    void bankChangeKeepsABlockingHold() {
+        stubSaveEchoesBack();
+        for (HoldReason blocking : List.of(HoldReason.MANUAL_REVIEW,
+                HoldReason.ACH_RETURN_UNAUTHORIZED, HoldReason.ACH_RETURN_ACCOUNT)) {
+            InvestmentSchedule held = heldSchedule(blocking);
+            stubLatestSchedule(held);
+
+            service.resetForBankChange(user);
+
+            assertEquals(blocking, held.getHoldReason(), blocking + " survives the bank change");
+            assertNull(held.getAchRequestId(), "the old relationship is still gone");
+            assertEquals(Status.ACTIVE, held.getStatus(), "and the status is still left alone");
+        }
+        verify(analyticsOutboxService, never()).record(any(), any(), any());
+    }
+
     // --- Site 5: the system resume, which now lives in AchRelationshipService.adopt -------------
     // updateWithAchRequestId is gone (Phase 0 made AchRelationshipService the single writer of the
     // ACH fields), and its resume cases are AchRelationshipServiceTest's.

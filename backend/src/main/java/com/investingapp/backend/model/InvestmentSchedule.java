@@ -14,6 +14,9 @@ import com.investingapp.backend.util.EasternTime;
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
+// Ruling R19: an UPDATE names only the columns changed in this unit of work, so a writer holding a
+// stale copy cannot write back a column another transaction moved (next_investment_date, hold_reason).
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "investment_schedules")
 public class InvestmentSchedule {
     @Id
@@ -355,6 +358,15 @@ public class InvestmentSchedule {
     /** Holds that stop a MANUAL schedule from investing (spec 5.2); BANK_CHANGE is not one of them. */
     private static final EnumSet<HoldReason> BLOCKING_HOLDS = EnumSet.of(
             HoldReason.ACH_RETURN_UNAUTHORIZED, HoldReason.ACH_RETURN_ACCOUNT, HoldReason.MANUAL_REVIEW);
+
+    /**
+     * Whether this hold, on its own, stops money: true for exactly the members of BLOCKING_HOLDS,
+     * the set {@link #isReadyForInvestment} reads. Exposed so callers ask instead of restating the
+     * list (ruling R20). Null, BANK_CHANGE and every other hold are not blocking.
+     */
+    public static boolean isBlockingHold(HoldReason reason) {
+        return reason != null && BLOCKING_HOLDS.contains(reason);
+    }
 
     /**
      * Whether the schedule is stopped, for any reason. Derived from the status rather than stored:

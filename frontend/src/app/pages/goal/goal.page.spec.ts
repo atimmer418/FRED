@@ -49,6 +49,65 @@ function kidsGoalFixture(id: number, birthYear: number | null): Goal {
   return { ...houseGoal(id), type: 'KIDS', name: 'Our kids', icon: 'child_care', config };
 }
 
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** The month `n` months from this one (negative for past months). */
+function monthsOut(n: number): { year: number; month: number } {
+  const d = new Date();
+  const total = d.getFullYear() * 12 + d.getMonth() + n;
+  return { year: Math.floor(total / 12), month: (total % 12) + 1 };
+}
+
+function monLabel(m: { year: number; month: number }): string {
+  return `${MON[m.month - 1]} ${m.year}`;
+}
+
+function usd(n: number): string {
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+interface FundKid {
+  label: string;
+  birthYear: number | null;
+  birthMonth: number | null;
+  due?: { year: number; month: number };
+  target?: number;
+  balance?: number;
+  logged?: string | null;
+}
+
+/** A stored kids goal anchored now, each kid with a `due` holding a first-year fund. */
+function fundKidsGoal(
+  id: number,
+  kids: FundKid[],
+  opts: { plan529Target?: number; brokerageTarget?: number; anchoredAt?: string } = {},
+): Goal {
+  const fresh = (balance = 0, logged: string | null = null) =>
+    ({ balance, balanceUpdatedAt: logged, anchorBalance: balance, anchorMonthly: 0 });
+  const config: KidsConfig = {
+    plan529Target: opts.plan529Target ?? 0,
+    brokerageTarget: opts.brokerageTarget ?? 0,
+    firstYearFund: kids.some(k => !!k.due),
+    kids: kids.map(k => ({
+      label: k.label,
+      birthYear: k.birthYear,
+      birthMonth: k.birthMonth,
+      firstYearTarget: k.due ? (k.target ?? 25_700) : null,
+      firstYearDueYear: k.due?.year ?? null,
+      firstYearDueMonth: k.due?.month ?? null,
+      accounts: {
+        plan529: fresh(),
+        brokerage: fresh(),
+        firstYear: k.due ? fresh(k.balance ?? 0, k.logged ?? null) : null,
+      },
+    })),
+  };
+  return {
+    ...houseGoal(id), type: 'KIDS', name: 'Our kids', icon: 'child_care', config,
+    planAnchoredAt: opts.anchoredAt ?? localIso(new Date()), anchorMonthly: 500,
+  };
+}
+
 function vacationGoalFixture(id: number): Goal {
   const config: VacationConfig = { tripsPerYear: 2, budgetPerTrip: 3_000, savedThisYear: 0, savedYear: YEAR };
   return { ...houseGoal(id), type: 'VACATION', name: 'Trips', icon: 'flight', config, planRateKind: 'cash', planRate: 0.04 };
@@ -137,7 +196,9 @@ describe('GoalPage', () => {
     expect(page.form().type).toBe('KIDS');
     expect(page.form().name).toBe('Our kids');
     expect(navCtrl.navigateBack).not.toHaveBeenCalled();
-    expect(fixture.nativeElement.querySelector('.gl-cta').textContent).toContain('Show my plan');
+    // KIDS opens the quiz on its first card.
+    expect(fixture.nativeElement.querySelector('.gl-q').textContent).toContain('How many kids are you planning for?');
+    expect(fixture.nativeElement.querySelector('.gl-cta').textContent).toContain('Next');
   });
 
   it('navigates back for an unknown type or a non-numeric id', async () => {
@@ -552,5 +613,462 @@ describe('GoalPage', () => {
 
     const vacation = await create({ id: '6' }, { goals: [vacationGoalFixture(6)] });
     expect(text(vacation)).not.toContain('\u2014');
+  });
+
+  // \u2500\u2500 KIDS: quiz, what a kid costs, first-year fund \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+  function question(fixture: ComponentFixture<GoalPage>): string {
+    return text(fixture, '.gl-q').trim();
+  }
+
+  function clickCta(fixture: ComponentFixture<GoalPage>): void {
+    (fixture.nativeElement.querySelector('.gl-quiz .gl-cta') as HTMLButtonElement).click();
+    fixture.detectChanges();
+  }
+
+  function showCard(fixture: ComponentFixture<GoalPage>, card: 1 | 2 | 3 | 4 | 5): void {
+    const page = fixture.componentInstance;
+    page.backToInputs();
+    page.quizCard.set(card);
+    fixture.detectChanges();
+  }
+
+  it('walks the five quiz cards in order with the cost card third and blocks Next on an invalid card', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    const root: HTMLElement = fixture.nativeElement;
+
+    expect(question(fixture)).toBe('How many kids are you planning for?');
+    expect(text(fixture)).toContain('Count the ones already here too.');
+    expect(root.querySelectorAll('.gl-dots span').length).toBe(5);
+    expect(root.querySelector('.gl-quiz-back')).toBeNull();
+
+    clickCta(fixture);
+    expect(question(fixture)).toBe('When?');
+    expect(text(fixture)).toContain('Not sure yet');
+    page.patchKid(0, { undecided: false, birthYear: YEAR + 20, birthMonth: 3 });
+    clickCta(fixture);
+    expect(question(fixture)).withContext('blocked by an out-of-range year').toBe('When?');
+    expect(text(fixture)).toContain(`Enter a year from ${YEAR - 17} to ${YEAR + 10}.`);
+    page.toggleUndecided(0);
+    fixture.detectChanges();
+
+    clickCta(fixture);
+    expect(question(fixture)).toBe('What a kid costs');
+    expect(root.querySelector('.gl-quiz-back')).not.toBeNull();
+    clickCta(fixture);
+    expect(question(fixture)).toBe('How much do you want to set aside for college?');
+    clickCta(fixture);
+    expect(question(fixture)).toBe('How much do you want each kid to start adult life with?');
+    expect(text(fixture, '.gl-quiz .gl-cta').trim()).toBe('Show my plan');
+    expect(root.querySelector('#gl-name')).not.toBeNull();
+
+    (root.querySelector('.gl-quiz-back') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(question(fixture)).toBe('How much do you want to set aside for college?');
+
+    // A custom amount left empty blocks Next on its own card.
+    page.setCollegeChoice('custom');
+    page.patchKids({ plan529Target: null });
+    clickCta(fixture);
+    expect(question(fixture)).toBe('How much do you want to set aside for college?');
+    expect(text(fixture)).toContain('Enter an amount greater than $0.');
+    page.setCollegeChoice('public_tuition');
+    clickCta(fixture);
+    clickCta(fixture);
+    expect(page.step()).toBe(2);
+
+    // Back from the plan returns to card 1.
+    page.backToInputs();
+    fixture.detectChanges();
+    expect(question(fixture)).toBe('How many kids are you planning for?');
+  });
+
+  it('jumps to the first card with an error when the plan is shown or saved', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.quizCard.set(5);
+    page.patchKid(0, { undecided: false, birthYear: YEAR + 30, birthMonth: 1 });
+    page.showPlan();
+    expect(page.step()).toBe(1);
+    expect(page.quizCard()).toBe(2);
+  });
+
+  it('shows the monthly the fund adds next to the switch and the short-runway line under 12 months', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.selectRate(0.10);
+    showCard(fixture, 3);
+
+    expect(text(fixture)).toContain('About $422,000 to raise an only child to 18.');
+    expect(text(fixture)).toContain('The first year alone, with birth costs: about $25,700 for a first child.');
+    expect(text(fixture)).toContain('National averages for a middle-income, two-parent family. USDA figures from 2015, adjusted to September 2026 dollars by FRED. Birth cost from Peterson-KFF, 2023 dollars, with employer insurance.');
+    expect(text(fixture)).toContain('Plan for the first year');
+    expect(page.form().kids.firstYearFund).toBeTrue();
+    expect(fixture.nativeElement.querySelector('.gl-switch').getAttribute('aria-checked')).toBe('true');
+    expect(text(fixture)).toContain(`Adds about $616 a month until ${monLabel(monthsOut(36))}`);
+    expect(text(fixture)).not.toContain('That is a lot to save');
+
+    // Six months out: the default turns off, the line still shows what it would add.
+    const due = monthsOut(6);
+    page.patchKid(0, { undecided: false, birthYear: due.year, birthMonth: due.month });
+    fixture.detectChanges();
+    expect(page.form().kids.firstYearFund).toBeFalse();
+    expect(page.fundShortRunwayMonths()).toBe(6);
+    expect(text(fixture)).toContain(`a month until ${monLabel(due)}`);
+    expect(text(fixture)).toContain('That is a lot to save in 6 months. Most of the first year is paid from your income as you go, so save what you can.');
+
+    // Once the user touches the switch, timing edits no longer re-default it.
+    page.toggleFirstYearFund();
+    const later = monthsOut(30);
+    page.patchKid(0, { birthYear: later.year, birthMonth: later.month });
+    page.patchKid(0, { birthYear: due.year, birthMonth: due.month });
+    expect(page.form().kids.firstYearFund).toBeTrue();
+  });
+
+  it('sets the 529 target from a college row and the brokerage target from an at-18 row', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    showCard(fixture, 4);
+    const rows = () => Array.from(fixture.nativeElement.querySelectorAll('.gl-select-row')) as HTMLButtonElement[];
+    // Label left, amount right: read the two spans of each row.
+    const rowText = () => rows().map(r => Array.from(r.querySelectorAll('span'))
+      .map(s => (s.textContent ?? '').trim()).join(' '));
+    expect(rowText()).toEqual([
+      "In-state public tuition, at today's prices $47,800",
+      "In-state public full cost, at today's prices $123,960",
+      "Private college tuition, at today's prices $180,000",
+      'Another amount',
+      'None for now',
+    ]);
+    expect(rows()[0].classList).toContain('selected');
+    expect(text(fixture)).toContain('This goes in a 529, a state college savings plan you open outside FRED. Per kid, four years at 2025-26 prices from the College Board. College will likely cost more by the time your kid starts: at 3% a year, $47,800 today is about $81,000 in 18 years. Raise the amount any time.');
+
+    rows()[1].click();
+    fixture.detectChanges();
+    expect(page.form().kids.plan529Target).toBe(123_960);
+    expect(page.form().kids.collegeChoice).toBe('public_full');
+    rows()[4].click();
+    fixture.detectChanges();
+    expect(page.form().kids.plan529Target).toBeNull();
+    rows()[3].click();
+    fixture.detectChanges();
+    const custom = fixture.nativeElement.querySelector('#gl-college-custom') as HTMLInputElement;
+    expect(custom).not.toBeNull();
+    custom.value = '70000';
+    custom.dispatchEvent(new Event('input'));
+    expect(page.form().kids.plan529Target).toBe(70_000);
+    expect(page.form().kids.collegeChoice).toBe('custom');
+
+    page.quizCard.set(5);
+    fixture.detectChanges();
+    expect(rowText()).toEqual(['$25,000', '$50,000', '$100,000', '$250,000', 'Another amount', 'Nothing extra']);
+    expect(rows()[0].classList).toContain('selected');
+    rows()[2].click();
+    fixture.detectChanges();
+    expect(page.form().kids.brokerageTarget).toBe(100_000);
+    expect(page.form().kids.at18Choice).toBe(100_000);
+    rows()[5].click();
+    expect(page.form().kids.brokerageTarget).toBeNull();
+    expect(page.form().kids.at18Choice).toBe('none');
+  });
+
+  it('orders the plan view: hero, return assumption, inputs, status, costs, fund, accounts', async () => {
+    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36) }],
+      { plan529Target: 47_800, brokerageTarget: 25_000 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const root: HTMLElement = fixture.nativeElement;
+    const order = Array.from(root.querySelectorAll('.gl-hero, .gl-rate, .gl-inputs-row, .gl-status, .gl-costs, .gl-fund, .gl-account'))
+      .map(el => ['gl-hero', 'gl-rate', 'gl-inputs-row', 'gl-status', 'gl-costs', 'gl-fund', 'gl-account']
+        .find(c => el.classList.contains(c)));
+    expect(order).toEqual(['gl-hero', 'gl-rate', 'gl-inputs-row', 'gl-status', 'gl-costs', 'gl-fund', 'gl-account', 'gl-account']);
+    expect(text(fixture, '.gl-inputs-row')).toContain('1 kid \u00b7 $48K college \u00b7 $25K at 18 \u00b7 first-year fund');
+    const fund = fixture.componentInstance.view().firstYear!;
+    expect(text(fixture, '.gl-hero')).toContain(`${usd(fund.totalMonthly)} of this is the first-year fund, which ends ${monLabel(monthsOut(36))}.`);
+    expect(text(fixture, '.gl-account')).toContain('Based on 2025-26 college prices, which tend to rise.');
+  });
+
+  it('words the per-child headline by family size', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.showPlan();
+    fixture.detectChanges();
+    expect(text(fixture, '.gl-costs')).toContain('About $422,000 to raise an only child to 18');
+    expect(text(fixture, '.gl-costs')).not.toContain('in all');
+    // Setup opens the card: rows, birth row and the note with the college ending.
+    expect(text(fixture, '.gl-costs')).toContain('Pregnancy and birth, with employer insurance: about $2,700 out of pocket (Peterson-KFF, 2023 dollars)');
+    expect(text(fixture, '.gl-costs')).toContain('College is not included, which is what the 529 below is for.');
+
+    page.addKid();
+    page.showPlan();
+    fixture.detectChanges();
+    const two = text(fixture, '.gl-costs');
+    expect(two).toContain('About $332,000 per child to 18 in a two-child family');
+    expect(two).toContain('For your 2 kids, about $664,000 in all, if they are home at the same time.');
+    expect(two).toContain('Baby and toddler, 0 to 2');
+    expect(two).toContain('about $18,000 a year, $1,500 a month');
+    expect(two).toContain('Preschool, 3 to 5');
+    expect(two).toContain('Grade school, 6 to 11');
+    expect(two).toContain('about $18,100 a year, $1,510 a month');
+    expect(two).toContain('Teen years, 12 to 17');
+    expect(two).toContain('about $19,100 a year, $1,600 a month');
+    expect(two).toContain('Yearly costs are national averages for a middle-income, two-parent family: USDA figures from 2015, adjusted to September 2026 dollars by FRED. Families with more children spend less on each one, and an only child costs more (USDA). Your costs will differ.');
+
+    page.addKid();
+    page.setCollegeChoice('none');
+    page.showPlan();
+    fixture.detectChanges();
+    const three = text(fixture, '.gl-costs');
+    expect(three).toContain('About $252,000 per child to 18 in a family of three or more');
+    expect(three).toContain('For your 3 kids, about $757,000 in all, if they are home at the same time.');
+    expect(three).toContain('College is not included. You can add a college plan from Edit.');
+
+    // Sources list the three cost sources and leave the College Board to the college question.
+    (fixture.nativeElement.querySelector('.gl-costs-sources-toggle') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const sources = text(fixture, '.gl-costs');
+    expect(sources).toContain('USDA, Expenditures on Children by Families');
+    expect(sources).toContain('U.S. Bureau of Labor Statistics, Consumer Price Index');
+    expect(sources).toContain('Peterson-KFF Health System Tracker');
+    expect(sources).not.toContain('College Board');
+  });
+
+  it('collapses the cost card in edit mode behind Show costs by age', async () => {
+    const fixture = await create({ id: '5' }, { goals: [kidsGoalFixture(5, null)] });
+    expect(text(fixture, '.gl-costs')).toContain('About $422,000 to raise an only child to 18');
+    expect(text(fixture, '.gl-costs')).not.toContain('Baby and toddler, 0 to 2');
+    const toggle = fixture.nativeElement.querySelector('.gl-costs-toggle') as HTMLButtonElement;
+    expect(toggle.textContent).toContain('Show costs by age');
+    toggle.click();
+    fixture.detectChanges();
+    expect(text(fixture, '.gl-costs')).toContain('Baby and toddler, 0 to 2');
+  });
+
+  it('lists a decided fund until its month, an undecided fund with its date and the invested note, and a finished fund as saved of target', async () => {
+    const ava = monthsOut(48);
+    const born = monthsOut(-2);
+    const goal = fundKidsGoal(5, [
+      { label: 'Ava', birthYear: ava.year, birthMonth: ava.month, due: ava },
+      { label: 'Ben', birthYear: null, birthMonth: null, due: monthsOut(36), target: 20_800 },
+      { label: 'Cy', birthYear: born.year, birthMonth: born.month, due: born, target: 16_500, balance: 9_000 },
+      { label: 'Dee', birthYear: null, birthMonth: null, due: monthsOut(-1), target: 20_800, balance: 20_000 },
+    ], { plan529Target: 47_800 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const rows = fixture.componentInstance.view().firstYear!.rows;
+    const card = text(fixture, '.gl-fund');
+
+    expect(card).toContain('Ava: about $25,700 for birth costs and the first year.');
+    expect(card).toContain(`${usd(rows[0].plan.monthly)} a month until ${monLabel(ava)}.`);
+    expect(rows[0].plan.rateKind).toBe('market');
+    expect(card).not.toContain('since you need it within 3 years');
+
+    expect(card).toContain('Ben: about $20,800 for birth costs and the first year.');
+    expect(card).toContain(`${usd(rows[1].plan.monthly)} a month until ${monLabel(monthsOut(36))}. No date yet, so this one is invested at your return assumption.`);
+
+    expect(card).toContain('Cy: $9,000 saved of $16,500 for the first year.');
+    expect(card).not.toContain('Cy: about');
+    expect(card).toContain('Dee: $20,000 saved of $20,800. Three years are up, so set a date to keep planning.');
+
+    expect(fixture.nativeElement.querySelectorAll('.gl-fund input').length).toBe(4);
+    expect(text(fixture, '.gl-fund')).toContain('Saved so far');
+    expect(text(fixture)).toContain('Markets can be down when the day comes, so treat this as a head start. Once you pick a date less than three years away, FRED plans this fund as cash.');
+    expect(card).toContain('FRED estimate: first-year average (USDA, adjusted to September 2026 dollars) plus birth costs (Peterson-KFF, 2023 dollars), rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move goal money.');
+  });
+
+  it('adds the cash line for a decided fund under three years away', async () => {
+    const due = monthsOut(20);
+    const goal = fundKidsGoal(5, [{ label: 'Ava', birthYear: due.year, birthMonth: due.month, due }], { plan529Target: 47_800 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const row = fixture.componentInstance.view().firstYear!.rows[0];
+    expect(text(fixture, '.gl-fund')).toContain(`${usd(row.plan.monthly)} a month until ${monLabel(due)}. Planned as cash at about 4%, since you need it within 3 years.`);
+  });
+
+  it('hides the fund switch and card when every kid is already born and no fund is stored', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.patchKid(0, { undecided: false, birthYear: YEAR - 2, birthMonth: 4 });
+    showCard(fixture, 3);
+    expect(page.anyKidEligible()).toBeFalse();
+    expect(page.form().kids.firstYearFund).toBeFalse();
+    expect(fixture.nativeElement.querySelector('.gl-switch')).toBeNull();
+    expect(text(fixture)).toContain('Your kids are already here, so there is no first-year fund to plan.');
+    page.showPlan();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.gl-fund')).toBeNull();
+    expect(text(fixture, '.gl-inputs-row')).not.toContain('first-year fund');
+  });
+
+  it('sends firstYearFund, per-kid targets, due dates and first-year anchors on save', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    page.addKid();
+    page.showPlan();
+    fixture.detectChanges();
+    const input = fixture.nativeElement.querySelector('#gl-bal-firstYear-0') as HTMLInputElement;
+    expect(input).withContext('first-year balance tile in setup').not.toBeNull();
+    input.value = '1000';
+    input.dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+
+    await page.save();
+    const config = (createSpy.calls.mostRecent().args[0] as GoalWrite).config as KidsConfig;
+    const rows = page.view().firstYear!.rows;
+    const due = monthsOut(36);
+    expect(config.firstYearFund).toBeTrue();
+    expect(config.kids.map(k => k.firstYearTarget)).toEqual([25_700, 20_800]);
+    config.kids.forEach((kid, i) => {
+      expect([kid.firstYearDueYear, kid.firstYearDueMonth]).toEqual([due.year, due.month]);
+      expect(kid.accounts.firstYear!.anchorMonthly).toBe(rows[i].plan.monthly);
+      expect(kid.accounts.firstYear!.anchorMonthly).toBeGreaterThan(0);
+    });
+    expect(config.kids[0].accounts.firstYear!.balance).toBe(1_000);
+    expect(config.kids[1].accounts.firstYear!.balance).toBe(0);
+  });
+
+  it('logs a first-year balance in edit mode', async () => {
+    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36) }], { plan529Target: 47_800 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    await fixture.componentInstance.updateBalance({ kid: 0, account: 'firstYear' }, 2_500);
+    const config = (updateSpy.calls.mostRecent().args[1] as GoalWrite).config as KidsConfig;
+    expect(config.kids[0].accounts.firstYear!.balance).toBe(2_500);
+  });
+
+  it('shows the same first-year monthly before and after a re-plan save', async () => {
+    const goal = kidsGoalFixture(5, null);
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    page.toggleFirstYearFund();
+    const before = page.view();
+    expect(before.firstYear!.totalMonthly).toBeGreaterThan(0);
+    await page.save();
+    const body = updateSpy.calls.mostRecent().args[1] as GoalWrite;
+    TestBed.resetTestingModule();
+
+    // What the server stores on a re-anchor: anchored now, no logged-balance date.
+    const saved: Goal = {
+      ...goal, ...body, planAnchoredAt: localIso(new Date()), balanceUpdatedAt: null, anchorBalance: body.currentBalance,
+    };
+    const after = await create({ id: '5' }, { goals: [saved] });
+    expect(after.componentInstance.view().firstYear!.totalMonthly).toBe(before.firstYear!.totalMonthly);
+    expect(after.componentInstance.view().monthlyTotal).toBe(before.monthlyTotal);
+  });
+
+  it('reads Plan started, not Ahead or Behind, while a changed plan is unsaved', async () => {
+    const logged = localIso(new Date(Date.now() - 90 * 86_400_000));
+    const kids = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(40), balance: 9_000, logged }],
+      { plan529Target: 47_800, anchoredAt: localIso(new Date(Date.now() - 200 * 86_400_000)) });
+    const fixture = await create({ id: '5' }, { goals: [kids] });
+    const page = fixture.componentInstance;
+    expect(['ahead', 'on_plan', 'behind']).toContain(page.view().status.kind);
+    page.setCollegeChoice('public_full');
+    fixture.detectChanges();
+    expect(page.statusLine()).toBe('Plan started');
+    expect(text(fixture, '.gl-status')).toContain('Plan started');
+    TestBed.resetTestingModule();
+
+    const house: Goal = {
+      ...houseGoal(8), currentBalance: 10_000, anchorBalance: 1_000, anchorMonthly: 500,
+      planAnchoredAt: localIso(new Date(Date.now() - 200 * 86_400_000)), balanceUpdatedAt: logged,
+    };
+    const houseFixture = await create({ id: '8' }, { goals: [house] });
+    const housePage = houseFixture.componentInstance;
+    expect(housePage.statusLine()).toContain('Ahead by');
+    housePage.patch({ price: 500_000 });
+    expect(housePage.statusLine()).toBe('Plan started');
+    expect(housePage.draftGoal().anchorBalance).toBe(10_000);
+  });
+
+  it('keeps the stored fund switch in edit mode when a kid is added or a date moves', async () => {
+    const fixture = await create({ id: '5' }, { goals: [kidsGoalFixture(5, null)] });
+    const page = fixture.componentInstance;
+    expect(page.form().kids.firstYearFund).toBeFalse();
+    page.addKid();
+    const due = monthsOut(20);
+    page.patchKid(0, { undecided: false, birthYear: due.year, birthMonth: due.month });
+    expect(page.form().kids.firstYearFund).toBeFalse();
+    TestBed.resetTestingModule();
+
+    const on = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36) }], { plan529Target: 47_800 });
+    const onFixture = await create({ id: '5' }, { goals: [on] });
+    const onPage = onFixture.componentInstance;
+    const soon = monthsOut(3);
+    onPage.patchKid(0, { undecided: false, birthYear: soon.year, birthMonth: soon.month });
+    expect(onPage.form().kids.firstYearFund).toBeTrue();
+  });
+
+  it('shows $616 a month next to the switch when the fund is turned on for a stored goal', async () => {
+    const fixture = await create({ id: '5' }, { goals: [kidsGoalFixture(5, null)] });
+    const page = fixture.componentInstance;
+    page.selectRate(0.10);
+    showCard(fixture, 3);
+    expect(page.form().kids.firstYearFund).toBeFalse();
+    expect(text(fixture)).toContain(`Adds about $616 a month until ${monLabel(monthsOut(36))}`);
+    page.toggleFirstYearFund();
+    fixture.detectChanges();
+    expect(page.view().firstYear!.totalMonthly).toBe(616);
+  });
+
+  it('uses the cash line, not the invested line, for an undecided fund planned as cash', async () => {
+    const due = monthsOut(20);
+    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due }], { plan529Target: 47_800 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const row = fixture.componentInstance.view().firstYear!.rows[0];
+    expect(row.plan.rateKind).toBe('cash');
+    expect(text(fixture, '.gl-fund')).toContain(`${usd(row.plan.monthly)} a month until ${monLabel(due)}. No date yet. Planned as cash at about 4%, since this runway ends within 3 years.`);
+    expect(text(fixture)).not.toContain('invested at your return assumption');
+    expect(text(fixture)).not.toContain('Markets can be down');
+  });
+
+  it('drops the fund from the hero total when it is switched off and warns about logged balances', async () => {
+    const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36), balance: 1_200, logged: localIso(new Date()) }],
+      { plan529Target: 47_800 });
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    const before = page.view();
+    const fundMonthly = before.firstYear!.totalMonthly;
+    expect(fundMonthly).toBeGreaterThan(0);
+    expect(page.fundLoggedBalance()).toBe(1_200);
+
+    page.toggleFirstYearFund();
+    fixture.detectChanges();
+    expect(page.view().firstYear).toBeUndefined();
+    expect(page.view().monthlyTotal).toBe(before.monthlyTotal - fundMonthly);
+    expect(text(fixture, '.gl-hero')).toContain(usd(before.monthlyTotal - fundMonthly));
+    expect(fixture.nativeElement.querySelector('.gl-fund')).toBeNull();
+
+    showCard(fixture, 3);
+    expect(text(fixture)).toContain('Turning this off removes the $1,200 you logged for it from this plan.');
+  });
+
+  it('says the accounts and the fund live outside FRED', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    showCard(fixture, 4);
+    expect(text(fixture)).toContain('a state college savings plan you open outside FRED');
+    showCard(fixture, 5);
+    expect(text(fixture)).toContain('A custodial or regular brokerage account you open outside FRED.');
+    fixture.componentInstance.showPlan();
+    fixture.detectChanges();
+    expect(text(fixture, '.gl-fund')).toContain('Keep this in your own savings or brokerage account. FRED does not hold or move goal money.');
+  });
+
+  it('has no em dash in the quiz, the cost card or the fund card', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.addKid();
+    const soon = monthsOut(4);
+    page.patchKid(0, { undecided: false, birthYear: soon.year, birthMonth: soon.month });
+    for (const card of [1, 2, 3, 4, 5] as const) {
+      showCard(fixture, card);
+      expect(text(fixture)).withContext(`card ${card}`).not.toContain('\u2014');
+    }
+    page.toggleFirstYearFund();
+    page.showPlan();
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('.gl-costs-sources-toggle') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.gl-fund')).not.toBeNull();
+    expect(text(fixture)).not.toContain('\u2014');
   });
 });

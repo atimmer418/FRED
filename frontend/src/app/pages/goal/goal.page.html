@@ -16,9 +16,150 @@
 
       <!-- Step 1: setup inputs -->
       <ng-container *ngIf="step() === 1">
-        <div class="gl-card">
 
-          <!-- Goal name (every type) -->
+        <!-- KIDS: a five-card quiz, one card at a time -->
+        <div class="gl-card gl-quiz" *ngIf="form().type === 'KIDS'">
+          <div class="gl-dots" aria-hidden="true">
+            <span *ngFor="let c of quizCards" [class.on]="c === quizCard()" [class.done]="c < quizCard()"></span>
+          </div>
+
+          <!-- Card 1: how many -->
+          <ng-container *ngIf="quizCard() === 1">
+            <h3 class="gl-q">How many kids are you planning for?</h3>
+            <div class="gl-field gl-count">
+              <div class="gl-stepper gl-stepper-lg">
+                <button type="button" (click)="removeKid(form().kids.kids.length - 1)"
+                        [disabled]="form().kids.kids.length <= 1" aria-label="Remove a kid">−</button>
+                <span class="gl-stepper-val">{{ form().kids.kids.length }}</span>
+                <button type="button" (click)="addKid()"
+                        [disabled]="form().kids.kids.length >= maxKids" aria-label="Add a kid">+</button>
+              </div>
+              <p class="gl-helper">Count the ones already here too.</p>
+            </div>
+          </ng-container>
+
+          <!-- Card 2: when -->
+          <ng-container *ngIf="quizCard() === 2">
+            <h3 class="gl-q">When?</h3>
+            <div class="gl-kid" *ngFor="let kid of form().kids.kids; let i = index; trackBy: trackIndex">
+              <input class="gl-input gl-kid-label" type="text" maxlength="30" aria-label="Kid name"
+                     [ngModel]="kid.label" (ngModelChange)="patchKid(i, { label: $event })" />
+              <div class="gl-kid-row">
+                <select class="gl-input gl-select" aria-label="Birth month" [disabled]="kid.undecided"
+                        [ngModel]="kid.birthMonth" (ngModelChange)="setKidMonth(i, $event)">
+                  <option [ngValue]="null">Not sure</option>
+                  <option *ngFor="let m of monthNames; let mi = index" [ngValue]="mi + 1">{{ m }}</option>
+                </select>
+                <input class="gl-input gl-year" type="text" inputmode="numeric" placeholder="Year" aria-label="Birth year"
+                       [disabled]="kid.undecided" [value]="fmtNumber(kid.birthYear)" (input)="onKidYear(i, $event)" />
+              </div>
+              <label class="gl-check">
+                <input type="checkbox" [checked]="kid.undecided" (change)="toggleUndecided(i)" />
+                <span>Not sure yet</span>
+              </label>
+              <p class="gl-error" *ngIf="errors()['kid.' + i + '.birthYear']">{{ errors()['kid.' + i + '.birthYear'] }}</p>
+            </div>
+          </ng-container>
+
+          <!-- Card 3: what a kid costs, and the first-year switch -->
+          <ng-container *ngIf="quizCard() === 3">
+            <h3 class="gl-q">What a kid costs</h3>
+            <ng-container *ngIf="quizCosts() as c">
+              <p class="gl-quiz-big">{{ costHeadline(c) }}.</p>
+              <p class="gl-quiz-line">{{ firstChildLine }}</p>
+              <p class="gl-helper">{{ costSourceLine(c) }}</p>
+            </ng-container>
+
+            <div class="gl-fund-switch" *ngIf="anyKidEligible(); else allBorn">
+              <div class="gl-switch-row">
+                <span class="gl-switch-label" id="gl-fund-switch-label">Plan for the first year</span>
+                <button type="button" role="switch" class="gl-switch" aria-labelledby="gl-fund-switch-label"
+                        [class.on]="form().kids.firstYearFund" [attr.aria-checked]="form().kids.firstYearFund"
+                        (click)="toggleFirstYearFund()">
+                  <span class="gl-switch-knob"></span>
+                </button>
+              </div>
+              <p class="gl-quiz-line" *ngIf="fundPreview() as p">Adds about {{ fmtMoney(p.monthly) }} a month until {{ p.endsLabel }}</p>
+              <p class="gl-helper" *ngIf="fundShortRunwayMonths() as n">{{ shortRunwayLine(n) }}</p>
+              <p class="gl-helper gl-warn" *ngIf="fundLoggedBalance() > 0">Turning this off removes the {{ fmtMoney(fundLoggedBalance()) }} you logged for it from this plan.</p>
+            </div>
+            <ng-template #allBorn>
+              <p class="gl-helper gl-all-born">Your kids are already here, so there is no first-year fund to plan.</p>
+            </ng-template>
+          </ng-container>
+
+          <!-- Card 4: college -->
+          <ng-container *ngIf="quizCard() === 4">
+            <h3 class="gl-q">How much do you want to set aside for college?</h3>
+            <div class="gl-select-rows">
+              <button type="button" class="gl-select-row" *ngFor="let p of collegeRows"
+                      [class.selected]="isCollegeChoice(p.key)" (click)="setCollegeChoice(p.key)">
+                <span class="gl-select-label">{{ p.label }}</span>
+                <span class="gl-select-amount">{{ fmtMoney(p.amount) }}</span>
+              </button>
+              <button type="button" class="gl-select-row" [class.selected]="isCollegeChoice('custom')" (click)="setCollegeChoice('custom')">
+                <span class="gl-select-label">Another amount</span>
+              </button>
+              <button type="button" class="gl-select-row" [class.selected]="isCollegeChoice('none')" (click)="setCollegeChoice('none')">
+                <span class="gl-select-label">None for now</span>
+              </button>
+            </div>
+            <div class="gl-field gl-custom" *ngIf="isCollegeChoice('custom')">
+              <label class="gl-label" for="gl-college-custom">College amount per kid</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-college-custom" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(form().kids.plan529Target)" (input)="onKidsTarget('plan529Target', $event)" />
+              </div>
+            </div>
+            <p class="gl-error" *ngIf="errors()['plan529Target']">{{ errors()['plan529Target'] }}</p>
+            <p class="gl-helper">This goes in a 529, a state college savings plan you open outside FRED. Per kid, four years at 2025-26 prices from the College Board. College will likely cost more by the time your kid starts: at 3% a year, $47,800 today is about $81,000 in 18 years. Raise the amount any time.</p>
+          </ng-container>
+
+          <!-- Card 5: at 18, the goal name, and the CTA -->
+          <ng-container *ngIf="quizCard() === 5">
+            <h3 class="gl-q">How much do you want each kid to start adult life with?</h3>
+            <div class="gl-select-rows">
+              <button type="button" class="gl-select-row" *ngFor="let amount of at18Presets"
+                      [class.selected]="isAt18Choice(amount)" (click)="setAt18Choice(amount)">
+                <span class="gl-select-label">{{ fmtMoney(amount) }}</span>
+              </button>
+              <button type="button" class="gl-select-row" [class.selected]="isAt18Choice('custom')" (click)="setAt18Choice('custom')">
+                <span class="gl-select-label">Another amount</span>
+              </button>
+              <button type="button" class="gl-select-row" [class.selected]="isAt18Choice('none')" (click)="setAt18Choice('none')">
+                <span class="gl-select-label">Nothing extra</span>
+              </button>
+            </div>
+            <div class="gl-field gl-custom" *ngIf="isAt18Choice('custom')">
+              <label class="gl-label" for="gl-at18-custom">Amount per kid at 18</label>
+              <div class="gl-money">
+                <span class="gl-prefix">$</span>
+                <input id="gl-at18-custom" class="gl-input" type="text" inputmode="numeric"
+                       [value]="fmtNumber(form().kids.brokerageTarget)" (input)="onKidsTarget('brokerageTarget', $event)" />
+              </div>
+            </div>
+            <p class="gl-error" *ngIf="errors()['brokerageTarget']">{{ errors()['brokerageTarget'] }}</p>
+            <p class="gl-helper">A custodial or regular brokerage account you open outside FRED.</p>
+
+            <div class="gl-field gl-quiz-name">
+              <label class="gl-label" for="gl-name">Goal name</label>
+              <input id="gl-name" class="gl-input" type="text" maxlength="50"
+                     [ngModel]="form().name" (ngModelChange)="patch({ name: $event })" />
+              <p class="gl-error" *ngIf="errors()['name']">{{ errors()['name'] }}</p>
+            </div>
+            <p class="gl-error" *ngIf="errors()['kidsTargets']">{{ errors()['kidsTargets'] }}</p>
+          </ng-container>
+
+          <div class="gl-quiz-nav">
+            <button type="button" class="gl-quiz-back" *ngIf="quizCard() > 1" (click)="prevQuizCard()">Back</button>
+            <button type="button" class="gl-cta" (click)="nextQuizCard()">{{ quizCard() === 5 ? 'Show my plan' : 'Next' }}</button>
+          </div>
+        </div>
+
+        <div class="gl-card" *ngIf="form().type !== 'KIDS'">
+
+          <!-- Goal name (every type but KIDS, which asks on its last quiz card) -->
           <div class="gl-field">
             <label class="gl-label" for="gl-name">Goal name</label>
             <input id="gl-name" class="gl-input" type="text" maxlength="50"
@@ -37,60 +178,6 @@
               </button>
             </div>
           </div>
-
-          <!-- KIDS -->
-          <ng-container *ngIf="form().type === 'KIDS'">
-            <div class="gl-field">
-              <label class="gl-label" for="gl-529">529 target per kid</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-529" class="gl-input" type="text" inputmode="numeric" placeholder="Optional"
-                       [value]="fmtNumber(form().kids.plan529Target)" (input)="onKidsTarget('plan529Target', $event)" />
-              </div>
-            </div>
-            <div class="gl-field">
-              <label class="gl-label" for="gl-brokerage">Brokerage target per kid</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-brokerage" class="gl-input" type="text" inputmode="numeric" placeholder="Optional"
-                       [value]="fmtNumber(form().kids.brokerageTarget)" (input)="onKidsTarget('brokerageTarget', $event)" />
-              </div>
-              <p class="gl-error" *ngIf="errors()['kidsTargets']">{{ errors()['kidsTargets'] }}</p>
-              <p class="gl-helper">A 529 is a state college plan. The brokerage is a custodial or regular account. You open both outside FRED.</p>
-            </div>
-
-            <div class="gl-field">
-              <div class="gl-kids-head">
-                <span class="gl-label">Kids</span>
-                <div class="gl-stepper">
-                  <button type="button" (click)="removeKid(form().kids.kids.length - 1)"
-                          [disabled]="form().kids.kids.length <= 1" aria-label="Remove a kid">−</button>
-                  <span class="gl-stepper-val">{{ form().kids.kids.length }}</span>
-                  <button type="button" (click)="addKid()"
-                          [disabled]="form().kids.kids.length >= maxKids" aria-label="Add a kid">+</button>
-                </div>
-              </div>
-
-              <div class="gl-kid" *ngFor="let kid of form().kids.kids; let i = index">
-                <input class="gl-input gl-kid-label" type="text" maxlength="30" aria-label="Kid name"
-                       [ngModel]="kid.label" (ngModelChange)="patchKid(i, { label: $event })" />
-                <div class="gl-kid-row">
-                  <select class="gl-input gl-select" aria-label="Birth month" [disabled]="kid.undecided"
-                          [ngModel]="kid.birthMonth" (ngModelChange)="setKidMonth(i, $event)">
-                    <option [ngValue]="null">Not sure</option>
-                    <option *ngFor="let m of monthNames; let mi = index" [ngValue]="mi + 1">{{ m }}</option>
-                  </select>
-                  <input class="gl-input gl-year" type="text" inputmode="numeric" placeholder="Year" aria-label="Birth year"
-                         [disabled]="kid.undecided" [value]="fmtNumber(kid.birthYear)" (input)="onKidYear(i, $event)" />
-                </div>
-                <label class="gl-check">
-                  <input type="checkbox" [checked]="kid.undecided" (change)="toggleUndecided(i)" />
-                  <span>Undecided</span>
-                </label>
-                <p class="gl-error" *ngIf="errors()['kid.' + i + '.birthYear']">{{ errors()['kid.' + i + '.birthYear'] }}</p>
-              </div>
-            </div>
-          </ng-container>
 
           <!-- HOUSE / CAR -->
           <ng-container *ngIf="form().type === 'HOUSE' || form().type === 'CAR'">
@@ -183,6 +270,7 @@
             <div class="gl-hero-amount">{{ fmtMoney(v.monthlyTotal) }}<span class="gl-hero-unit">/mo</span></div>
             <p class="gl-hero-paycheck" *ngIf="v.perPaycheck !== null">about {{ fmtMoney(v.perPaycheck) }} a paycheck</p>
             <p class="gl-hero-headline">{{ v.headline }}</p>
+            <p class="gl-hero-fund" *ngIf="heroFundLine() as fundLine">{{ fundLine }}</p>
           </div>
 
           <!-- Return assumption (vacation money never grows, so it has none) -->
@@ -217,11 +305,63 @@
             <p class="gl-stale" *ngIf="showUpdateBalance()">Update your balance</p>
           </div>
 
+          <!-- KIDS: what a kid costs -->
+          <div class="gl-card gl-costs" *ngIf="v.kidCosts as c">
+            <div class="gl-account-title">What a kid costs</div>
+            <p class="gl-costs-headline">{{ costHeadline(c) }}</p>
+            <p class="gl-account-line" *ngIf="costFamilyLine(c) as family">{{ family }}</p>
+
+            <ng-container *ngIf="costsOpen(); else costsCollapsed">
+              <div class="gl-ritual gl-stage" *ngFor="let stage of c.stages; trackBy: trackLabel">
+                <span>{{ stage.label }}</span><b>{{ costStageLine(stage) }}</b>
+              </div>
+              <p class="gl-costs-birth">{{ costBirthLine(c) }}</p>
+              <p class="gl-helper">{{ costNote(c, hasCollege()) }}</p>
+            </ng-container>
+            <ng-template #costsCollapsed>
+              <p class="gl-helper">{{ costSourceLine(c) }}</p>
+            </ng-template>
+
+            <div class="gl-costs-links">
+              <button type="button" class="gl-link gl-costs-toggle" (click)="toggleCosts()">
+                {{ costsOpen() ? 'Hide costs by age' : 'Show costs by age' }}
+              </button>
+              <button type="button" class="gl-link gl-costs-sources-toggle" (click)="toggleCostSources()">Where these numbers come from</button>
+            </div>
+            <ul class="gl-sources" *ngIf="costSourcesOpen()">
+              <li *ngFor="let s of costSources">{{ s.name }}, {{ s.year }}</li>
+            </ul>
+          </div>
+
+          <!-- KIDS: first-year fund (when any kid holds one) -->
+          <ng-container *ngIf="visibleFundRows().length > 0">
+            <div class="gl-card gl-fund">
+              <div class="gl-account-title">First-year fund</div>
+              <div class="gl-fund-row" *ngFor="let row of visibleFundRows(); trackBy: trackFundRow">
+                <ng-container *ngIf="fundRowLines(row) as lines">
+                  <p class="gl-fund-lead">{{ lines.lead }}</p>
+                  <p class="gl-account-line" *ngIf="lines.plan">{{ lines.plan }}</p>
+                </ng-container>
+                <div class="gl-field gl-balance">
+                  <label class="gl-label" [attr.for]="'gl-bal-firstYear-' + row.kidIndex">Saved so far</label>
+                  <div class="gl-money">
+                    <span class="gl-prefix">$</span>
+                    <input class="gl-input" type="text" inputmode="numeric" [id]="'gl-bal-firstYear-' + row.kidIndex"
+                           [value]="fmtNumber(row.balance)" (blur)="onBalanceBlur({ kid: row.kidIndex, account: 'firstYear' }, $event)" />
+                  </div>
+                </div>
+              </div>
+              <p class="gl-helper gl-fund-footer">FRED estimate: first-year average (USDA, adjusted to {{ v.kidCosts?.asOfLabel }} dollars) plus birth costs (Peterson-KFF, 2023 dollars), rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move goal money.</p>
+            </div>
+            <p class="gl-note" *ngIf="showInvestedFundNote()">Markets can be down when the day comes, so treat this as a head start. Once you pick a date less than three years away, FRED plans this fund as cash.</p>
+          </ng-container>
+
           <!-- KIDS: one card per account, each kid on demand -->
           <ng-container *ngIf="v.kids">
             <div class="gl-card gl-account" *ngFor="let acct of v.kids; trackBy: trackAccount">
               <div class="gl-account-title">{{ acct.label }}</div>
               <p class="gl-account-line">{{ accountLine(acct.totals) }}</p>
+              <p class="gl-helper" *ngIf="acct.account === 'plan529' && collegePresetSelected()">Based on {{ collegePriceYear }} college prices, which tend to rise.</p>
               <button type="button" class="gl-link" (click)="toggleKidDetails(acct.account)">
                 {{ kidDetailsOpen()[acct.account] ? 'Hide each kid' : 'Show each kid' }}
               </button>

@@ -423,6 +423,9 @@ There is no user-facing sign-out anywhere in the app: `tab3.onLogout()` is a `co
 ## FRED-229 — Goals v3: plans FRED proposes
 Goals v3: plans FRED proposes. Goals move to the backend (goals table V9, /api/goals), FRED proposes each plan (monthly and per paycheck; kids get birthday and New Year rituals with 18/22/30 milestones), seven goal types (Kids, House, Car, Vacation, Emergency fund, Wedding, Something else), cash rate for money needed within three years, one free goal and Piggy Plus for more, pushed goal page with a my-profile summary card, v2 localStorage goals imported. Supersedes the goals criteria of FRED-216. Built on feature/goals-v3; device pass and API smoke pending. Design: docs/superpowers/specs/2026-11-02-goals-v3-plans-design.md.
 
+## FRED-230 — Goals: AI-written personal plan summary
+Goals: AI-written personal plan summary. The backend sends a goal's computed plan (fixed numbers) to Claude, which writes a short personal summary through the compliance gate, the Monthly Market Breakdown pattern, plus a read-only get_goals tool for Ask FRED. The AI never produces or changes a dollar figure. Follows Goals v3 (kid costs and quiz shipped on feature/goals-v3).
+
 
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._

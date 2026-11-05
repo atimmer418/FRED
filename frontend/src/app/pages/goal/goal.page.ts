@@ -18,23 +18,31 @@ import {
   DEFAULT_ANNUAL_RETURN, RETURN_SCENARIOS, RateAssumptionsService,
 } from '../../services/rate-assumptions.service';
 import {
-  EmergencyFundConfig, Goal, GoalConfig, GoalType, GoalWrite, HouseCarConfig, KidsConfig, TargetConfig,
-  VacationConfig,
+  AccountState, EmergencyFundConfig, Goal, GoalConfig, GoalType, GoalWrite, HouseCarConfig, KidInput, KidsConfig,
+  TargetConfig, VacationConfig,
 } from '../../models/goal.model';
-import { kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
+import { horizonMonths, isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
+import { collegePresets, costCardSources, kidCostFigures } from '../../utils/kid-cost.utils';
+import { AT_18_PRESETS, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import {
-  CUSTOM_ICON_OPTIONS, GoalForm, MAX_KIDS, defaultForm, formFromGoal, formToConfig, isGoalType, newKidRow,
-  planInputsChanged, validateForm, KidFormRow,
+  At18Choice, CUSTOM_ICON_OPTIONS, CollegeChoice, GoalForm, KidsQuizCard, MAX_KIDS, collegeAmount, costBirthLine,
+  costFamilyLine, costHeadline, costNote, costSourceLine, costStageLine, defaultFirstYearFund, defaultForm,
+  firstChildLine, formFromGoal, formToConfig, fundRowLines, isGoalType, kidTiming, kidsQuizErrors, newKidRow,
+  planInputsChanged, shortRunwayLine, toLocalIso, validateForm, KidFormRow,
 } from './goal-form.model';
 import {
-  GoalPlanInput, GoalPlanView, KidAccountKey, KidPlanRow, buildGoalPlanView, fmtCompact, fmtMoney, fmtMonthYear,
+  FirstYearRow, GoalPlanInput, GoalPlanView, KidAccountKey, KidPlanRow, buildGoalPlanView, fmtCompact, fmtMoney,
+  fmtMonthYear,
 } from './goal-plan.view-model';
 
+/** A kid's balance tile: the 529, the brokerage, or the first-year fund. */
+export type KidBalanceKey = KidAccountKey | 'firstYear';
+
 /** Which balance a balance tile edits. */
-export type BalancePath = 'current' | 'vacation' | { kid: number; account: KidAccountKey };
+export type BalancePath = 'current' | 'vacation' | { kid: number; account: KidBalanceKey };
 
 type NumericField = 'price' | 'targetYear' | 'budgetPerTrip' | 'monthlyExpenses' | 'targetAmount';
 
@@ -100,9 +108,15 @@ export class GoalPage implements OnInit {
   readonly setupBalances = signal<{
     current: number;
     vacation: number;
-    kids: Array<Partial<Record<KidAccountKey, number>>>;
+    kids: Array<Partial<Record<KidBalanceKey, number>>>;
   }>({ current: 0, vacation: 0, kids: [] });
   private readonly now = new Date();
+
+  /** True in edit mode once a plan input differs from the saved goal: saving will re-anchor. */
+  readonly planChanged = computed(() => {
+    const goal = this.existing();
+    return this.mode() === 'edit' && !!goal && planInputsChanged(this.form(), goal, this.now);
+  });
 
   /**
    * In edit mode the stored rate kind holds until a plan input changes, so a goal that
@@ -110,66 +124,14 @@ export class GoalPage implements OnInit {
    */
   readonly rateKindOverride = computed(() => {
     const goal = this.existing();
-    return this.mode() === 'edit' && goal && !planInputsChanged(this.form(), goal) ? goal.planRateKind : null;
+    return this.mode() === 'edit' && goal && !this.planChanged() ? goal.planRateKind : null;
   });
 
   /** The goal as it would be saved now: live inputs, saved (or, in setup, typed) balances and anchor. */
-  readonly draftGoal = computed<GoalPlanInput>(() => {
-    const form = this.form();
-    const goal = this.existing();
-    let config = formToConfig(form, goal);
-    if (goal) {
-      return {
-        type: form.type,
-        config,
-        currentBalance: goal.currentBalance,
-        completed: goal.completed,
-        clientId: goal.clientId,
-        anchorBalance: goal.anchorBalance,
-        anchorMonthly: goal.anchorMonthly,
-        planRate: goal.planRate,
-        planRateKind: goal.planRateKind,
-        planAnchoredAt: goal.planAnchoredAt,
-        balanceUpdatedAt: goal.balanceUpdatedAt,
-      };
-    }
-    const typed = this.setupBalances();
-    if (form.type === 'KIDS') {
-      const c = config as KidsConfig;
-      config = {
-        ...c,
-        kids: c.kids.map((kid, i) => ({
-          ...kid,
-          accounts: {
-            plan529: { ...kid.accounts.plan529, balance: typed.kids[i]?.plan529 ?? 0 },
-            brokerage: { ...kid.accounts.brokerage, balance: typed.kids[i]?.brokerage ?? 0 },
-          },
-        })),
-      };
-    } else if (form.type === 'VACATION') {
-      config = { ...(config as VacationConfig), savedThisYear: typed.vacation, savedYear: this.now.getFullYear() };
-    }
-    return {
-      type: form.type,
-      config,
-      currentBalance: form.type === 'KIDS' || form.type === 'VACATION' ? 0 : typed.current,
-      completed: false,
-      clientId: null,
-      anchorBalance: 0,
-      anchorMonthly: 0,
-      planRate: this.selectedRate(),
-      planRateKind: 'market',
-      planAnchoredAt: this.now.toISOString(),
-      balanceUpdatedAt: null,
-    };
-  });
+  readonly draftGoal = computed<GoalPlanInput>(() => this.buildDraft(this.form()));
 
-  readonly view = computed<GoalPlanView>(() => buildGoalPlanView(this.draftGoal(), {
-    marketRate: this.selectedRate(),
-    frequency: this.frequency(),
-    now: this.now,
-    rateKindOverride: this.rateKindOverride(),
-  }));
+  readonly view = computed<GoalPlanView>(() =>
+    this.planViewOf(this.draftGoal(), this.mode() === 'setup' || this.planChanged()));
 
   /** Imported from v2 and never planned: the first save is its first plan. */
   readonly isImported = computed(() => {
@@ -216,6 +178,92 @@ export class GoalPage implements OnInit {
     return this.mode() === 'edit' && s.stale && (s.kind === 'ahead' || s.kind === 'on_plan' || s.kind === 'behind');
   });
 
+  // ── KIDS: quiz, what a kid costs, first-year fund ───────────────────────────
+
+  readonly quizCards: ReadonlyArray<KidsQuizCard> = [1, 2, 3, 4, 5];
+  readonly quizCard = signal<KidsQuizCard>(1);
+  readonly collegeRows = collegePresets();
+  readonly at18Presets = AT_18_PRESETS;
+  readonly costSources = costCardSources();
+  readonly costHeadline = costHeadline;
+  readonly costFamilyLine = costFamilyLine;
+  readonly costStageLine = costStageLine;
+  readonly costBirthLine = costBirthLine;
+  readonly costSourceLine = costSourceLine;
+  readonly costNote = costNote;
+  readonly firstChildLine = firstChildLine();
+  readonly shortRunwayLine = shortRunwayLine;
+  readonly fundRowLines = fundRowLines;
+
+  /**
+   * Setup: the fund switch follows defaultFirstYearFund until the user touches it.
+   * Edit: the stored switch counts as touched and is never re-defaulted.
+   */
+  private readonly fundTouched = signal(false);
+  /** null = the mode's default: open in setup, collapsed in edit. */
+  private readonly costsOpenChoice = signal<boolean | null>(null);
+  readonly costsOpen = computed(() => this.costsOpenChoice() ?? this.mode() === 'setup');
+  readonly costSourcesOpen = signal(false);
+
+  readonly quizCosts = computed(() => kidCostFigures(this.form().kids.kids.length));
+
+  /** True when any kid could hold a fund: not yet born, or already holding a stored one. */
+  readonly anyKidEligible = computed(() => {
+    const stored = this.storedKids();
+    return this.form().kids.kids.some((row, i) => {
+      const t = kidTiming(row);
+      return isKidNotYetBorn(t.birthYear, t.birthMonth, this.now) || !!stored[i]?.accounts.firstYear;
+    });
+  });
+
+  /** What the fund would add per month, and its last end month, if it were on. */
+  readonly fundPreview = computed<{ monthly: number; endsLabel: string } | null>(() => {
+    const form = this.form();
+    if (form.type !== 'KIDS') return null;
+    const on: GoalForm = { ...form, kids: { ...form.kids, firstYearFund: true } };
+    const goal = this.existing();
+    const reanchor = this.mode() === 'setup' || (!!goal && planInputsChanged(on, goal, this.now));
+    const fund = this.planViewOf(this.buildDraft(on), reanchor).firstYear;
+    return fund?.endsLabel ? { monthly: fund.totalMonthly, endsLabel: fund.endsLabel } : null;
+  });
+
+  /** The shortest runway among decided kids not yet born, when under 12 months; else null. */
+  readonly fundShortRunwayMonths = computed<number | null>(() => {
+    const months = this.form().kids.kids
+      .map(kidTiming)
+      .filter(t => t.birthYear !== null && isKidNotYetBorn(t.birthYear, t.birthMonth, this.now))
+      .map(t => horizonMonths(this.now, t.birthYear as number, t.birthMonth ?? 7));
+    const shortest = months.length > 0 ? Math.min(...months) : null;
+    return shortest !== null && shortest < 12 ? shortest : null;
+  });
+
+  /** Balances logged on the saved goal's first-year funds, which turning the fund off drops. */
+  readonly fundLoggedBalance = computed(() =>
+    this.storedKids().reduce((sum, kid) => sum + (kid.accounts.firstYear?.balance ?? 0), 0));
+
+  readonly collegePresetSelected = computed(() =>
+    this.collegeRows.some(p => p.key === this.form().kids.collegeChoice));
+  readonly collegePriceYear = COLLEGE_PRICE_YEAR_LABEL;
+
+  /** A college amount is set, so the cost note points at the 529 below. */
+  readonly hasCollege = computed(() => (this.form().kids.plan529Target ?? 0) > 0);
+
+  /** Hero line: "$F of this is the first-year fund, which ends Mon YYYY." when other targets exist too. */
+  readonly heroFundLine = computed<string | null>(() => {
+    const fund = this.view().firstYear;
+    const c = this.draftGoal().config as KidsConfig;
+    if (this.form().type !== 'KIDS' || !fund || !(fund.totalMonthly > 0) || !fund.endsLabel) return null;
+    if (!(c.plan529Target > 0) && !(c.brokerageTarget > 0)) return null;
+    return `${fmtMoney(fund.totalMonthly)} of this is the first-year fund, which ends ${fund.endsLabel}.`;
+  });
+
+  readonly visibleFundRows = computed<FirstYearRow[]>(() =>
+    (this.view().firstYear?.rows ?? []).filter(r => !r.hidden));
+
+  /** Any visible undecided fund still running and invested at the return assumption. */
+  readonly showInvestedFundNote = computed(() =>
+    this.visibleFundRows().some(r => r.plan.undecided && !r.plan.finished && r.plan.rateKind === 'market'));
+
   async ngOnInit(): Promise<void> {
     const params = this.route.snapshot.paramMap;
     const typeParam = params.get('type');
@@ -258,6 +306,7 @@ export class GoalPage implements OnInit {
     }
     this.mode.set('edit');
     this.existing.set(goal);
+    this.fundTouched.set(true);
     this.form.set(formFromGoal(goal));
     this.step.set(2);
     this.ready.set(true);
@@ -273,14 +322,68 @@ export class GoalPage implements OnInit {
 
   /** Validates, then moves to the plan view. Stays on step 1 with errors if invalid. */
   showPlan(): void {
-    const errs = validateForm(this.form(), new Date());
-    this.errors.set(errs);
-    if (Object.keys(errs).length > 0) return;
+    if (!this.validateAll()) return;
     this.step.set(2);
   }
 
   backToInputs(): void {
     this.step.set(1);
+    this.quizCard.set(1);
+  }
+
+  // ── KIDS quiz ───────────────────────────────────────────────────────────────
+
+  /** Validates the current card, then advances. Card 5 shows the plan. */
+  nextQuizCard(): void {
+    const card = this.quizCard();
+    if (card === 5) {
+      this.showPlan();
+      return;
+    }
+    const errs = kidsQuizErrors(this.form(), card, this.now, this.existing());
+    this.errors.set(errs);
+    if (Object.keys(errs).length > 0) return;
+    this.quizCard.set((card + 1) as KidsQuizCard);
+  }
+
+  prevQuizCard(): void {
+    const card = this.quizCard();
+    if (card === 1) return;
+    this.errors.set({});
+    this.quizCard.set((card - 1) as KidsQuizCard);
+  }
+
+  setCollegeChoice(choice: CollegeChoice): void {
+    const amount = choice === 'custom' ? this.form().kids.plan529Target : collegeAmount(choice);
+    this.patchKids({ collegeChoice: choice, plan529Target: amount });
+  }
+
+  setAt18Choice(choice: At18Choice): void {
+    let amount: number | null;
+    if (typeof choice === 'number') amount = choice;
+    else amount = choice === 'custom' ? this.form().kids.brokerageTarget : null;
+    this.patchKids({ at18Choice: choice, brokerageTarget: amount });
+  }
+
+  toggleFirstYearFund(): void {
+    this.fundTouched.set(true);
+    this.patchKids({ firstYearFund: !this.form().kids.firstYearFund });
+  }
+
+  toggleCosts(): void {
+    this.costsOpenChoice.set(!this.costsOpen());
+  }
+
+  toggleCostSources(): void {
+    this.costSourcesOpen.update(open => !open);
+  }
+
+  isCollegeChoice(choice: CollegeChoice): boolean {
+    return this.form().kids.collegeChoice === choice;
+  }
+
+  isAt18Choice(choice: At18Choice): boolean {
+    return this.form().kids.at18Choice === choice;
   }
 
   // ── Plan view: rate chips ──────────────────────────────────────────────────
@@ -305,6 +408,10 @@ export class GoalPage implements OnInit {
     return m.label;
   }
 
+  trackFundRow(_i: number, row: FirstYearRow): number {
+    return row.kidIndex;
+  }
+
   toggleKidDetails(account: KidAccountKey): void {
     this.kidDetailsOpen.update(open => ({ ...open, [account]: !open[account] }));
   }
@@ -324,9 +431,7 @@ export class GoalPage implements OnInit {
   async save(): Promise<void> {
     if (this.saving()) return;
     const form = this.form();
-    const errs = validateForm(form, new Date());
-    if (Object.keys(errs).length > 0) {
-      this.errors.set(errs);
+    if (!this.validateAll()) {
       this.step.set(1);
       return;
     }
@@ -505,10 +610,11 @@ export class GoalPage implements OnInit {
     } else {
       const c = goal.config as KidsConfig;
       const kid = c.kids[path.kid];
-      if (!kid || kid.accounts[path.account].balance === amount) return;
+      const account = kid?.accounts[path.account];
+      if (!account || account.balance === amount) return;
       const kids = c.kids.map((k, i) => i !== path.kid ? k : {
         ...k,
-        accounts: { ...k.accounts, [path.account]: { ...k.accounts[path.account], balance: amount } },
+        accounts: { ...k.accounts, [path.account]: { ...account, balance: amount } },
       });
       patch = { config: { ...c, kids } };
     }
@@ -540,6 +646,7 @@ export class GoalPage implements OnInit {
 
   patchKids(partial: Partial<GoalForm['kids']>): void {
     this.form.update(f => ({ ...f, kids: { ...f.kids, ...partial } }));
+    if (partial.kids) this.applyFundDefault();
     this.revalidateIfShowing();
   }
 
@@ -548,6 +655,7 @@ export class GoalPage implements OnInit {
       ...f,
       kids: { ...f.kids, kids: f.kids.kids.map((k, i) => (i === index ? { ...k, ...partial } : k)) },
     }));
+    this.applyFundDefault();
     this.revalidateIfShowing();
   }
 
@@ -622,11 +730,145 @@ export class GoalPage implements OnInit {
     return digits ? parseInt(digits, 10) : null;
   }
 
-  /** Once the user has hit "Show my plan" with errors, keep messages live as they type. */
+  /** Once the user has hit "Show my plan" (or Next) with errors, keep messages live as they type. */
   private revalidateIfShowing(): void {
-    if (Object.keys(this.errors()).length > 0) {
-      this.errors.set(validateForm(this.form(), new Date()));
+    if (Object.keys(this.errors()).length === 0) return;
+    const form = this.form();
+    this.errors.set(form.type === 'KIDS' && this.step() === 1
+      ? kidsQuizErrors(form, this.quizCard(), this.now, this.existing())
+      : validateForm(form, this.now, this.existing()));
+  }
+
+  /**
+   * Validates the whole form and shows its errors. For KIDS, a failure lands on the first quiz
+   * card with an error and shows that card's errors.
+   */
+  private validateAll(): boolean {
+    const form = this.form();
+    const errs = validateForm(form, this.now, this.existing());
+    if (Object.keys(errs).length === 0) {
+      this.errors.set({});
+      return true;
     }
+    if (form.type !== 'KIDS') {
+      this.errors.set(errs);
+      return false;
+    }
+    const card = this.quizCards.find(c => Object.keys(kidsQuizErrors(form, c, this.now, this.existing())).length > 0) ?? 5;
+    this.quizCard.set(card);
+    this.errors.set(kidsQuizErrors(form, card, this.now, this.existing()));
+    return false;
+  }
+
+  /** Setup only, until the user touches the switch: the fund follows the count and timing. */
+  private applyFundDefault(): void {
+    const form = this.form();
+    if (this.mode() !== 'setup' || this.fundTouched() || form.type !== 'KIDS') return;
+    const value = defaultFirstYearFund(form.kids.kids, this.now);
+    if (value !== form.kids.firstYearFund) {
+      this.form.update(f => ({ ...f, kids: { ...f.kids, firstYearFund: value } }));
+    }
+  }
+
+  /** The saved goal's kids, or [] in setup or for another type. */
+  private storedKids(): KidInput[] {
+    const goal = this.existing();
+    return goal && goal.type === 'KIDS' ? (goal.config as KidsConfig).kids : [];
+  }
+
+  /** The goal as it would be saved from this form. See draftGoal. */
+  private buildDraft(form: GoalForm): GoalPlanInput {
+    const goal = this.existing();
+    let config = formToConfig(form, goal, this.now);
+    if (goal) {
+      const draft: GoalPlanInput = {
+        type: form.type,
+        config,
+        currentBalance: goal.currentBalance,
+        completed: goal.completed,
+        clientId: goal.clientId,
+        anchorBalance: goal.anchorBalance,
+        anchorMonthly: goal.anchorMonthly,
+        planRate: goal.planRate,
+        planRateKind: goal.planRateKind,
+        planAnchoredAt: goal.planAnchoredAt,
+        balanceUpdatedAt: goal.balanceUpdatedAt,
+      };
+      return planInputsChanged(form, goal, this.now) ? this.reanchored(draft) : draft;
+    }
+    const typed = this.setupBalances();
+    if (form.type === 'KIDS') {
+      const c = config as KidsConfig;
+      config = {
+        ...c,
+        kids: c.kids.map((kid, i) => ({
+          ...kid,
+          accounts: {
+            plan529: { ...kid.accounts.plan529, balance: typed.kids[i]?.plan529 ?? 0 },
+            brokerage: { ...kid.accounts.brokerage, balance: typed.kids[i]?.brokerage ?? 0 },
+            ...(kid.accounts.firstYear
+              ? { firstYear: { ...kid.accounts.firstYear, balance: typed.kids[i]?.firstYear ?? 0 } }
+              : {}),
+          },
+        })),
+      };
+    } else if (form.type === 'VACATION') {
+      config = { ...(config as VacationConfig), savedThisYear: typed.vacation, savedYear: this.now.getFullYear() };
+    }
+    return {
+      type: form.type,
+      config,
+      currentBalance: form.type === 'KIDS' || form.type === 'VACATION' ? 0 : typed.current,
+      completed: false,
+      clientId: null,
+      anchorBalance: 0,
+      anchorMonthly: 0,
+      planRate: this.selectedRate(),
+      planRateKind: 'market',
+      planAnchoredAt: this.now.toISOString(),
+      balanceUpdatedAt: null,
+    };
+  }
+
+  /**
+   * An edit draft whose plan inputs changed, anchored now exactly as the server will store it:
+   * anchor balances reset to the current balances and no logged-balance date, so the preview
+   * equals the plan after the save and the status reads Plan started meanwhile.
+   */
+  private reanchored(draft: GoalPlanInput): GoalPlanInput {
+    let config = draft.config;
+    if (draft.type === 'KIDS') {
+      const c = config as KidsConfig;
+      const reset = (a: AccountState): AccountState => ({ ...a, anchorBalance: a.balance, balanceUpdatedAt: null });
+      config = {
+        ...c,
+        kids: c.kids.map(kid => ({
+          ...kid,
+          accounts: {
+            plan529: reset(kid.accounts.plan529),
+            brokerage: reset(kid.accounts.brokerage),
+            ...(kid.accounts.firstYear ? { firstYear: reset(kid.accounts.firstYear) } : {}),
+          },
+        })),
+      };
+    }
+    return {
+      ...draft,
+      config,
+      planAnchoredAt: toLocalIso(this.now),
+      anchorBalance: draft.currentBalance,
+      balanceUpdatedAt: null,
+    };
+  }
+
+  private planViewOf(draft: GoalPlanInput, reanchorPending: boolean): GoalPlanView {
+    return buildGoalPlanView(draft, {
+      marketRate: this.selectedRate(),
+      frequency: this.frequency(),
+      now: this.now,
+      rateKindOverride: this.rateKindOverride(),
+      reanchorPending,
+    });
   }
 
   /** Setup mode: one active goal already and not Plus/Pro. */
@@ -668,19 +910,29 @@ export class GoalPage implements OnInit {
     });
   }
 
-  /** KIDS: stamp each account's anchorMonthly with that account's proposed monthly. */
+  /**
+   * KIDS: stamp each account's anchorMonthly with that account's proposed monthly. A finished
+   * first-year fund asks for nothing more, so it keeps the anchor it has.
+   */
   private withAccountAnchors(config: GoalConfig, view: GoalPlanView): GoalConfig {
     if (!view.kids) return config;
     const cfg = config as KidsConfig;
     const monthlyFor = (account: KidAccountKey, i: number): number =>
       view.kids?.find(a => a.account === account)?.perKid[i]?.plan.monthly ?? 0;
-    const kids = cfg.kids.map((kid, i) => ({
-      ...kid,
-      accounts: {
-        plan529: { ...kid.accounts.plan529, anchorMonthly: monthlyFor('plan529', i) },
-        brokerage: { ...kid.accounts.brokerage, anchorMonthly: monthlyFor('brokerage', i) },
-      },
-    }));
+    const kids = cfg.kids.map((kid, i) => {
+      const fund = kid.accounts.firstYear;
+      const fundPlan = view.firstYear?.rows.find(r => r.kidIndex === i)?.plan;
+      return {
+        ...kid,
+        accounts: {
+          plan529: { ...kid.accounts.plan529, anchorMonthly: monthlyFor('plan529', i) },
+          brokerage: { ...kid.accounts.brokerage, anchorMonthly: monthlyFor('brokerage', i) },
+          ...(fund
+            ? { firstYear: { ...fund, anchorMonthly: fundPlan && !fundPlan.finished ? fundPlan.monthly : fund.anchorMonthly } }
+            : {}),
+        },
+      };
+    });
     return { ...cfg, kids };
   }
 
@@ -725,8 +977,9 @@ export class GoalPage implements OnInit {
       case 'KIDS': {
         const c = goal.config as KidsConfig;
         const parts = [`${c.kids.length} ${c.kids.length === 1 ? 'kid' : 'kids'}`];
-        if (c.plan529Target > 0) parts.push(`${fmtCompact(c.plan529Target)} 529`);
-        if (c.brokerageTarget > 0) parts.push(`${fmtCompact(c.brokerageTarget)} brokerage`);
+        if (c.plan529Target > 0) parts.push(`${fmtCompact(c.plan529Target)} college`);
+        if (c.brokerageTarget > 0) parts.push(`${fmtCompact(c.brokerageTarget)} at 18`);
+        if (c.firstYearFund) parts.push('first-year fund');
         return parts.join(' · ');
       }
       case 'HOUSE':

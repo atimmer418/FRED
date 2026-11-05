@@ -2,6 +2,8 @@ package com.investingapp.backend.controller;
 
 import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.service.AlpacaService;
@@ -50,6 +52,7 @@ class TradingControllerCloseAccountTest {
     private AlpacaService alpacaService;
     private UserDeletionService userDeletionService;
     private AnalyticsOutboxService analyticsOutboxService;
+    private OpsAlertService opsAlertService;
     private Authentication authentication;
     private User user;
 
@@ -68,6 +71,8 @@ class TradingControllerCloseAccountTest {
         ReflectionTestUtils.setField(controller, "investmentScheduleRepository",
                 mock(InvestmentScheduleRepository.class));
         ReflectionTestUtils.setField(controller, "analyticsOutboxService", analyticsOutboxService);
+        opsAlertService = mock(OpsAlertService.class);
+        ReflectionTestUtils.setField(controller, "opsAlertService", opsAlertService);
 
         user = new User(EMAIL);
         user.setId(42L);
@@ -126,5 +131,7 @@ class TradingControllerCloseAccountTest {
         // deletion that did not happen. That is the whole point of handing the event to the
         // deletion transaction instead of committing it here first.
         verify(analyticsOutboxService, never()).record(anyString(), any(), anyMap());
+        verify(opsAlertService).raise(eq(OpsAlerts.USER_DELETION_DEFERRED), eq("42"), anyString(),
+                eq(Map.of("reason", "ACCOUNT_CLOSED", "deferral", "SETTLEMENT_WINDOW")));
     }
 }

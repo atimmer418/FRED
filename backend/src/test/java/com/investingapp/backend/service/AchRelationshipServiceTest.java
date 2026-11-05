@@ -5,6 +5,8 @@ import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.ScheduleMode;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
@@ -47,6 +49,7 @@ class AchRelationshipServiceTest {
     private final EncryptionService encryption = mock(EncryptionService.class);
     private final PlaidToAlpacaService plaidToAlpaca = mock(PlaidToAlpacaService.class);
     private final AnalyticsOutboxService analyticsOutboxService = mock(AnalyticsOutboxService.class);
+    private final OpsAlertService opsAlertService = mock(OpsAlertService.class);
     private AchRelationshipService service;
     private User user;
     private InvestmentSchedule schedule;
@@ -54,7 +57,7 @@ class AchRelationshipServiceTest {
     @BeforeEach
     void setUp() {
         service = new AchRelationshipService(users, schedules, executions, alpaca, encryption,
-                plaidToAlpaca, analyticsOutboxService);
+                plaidToAlpaca, analyticsOutboxService, opsAlertService);
         when(encryption.decrypt(anyString())).thenAnswer(i -> i.getArgument(0));
         when(encryption.encrypt(anyString())).thenAnswer(i -> "ENC:" + i.getArgument(0));
         user = new User("ach@fredvested.com");
@@ -253,6 +256,8 @@ class AchRelationshipServiceTest {
         assertThat(schedule.getAchRequestId()).isNull();
         assertThat(schedule.getHoldReason()).isEqualTo(HoldReason.MANUAL_REVIEW);
         assertThat(schedule.getStatus()).isEqualTo(InvestmentSchedule.Status.PENDING_BANK);
+        verify(opsAlertService).raise(eq(OpsAlerts.ACH_ADOPT_REFUSED), eq("7"), anyString(),
+                eq(Map.of("user", "7", "reason", "REFUSED_MASK_MISMATCH")));
     }
 
     @Test
@@ -291,6 +296,8 @@ class AchRelationshipServiceTest {
 
         assertThat(user.getAlpacaAchStatus()).isNull();
         verify(alpaca, never()).deleteAchRelationship(anyString(), anyString());
+        verify(opsAlertService).raise(eq(OpsAlerts.ACH_CANCEL_FAILED), eq("7"), anyString(),
+                eq(Map.of("user", "7", "stage", "list")));
     }
 
     @Test
@@ -316,6 +323,8 @@ class AchRelationshipServiceTest {
 
         assertThat(user.getAlpacaAchRelationshipId()).isNull();
         assertThat(schedule.getAchRequestId()).isNull();
+        verify(opsAlertService).raise(eq(OpsAlerts.ACH_CREATE_FAILED), eq("7"), anyString(),
+                eq(Map.of("user", "7", "stage", "create")));
     }
 
     @Test
@@ -330,6 +339,8 @@ class AchRelationshipServiceTest {
         verify(plaidToAlpaca, never()).createAchRelationshipFromPlaid(any(), any(), any(), any());
         verify(alpaca, never()).deleteAchRelationship(anyString(), anyString());
         assertThat(user.getAlpacaAchRelationshipId()).isNull();
+        verify(opsAlertService, times(1)).raise(eq(OpsAlerts.ACH_CANCEL_STUCK), eq("7"), anyString(),
+                eq(Map.of("user", "7")));
     }
 
     @Test
@@ -354,5 +365,7 @@ class AchRelationshipServiceTest {
         verify(plaidToAlpaca, never()).createAchRelationshipFromPlaid(any(), any(), any(), any());
         verify(alpaca, never()).deleteAchRelationship(anyString(), anyString());
         assertThat(user.getAlpacaAchRelationshipId()).isNull();
+        verify(opsAlertService).raise(eq(OpsAlerts.ACH_UNKNOWN_RELATIONSHIP), eq("7"), anyString(),
+                eq(Map.of("user", "7", "count", 1)));
     }
 }

@@ -20,8 +20,13 @@ import java.time.LocalDateTime;
  * <p>occurrences and deliveryStatus are initialised here because Hibernate binds every mapped
  * column on insert, so the V10 DEFAULTs never apply to a row the application writes.
  * firstRaisedAt and lastRaisedAt are Eastern wall time, set by the service.
+ *
+ * <p>@DynamicUpdate: the delivery thread writes deliveryStatus after the raising thread may have
+ * bumped occurrences, so each save must send only the columns it changed or it would put a stale
+ * count back.
  */
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "ops_alerts")
 @Getter
 @Setter

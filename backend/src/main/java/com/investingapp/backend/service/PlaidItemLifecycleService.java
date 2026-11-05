@@ -3,6 +3,8 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.model.PlaidItemRemoval;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.PlaidItemRemovalRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.util.EasternTime;
@@ -29,6 +31,7 @@ import retrofit2.Response;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Plaid Item lifecycle outside the exchange transaction (spec 2.4 step 6, 2.9).
@@ -58,6 +61,7 @@ public class PlaidItemLifecycleService {
     private final JobLockService jobLockService;
     private final TransactionTemplate writeTx;
     private final String plaidWebhookUrl;
+    private final OpsAlertService opsAlertService;
 
     public PlaidItemLifecycleService(PlaidItemRemovalRepository removalRepository,
             UserRepository userRepository,
@@ -66,7 +70,8 @@ public class PlaidItemLifecycleService {
             SchedulerGate schedulerGate,
             JobLockService jobLockService,
             PlatformTransactionManager transactionManager,
-            @Value("${plaid.webhook.url}") String plaidWebhookUrl) {
+            @Value("${plaid.webhook.url}") String plaidWebhookUrl,
+            OpsAlertService opsAlertService) {
         this.removalRepository = removalRepository;
         this.userRepository = userRepository;
         this.plaidApi = plaidApi;
@@ -75,6 +80,7 @@ public class PlaidItemLifecycleService {
         this.jobLockService = jobLockService;
         this.writeTx = new TransactionTemplate(transactionManager);
         this.plaidWebhookUrl = plaidWebhookUrl;
+        this.opsAlertService = opsAlertService;
     }
 
     public record BackfillReport(int attempted, int succeeded, int failed) {
@@ -160,6 +166,10 @@ public class PlaidItemLifecycleService {
                     .findByRemovedAtIsNullAndRequestedAtBeforeOrderByRequestedAtAsc(retryFloor)) {
                 logger.error("alert.plaid.item_remove.exhausted id={} item={} attempts={} lastError={}",
                         row.getId(), row.getItemId(), row.getAttempts(), row.getLastError());
+                opsAlertService.raise(OpsAlerts.PLAID_ITEM_REMOVE_EXHAUSTED, String.valueOf(row.getId()),
+                        "Plaid /item/remove retries exhausted after 7 days; the Item may still bill",
+                        Map.of("id", String.valueOf(row.getId()), "item", String.valueOf(row.getItemId()),
+                                "attempts", row.getAttempts()));
             }
         } finally {
             jobLockService.release(JobLocks.PLAID_ITEM_REMOVALS);

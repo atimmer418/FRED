@@ -4,6 +4,8 @@ import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.model.*;
 import com.investingapp.backend.repository.*;
 import com.investingapp.backend.service.ScheduledInvestmentProcessor.ProcessOutcome;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.util.AnalyticsBands;
 import com.investingapp.backend.util.EasternTime;
 import com.investingapp.backend.util.ServerAnalyticsEvent;
@@ -92,6 +94,9 @@ public class InvestmentExecutionService {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private OpsAlertService opsAlertService;
 
     /**
      * Check if markets are currently open (US Eastern Time)
@@ -256,6 +261,9 @@ public class InvestmentExecutionService {
             List<InvestmentExecution> found = executionRepository.findAllById(ids);
             if (found.size() != ids.size()) {
                 logger.error("alert.batch_rows_missing user={} expected={} found={}", userId, ids.size(), found.size());
+                opsAlertService.raise(OpsAlerts.BATCH_ROWS_MISSING, String.valueOf(userId),
+                        "batch reload found fewer execution rows than ids",
+                        Map.of("user", String.valueOf(userId), "expected", ids.size(), "found", found.size()));
             }
             for (InvestmentExecution execution : found) {
                 writer.accept(execution);
@@ -318,6 +326,9 @@ public class InvestmentExecutionService {
                     int claimed = claimInNewTransaction(ids, batchStart, batchNight);
                     if (claimed != ids.size()) {
                         logger.error("alert.batch_claim_short user={} expected={} claimed={}", batchUser.userId(), ids.size(), claimed);
+                        opsAlertService.raise(OpsAlerts.BATCH_CLAIM_SHORT, String.valueOf(batchUser.userId()),
+                                "batch claim short; this user is skipped tonight",
+                                Map.of("user", String.valueOf(batchUser.userId()), "expected", ids.size(), "claimed", claimed));
                         continue;
                     }
 
@@ -398,6 +409,9 @@ public class InvestmentExecutionService {
         });
         logger.error("alert.batch_no_relationship user={} rows={} total={}",
                 batchUser.userId(), batchUser.executionIds().size(), batchUser.totalAmount());
+        opsAlertService.raise(OpsAlerts.BATCH_NO_RELATIONSHIP, String.valueOf(batchUser.userId()),
+                "no ACH relationship on file; rows marked FUNDING_FAILED",
+                Map.of("user", String.valueOf(batchUser.userId()), "rows", batchUser.executionIds().size()));
         notifyUserOfFailure(batchUser.email(), batchUser.totalAmount(), "Funding Failed", details);
     }
 

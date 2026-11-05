@@ -5,6 +5,8 @@ import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.ScheduleMode;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.repository.UserRepository;
@@ -51,6 +53,7 @@ public class AchRelationshipService {
     private final EncryptionService encryptionService;
     private final PlaidToAlpacaService plaidToAlpacaService;
     private final AnalyticsOutboxService analyticsOutboxService;
+    private final OpsAlertService opsAlertService;
 
     public AchRelationshipService(UserRepository userRepository,
             InvestmentScheduleRepository scheduleRepository,
@@ -58,7 +61,8 @@ public class AchRelationshipService {
             AlpacaApiService alpacaApiService,
             EncryptionService encryptionService,
             PlaidToAlpacaService plaidToAlpacaService,
-            AnalyticsOutboxService analyticsOutboxService) {
+            AnalyticsOutboxService analyticsOutboxService,
+            OpsAlertService opsAlertService) {
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
         this.executionRepository = executionRepository;
@@ -66,6 +70,7 @@ public class AchRelationshipService {
         this.encryptionService = encryptionService;
         this.plaidToAlpacaService = plaidToAlpacaService;
         this.analyticsOutboxService = analyticsOutboxService;
+        this.opsAlertService = opsAlertService;
     }
 
     /**
@@ -168,6 +173,9 @@ public class AchRelationshipService {
 
     private AdoptResult refuse(User user, Optional<InvestmentSchedule> scheduleOpt, AchRelationshipSummary rel, AdoptResult reason) {
         logger.error("alert.ach.adopt_refused user={} reason={} rel={}", user.getId(), reason, rel.id());
+        opsAlertService.raise(OpsAlerts.ACH_ADOPT_REFUSED, String.valueOf(user.getId()),
+                "ACH relationship adoption refused; schedule held for MANUAL_REVIEW",
+                Map.of("user", String.valueOf(user.getId()), "reason", reason.name()));
         scheduleOpt.ifPresent(schedule -> {
             schedule.setHoldReason(HoldReason.MANUAL_REVIEW);
             scheduleRepository.save(schedule);
@@ -195,6 +203,9 @@ public class AchRelationshipService {
             active = alpacaApiService.listAchRelationships(alpacaAccountId, ACTIVE_STATUSES);
         } catch (RestClientException | IllegalStateException e) {
             logger.error("alert.ach.cancel_failed user={} stage=list error={}", user.getId(), e.getMessage());
+            opsAlertService.raise(OpsAlerts.ACH_CANCEL_FAILED, String.valueOf(user.getId()),
+                    "listing ACH relationships for the bank-change cancel failed",
+                    Map.of("user", String.valueOf(user.getId()), "stage", "list"));
             return true;
         }
         boolean deletedAny = false;
@@ -203,6 +214,9 @@ public class AchRelationshipService {
                 deletedAny = true;
             } else {
                 logger.error("alert.ach.cancel_failed user={} stage=delete rel={}", user.getId(), rel.id());
+                opsAlertService.raise(OpsAlerts.ACH_CANCEL_FAILED, String.valueOf(user.getId()),
+                        "deleting an ACH relationship for the bank-change cancel failed",
+                        Map.of("user", String.valueOf(user.getId()), "stage", "delete"));
             }
         }
         if (deletedAny) {
@@ -231,6 +245,9 @@ public class AchRelationshipService {
             existing = alpacaApiService.listAchRelationships(alpacaAccountId, POLL_STATUSES);
         } catch (RestClientException | IllegalStateException e) {
             logger.error("alert.ach.poll_list_failed user={} error={}", user.getId(), e.getMessage());
+            opsAlertService.raise(OpsAlerts.ACH_POLL_LIST_FAILED, String.valueOf(user.getId()),
+                    "listing ACH relationships for the 15-minute poll failed",
+                    Map.of("user", String.valueOf(user.getId()), "stage", "poll_list"));
             return;
         }
         if (existing.isEmpty()) {
@@ -242,6 +259,9 @@ public class AchRelationshipService {
         if (!onlyPrevious) {
             logger.error("alert.ach.unknown_relationship user={} ids={}", user.getId(),
                     existing.stream().map(AchRelationshipSummary::id).toList());
+            opsAlertService.raise(OpsAlerts.ACH_UNKNOWN_RELATIONSHIP, String.valueOf(user.getId()),
+                    "an ACH relationship FRED did not create sits on the account; the poll is waiting",
+                    Map.of("user", String.valueOf(user.getId()), "count", existing.size()));
             return;
         }
         if (!existing.stream().allMatch(r -> CANCEL_REQUESTED.equals(r.status()))) {
@@ -254,6 +274,9 @@ public class AchRelationshipService {
         LocalDateTime cancelRequestedAt = user.getPlaidItemLinkedAt();
         if (cancelRequestedAt == null || cancelRequestedAt.isBefore(EasternTime.now().minusHours(24))) {
             logger.error("alert.ach.cancel_stuck user={} rel={}", user.getId(), previousId);
+            opsAlertService.raise(OpsAlerts.ACH_CANCEL_STUCK, String.valueOf(user.getId()),
+                    "previous ACH relationship still CANCEL_REQUESTED after 24 hours",
+                    Map.of("user", String.valueOf(user.getId())));
         } else {
             logger.info("ach.poll.waiting user={} rel={} status=CANCEL_REQUESTED", user.getId(), previousId);
         }
@@ -266,6 +289,9 @@ public class AchRelationshipService {
         if (id == null || result.containsKey("error")) {
             // Log only the error text: raw_response carries bank details.
             logger.error("alert.ach.create_failed user={} error={}", user.getId(), result == null ? "null result" : result.get("error"));
+            opsAlertService.raise(OpsAlerts.ACH_CREATE_FAILED, String.valueOf(user.getId()),
+                    "creating the ACH relationship failed; the poll retries in 15 minutes",
+                    Map.of("user", String.valueOf(user.getId()), "stage", "create"));
             return;
         }
         adopt(user, new AchRelationshipSummary(id.toString(), (String) result.get("status"), (String) result.get("created_at"), null));

@@ -67,6 +67,10 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
     static final String PLAID_ENV_SANDBOX = "sandbox";
     static final String PLAID_ENV_PRODUCTION = "production";
 
+    /** app.ops.alert.provider values (spec 12.3): logging writes to the log only, webhook reaches a person. */
+    static final String OPS_ALERT_PROVIDER_LOGGING = "logging";
+    static final String OPS_ALERT_PROVIDER_WEBHOOK = "webhook";
+
     /**
      * SHA-256 digest of the sandbox secret that sat in application-prod.properties from b08d9e3
      * (2025-06-28) until Phase 0. Git history keeps the plaintext forever, so prod refuses it; this
@@ -139,6 +143,7 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
             checkProdPlaidSecret(violations);
             checkProdDatasourceUrl(violations);
             checkProdJwtSecret(violations);
+            checkProdOpsAlertProvider(violations);
         }
 
         if (!violations.isEmpty()) {
@@ -179,6 +184,25 @@ public class BrokerEnvironmentGuard implements BeanFactoryPostProcessor, Environ
             violations.add("plaid.webhook.url=" + value + " points at this machine, which cannot be right in prod");
         } else if (isTunnelUrl(value)) {
             violations.add("plaid.webhook.url=" + value + " is a dev tunnel, which cannot be right in prod");
+        }
+    }
+
+    /**
+     * Spec 12.1, 12.3: a prod alert must reach a person, so logging is refused, and so is webhook
+     * without an https receiver. The URL embeds its token: violations name the property, never the value.
+     */
+    private void checkProdOpsAlertProvider(List<String> violations) {
+        String provider = environment.getProperty("app.ops.alert.provider", OPS_ALERT_PROVIDER_LOGGING);
+        if (!OPS_ALERT_PROVIDER_WEBHOOK.equals(provider)) {
+            violations.add("app.ops.alert.provider=" + provider
+                    + " cannot deliver alerts to a person in prod; set OPS_ALERT_PROVIDER=webhook");
+            return;
+        }
+        String url = environment.getProperty("app.ops.alert.webhook-url", "");
+        if (url.isBlank()) {
+            violations.add("app.ops.alert.webhook-url is not set, so prod alerts would go nowhere");
+        } else if (!url.trim().toLowerCase().startsWith("https://")) {
+            violations.add("app.ops.alert.webhook-url must start with https:// in prod");
         }
     }
 

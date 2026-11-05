@@ -3,6 +3,8 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.model.PlaidWebhookEvent;
 import com.investingapp.backend.model.PlaidWebhookEventStatus;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.PlaidWebhookEventRepository;
 import com.investingapp.backend.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,12 +15,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -38,6 +42,7 @@ class PlaidWebhookInboxServiceTest {
     private PlaidWebhookInboxService service;
     private PlaidWebhookEventRepository eventRepository;
     private UserRepository userRepository;
+    private OpsAlertService opsAlertService;
 
     static byte[] body(String type, String code, String itemId, String env) {
         return ("{\"webhook_type\":\"" + type + "\",\"webhook_code\":\"" + code + "\",\"item_id\":\"" + itemId
@@ -61,6 +66,8 @@ class PlaidWebhookInboxServiceTest {
         ReflectionTestUtils.setField(service, "eventRepository", eventRepository);
         ReflectionTestUtils.setField(service, "userRepository", userRepository);
         ReflectionTestUtils.setField(service, "plaidEnv", "sandbox");
+        opsAlertService = mock(OpsAlertService.class);
+        ReflectionTestUtils.setField(service, "opsAlertService", opsAlertService);
 
         when(eventRepository.findByDedupeKey(anyString())).thenReturn(Optional.empty());
         when(eventRepository.save(any(PlaidWebhookEvent.class))).thenAnswer(i -> i.getArgument(0));
@@ -132,6 +139,8 @@ class PlaidWebhookInboxServiceTest {
         assertThat(event.getStatus()).isEqualTo(PlaidWebhookEventStatus.IGNORED);
         assertThat(event.getUserId()).isNull();
         verify(eventRepository).save(event);
+        verify(opsAlertService).raise(eq(OpsAlerts.PLAID_WEBHOOK_AMBIGUOUS_ITEM), eq(ITEM_ID), anyString(),
+                eq(Map.of("item", ITEM_ID)));
     }
 
     @Test

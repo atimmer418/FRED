@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.investingapp.backend.model.PlaidWebhookEvent;
 import com.investingapp.backend.model.PlaidWebhookEventStatus;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.PlaidWebhookEventRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.util.EasternTime;
@@ -21,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -42,6 +45,9 @@ public class PlaidWebhookInboxService {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private OpsAlertService opsAlertService;
 
     @Value("${plaid.env}")
     private String plaidEnv;
@@ -103,6 +109,9 @@ public class PlaidWebhookInboxService {
         } catch (IncorrectResultSizeDataAccessException e) {
             // plaid_item_id has no unique constraint; a sandbox Item reused across users must not drop the row
             logger.error("alert.plaid.webhook.ambiguous_item item_id={}", itemId);
+            opsAlertService.raise(OpsAlerts.PLAID_WEBHOOK_AMBIGUOUS_ITEM, itemId,
+                    "webhook item_id matches more than one user; row stored IGNORED",
+                    Map.of("item", itemId));
             return null;
         }
     }

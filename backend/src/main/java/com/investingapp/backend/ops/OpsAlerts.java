@@ -34,6 +34,10 @@ public final class OpsAlerts {
     public static final String RECONCILE_LATE = "paycheck.reconcile.late";
     /** Raised by the 22:30 reconcile once per run, subject "nightly" (T15); T05 reads it. */
     public static final String RECONCILE_RAN = "paycheck.reconcile.ran";
+    /** Spec 12.3 "reconcile truncated". */
+    public static final String RECONCILE_TRUNCATED = "paycheck.reconcile.truncated";
+    /** Spec 12.3 "reconcile throwing". */
+    public static final String RECONCILE_THREW = "paycheck.reconcile.threw";
 
     /** PlaidGateway: the fifth consecutive TRANSIENT or RATE_LIMIT Plaid result (spec 2.1, 12.3). Subject: global. */
     public static final String PLAID_OUTAGE = "plaid.outage";

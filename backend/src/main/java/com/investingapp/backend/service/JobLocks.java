@@ -10,6 +10,8 @@ public final class JobLocks {
     public static final String PLAID_WEBHOOK_INBOX = "plaid.webhook-inbox";
     public static final String OPS_HEARTBEAT = "ops.heartbeat";
 
+    public static final String PAYCHECK_RECONCILE = "paycheck.reconcile";
+
     private JobLocks() {
     }
 }

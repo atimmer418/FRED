@@ -383,3 +383,45 @@ All paths relative to `/Users/andrewtimmer/PersonalTypeshit/FRED`.
    remove confirmation; vacation at a mocked new year shows reset line.
 6. Copy: grep new html/ts and `my-profile.page.ts` for em dashes; read every plan sentence
    aloud in FRED's voice.
+
+## Amendments from the final whole-branch review (2026-11-05)
+
+A six-lens review of the finished branch found cross-task defects. These rules were added or
+sharpened; where they differ from the text above, this section wins.
+
+- **Reopening a goal is a tier-checked action.** The one-active-goal rule also runs when a
+  completed goal is set back to active, so completing a goal, adding another and reopening the
+  first cannot exceed the limit. A free user who tries sees the Plus nudge.
+- **Stored dates survive the calendar.** The server applies date-relative lower bounds (target
+  year not in the past, kid not yet 18, vacation year not stale) only to values that are new or
+  changed. A stored goal whose year has passed still accepts balance updates and Mark
+  completed. The page's validation accepts an unchanged stored year the same way.
+- **Expected balance stops at the deadline.** Status never expects contributions after a
+  goal's or an account's deadline.
+- **The deadline month shows what is due.** When the plan asks for no monthly and a shortfall
+  remains, the hero reads "$X due now", the headline reads "Target month reached", and the
+  "from you, from growth" line and the catch-up sentence are hidden. Nothing is attributed to
+  growth in a month with no growth.
+- **Vacation status starts when the plan starts.** Expected savings count from the plan's
+  first month in its first year, and the status reads Plan started until an amount has been
+  logged for the current year. A vacation goal never shows a catch-up sentence.
+- **A never-planned import has no frozen rate kind.** The import stores cash for a target under
+  36 months out and market otherwise, and the first save of an imported goal is a full first
+  plan, so a goal a year away is planned as cash.
+- **Writes from the goal page are serialized.** A balance saved on blur and a Save, Mark
+  completed or Remove tapped right after it run in order, each built from the result of the one
+  before, so neither overwrites the other.
+- **Balances typed for accounts that are not saved yet are kept.** In edit mode a balance typed
+  for a kid added in the session, or for a newly switched-on first-year fund, travels with the
+  save.
+- **Whole dollars in fields and imports.** Amount fields show and save whole dollars; imported
+  amounts are rounded to whole dollars and capped.
+- **Imports are bounded** at 50 imported goals per user.
+- **Icons.** The Kids, Vacation and Wedding icons are part of the shipped icon font subset.
+
+Known and deferred, for the owner: server timestamps are Eastern wall-clock and the client
+parses them as device-local, which can shift a month count at a month boundary for a user in
+another time zone; the tier rule and the import are check-then-insert and can race under
+concurrent requests; an imported goal whose first plan needs $0 a month keeps its "Plan
+updated" chip; the largest files (the goal page, its styles, the form model, GoalService) are
+due a split.

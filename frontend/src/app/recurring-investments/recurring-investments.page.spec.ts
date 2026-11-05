@@ -3,7 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
 import { AlertController } from '@ionic/angular/standalone';
-import { of, throwError } from 'rxjs';
+import { BehaviorSubject, of, throwError } from 'rxjs';
 import { RecurringInvestmentsPage } from './recurring-investments.page';
 import { InvestmentService, InvestmentSchedule } from '../services/investment.service';
 import { PasskeyService } from '../services/passkey.service';
@@ -11,6 +11,9 @@ import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AccountStatusService } from '../services/account-status.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
+import { PlaidService } from '../services/plaid.service';
+import { PrimaryBankAccount } from '../models/primary-bank-account';
+import { reconnectCardFor } from '../components/reconnect-card/reconnect-card.component';
 
 /**
  * Analytics call sites on recurring-investments.
@@ -26,6 +29,9 @@ describe('RecurringInvestmentsPage — analytics', () => {
   let accountStatus: jasmine.SpyObj<AccountStatusService>;
   let pin: jasmine.SpyObj<PinService>;
   let page: RecurringInvestmentsPage;
+  let plaid: jasmine.SpyObj<PlaidService>;
+  let router: jasmine.SpyObj<Router>;
+  let status$: BehaviorSubject<string | null>;
 
   const schedule: InvestmentSchedule = {
     id: 7,
@@ -55,13 +61,19 @@ describe('RecurringInvestmentsPage — analytics', () => {
       'resumeSchedule',
       'createSchedule',
     ]);
-    accountStatus = jasmine.createSpyObj<AccountStatusService>('AccountStatusService', ['isAccountActive']);
+    status$ = new BehaviorSubject<string | null>('ACTIVE');
+    accountStatus = jasmine.createSpyObj<AccountStatusService>('AccountStatusService', ['isAccountActive'], {
+      accountStatus$: status$.asObservable(),
+    });
     accountStatus.isAccountActive.and.returnValue(true);
     pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
     pin.hasPin.and.resolveTo(false);
+    plaid = jasmine.createSpyObj<PlaidService>('PlaidService', ['getPrimaryBankAccount']);
+    plaid.getPrimaryBankAccount.and.returnValue(of(null));
+    router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
     page = new RecurringInvestmentsPage(
-      jasmine.createSpyObj<Router>('Router', ['navigate']),
+      router,
       { queryParams: of({}), params: of({}), snapshot: { queryParams: {} } } as unknown as ActivatedRoute,
       investments,
       jasmine.createSpyObj<PasskeyService>('PasskeyService', ['startAuthentication']),
@@ -71,6 +83,7 @@ describe('RecurringInvestmentsPage — analytics', () => {
       jasmine.createSpyObj<AlertController>('AlertController', ['create']),
       jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
       analytics,
+      plaid,
     );
   });
 
@@ -204,4 +217,46 @@ describe('RecurringInvestmentsPage — analytics', () => {
     expect(analytics.trackErrorShown).toHaveBeenCalledOnceWith('network', 'portfolio', 'toast', null, false);
     expect(analytics.track).not.toHaveBeenCalled();
   }));
+
+  // ── the reconnect card (R10, R18) ──────────────────────────────────────────
+
+  const brokenBank: PrimaryBankAccount = {
+    accountId: 'acc-1',
+    institutionName: 'Chase',
+    accountName: 'Plaid Checking',
+    accountType: 'depository',
+    accountSubtype: 'checking',
+    mask: '0000',
+    itemStatus: 'LOGIN_REQUIRED',
+    transactionsConsented: true,
+    consentExpiresAt: null,
+  };
+
+  it('cardRendersWithoutSchedule: a 404 schedule still loads the bank and yields a card', () => {
+    investments.getCurrentSchedule.and.returnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+    plaid.getPrimaryBankAccount.and.returnValue(of(brokenBank));
+
+    page.ngOnInit();
+
+    expect(page.currentInvestment).toBeNull();
+    expect(page.reconnectAccount).toEqual(brokenBank);
+    expect(reconnectCardFor(page.reconnectAccount)).not.toBeNull();
+    expect(analytics.track).not.toHaveBeenCalled();
+  });
+
+  it('reconnectGoesToChangeBankInUpdateMode', () => {
+    page.onReconnect();
+
+    expect(router.navigate).toHaveBeenCalledOnceWith(['/change-bank-account'], { queryParams: { mode: 'update' } });
+  });
+
+  it('hiddenForRejectedApplicant: R18, the card is for users who can invest', () => {
+    investments.getCurrentSchedule.and.returnValue(of(schedule));
+    plaid.getPrimaryBankAccount.and.returnValue(of(brokenBank));
+    status$.next('REJECTED');
+
+    page.ngOnInit();
+
+    expect(page.reconnectAccount).toBeNull();
+  });
 });

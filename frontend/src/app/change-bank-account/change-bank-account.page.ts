@@ -3,11 +3,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Subject, takeUntil, catchError, tap, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
-import { clearPlaidLinkSession, plaidOAuthStateId, readPlaidLinkReturn, readPlaidLinkToken, readPlaidOAuthReturnHref, storePlaidLinkSession } from '../utils/plaid-link-session';
+import { clearPlaidLinkSession, PlaidLinkMode, plaidOAuthStateId, readPlaidLinkMode, readPlaidLinkReturn, readPlaidLinkToken, readPlaidOAuthReturnHref, storePlaidLinkSession } from '../utils/plaid-link-session';
+import { UpdateModeCompleteResponse } from '../models/primary-bank-account';
 import { PlaidService } from '../services/plaid.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
@@ -24,6 +25,11 @@ import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-
 declare var Plaid: any;
 
 const BACKEND_API_URL = environment.backendApiUrl;
+
+/** The server's answer when Plaid refuses an update-mode token (PlaidController create_link_token, spec 8.8). */
+function isUpdateModeUnavailable(error: unknown): boolean {
+  return error instanceof HttpErrorResponse && error.status === 409 && error.error?.code === 'UPDATE_MODE_UNAVAILABLE';
+}
 
 @Component({
   selector: 'app-change-bank-account',
@@ -51,6 +57,8 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
   private plaidHandler: any;
   private plaidSubscription: any;
   private currentLinkToken: string | null = null;
+  /** The mode the current token was created with; decides what onSuccess does (spec 2.3). */
+  private linkMode: PlaidLinkMode = 'link';
 
   constructor(
     private router: Router,
@@ -134,8 +142,10 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
       let linkToken: string;
       if (resuming) {
         linkToken = storedToken as string;
+        // The OAuth return URL carries oauth_state_id, not ?mode, so the mode comes back with the session.
+        this.linkMode = readPlaidLinkMode();
       } else {
-        const linkTokenData = await this.getLinkTokenAuthenticated().toPromise();
+        const linkTokenData = await this.requestLinkToken(this.requestedLinkMode());
         linkToken = linkTokenData.link_token;
         if (!linkToken) {
           throw new Error('Failed to retrieve link_token from backend.');
@@ -152,13 +162,18 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
           console.log('Plaid Link success! Public Token:', public_token, 'Metadata:', metadata);
           this.statusMessage = 'Processing...';
           this.isLoading = true;
-          this.exchangePublicTokenAuthenticated(public_token);
+          if (this.linkMode === 'update') {
+            // Same Item, same access token: nothing to exchange. The server re-reads consent (spec 2.3).
+            this.completeUpdateMode();
+          } else {
+            this.exchangePublicTokenAuthenticated(public_token);
+          }
         },
         onLoad: () => {
           console.log('Plaid Link UI loaded.');
           this.isLoading = false;
           this.isPlaidReady = true;
-          this.statusMessage = 'Ready to change your bank account.';
+          this.statusMessage = this.linkMode === 'update' ? 'Ready to reconnect your bank.' : 'Ready to change your bank account.';
         },
         onExit: (err: any, metadata: any) => {
           clearPlaidLinkSession();
@@ -221,7 +236,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
       // The step-up gate (or its deliberate absence) just passed: only now is it true that a
       // stored token proves Link really left for the bank after a verified step-up.
       if (this.currentLinkToken) {
-        storePlaidLinkSession(this.currentLinkToken, 'change-bank');
+        storePlaidLinkSession(this.currentLinkToken, 'change-bank', this.linkMode);
       }
       this.plaidHandler.open();
     } else {
@@ -230,10 +245,35 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
     }
   }
 
-  private getLinkTokenAuthenticated() {
-    return this.http.post<any>(`${BACKEND_API_URL}/plaid/create_link_token`, { mode: 'link' }, {
+  private getLinkTokenAuthenticated(mode: PlaidLinkMode = 'link') {
+    return this.http.post<any>(`${BACKEND_API_URL}/plaid/create_link_token`, { mode }, {
       headers: this.getAuthHeaders()
     });
+  }
+
+  /**
+   * A token in the requested mode. Plaid can refuse update mode (after USER_PERMISSION_REVOKED, or
+   * with no Item) and the server answers 409 UPDATE_MODE_UNAVAILABLE; a fresh link is then the way
+   * back, and its exchange queues the old Item for removal (spec 2.3, 8.8). Any other error rethrows.
+   */
+  private async requestLinkToken(mode: PlaidLinkMode): Promise<{ link_token: string }> {
+    try {
+      const data = await this.getLinkTokenAuthenticated(mode).toPromise();
+      this.linkMode = mode;
+      return data;
+    } catch (error) {
+      if (mode === 'update' && isUpdateModeUnavailable(error)) {
+        const data = await this.getLinkTokenAuthenticated('link').toPromise();
+        this.linkMode = 'link';
+        return data;
+      }
+      throw error;
+    }
+  }
+
+  /** 'update' only when opened as /change-bank-account?mode=update (the reconnect card). Stubbed in specs. */
+  private requestedLinkMode(): PlaidLinkMode {
+    return new URLSearchParams(window.location.search).get('mode') === 'update' ? 'update' : 'link';
   }
 
   /**
@@ -297,6 +337,40 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         return of(null);
       })
     ).subscribe();
+  }
+
+  /** Update mode keeps the Item and its access token, so the server only re-reads it (spec 2.3, 8.8). */
+  private completeUpdateMode(): void {
+    this.plaidSubscription = this.http.post<UpdateModeCompleteResponse>(
+      `${BACKEND_API_URL}/plaid/update-mode-complete`,
+      {},
+      { headers: this.getAuthHeaders() }
+    ).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        if (response?.result === 'CONSENT_STILL_MISSING') {
+          this.statusMessage = 'Your bank is connected. FRED still needs permission to read deposits.';
+          this.toastService.showToast('FRED still needs permission to read deposits at your bank.', 'warning', 5000);
+        } else {
+          this.statusMessage = 'Your bank connection is up to date.';
+          this.toastService.showToast('Your bank is reconnected.', 'success', 3000);
+        }
+        void this.loadCurrentBankAccount();
+        this.plaidService.refreshBankAccountData();
+      },
+      error: (err) => {
+        this.isLoading = false;
+        this.analytics.trackErrorShown(
+          isNetworkFailure(err) ? 'network' : 'bank_link',
+          'portfolio',
+          'toast',
+          httpStatusOf(err),
+          false,
+        );
+        this.statusMessage = 'Could not finish reconnecting your bank. Please try again.';
+        this.toastService.showToast('Could not finish reconnecting your bank. Please try again.', 'danger', 5000);
+      }
+    });
   }
 
   private getAuthHeaders(): HttpHeaders {

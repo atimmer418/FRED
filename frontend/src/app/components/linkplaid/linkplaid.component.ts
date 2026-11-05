@@ -6,14 +6,15 @@ import { HttpClient, HttpHeaders, HttpErrorResponse } from '@angular/common/http
 import {
   IonHeader, IonToolbar, IonContent, IonFooter, IonSpinner, NavController
 } from '@ionic/angular/standalone';
-import { Observable, throwError, Subscription } from 'rxjs';
+import { Observable, of, throwError, Subscription } from 'rxjs';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { catchError, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
-import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession, storePlaidOAuthReturnHref } from '../../utils/plaid-link-session';
+import { clearPlaidLinkSession, PlaidLinkMode, readPlaidLinkMode, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession, storePlaidOAuthReturnHref } from '../../utils/plaid-link-session';
+import { UpdateModeCompleteResponse } from '../../models/primary-bank-account';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -45,6 +46,8 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
 
   private isUserAuthenticated: boolean = false; // Determine this based on JWT presence
   private plaidSubscription: Subscription | undefined;
+  /** The mode the current token was created with (spec 2.3). This page only asks for 'link'. */
+  private linkMode: PlaidLinkMode = 'link';
 
   constructor(
     private http: HttpClient,
@@ -100,6 +103,8 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
         clearPlaidLinkSession();
       }
       let linkToken: string;
+      // A resumed session carries the mode it was stored with; a fresh token here is always 'link'.
+      this.linkMode = resuming ? readPlaidLinkMode() : 'link';
 
       if (this.isUserAuthenticated) {
         if (resuming) {
@@ -133,7 +138,12 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
           this.statusMessage = 'Processing...';
           this.isLoading = true;
           if (this.isUserAuthenticated) {
-            this.exchangePublicTokenAuthenticated(public_token);
+            if (this.linkMode === 'update') {
+              // Same Item, same access token: nothing to exchange (spec 2.3).
+              this.completeUpdateMode();
+            } else {
+              this.exchangePublicTokenAuthenticated(public_token);
+            }
           } else {
             console.error("Critical error: user is not authenticated when trying to link bank.");
             this.statusMessage = "Error: User is not authenticated. Please restart the process.";
@@ -229,6 +239,29 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
           this.analytics.trackErrorShown('bank_link', 'onboarding', 'inline_banner', httpStatusOf(err), true);
           this.statusMessage = `Error: ${err.error?.message || 'Failed to link bank account.'}`;
           return this.handleError(err);
+        })
+      ).subscribe();
+  }
+
+  /**
+   * Update mode keeps the Item, so the bank step is already satisfied: finish it exactly as a
+   * successful exchange does. A failure leaves the user here with the retry button.
+   */
+  private completeUpdateMode(): void {
+    this.plaidSubscription = this.http.post<UpdateModeCompleteResponse>(`${BACKEND_API_URL}/plaid/update-mode-complete`, {}, { headers: this.getAuthHeaders() })
+      .pipe(
+        tap(() => {
+          this.statusMessage = 'Bank account reconnected!';
+          this.authService.completeStep('linkPlaid').subscribe({
+            next: () => this.navCtrl.navigateForward('/investment-schedule', { replaceUrl: true }),
+            error: () => this.navCtrl.navigateForward('/investment-schedule', { replaceUrl: true }),
+          });
+        }),
+        catchError(err => {
+          this.isLoading = false;
+          this.analytics.trackErrorShown('bank_link', 'onboarding', 'inline_banner', httpStatusOf(err), true);
+          this.statusMessage = 'Error: Could not finish reconnecting your bank. Please try again.';
+          return of(null);
         })
       ).subscribe();
   }

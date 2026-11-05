@@ -34,6 +34,9 @@ import { AccountStatusService } from '../services/account-status.service';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+import { PlaidService } from '../services/plaid.service';
+import { PrimaryBankAccount } from '../models/primary-bank-account';
+import { ReconnectCardComponent } from '../components/reconnect-card/reconnect-card.component';
 
 interface InvestmentFrequencyOption {
   value: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'SEMI_MONTHLY';
@@ -55,7 +58,8 @@ interface InvestmentFrequencyOption {
     IonButtons,
     IonDatetime,
     IonModal,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective,
+    ReconnectCardComponent
   ],
   templateUrl: './recurring-investments.page.html',
   styleUrls: ['./recurring-investments.page.scss']
@@ -73,6 +77,10 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
 
   isLoading = false;
   isDatePickerOpen = false;
+
+  /** The linked bank from GET /plaid/primary-bank-account; null when unlinked or unreadable. */
+  bankAccount: PrimaryBankAccount | null = null;
+  private accountRejected = false;
 
   // Helper property for date picker minimum date
   readonly todayISO = new Date().toISOString();
@@ -116,7 +124,8 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
     private accountStatusService: AccountStatusService,
     private alertController: AlertController,
     private navCtrl: NavController,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    private plaidService: PlaidService
   ) {
     addIcons({ cashOutline, timeOutline, calendarOutline, addOutline, checkmarkCircleOutline, pauseOutline, playOutline, alertCircleOutline, settingsOutline, informationCircleOutline });
   }
@@ -128,11 +137,35 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
       }
     });
     this.loadCurrentInvestment();
+    this.loadBankAccount();
   }
 
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  /** What the reconnect card is given: nothing for a rejected applicant, who cannot invest (R18). */
+  get reconnectAccount(): PrimaryBankAccount | null {
+    return this.accountRejected ? null : this.bankAccount;
+  }
+
+  /**
+   * The bank is read independently of the schedule (R10), so the card shows for a user with no
+   * schedule too. A failed read leaves no card and no toast: the schedule is this page's job.
+   */
+  private loadBankAccount(): void {
+    this.accountStatusService.accountStatus$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(status => this.accountRejected = status === 'REJECTED');
+    this.plaidService.getPrimaryBankAccount()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(account => this.bankAccount = account);
+  }
+
+  /** Reconnect reopens the same Item in update mode; that page falls back to a fresh link on 409. */
+  onReconnect(): void {
+    this.router.navigate(['/change-bank-account'], { queryParams: { mode: 'update' } });
   }
 
   private loadCurrentInvestment() {

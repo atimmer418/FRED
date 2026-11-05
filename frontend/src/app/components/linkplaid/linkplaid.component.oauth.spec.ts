@@ -4,7 +4,7 @@ import { NavController } from '@ionic/angular/standalone';
 import { of } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
-import { PLAID_LINK_RETURN_KEY, PLAID_LINK_TOKEN_KEY, PLAID_OAUTH_RETURN_HREF_KEY } from '../../utils/plaid-link-session';
+import { PLAID_LINK_MODE_KEY, PLAID_LINK_RETURN_KEY,PLAID_LINK_TOKEN_KEY, PLAID_OAUTH_RETURN_HREF_KEY } from '../../utils/plaid-link-session';
 import { LinkPlaidComponent } from './linkplaid.component';
 
 /**
@@ -171,6 +171,30 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     plaidConfig.onSuccess('public-sandbox-token', {});
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
+  it('updateSuccessCallsCompleteNotExchange: a resumed update-mode session completes instead of exchanging', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
+    sessionStorage.setItem(PLAID_LINK_MODE_KEY, 'update');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+    post.and.returnValue(of({ result: 'REPAIRED' }));
+
+    await component.initializePlaidLink();
+    plaidConfig.onSuccess('public-token-unused-in-update-mode', {});
+
+    expect(post.calls.allArgs().map(args => args[0] as string)).toEqual([jasmine.stringMatching(/\/plaid\/update-mode-complete$/)]);
+    expect(navCtrl.navigateForward).toHaveBeenCalledWith('/investment-schedule', { replaceUrl: true });
+  });
+
+  it('linkModeSuccessStillExchanges: a fresh onboarding token never calls update-mode-complete', async () => {
+    await component.initializePlaidLink();
+    expect(sessionStorage.getItem(PLAID_LINK_MODE_KEY)).toBe('link');
+    post.and.returnValue(of({ message: 'ok' }));
+
+    plaidConfig.onSuccess('public-sandbox-token', {});
+
+    expect(post.calls.mostRecent().args[0]).toMatch(/\/plaid\/exchange_public_token$/);
   });
 
   it('goBack returns to KYC verification', () => {

@@ -12,14 +12,22 @@
  */
 export const PLAID_LINK_TOKEN_KEY = 'fred.plaid.linkToken';
 export const PLAID_LINK_RETURN_KEY = 'fred.plaid.linkReturn';
+export const PLAID_LINK_MODE_KEY = 'fred.plaid.linkMode';
 export const PLAID_OAUTH_RETURN_HREF_KEY = 'fred.plaid.oauthReturnHref';
 
 export type PlaidLinkReturnTo = 'onboarding' | 'change-bank';
 
-export function storePlaidLinkSession(linkToken: string, returnTo: PlaidLinkReturnTo): void {
+/**
+ * The mode the parked token was created with (spec 2.3). An update-mode token must finish with
+ * POST /plaid/update-mode-complete, never an exchange, and the OAuth return URL does not say which.
+ */
+export type PlaidLinkMode = 'link' | 'update';
+
+export function storePlaidLinkSession(linkToken: string, returnTo: PlaidLinkReturnTo, mode: PlaidLinkMode = 'link'): void {
   try {
     sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, linkToken);
     sessionStorage.setItem(PLAID_LINK_RETURN_KEY, returnTo);
+    sessionStorage.setItem(PLAID_LINK_MODE_KEY, mode);
   } catch {
     // Storage blocked: the OAuth return starts Link over with a fresh token.
   }
@@ -43,6 +51,15 @@ export function readPlaidLinkReturn(): PlaidLinkReturnTo | null {
     return sessionStorage.getItem(PLAID_LINK_RETURN_KEY) as PlaidLinkReturnTo | null;
   } catch {
     return null;
+  }
+}
+
+/** The stored mode; anything but an explicit 'update', including nothing stored, is 'link'. */
+export function readPlaidLinkMode(): PlaidLinkMode {
+  try {
+    return sessionStorage.getItem(PLAID_LINK_MODE_KEY) === 'update' ? 'update' : 'link';
+  } catch {
+    return 'link';
   }
 }
 
@@ -96,6 +113,7 @@ export function clearPlaidLinkSession(): void {
   try {
     sessionStorage.removeItem(PLAID_LINK_TOKEN_KEY);
     sessionStorage.removeItem(PLAID_LINK_RETURN_KEY);
+    sessionStorage.removeItem(PLAID_LINK_MODE_KEY);
     sessionStorage.removeItem(PLAID_OAUTH_RETURN_HREF_KEY);
   } catch {
     // Nothing to clear.

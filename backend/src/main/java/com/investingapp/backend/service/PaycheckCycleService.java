@@ -187,17 +187,22 @@ public class PaycheckCycleService {
             if (stream == null || !TRUSTED.contains(stream.getState())) {
                 continue; // a RETIRED stream's leftover cycle closes without effect
             }
-            stream.setMissedCount((short) Math.min(stream.getMissedCount() + 1, Short.MAX_VALUE));
-            stream.setState(PaycheckStreamState.DORMANT);
-            stream.setUpdatedAt(nowET);
-            streamRepository.save(stream);
-            schedule.filter(s -> mirrors(s, stream)).ifPresent(s -> {
-                s.setDetectionState(DetectionState.DORMANT);
-                s.setMissedCount(stream.getMissedCount());
-                if (s.getDormantSince() == null) {
-                    s.setDormantSince(cycle.getWindowEnd());
-                }
-            });
+            // Dormancy means the payer went quiet: a deposit dated after this period (spec 4.7 rule 5
+            // can confirm a later period) leaves the stream as it is; only this period closes as missed.
+            boolean quietSince = stream.getLastDate() == null || !stream.getLastDate().isAfter(cycle.getExpectedDate());
+            if (quietSince) {
+                stream.setMissedCount((short) Math.min(stream.getMissedCount() + 1, Short.MAX_VALUE));
+                stream.setState(PaycheckStreamState.DORMANT);
+                stream.setUpdatedAt(nowET);
+                streamRepository.save(stream);
+                schedule.filter(s -> mirrors(s, stream)).ifPresent(s -> {
+                    s.setDetectionState(DetectionState.DORMANT);
+                    s.setMissedCount(stream.getMissedCount());
+                    if (s.getDormantSince() == null) {
+                        s.setDormantSince(cycle.getWindowEnd());
+                    }
+                });
+            }
             if (stream.getRole() == PaycheckStreamRole.PRIMARY) {
                 CadenceResult cadence = cadenceOf(stream);
                 openCycleIfNone(stream, schedule, cadence, PayCalendar.predictedNext(cadence, cycle.getExpectedDate()))

@@ -231,6 +231,18 @@ class PaycheckCycleServiceTest {
     }
 
     @Test
+    void missedPeriodWithALaterDepositDoesNotMakeTheStreamDormant() {
+        primary.setLastDate(LocalDate.of(2026, 10, 2)); // a deposit landed after the missed period's expected date
+        assertThat(service.markMissesForUser(USER_ID, LocalDate.of(2026, 10, 14))).isEqualTo(1);
+        assertThat(open.getState()).isEqualTo(MISSED);
+        assertThat(primary.getState()).isEqualTo(PaycheckStreamState.PROVISIONAL);
+        assertThat(primary.getMissedCount()).isZero();
+        assertThat(schedule).extracting(InvestmentSchedule::getDetectionState, InvestmentSchedule::getMissedCount,
+                        InvestmentSchedule::getDormantSince)
+                .containsExactly(null, (short) 0, null);
+    }
+
+    @Test
     void retiresAfter120DaysKeepsTokenAndCadence() {
         primary.setState(PaycheckStreamState.DORMANT);
         primary.setMissedCount((short) 9);

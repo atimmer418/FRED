@@ -446,8 +446,44 @@ class PlaidRecurringServiceTest {
         assertThat(snapshot.path("personal_finance_category").path("detailed").asText()).isEqualTo("INCOME_SALARY");
 
         PaycheckStream second = withStreamId(saved, "s-2");
-        assertThat(second.getPlaidStatus()).isEqualTo("UNKNOWN");
+        assertThat(second.getPlaidStatus()).isNull();
         assertThat(second.getPlaidFrequency()).isEqualTo("UNKNOWN");
+    }
+
+    @Test
+    void unrecognizedOrMissingStatusIsStoredAsNoStatus() throws Exception {
+        givenUser(ITEM, PlaidItemStatus.OK);
+        TransactionStream newer = stream("s-new", "acc-1", ACME, -2418.00, "t-1")
+                .status(TransactionStreamStatus.ENUM_UNKNOWN);
+        TransactionStream missing = stream("s-none", "acc-1", "GLOBEX PAYROLL", -900.00, "t-2").status(null);
+        TransactionStream real = stream("s-real", "acc-1", "INITECH LLC DIR DEP", -500.00, "t-3")
+                .status(TransactionStreamStatus.UNKNOWN);
+        plaidReturns(inflow(newer, missing, real));
+
+        service.readStreams(USER_ID, ITEM);
+
+        List<PaycheckStream> saved = savedStreams();
+        PaycheckStream newerRow = withStreamId(saved, "s-new");
+        PaycheckStream missingRow = withStreamId(saved, "s-none");
+        assertThat(newerRow.getPlaidStatus()).isNull();
+        assertThat(missingRow.getPlaidStatus()).isNull();
+        assertThat(withStreamId(saved, "s-real").getPlaidStatus()).isEqualTo("UNKNOWN");
+        assertThat(new ObjectMapper().readTree(newerRow.getPlaidSnapshotJson()).get("status").isNull()).isTrue();
+        assertThat(new ObjectMapper().readTree(missingRow.getPlaidSnapshotJson()).get("status").isNull()).isTrue();
+    }
+
+    @Test
+    void streamWithoutAUsablePayerTokenIsSkipped() {
+        givenUser(ITEM, PlaidItemStatus.OK);
+        plaidReturns(inflow(
+                stream("s-digits-1", "acc-1", "12345678", -100.00, "t-1"),
+                stream("s-digits-2", "acc-1", "98765432", -200.00, "t-2"),
+                stream("s-ok", "acc-1", ACME, -2418.00, "t-3")));
+
+        StreamsReadOutcome outcome = service.readStreams(USER_ID, ITEM);
+
+        assertThat(outcome).isEqualTo(new StreamsReadOutcome(StreamsReadStatus.APPLIED, 3, 0, 1, null));
+        assertThat(savedStreams()).extracting(PaycheckStream::getPlaidStreamId).containsExactly("s-ok");
     }
 
 }

@@ -213,8 +213,8 @@ public class PlaidRecurringService {
             }
             String token = ColumnText.fit(PayerTokenizer.token(stream.getDescription(), stream.getMerchantName()),
                     PAYER_TOKEN_WIDTH);
-            if (isBlank(token)) {
-                continue;
+            if (isBlank(token) || PayerTokenizer.UNKNOWN.equals(token)) {
+                continue; // nothing to key a payer on; one shared UNKNOWN row would merge unrelated streams
             }
             List<String> transactionIds = stream.getTransactionIds() == null ? List.of() : stream.getTransactionIds();
             Optional<PaycheckStream> existing = byPayerToken(rows, accountId, token)
@@ -309,9 +309,14 @@ public class PlaidRecurringService {
         row.setUpdatedAt(nowET);
     }
 
-    /** Wire string; a value newer than plaid-java 46.0.0 (ENUM_UNKNOWN) or a missing one is UNKNOWN, which the hard gate rejects. */
+    /**
+     * Wire string, or null when there is none. Plaid's own UNKNOWN status is a statement about the
+     * stream and stays "UNKNOWN" (the hard gate rejects it). A missing status or a value newer than
+     * plaid-java 46.0.0 (ENUM_UNKNOWN) is the absence of information, so it is null and scores zero
+     * points rather than rejecting the stream.
+     */
     static String statusWire(TransactionStreamStatus status) {
-        return status == null || status == TransactionStreamStatus.ENUM_UNKNOWN ? UNKNOWN : status.getValue();
+        return status == null || status == TransactionStreamStatus.ENUM_UNKNOWN ? null : status.getValue();
     }
 
     static String frequencyWire(RecurringTransactionFrequency frequency) {
@@ -326,7 +331,12 @@ public class PlaidRecurringService {
         node.put("description", stream.getDescription());
         node.put("merchant_name", stream.getMerchantName());
         node.put("frequency", frequencyWire(stream.getFrequency()));
-        node.put("status", statusWire(stream.getStatus()));
+        String status = statusWire(stream.getStatus());
+        if (status == null) {
+            node.putNull("status");
+        } else {
+            node.put("status", status);
+        }
         node.put("is_active", stream.getIsActive());
         node.put("first_date", iso(stream.getFirstDate()));
         node.put("last_date", iso(stream.getLastDate()));

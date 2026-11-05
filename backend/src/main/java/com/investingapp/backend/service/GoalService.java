@@ -37,7 +37,11 @@ public class GoalService {
 
     private static final int UNDECIDED_RUNWAY_MONTHS = 36;
     private static final BigDecimal MAX_AMOUNT = new BigDecimal("100000000");
+    /** The anchor_monthly column is DECIMAL(10,2). */
+    private static final BigDecimal MAX_MONTHLY = new BigDecimal("99999999.99");
+    private static final int MAX_IMPORTED_GOALS = 50;
     private static final BigDecimal IMPORT_PLAN_RATE = new BigDecimal("0.1000");
+    private static final BigDecimal IMPORT_CASH_RATE = new BigDecimal("0.0400");
     private static final Set<String> CUSTOM_ICONS = Set.of(
             "flag", "balance", "savings", "home", "school", "directions_car", "health_and_safety");
     private static final Map<GoalType, Set<String>> ICON_ALLOWLIST = Map.of(
@@ -81,6 +85,11 @@ public class GoalService {
         if (goal.getType() != request.getType()) {
             throw new GoalValidationException("A goal's type cannot be changed.");
         }
+        if (goal.isCompleted() && !request.isCompleted()) {
+            // Reopening counts as adding an active goal. The goal is still stored as completed here,
+            // so the count covers only the user's other active goals.
+            enforceTierLimit(user);
+        }
         Object stored = codec.parse(goal.getType(), goal.getConfigJson());
         Object config = validate(request, stored);
         LocalDateTime now = EasternTime.now();
@@ -105,12 +114,17 @@ public class GoalService {
 
     public List<Goal> importLegacy(User user, GoalImportRequest request) {
         int nextSort = goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user).size();
+        long imported = goalRepository.countByUserAndClientIdIsNotNull(user);
         List<Goal> saved = new ArrayList<>();
         for (GoalImportRequest.ImportedGoal legacy : request.getGoals()) {
+            if (imported >= MAX_IMPORTED_GOALS) {
+                break;
+            }
             if (goalRepository.existsByUserAndClientId(user, legacy.getClientId())) {
                 continue;
             }
             saved.add(goalRepository.save(buildImportedGoal(user, legacy, nextSort++)));
+            imported++;
         }
         return saved;
     }
@@ -289,14 +303,20 @@ public class GoalService {
             throw new GoalValidationException("Enter a balance between $0 and $100,000,000.");
         }
         requireScale(balance, "Enter a balance with at most 2 decimals.");
-        requireMonthly(request.getAnchorMonthly(), "Enter a monthly amount from $0 to $100,000,000 with at most 2 decimals.");
+        requireMonthly(request.getAnchorMonthly(), "Enter a monthly amount from $0 to $99,999,999.99 with at most 2 decimals.");
         Object config = codec.parse(request.getType(), request.getConfig());
+        // Date lower bounds apply only to values that are new or changed: a stored date that the
+        // calendar has since passed is still accepted, so balance logs and completion keep working.
         return switch (request.getType()) {
             case KIDS -> validateKids((KidsConfig) config, (KidsConfig) storedOrNull, year);
-            case HOUSE, CAR -> validateHouseCar((HouseCarConfig) config, year);
-            case VACATION -> validateVacation((VacationConfig) config, year);
-            case EMERGENCY_FUND -> validateEmergencyFund((EmergencyFundConfig) config, year);
-            case WEDDING, CUSTOM -> validateTarget((TargetConfig) config, year);
+            case HOUSE, CAR -> validateHouseCar((HouseCarConfig) config, year,
+                    storedOrNull == null ? null : ((HouseCarConfig) storedOrNull).targetYear());
+            case VACATION -> validateVacation((VacationConfig) config, year,
+                    storedOrNull == null ? null : ((VacationConfig) storedOrNull).savedYear());
+            case EMERGENCY_FUND -> validateEmergencyFund((EmergencyFundConfig) config, year,
+                    storedOrNull == null ? null : ((EmergencyFundConfig) storedOrNull).targetYear());
+            case WEDDING, CUSTOM -> validateTarget((TargetConfig) config, year,
+                    storedOrNull == null ? null : ((TargetConfig) storedOrNull).targetYear());
         };
     }
 
@@ -317,13 +337,16 @@ public class GoalService {
         List<KidsConfig.Kid> kids = new ArrayList<>();
         for (int i = 0; i < config.kids().size(); i++) {
             KidsConfig.Kid kid = config.kids().get(i);
+            if (kid == null) {
+                throw new GoalValidationException("Goal details are not in the expected shape.");
+            }
             String label = kid.label() == null ? null : kid.label().trim();
             if (label != null && label.length() > 30) {
                 throw new GoalValidationException("Keep each kid's name to 30 characters or fewer.");
             }
             Integer birthYear = kid.birthYear();
             if (birthYear != null) {
-                if (birthYear < year - 17) {
+                if (birthYear < year - 17 && !hasStoredBirthYear(storedOrNull, i, birthYear)) {
                     throw new GoalValidationException(
                             "Already 18 or older. Use Something else with a target year instead.");
                 }
@@ -356,6 +379,13 @@ public class GoalService {
             throw new GoalValidationException("Set a target for at least one account.");
         }
         return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, fundOn);
+    }
+
+    /** Whether the stored kid at this index has the same birth year (a kid who aged past 17 since). */
+    private static boolean hasStoredBirthYear(KidsConfig storedOrNull, int index, Integer birthYear) {
+        return storedOrNull != null && storedOrNull.kids() != null && index < storedOrNull.kids().size()
+                && storedOrNull.kids().get(index) != null
+                && Objects.equals(storedOrNull.kids().get(index).birthYear(), birthYear);
     }
 
     /** Whether the stored goal already holds a first-year account at this kid index. */
@@ -402,9 +432,9 @@ public class GoalService {
                 target, dueYear, dueMonth);
     }
 
-    private HouseCarConfig validateHouseCar(HouseCarConfig config, int year) {
+    private HouseCarConfig validateHouseCar(HouseCarConfig config, int year, Integer storedTargetYear) {
         requireAmount(config.price(), "price");
-        requireTargetYear(config.targetYear(), year);
+        requireTargetYear(config.targetYear(), year, storedTargetYear);
         Integer pct = config.downPaymentPct();
         if (pct != null && (pct < 1 || pct > 100)) {
             throw new GoalValidationException("Enter a down payment between 1% and 100%.");
@@ -412,30 +442,32 @@ public class GoalService {
         return config;
     }
 
-    private VacationConfig validateVacation(VacationConfig config, int year) {
+    private VacationConfig validateVacation(VacationConfig config, int year, Integer storedSavedYear) {
         if (config.tripsPerYear() == null || config.tripsPerYear() < 1 || config.tripsPerYear() > 4) {
             throw new GoalValidationException("Choose between 1 and 4 trips per year.");
         }
         requireAmount(config.budgetPerTrip(), "trip budget");
         requireTarget(config.savedThisYear());
-        if (config.savedYear() == null || config.savedYear() < year - 1 || config.savedYear() > year) {
+        Integer savedYear = config.savedYear();
+        boolean tooOld = savedYear != null && savedYear < year - 1 && !savedYear.equals(storedSavedYear);
+        if (savedYear == null || tooOld || savedYear > year) {
             throw new GoalValidationException("The saved-for year must be this year or last year.");
         }
         return config;
     }
 
-    private EmergencyFundConfig validateEmergencyFund(EmergencyFundConfig config, int year) {
+    private EmergencyFundConfig validateEmergencyFund(EmergencyFundConfig config, int year, Integer storedTargetYear) {
         requireAmount(config.monthlyExpenses(), "monthly expenses");
         if (config.months() == null || (config.months() != 3 && config.months() != 6)) {
             throw new GoalValidationException("Choose 3 or 6 months of expenses.");
         }
-        requireTargetYear(config.targetYear(), year);
+        requireTargetYear(config.targetYear(), year, storedTargetYear);
         return config;
     }
 
-    private TargetConfig validateTarget(TargetConfig config, int year) {
+    private TargetConfig validateTarget(TargetConfig config, int year, Integer storedTargetYear) {
         requireAmount(config.targetAmount(), "target amount");
-        requireTargetYear(config.targetYear(), year);
+        requireTargetYear(config.targetYear(), year, storedTargetYear);
         return config;
     }
 
@@ -463,7 +495,7 @@ public class GoalService {
     }
 
     private void requireMonthly(BigDecimal value, String message) {
-        if (value == null || value.signum() < 0 || value.compareTo(MAX_AMOUNT) > 0
+        if (value == null || value.signum() < 0 || value.compareTo(MAX_MONTHLY) > 0
                 || value.stripTrailingZeros().scale() > 2) {
             throw new GoalValidationException(message);
         }
@@ -476,12 +508,14 @@ public class GoalService {
         }
         if (state.anchorMonthly() != null) {
             requireMonthly(state.anchorMonthly(),
-                    "Enter a monthly contribution from $0 to $100,000,000 with at most 2 decimals.");
+                    "Enter a monthly contribution from $0 to $99,999,999.99 with at most 2 decimals.");
         }
     }
 
-    private void requireTargetYear(Integer targetYear, int year) {
-        if (targetYear == null || targetYear < year || targetYear > year + 50) {
+    /** A past year is accepted only when it is the stored, unchanged target year. */
+    private void requireTargetYear(Integer targetYear, int year, Integer storedTargetYear) {
+        boolean pastAndNew = targetYear != null && targetYear < year && !targetYear.equals(storedTargetYear);
+        if (targetYear == null || pastAndNew || targetYear > year + 50) {
             throw new GoalValidationException("Pick a target year between " + year + " and " + (year + 50) + ".");
         }
     }
@@ -492,10 +526,15 @@ public class GoalService {
     private Goal buildImportedGoal(User user, GoalImportRequest.ImportedGoal legacy, int sortOrder) {
         int year = EasternTime.today().getYear();
         int targetYear = Math.min(Math.max(legacy.getTargetYear(), year), year + 50);
+        // Whole dollars, because the v3 fields only hold whole dollars.
         BigDecimal target = legacy.getTargetAmount().max(BigDecimal.ONE).min(MAX_AMOUNT)
-                .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal starting = legacy.getStartingValue().max(BigDecimal.ZERO)
-                .setScale(2, RoundingMode.HALF_UP);
+                .setScale(0, RoundingMode.HALF_UP).setScale(2);
+        BigDecimal starting = legacy.getStartingValue().max(BigDecimal.ZERO).min(MAX_AMOUNT)
+                .setScale(0, RoundingMode.HALF_UP).setScale(2);
+        // Never planned yet, so the stored kind follows the horizon rule: cash under 36 months.
+        LocalDateTime nowForKind = EasternTime.now();
+        int monthsToDeadline = (targetYear - nowForKind.getYear()) * 12 + (12 - nowForKind.getMonthValue());
+        boolean cash = monthsToDeadline < UNDECIDED_RUNWAY_MONTHS;
         String icon = CUSTOM_ICONS.contains(legacy.getIcon()) ? legacy.getIcon() : "flag";
         String name = legacy.getName().trim();
         if (name.length() > 50) {
@@ -503,9 +542,9 @@ public class GoalService {
         }
 
         validateIcon(GoalType.CUSTOM, icon);
-        TargetConfig config = validateTarget(new TargetConfig(target, targetYear), year);
+        TargetConfig config = validateTarget(new TargetConfig(target, targetYear), year, null);
 
-        LocalDateTime now = EasternTime.now();
+        LocalDateTime now = nowForKind;
         Goal goal = new Goal();
         goal.setUser(user);
         goal.setClientId(legacy.getClientId());
@@ -517,8 +556,8 @@ public class GoalService {
         goal.setBalanceUpdatedAt(now);
         goal.setAnchorBalance(starting);
         goal.setAnchorMonthly(BigDecimal.ZERO);
-        goal.setPlanRate(IMPORT_PLAN_RATE);
-        goal.setPlanRateKind("market");
+        goal.setPlanRate(cash ? IMPORT_CASH_RATE : IMPORT_PLAN_RATE);
+        goal.setPlanRateKind(cash ? "cash" : "market");
         goal.setPlanAnchoredAt(now);
         goal.setCompleted(legacy.isCompleted());
         goal.setSortOrder(sortOrder);

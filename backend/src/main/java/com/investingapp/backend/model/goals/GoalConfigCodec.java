@@ -28,19 +28,33 @@ public class GoalConfigCodec {
     }
 
     public Object parse(GoalType type, String json) {
+        if (json == null) {
+            throw new GoalValidationException(BAD_SHAPE);
+        }
         try {
-            return mapper.readValue(json, configClass(type));
+            return requirePresent(mapper.readValue(json, configClass(type)));
         } catch (JsonProcessingException e) {
             throw new GoalValidationException(BAD_SHAPE, e);
         }
     }
 
     public Object parse(GoalType type, JsonNode node) {
+        if (node == null) {
+            throw new GoalValidationException(BAD_SHAPE);
+        }
         try {
-            return mapper.treeToValue(node, configClass(type));
+            return requirePresent(mapper.treeToValue(node, configClass(type)));
         } catch (JsonProcessingException e) {
             throw new GoalValidationException(BAD_SHAPE, e);
         }
+    }
+
+    /** A JSON null parses to a null record; that is a bad shape, not a server error. */
+    private static Object requirePresent(Object parsed) {
+        if (parsed == null) {
+            throw new GoalValidationException(BAD_SHAPE);
+        }
+        return parsed;
     }
 
     public String write(Object config) {

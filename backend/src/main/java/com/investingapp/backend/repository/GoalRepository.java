@@ -19,5 +19,7 @@ public interface GoalRepository extends JpaRepository<Goal, Long> {
 
     boolean existsByUserAndClientId(User user, String clientId);
 
+    long countByUserAndClientIdIsNotNull(User user);
+
     void deleteAllByUser(User user);
 }

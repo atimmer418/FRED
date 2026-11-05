@@ -7,7 +7,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Subject, takeUntil, catchError, tap, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
-import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../utils/plaid-link-session';
+import { clearPlaidLinkSession, plaidOAuthStateId, readPlaidLinkReturn, readPlaidLinkToken, readPlaidOAuthReturnHref, storePlaidLinkSession } from '../utils/plaid-link-session';
 import { PlaidService } from '../services/plaid.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
@@ -236,9 +236,26 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
     });
   }
 
-  /** The current URL when it carries Plaid's oauth_state_id, else null. Stubbed in specs. */
+  /**
+   * The URL Plaid redirected to when this load is an OAuth return, else null. Every link token
+   * names the one registered redirect URI (/link-bank), so a change-bank return arrives here
+   * forwarded, and the /link-bank href parked before the forward is the one Link must resume with.
+   * It is used only when it carries this load's oauth_state_id, so a leftover from an earlier round
+   * trip never stands in for the current one. Stubbed in specs.
+   */
   private oauthReturnHref(): string | null {
-    return window.location.search.includes('oauth_state_id') ? window.location.href : null;
+    const current = this.currentHref();
+    const stateId = plaidOAuthStateId(current);
+    if (stateId === null) {
+      return null;
+    }
+    const original = readPlaidOAuthReturnHref();
+    return original !== null && plaidOAuthStateId(original) === stateId ? original : current;
+  }
+
+  /** window.location.href, behind a method so specs can set the URL. */
+  private currentHref(): string {
+    return window.location.href;
   }
 
   private exchangePublicTokenAuthenticated(publicToken: string): void {

@@ -12,6 +12,7 @@ import { AppLockService } from './services/app-lock.service';
 import { PasskeyService } from './services/passkey.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { JwtTokenUtils } from './utils/jwt-token.utils';
+import { plaidOAuthReturnRoute, storePlaidOAuthReturnHref } from './utils/plaid-link-session';
 import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourComponent } from './components/first-time-tour/first-time-tour.component';
 import { environment } from '../environments/environment';
@@ -43,6 +44,13 @@ const CRITICAL_FONT_SPECS = [
 export class AppComponent implements OnInit {
 
   private userActivity$ = new Subject<void>();
+
+  /**
+   * Where a Plaid OAuth return still has to go (for example
+   * '/change-bank-account?oauth_state_id=...'), or null. Set once at cold start by
+   * capturePlaidOAuthReturn and spent once by navigateBasedOnProgress.
+   */
+  private plaidOAuthReturn: string | null = null;
 
   constructor(
     private router: Router,
@@ -172,6 +180,8 @@ export class AppComponent implements OnInit {
     // navigate to /tabs/tab1 immediately — before GET /user/progress returns.
     // GET /user/progress still runs and remains the sole routing authority (_source:'db').
     // This only paints faster; it never sets isLoggedIn, calls completeStep, or gates KYC/bank/money.
+    // A Plaid OAuth return is captured first: while one is pending, tryOptimisticNav stands aside.
+    this.capturePlaidOAuthReturn();
     this.tryOptimisticNav();
 
     // POST-REAUTH optimistic nav: same logic after a successful passkey / auth ceremony.
@@ -333,6 +343,16 @@ export class AppComponent implements OnInit {
       targetRoute = '/tabs/tab1';
     }
 
+    // A Plaid OAuth return goes where its Link session started, query string included, before any
+    // rule below can send it to a bare route and drop the oauth_state_id.
+    const oauthReturn = this.takePlaidOAuthReturn(targetRoute);
+    if (oauthReturn !== null) {
+      this.router.navigateByUrl(oauthReturn, { replaceUrl: true }).finally(() => {
+        this.hideCoversWhenReady(oauthReturn);
+      });
+      return;
+    }
+
     const currentBaseUrl = this.router.url.split('?')[0].split('#')[0];
 
     // Don't navigate if already on the target route
@@ -363,6 +383,44 @@ export class AppComponent implements OnInit {
     this.router.navigateByUrl(targetRoute, { replaceUrl: true }).finally(() => {
       this.hideCoversWhenReady(targetRoute);
     });
+  }
+
+  /**
+   * Plaid OAuth return (R9). The bank sends the user back to the one redirect URI registered per
+   * environment (https://local.fredvested.com/link-bank locally) with ?oauth_state_id=..., as a
+   * fresh page load. Initial navigation is disabled (main.ts) and navigateBasedOnProgress routes to
+   * bare paths, so without this the query string is dropped before either Link page reads it, and a
+   * fully onboarded user coming back from a bank change is sent to /tabs/tab1. The href Plaid
+   * redirected to is parked for the change-bank page, which resumes Link with it.
+   */
+  private capturePlaidOAuthReturn(): void {
+    const href = this.bootHref();
+    this.plaidOAuthReturn = plaidOAuthReturnRoute(href);
+    if (this.plaidOAuthReturn !== null) {
+      storePlaidOAuthReturnHref(href);
+    }
+  }
+
+  /** window.location.href at cold start, behind a method so specs can set it. */
+  private bootHref(): string {
+    return window.location.href;
+  }
+
+  /**
+   * The pending OAuth return route, at most once, when this progress allows it: the change-bank
+   * page only for a fully onboarded user, the onboarding Link page only while linking is the next
+   * step. Without a valid JWT it is kept, so it survives a re-authentication. Otherwise it is
+   * spent, and a route the progress does not allow is dropped, leaving the normal routing.
+   */
+  private takePlaidOAuthReturn(targetRoute: string): string | null {
+    const pending = this.plaidOAuthReturn;
+    if (pending === null || !JwtTokenUtils.getValidJwtToken()) {
+      return null;
+    }
+    this.plaidOAuthReturn = null;
+    const page = pending.split('?')[0];
+    const allowed = page === '/change-bank-account' ? targetRoute === '/tabs/tab1' : targetRoute === '/link-bank';
+    return allowed ? pending : null;
   }
 
   private hideCoversWhenReady(targetRoute?: string): void {
@@ -496,6 +554,8 @@ export class AppComponent implements OnInit {
    *          cover-hide); false when no optimistic nav happened.
    */
   private tryOptimisticNav(): boolean {
+    // A pending Plaid OAuth return must reach its Link page; tab1 would drop it.
+    if (this.plaidOAuthReturn !== null) return false;
     if (!JwtTokenUtils.getValidJwtToken()) return false;
     if (this.appLockService.isEnabled()) return false;
     if (this.appLockService.isCurrentlyLocked()) return false;

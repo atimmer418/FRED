@@ -13,7 +13,7 @@ import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
-import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../../utils/plaid-link-session';
+import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession, storePlaidOAuthReturnHref } from '../../utils/plaid-link-session';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -62,8 +62,12 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
     this.isUserAuthenticated = !!jwtToken; // Convert to boolean
 
     console.log(`LinkPlaidComponent ngOnInit - User Authenticated: ${this.isUserAuthenticated}`);
-    // Nothing is drafted on this screen, so there is no saved state to resume from.
-    this.analytics.trackOnboardingStepViewed('link_plaid', null, false);
+    // Nothing is drafted on this screen, so there is no saved state to resume from. A change-bank
+    // OAuth return only passes through on its way to /change-bank-account, so it is not a view of
+    // this onboarding step.
+    if (!this.changeBankOAuthReturn()) {
+      this.analytics.trackOnboardingStepViewed('link_plaid', null, false);
+    }
     this.initializePlaidLink();
   }
 
@@ -80,10 +84,19 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
       const returnHref = this.oauthReturnHref();
       const storedToken = returnHref ? readPlaidLinkToken() : null;
       const storedReturn = returnHref ? readPlaidLinkReturn() : null;
+      if (returnHref !== null && storedReturn === 'change-bank') {
+        // Every link token names one redirect URI per environment, and it is this page, so a
+        // change-bank round trip lands here. Hand it to the page that started it, with the query
+        // string intact and the session untouched: that page resumes Link with its own stored
+        // token, which only exists because its PIN step-up passed. The href Plaid redirected to is
+        // kept for that page to pass as receivedRedirectUri.
+        storePlaidOAuthReturnHref(returnHref);
+        this.router.navigateByUrl('/change-bank-account' + new URL(returnHref).search, { replaceUrl: true });
+        return;
+      }
       const resuming = returnHref !== null && storedToken !== null && storedReturn === 'onboarding';
       if (returnHref !== null && storedToken !== null && !resuming) {
-        // Stale token from a different flow (or a corrupted marker): discard it and fetch a fresh
-        // one below.
+        // A corrupted marker: discard it and fetch a fresh token below.
         clearPlaidLinkSession();
       }
       let linkToken: string;
@@ -241,6 +254,11 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
   /** The current URL when it carries Plaid's oauth_state_id, else null. Stubbed in specs. */
   private oauthReturnHref(): string | null {
     return window.location.search.includes('oauth_state_id') ? window.location.href : null;
+  }
+
+  /** True when this load is a change-bank OAuth return, which belongs on /change-bank-account. */
+  private changeBankOAuthReturn(): boolean {
+    return this.oauthReturnHref() !== null && readPlaidLinkReturn() === 'change-bank';
   }
 
   private handleError(error: HttpErrorResponse) {

@@ -35,6 +35,7 @@ import java.util.Set;
 @Transactional
 public class GoalService {
 
+    private static final int UNDECIDED_RUNWAY_MONTHS = 36;
     private static final BigDecimal MAX_AMOUNT = new BigDecimal("100000000");
     private static final BigDecimal IMPORT_PLAN_RATE = new BigDecimal("0.1000");
     private static final Set<String> CUSTOM_ICONS = Set.of(
@@ -63,7 +64,7 @@ public class GoalService {
 
     public Goal create(User user, GoalRequest request) {
         enforceTierLimit(user);
-        Object config = validate(request);
+        Object config = validate(request, null);
 
         Goal goal = new Goal();
         goal.setUser(user);
@@ -80,8 +81,8 @@ public class GoalService {
         if (goal.getType() != request.getType()) {
             throw new GoalValidationException("A goal's type cannot be changed.");
         }
-        Object config = validate(request);
         Object stored = codec.parse(goal.getType(), goal.getConfigJson());
+        Object config = validate(request, stored);
         LocalDateTime now = EasternTime.now();
 
         boolean firstPlan = goal.getAnchorMonthly().signum() == 0 && request.getAnchorMonthly().signum() > 0;
@@ -145,8 +146,7 @@ public class GoalService {
         goal.setBalanceUpdatedAt(null);
         Object toStore = config;
         if (config instanceof KidsConfig kids) {
-            toStore = mapAccounts(kids, (sent, index, brokerage) -> new AccountState(
-                    sent.balance(), null, sent.balance(), orZero(sent.anchorMonthly())));
+            toStore = mapAccounts(kids, (sent, index, slot) -> anchored(sent));
         }
         goal.setConfigJson(codec.write(toStore));
     }
@@ -159,8 +159,11 @@ public class GoalService {
         }
         Object toStore = config;
         if (config instanceof KidsConfig kids && stored instanceof KidsConfig old) {
-            toStore = mapAccounts(kids, (sent, index, brokerage) -> {
-                AccountState before = accountAt(old, index, brokerage);
+            toStore = mapAccounts(kids, (sent, index, slot) -> {
+                AccountState before = accountAt(old, index, slot);
+                if (before == null) {
+                    return anchored(sent);
+                }
                 boolean changed = sent.balance().compareTo(before.balance()) != 0;
                 return new AccountState(sent.balance(),
                         changed ? now : before.balanceUpdatedAt(),
@@ -168,6 +171,11 @@ public class GoalService {
             });
         }
         goal.setConfigJson(codec.write(toStore));
+    }
+
+    /** A fresh anchor: the plan starts from this balance and the monthly amount sent. */
+    private static AccountState anchored(AccountState sent) {
+        return new AccountState(sent.balance(), null, sent.balance(), orZero(sent.anchorMonthly()));
     }
 
     private boolean planInputsChanged(GoalType type, Object stored, Object incoming) {
@@ -206,13 +214,18 @@ public class GoalService {
     private boolean kidsPlanChanged(KidsConfig a, KidsConfig b) {
         if (differs(a.brokerageTarget(), b.brokerageTarget())
                 || differs(a.plan529Target(), b.plan529Target())
+                || Boolean.TRUE.equals(a.firstYearFund()) != Boolean.TRUE.equals(b.firstYearFund())
                 || a.kids().size() != b.kids().size()) {
             return true;
         }
         for (int i = 0; i < a.kids().size(); i++) {
             KidsConfig.Kid x = a.kids().get(i);
             KidsConfig.Kid y = b.kids().get(i);
-            if (!Objects.equals(x.birthYear(), y.birthYear()) || !Objects.equals(x.birthMonth(), y.birthMonth())) {
+            if (!Objects.equals(x.birthYear(), y.birthYear()) || !Objects.equals(x.birthMonth(), y.birthMonth())
+                    || (x.accounts().firstYear() == null) != (y.accounts().firstYear() == null)
+                    || differs(x.firstYearTarget(), y.firstYearTarget())
+                    || !Objects.equals(x.firstYearDueYear(), y.firstYearDueYear())
+                    || !Objects.equals(x.firstYearDueMonth(), y.firstYearDueMonth())) {
                 return true;
             }
         }
@@ -230,32 +243,41 @@ public class GoalService {
         return value == null ? BigDecimal.ZERO : value;
     }
 
+    private enum AccountSlot { BROKERAGE, PLAN_529, FIRST_YEAR }
+
     @FunctionalInterface
     private interface AccountMapper {
-        AccountState map(AccountState sent, int kidIndex, boolean brokerage);
+        AccountState map(AccountState sent, int kidIndex, AccountSlot slot);
     }
 
     private static KidsConfig mapAccounts(KidsConfig config, AccountMapper mapper) {
         List<KidsConfig.Kid> kids = new ArrayList<>();
         for (int i = 0; i < config.kids().size(); i++) {
             KidsConfig.Kid kid = config.kids().get(i);
+            AccountState firstYear = kid.accounts().firstYear();
             kids.add(new KidsConfig.Kid(kid.label(), kid.birthYear(), kid.birthMonth(),
                     new KidsConfig.Accounts(
-                            mapper.map(kid.accounts().brokerage(), i, true),
-                            mapper.map(kid.accounts().plan529(), i, false))));
+                            mapper.map(kid.accounts().brokerage(), i, AccountSlot.BROKERAGE),
+                            mapper.map(kid.accounts().plan529(), i, AccountSlot.PLAN_529),
+                            firstYear == null ? null : mapper.map(firstYear, i, AccountSlot.FIRST_YEAR)),
+                    kid.firstYearTarget(), kid.firstYearDueYear(), kid.firstYearDueMonth()));
         }
-        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids);
+        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, config.firstYearFund());
     }
 
-    private static AccountState accountAt(KidsConfig config, int index, boolean brokerage) {
+    private static AccountState accountAt(KidsConfig config, int index, AccountSlot slot) {
         KidsConfig.Accounts accounts = config.kids().get(index).accounts();
-        return brokerage ? accounts.brokerage() : accounts.plan529();
+        return switch (slot) {
+            case BROKERAGE -> accounts.brokerage();
+            case PLAN_529 -> accounts.plan529();
+            case FIRST_YEAR -> accounts.firstYear();
+        };
     }
 
     // ---- validation ----
 
     /** Parses and validates the request, returning the normalized typed config record. */
-    private Object validate(GoalRequest request) {
+    private Object validate(GoalRequest request, Object storedOrNull) {
         int year = EasternTime.today().getYear();
         String name = request.getName() == null ? "" : request.getName().trim();
         if (name.isEmpty() || name.length() > 50) {
@@ -270,7 +292,7 @@ public class GoalService {
         requireMonthly(request.getAnchorMonthly(), "Enter a monthly amount from $0 to $100,000,000 with at most 2 decimals.");
         Object config = codec.parse(request.getType(), request.getConfig());
         return switch (request.getType()) {
-            case KIDS -> validateKids((KidsConfig) config, year);
+            case KIDS -> validateKids((KidsConfig) config, (KidsConfig) storedOrNull, year);
             case HOUSE, CAR -> validateHouseCar((HouseCarConfig) config, year);
             case VACATION -> validateVacation((VacationConfig) config, year);
             case EMERGENCY_FUND -> validateEmergencyFund((EmergencyFundConfig) config, year);
@@ -284,17 +306,17 @@ public class GoalService {
         }
     }
 
-    private KidsConfig validateKids(KidsConfig config, int year) {
+    private KidsConfig validateKids(KidsConfig config, KidsConfig storedOrNull, int year) {
         requireTarget(config.brokerageTarget());
         requireTarget(config.plan529Target());
-        if (config.brokerageTarget().signum() == 0 && config.plan529Target().signum() == 0) {
-            throw new GoalValidationException("Set a target for at least one account.");
-        }
         if (config.kids() == null || config.kids().isEmpty() || config.kids().size() > 10) {
             throw new GoalValidationException("Add between 1 and 10 kids.");
         }
+        boolean fundOn = Boolean.TRUE.equals(config.firstYearFund());
+        int funded = 0;
         List<KidsConfig.Kid> kids = new ArrayList<>();
-        for (KidsConfig.Kid kid : config.kids()) {
+        for (int i = 0; i < config.kids().size(); i++) {
+            KidsConfig.Kid kid = config.kids().get(i);
             String label = kid.label() == null ? null : kid.label().trim();
             if (label != null && label.length() > 30) {
                 throw new GoalValidationException("Keep each kid's name to 30 characters or fewer.");
@@ -317,9 +339,67 @@ public class GoalService {
             }
             requireAccountBalance(kid.accounts().brokerage());
             requireAccountBalance(kid.accounts().plan529());
-            kids.add(new KidsConfig.Kid(label, birthYear, kid.birthMonth(), kid.accounts()));
+            AccountState firstYear = kid.accounts().firstYear();
+            KidsConfig.Accounts accounts = new KidsConfig.Accounts(
+                    kid.accounts().brokerage(), kid.accounts().plan529(), null);
+            if (fundOn && firstYear != null) {
+                funded++;
+                kids.add(validateFundKid(kid, label, accounts, firstYear, hasStoredFund(storedOrNull, i), year));
+            } else {
+                kids.add(new KidsConfig.Kid(label, birthYear, kid.birthMonth(), accounts, null, null, null));
+            }
         }
-        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids);
+        if (fundOn && funded == 0) {
+            throw new GoalValidationException("Turn off the first-year fund or add a kid who is not here yet.");
+        }
+        if (!fundOn && config.brokerageTarget().signum() == 0 && config.plan529Target().signum() == 0) {
+            throw new GoalValidationException("Set a target for at least one account.");
+        }
+        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, fundOn);
+    }
+
+    /** Whether the stored goal already holds a first-year account at this kid index. */
+    private static boolean hasStoredFund(KidsConfig storedOrNull, int index) {
+        return storedOrNull != null && storedOrNull.kids() != null && index < storedOrNull.kids().size()
+                && storedOrNull.kids().get(index).accounts() != null
+                && storedOrNull.kids().get(index).accounts().firstYear() != null;
+    }
+
+    /**
+     * Validates one kid's first-year fund. A stored account is never rejected for the kid's age or the
+     * end date. A new one needs a kid who is not here yet, and an undecided kid gets a server-set end
+     * month 36 months after the anchor month, whatever the client sent.
+     */
+    private KidsConfig.Kid validateFundKid(KidsConfig.Kid kid, String label, KidsConfig.Accounts accounts,
+                                           AccountState firstYear, boolean storedFund, int year) {
+        BigDecimal target = kid.firstYearTarget();
+        if (target == null || target.signum() <= 0 || target.compareTo(MAX_AMOUNT) > 0
+                || target.stripTrailingZeros().scale() > 2) {
+            throw new GoalValidationException("Enter a first-year amount greater than $0.");
+        }
+        Integer dueYear = kid.firstYearDueYear();
+        Integer dueMonth = kid.firstYearDueMonth();
+        boolean newAccount = !storedFund;
+        if (newAccount && kid.birthYear() == null) {
+            LocalDateTime end = EasternTime.now().plusMonths(UNDECIDED_RUNWAY_MONTHS);
+            dueYear = end.getYear();
+            dueMonth = end.getMonthValue();
+        }
+        if (dueYear == null || dueMonth == null || dueMonth < 1 || dueMonth > 12) {
+            throw new GoalValidationException("Pick the month the first year ends.");
+        }
+        requireAccountBalance(firstYear);
+        if (newAccount) {
+            if (kid.birthYear() != null && kid.birthYear() < year) {
+                throw new GoalValidationException("The first-year fund is for kids who are not here yet.");
+            }
+            if (dueYear < year || dueYear > year + 11) {
+                throw new GoalValidationException("Pick a first-year end date within the next 11 years.");
+            }
+        }
+        return new KidsConfig.Kid(label, kid.birthYear(), kid.birthMonth(),
+                new KidsConfig.Accounts(accounts.brokerage(), accounts.plan529(), firstYear),
+                target, dueYear, dueMonth);
     }
 
     private HouseCarConfig validateHouseCar(HouseCarConfig config, int year) {

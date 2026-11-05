@@ -87,4 +87,57 @@ class GoalConfigCodecTest {
         assertTrue(written.contains("\"2026-11-02T10:15:30\""), written);
         assertFalse(written.contains("[2026"), written);
     }
+
+    @Test
+    void parsesKidsConfigWithoutTheNewProperties() {
+        KidsConfig cfg = (KidsConfig) codec.parse(GoalType.KIDS, KIDS_JSON);
+
+        assertNull(cfg.firstYearFund());
+        KidsConfig.Kid kid = cfg.kids().get(0);
+        assertNull(kid.firstYearTarget());
+        assertNull(kid.firstYearDueYear());
+        assertNull(kid.firstYearDueMonth());
+        assertNull(kid.accounts().firstYear());
+    }
+
+    @Test
+    void parsesKidsConfigWithExplicitNullsForTheNewProperties() {
+        String json = """
+                {"brokerageTarget":0,"plan529Target":1000,"firstYearFund":null,"kids":[
+                  {"label":null,"birthYear":null,"birthMonth":null,"firstYearTarget":null,
+                   "firstYearDueYear":null,"firstYearDueMonth":null,"accounts":{
+                    "brokerage":{"balance":0,"balanceUpdatedAt":null,"anchorBalance":0,"anchorMonthly":0},
+                    "plan529":{"balance":0,"balanceUpdatedAt":null,"anchorBalance":0,"anchorMonthly":0},
+                    "firstYear":null}}]}
+                """;
+
+        KidsConfig cfg = (KidsConfig) codec.parse(GoalType.KIDS, json);
+
+        assertNull(cfg.firstYearFund());
+        assertNull(cfg.kids().get(0).accounts().firstYear());
+        assertNull(cfg.kids().get(0).firstYearTarget());
+    }
+
+    @Test
+    void roundTripsAFirstYearAccountWithTargetAndDueDate() {
+        String json = """
+                {"brokerageTarget":0,"plan529Target":0,"firstYearFund":true,"kids":[
+                  {"label":"Baby","birthYear":null,"birthMonth":null,"firstYearTarget":16000.50,
+                   "firstYearDueYear":2029,"firstYearDueMonth":11,"accounts":{
+                    "brokerage":{"balance":0,"balanceUpdatedAt":null,"anchorBalance":0,"anchorMonthly":0},
+                    "plan529":{"balance":0,"balanceUpdatedAt":null,"anchorBalance":0,"anchorMonthly":0},
+                    "firstYear":{"balance":250,"balanceUpdatedAt":"2026-11-02T10:15:30","anchorBalance":200,"anchorMonthly":616}}}]}
+                """;
+
+        KidsConfig cfg = (KidsConfig) codec.parse(GoalType.KIDS, json);
+        KidsConfig again = (KidsConfig) codec.parse(GoalType.KIDS, codec.write(cfg));
+
+        assertEquals(cfg, again);
+        assertEquals(Boolean.TRUE, again.firstYearFund());
+        KidsConfig.Kid kid = again.kids().get(0);
+        assertEquals(0, new java.math.BigDecimal("16000.50").compareTo(kid.firstYearTarget()));
+        assertEquals(2029, kid.firstYearDueYear());
+        assertEquals(11, kid.firstYearDueMonth());
+        assertEquals(0, new java.math.BigDecimal("616").compareTo(kid.accounts().firstYear().anchorMonthly()));
+    }
 }

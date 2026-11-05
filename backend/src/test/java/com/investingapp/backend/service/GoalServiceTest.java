@@ -87,11 +87,12 @@ class GoalServiceTest {
     }
 
     private static KidsConfig.Kid kid(String label, Integer birthYear, AccountState brokerage, AccountState plan529) {
-        return new KidsConfig.Kid(label, birthYear, 6, new KidsConfig.Accounts(brokerage, plan529));
+        return new KidsConfig.Kid(label, birthYear, 6, new KidsConfig.Accounts(brokerage, plan529, null),
+                null, null, null);
     }
 
     private KidsConfig kids(String brokerageTarget, String plan529Target, KidsConfig.Kid... kids) {
-        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids));
+        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids), null);
     }
 
     private GoalRequest kidsRequest(KidsConfig config, String balance, String monthly) {
@@ -206,7 +207,7 @@ class GoalServiceTest {
         for (int i = 0; i < 11; i++) {
             eleven.add(kid("Kid" + i, year - 2, acct("0", "0"), acct("0", "0")));
         }
-        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), eleven);
+        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), eleven, null);
 
         assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
     }
@@ -468,5 +469,287 @@ class GoalServiceTest {
 
         assertThrows(GoalValidationException.class,
                 () -> service.update(user, 3L, houseRequest("400000", "0", "0")));
+    }
+
+    // ---- first-year fund ----
+
+    private KidsConfig.Kid fundKid(String label, Integer birthYear, AccountState firstYear, String target,
+                                   Integer dueYear, Integer dueMonth) {
+        return new KidsConfig.Kid(label, birthYear, 6,
+                new KidsConfig.Accounts(acct("0", "0"), acct("0", "0"), firstYear),
+                target == null ? null : bd(target), dueYear, dueMonth);
+    }
+
+    private KidsConfig fundGoal(String brokerageTarget, String plan529Target, Boolean fund, KidsConfig.Kid... kids) {
+        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids), fund);
+    }
+
+    private KidsConfig oneFundKid(String balance, String target, int dueYear) {
+        return fundGoal("0", "30000", true,
+                fundKid("Baby", year + 1, acct(balance, "100"), target, dueYear, 6));
+    }
+
+    private KidsConfig storedConfigOf(Goal goal) {
+        return (KidsConfig) codec.parse(GoalType.KIDS, goal.getConfigJson());
+    }
+
+    private Goal rawStoredKidsGoal(Long id, String configJson) {
+        Goal g = new Goal();
+        g.setId(id);
+        g.setUser(user);
+        g.setType(GoalType.KIDS);
+        g.setName("Kids");
+        g.setIcon("child_care");
+        g.setConfigJson(configJson);
+        g.setCurrentBalance(bd("3000"));
+        g.setAnchorBalance(bd("3000"));
+        g.setAnchorMonthly(bd("300"));
+        g.setPlanRate(bd("0.0700"));
+        g.setPlanRateKind("market");
+        g.setPlanAnchoredAt(EasternTime.now().minusDays(30));
+        when(goalRepository.findByIdAndUser(id, user)).thenReturn(Optional.of(g));
+        return g;
+    }
+
+    @Test
+    void kidsFundOnRequiresAKidWithAFund() {
+        KidsConfig config = fundGoal("0", "30000", true, fundKid("Sam", year - 3, null, null, null, null));
+
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertEquals("Turn off the first-year fund or add a kid who is not here yet.", e.getMessage());
+    }
+
+    @Test
+    void kidsFundAccountRequiresATargetAndADueDate() {
+        List<KidsConfig> badTargets = List.of(
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), null, year + 1, 6)),
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "0", year + 1, 6)),
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "100000001", year + 1, 6)),
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "1000.123", year + 1, 6)));
+        for (KidsConfig config : badTargets) {
+            GoalValidationException e = assertThrows(GoalValidationException.class,
+                    () -> service.create(user, kidsRequest(config, "0", "0")));
+            assertEquals("Enter a first-year amount greater than $0.", e.getMessage());
+        }
+        List<KidsConfig> badDates = List.of(
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "5000", year + 1, 13)),
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "5000", year + 1, 0)),
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "5000", year + 1, null)),
+                fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "5000", null, 6)));
+        for (KidsConfig config : badDates) {
+            assertThrows(GoalValidationException.class,
+                    () -> service.create(user, kidsRequest(config, "0", "0")));
+        }
+    }
+
+    @Test
+    void kidsRejectANewFirstYearAccountOnAKidBornLastYear() {
+        KidsConfig config = fundGoal("0", "30000", true,
+                fundKid("Sam", year - 1, acct("0", "0"), "5000", year, 6));
+
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertEquals("The first-year fund is for kids who are not here yet.", e.getMessage());
+    }
+
+    @Test
+    void kidsRejectANewFirstYearDueYearOutsideTheWindow() {
+        for (int due : new int[] {year - 1, year + 12}) {
+            KidsConfig config = fundGoal("0", "30000", true,
+                    fundKid("Baby", year + 1, acct("0", "0"), "5000", due, 6));
+            assertThrows(GoalValidationException.class,
+                    () -> service.create(user, kidsRequest(config, "0", "0")));
+        }
+    }
+
+    @Test
+    void storedFirstYearAccountSurvivesTheNewYear() {
+        stubSave();
+        AccountState storedFund = new AccountState(bd("1000"), null, bd("1000"), bd("100"));
+        KidsConfig storedConfig = fundGoal("0", "30000", true,
+                new KidsConfig.Kid("Sam", year - 1, 6,
+                        new KidsConfig.Accounts(acct("0", "0"), acct("0", "0"), storedFund),
+                        bd("5000"), year - 1, 12));
+        Goal stored = rawStoredKidsGoal(9L, codec.write(storedConfig));
+
+        KidsConfig sent = fundGoal("0", "30000", true,
+                new KidsConfig.Kid("Sam", year - 1, 6,
+                        new KidsConfig.Accounts(acct("0", "0"), acct("0", "0"), acct("1200", "100")),
+                        bd("5000"), year - 1, 12));
+        var anchoredAt = stored.getPlanAnchoredAt();
+        Goal updated = service.update(user, 9L, kidsRequest(sent, "3200", "300"));
+
+        KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
+        assertEquals(anchoredAt, updated.getPlanAnchoredAt());
+        assertEquals(0, bd("1200").compareTo(accounts.firstYear().balance()));
+        assertEquals(0, bd("1000").compareTo(accounts.firstYear().anchorBalance()));
+        assertEquals(0, bd("100").compareTo(accounts.firstYear().anchorMonthly()));
+        assertNotNull(accounts.firstYear().balanceUpdatedAt());
+        assertEquals(year - 1, storedConfigOf(updated).kids().get(0).firstYearDueYear());
+    }
+
+    @Test
+    void kidsAllowFirstYearOnlyGoal() {
+        stubSave();
+        KidsConfig config = fundGoal("0", "0", true,
+                fundKid("Someday", null, acct("0", "50"), "5000", null, null));
+
+        Goal goal = service.create(user, kidsRequest(config, "0", "50"));
+
+        KidsConfig result = storedConfigOf(goal);
+        assertEquals(Boolean.TRUE, result.firstYearFund());
+        assertNotNull(result.kids().get(0).accounts().firstYear());
+    }
+
+    @Test
+    void newUndecidedFundGetsAServerDueDateThirtySixMonthsOut() {
+        stubSave();
+        var before = EasternTime.now().plusMonths(36);
+        KidsConfig config = fundGoal("0", "0", true,
+                fundKid("Someday", null, acct("0", "50"), "5000", 1999, 1));
+
+        Goal goal = service.create(user, kidsRequest(config, "0", "50"));
+
+        var after = EasternTime.now().plusMonths(36);
+        KidsConfig.Kid result = storedConfigOf(goal).kids().get(0);
+        boolean matchesBefore = result.firstYearDueYear() == before.getYear()
+                && result.firstYearDueMonth() == before.getMonthValue();
+        boolean matchesAfter = result.firstYearDueYear() == after.getYear()
+                && result.firstYearDueMonth() == after.getMonthValue();
+        assertTrue(matchesBefore || matchesAfter,
+                "due " + result.firstYearDueYear() + "-" + result.firstYearDueMonth()
+                        + " expected " + before.getYear() + "-" + before.getMonthValue());
+    }
+
+    @Test
+    void kidsFundOffStripsEveryFirstYearField() {
+        stubSave();
+        for (Boolean off : new Boolean[] {false, null}) {
+            KidsConfig config = fundGoal("5000", "30000", off,
+                    fundKid("Baby", year + 1, acct("10", "5"), "5000", year + 1, 6));
+
+            Goal goal = service.create(user, kidsRequest(config, "0", "0"));
+
+            KidsConfig result = storedConfigOf(goal);
+            KidsConfig.Kid kid = result.kids().get(0);
+            assertEquals(Boolean.FALSE, result.firstYearFund());
+            assertNull(kid.accounts().firstYear());
+            assertNull(kid.firstYearTarget());
+            assertNull(kid.firstYearDueYear());
+            assertNull(kid.firstYearDueMonth());
+        }
+    }
+
+    @Test
+    void kidsFundOnNullsFundFieldsOnAKidWithoutAFund() {
+        stubSave();
+        KidsConfig config = fundGoal("0", "30000", true,
+                fundKid("Baby", year + 1, acct("0", "0"), "5000", year + 1, 6),
+                fundKid("Sam", year - 3, null, "7000", year + 2, 3));
+
+        KidsConfig result = storedConfigOf(service.create(user, kidsRequest(config, "0", "0")));
+
+        KidsConfig.Kid sam = result.kids().get(1);
+        assertNull(sam.accounts().firstYear());
+        assertNull(sam.firstYearTarget());
+        assertNull(sam.firstYearDueYear());
+        assertNull(sam.firstYearDueMonth());
+        assertEquals(0, bd("5000").compareTo(result.kids().get(0).firstYearTarget()));
+    }
+
+    @Test
+    void kidsRejectAllZeroTargetsWhenTheFundIsOff() {
+        KidsConfig off = fundGoal("0", "0", false, fundKid("Baby", year + 1, acct("0", "0"), "5000", year + 1, 6));
+
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, kidsRequest(off, "0", "0")));
+        assertEquals("Set a target for at least one account.", e.getMessage());
+    }
+
+    @Test
+    void kidsCreateAnchorsTheFirstYearAccount() {
+        stubSave();
+
+        Goal goal = service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100"));
+
+        KidsConfig.Kid kid = storedConfigOf(goal).kids().get(0);
+        AccountState fund = kid.accounts().firstYear();
+        assertEquals(0, bd("400").compareTo(fund.balance()));
+        assertEquals(0, bd("400").compareTo(fund.anchorBalance()));
+        assertEquals(0, bd("100").compareTo(fund.anchorMonthly()));
+        assertNull(fund.balanceUpdatedAt());
+        assertEquals(0, bd("5000").compareTo(kid.firstYearTarget()));
+        assertEquals(year + 1, kid.firstYearDueYear());
+        assertEquals(6, kid.firstYearDueMonth());
+    }
+
+    @Test
+    void updateReanchorsWhenTheFundIsSwitchedOff() {
+        stubSave();
+        storedGoal(service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
+
+        KidsConfig off = fundGoal("0", "30000", false,
+                fundKid("Baby", year + 1, acct("400", "100"), "5000", year + 1, 6));
+        Goal updated = service.update(user, 6L, kidsRequest(off, "450", "100"));
+
+        assertEquals(bd("450"), updated.getAnchorBalance());
+        KidsConfig result = storedConfigOf(updated);
+        assertNull(result.kids().get(0).accounts().firstYear());
+        assertEquals(Boolean.FALSE, result.firstYearFund());
+    }
+
+    @Test
+    void updateReanchorsWhenAFirstYearTargetOrDueDateChanges() {
+        stubSave();
+        storedGoal(service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
+
+        Goal targetChanged = service.update(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 1), "450", "100"));
+        assertEquals(bd("450"), targetChanged.getAnchorBalance());
+
+        Goal dueChanged = service.update(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 2), "470", "100"));
+        assertEquals(bd("470"), dueChanged.getAnchorBalance());
+        assertEquals(year + 2, storedConfigOf(dueChanged).kids().get(0).firstYearDueYear());
+    }
+
+    @Test
+    void kidsUpdateStampsOnlyTheChangedFirstYearBalance() {
+        stubSave();
+        Goal stored = storedGoal(
+                service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
+        var anchoredAt = stored.getPlanAnchoredAt();
+
+        Goal same = service.update(user, 6L, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100"));
+        assertNull(storedConfigOf(same).kids().get(0).accounts().firstYear().balanceUpdatedAt());
+
+        Goal updated = service.update(user, 6L, kidsRequest(oneFundKid("650", "5000", year + 1), "650", "100"));
+
+        KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
+        assertEquals(anchoredAt, updated.getPlanAnchoredAt());
+        assertNull(accounts.plan529().balanceUpdatedAt());
+        assertNotNull(accounts.firstYear().balanceUpdatedAt());
+        assertEquals(0, bd("650").compareTo(accounts.firstYear().balance()));
+        assertEquals(0, bd("400").compareTo(accounts.firstYear().anchorBalance()));
+    }
+
+    @Test
+    void legacyStoredKidsGoalStillUpdates() {
+        stubSave();
+        String legacy = "{\"brokerageTarget\":50000,\"plan529Target\":80000,\"kids\":[{\"label\":\"Ava\","
+                + "\"birthYear\":" + (year - 3) + ",\"birthMonth\":4,\"accounts\":{"
+                + "\"brokerage\":{\"balance\":1000,\"balanceUpdatedAt\":null,\"anchorBalance\":900,\"anchorMonthly\":100},"
+                + "\"plan529\":{\"balance\":2000,\"balanceUpdatedAt\":null,\"anchorBalance\":1800,\"anchorMonthly\":200}}}]}";
+        Goal stored = rawStoredKidsGoal(11L, legacy);
+        var anchoredAt = stored.getPlanAnchoredAt();
+        KidsConfig sent = new KidsConfig(bd("50000"), bd("80000"), List.of(new KidsConfig.Kid("Ava", year - 3, 4,
+                new KidsConfig.Accounts(acct("1000", "100"), acct("2500", "200"), null), null, null, null)), null);
+
+        Goal updated = service.update(user, 11L, kidsRequest(sent, "3500", "300"));
+
+        KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
+        assertEquals(anchoredAt, updated.getPlanAnchoredAt());
+        assertEquals(0, bd("1800").compareTo(accounts.plan529().anchorBalance()));
+        assertEquals(0, bd("2500").compareTo(accounts.plan529().balance()));
+        assertNull(accounts.firstYear());
     }
 }

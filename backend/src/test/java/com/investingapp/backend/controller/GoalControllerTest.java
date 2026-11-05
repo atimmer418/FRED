@@ -233,4 +233,28 @@ class GoalControllerTest {
                 .andExpect(jsonPath("$.message").isString());
         verifyNoInteractions(service);
     }
+
+    @Test
+    void acceptsAKidsBodyWithTheNewProperties() throws Exception {
+        String kidsConfig = "{\"brokerageTarget\":0,\"plan529Target\":0,\"firstYearFund\":true,\"kids\":[{"
+                + "\"label\":\"Baby\",\"birthYear\":null,\"birthMonth\":null,\"firstYearTarget\":16000,"
+                + "\"firstYearDueYear\":2029,\"firstYearDueMonth\":11,\"accounts\":{"
+                + "\"brokerage\":{\"balance\":0,\"balanceUpdatedAt\":null,\"anchorBalance\":null,\"anchorMonthly\":0},"
+                + "\"plan529\":{\"balance\":0,\"balanceUpdatedAt\":null,\"anchorBalance\":null,\"anchorMonthly\":0},"
+                + "\"firstYear\":{\"balance\":0,\"balanceUpdatedAt\":null,\"anchorBalance\":null,\"anchorMonthly\":616}}}]}";
+        Goal saved = goal(4L);
+        saved.setType(GoalType.KIDS);
+        saved.setIcon("child_care");
+        saved.setConfigJson(kidsConfig);
+        when(service.create(any(User.class), any(GoalRequest.class))).thenReturn(saved);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"KIDS\",\"name\":\"Kids\",\"icon\":\"child_care\","
+                                + "\"currentBalance\":0,\"anchorMonthly\":616,\"planRate\":0.07,"
+                                + "\"planRateKind\":\"market\",\"config\":" + kidsConfig + "}"))
+                .andExpect(status().isCreated());
+        verify(service).create(any(User.class), any(GoalRequest.class));
+    }
 }

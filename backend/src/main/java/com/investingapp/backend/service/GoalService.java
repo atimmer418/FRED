@@ -229,6 +229,7 @@ public class GoalService {
         if (differs(a.brokerageTarget(), b.brokerageTarget())
                 || differs(a.plan529Target(), b.plan529Target())
                 || Boolean.TRUE.equals(a.firstYearFund()) != Boolean.TRUE.equals(b.firstYearFund())
+                || Boolean.TRUE.equals(a.giftDays()) != Boolean.TRUE.equals(b.giftDays())
                 || a.kids().size() != b.kids().size()) {
             return true;
         }
@@ -276,7 +277,8 @@ public class GoalService {
                             firstYear == null ? null : mapper.map(firstYear, i, AccountSlot.FIRST_YEAR)),
                     kid.firstYearTarget(), kid.firstYearDueYear(), kid.firstYearDueMonth()));
         }
-        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, config.firstYearFund());
+        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, config.firstYearFund(),
+                config.giftDays());
     }
 
     private static AccountState accountAt(KidsConfig config, int index, AccountSlot slot) {
@@ -329,8 +331,8 @@ public class GoalService {
     private KidsConfig validateKids(KidsConfig config, KidsConfig storedOrNull, int year) {
         requireTarget(config.brokerageTarget());
         requireTarget(config.plan529Target());
-        if (config.kids() == null || config.kids().isEmpty() || config.kids().size() > 10) {
-            throw new GoalValidationException("Add between 1 and 10 kids.");
+        if (config.kids() == null || config.kids().isEmpty() || config.kids().size() > 5) {
+            throw new GoalValidationException("Add between 1 and 5 kids.");
         }
         boolean fundOn = Boolean.TRUE.equals(config.firstYearFund());
         int funded = 0;
@@ -378,7 +380,7 @@ public class GoalService {
         if (!fundOn && config.brokerageTarget().signum() == 0 && config.plan529Target().signum() == 0) {
             throw new GoalValidationException("Set a target for at least one account.");
         }
-        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, fundOn);
+        return new KidsConfig(config.brokerageTarget(), config.plan529Target(), kids, fundOn, Boolean.TRUE.equals(config.giftDays()));
     }
 
     /** Whether the stored kid at this index has the same birth year (a kid who aged past 17 since). */
@@ -443,8 +445,8 @@ public class GoalService {
     }
 
     private VacationConfig validateVacation(VacationConfig config, int year, Integer storedSavedYear) {
-        if (config.tripsPerYear() == null || config.tripsPerYear() < 1 || config.tripsPerYear() > 4) {
-            throw new GoalValidationException("Choose between 1 and 4 trips per year.");
+        if (config.tripsPerYear() == null || config.tripsPerYear() < 1 || config.tripsPerYear() > 10) {
+            throw new GoalValidationException("Pick 1 to 10 trips a year.");
         }
         requireAmount(config.budgetPerTrip(), "trip budget");
         requireTarget(config.savedThisYear());

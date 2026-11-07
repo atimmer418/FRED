@@ -9,7 +9,7 @@ import java.util.List;
  * account, a snapshotted target and a stored end month.
  */
 public record KidsConfig(BigDecimal brokerageTarget, BigDecimal plan529Target, List<Kid> kids,
-                         Boolean firstYearFund) {
+                         Boolean firstYearFund, Boolean giftDays) {
 
     public record Kid(String label, Integer birthYear, Integer birthMonth, Accounts accounts,
                       BigDecimal firstYearTarget, Integer firstYearDueYear, Integer firstYearDueMonth) {

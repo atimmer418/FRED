@@ -89,6 +89,18 @@ class GoalConfigCodecTest {
     }
 
     @Test
+    void kidsConfigWithoutGiftDaysParsesAndReserializesFalse() throws Exception {
+        KidsConfig cfg = (KidsConfig) codec.parse(GoalType.KIDS, KIDS_JSON);
+        assertNull(cfg.giftDays());
+
+        KidsConfig normalized = new KidsConfig(cfg.brokerageTarget(), cfg.plan529Target(), cfg.kids(),
+                cfg.firstYearFund(), Boolean.TRUE.equals(cfg.giftDays()));
+        JsonNode written = mapper.readTree(codec.write(normalized));
+        assertTrue(written.has("giftDays"));
+        assertFalse(written.get("giftDays").asBoolean());
+    }
+
+    @Test
     void parsesKidsConfigWithoutTheNewProperties() {
         KidsConfig cfg = (KidsConfig) codec.parse(GoalType.KIDS, KIDS_JSON);
 

@@ -92,7 +92,7 @@ class GoalServiceTest {
     }
 
     private KidsConfig kids(String brokerageTarget, String plan529Target, KidsConfig.Kid... kids) {
-        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids), null);
+        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids), null, null);
     }
 
     private GoalRequest kidsRequest(KidsConfig config, String balance, String monthly) {
@@ -202,14 +202,73 @@ class GoalServiceTest {
     }
 
     @Test
-    void kidsRejectEleventhKid() {
-        List<KidsConfig.Kid> eleven = new ArrayList<>();
-        for (int i = 0; i < 11; i++) {
-            eleven.add(kid("Kid" + i, year - 2, acct("0", "0"), acct("0", "0")));
-        }
-        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), eleven, null);
+    void sixKidsAreRejected() {
+        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(6), null, null);
 
-        assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertEquals("Add between 1 and 5 kids.", e.getMessage());
+    }
+
+    @Test
+    void fiveKidsAreAccepted() {
+        stubSave();
+        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(5), null, null);
+
+        assertNotNull(service.create(user, kidsRequest(config, "0", "0")));
+    }
+
+    private List<KidsConfig.Kid> kidList(int count) {
+        List<KidsConfig.Kid> list = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            list.add(kid("Kid" + i, year - 2, acct("0", "0"), acct("0", "0")));
+        }
+        return list;
+    }
+
+    @Test
+    void elevenTripsAreRejectedAndTenAccepted() {
+        stubSave();
+        var ten = new com.investingapp.backend.model.goals.VacationConfig(10, bd("3000"), bd("500"), year);
+        var eleven = new com.investingapp.backend.model.goals.VacationConfig(11, bd("3000"), bd("500"), year);
+
+        assertNotNull(service.create(user, requestWith(GoalType.VACATION, "flight", ten, "0", false)));
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, requestWith(GoalType.VACATION, "flight", eleven, "0", false)));
+        assertEquals("Pick 1 to 10 trips a year.", e.getMessage());
+    }
+
+    @Test
+    void flippingGiftDaysIsAPlanInputChangeAndReanchors() {
+        stubSave();
+        KidsConfig off = kids("1000", "1000", kid("Sam", year - 2, acct("0", "0"), acct("0", "0")));
+        Goal stored = storedGoal(service.create(user, kidsRequest(off, "100", "50")), 21L);
+        var oldAnchoredAt = stored.getPlanAnchoredAt().minusDays(30);
+        stored.setPlanAnchoredAt(oldAnchoredAt);
+
+        KidsConfig on = new KidsConfig(off.brokerageTarget(), off.plan529Target(), off.kids(), null, true);
+        Goal updated = service.update(user, 21L, kidsRequest(on, "150", "50"));
+
+        assertTrue(updated.getPlanAnchoredAt().isAfter(oldAnchoredAt));
+        assertEquals(bd("150"), updated.getAnchorBalance());
+        assertEquals(Boolean.TRUE, storedConfigOf(updated).giftDays());
+    }
+
+    @Test
+    void nullAndFalseGiftDaysAreTheSameForReanchoring() {
+        stubSave();
+        KidsConfig stale = kids("1000", "1000", kid("Sam", year - 2, acct("0", "0"), acct("0", "0")));
+        Goal stored = storedGoal(service.create(user, kidsRequest(stale, "100", "50")), 22L);
+        var anchoredAt = stored.getPlanAnchoredAt().minusDays(30);
+        stored.setPlanAnchoredAt(anchoredAt);
+
+        KidsConfig explicitFalse = new KidsConfig(stale.brokerageTarget(), stale.plan529Target(), stale.kids(),
+                null, false);
+        Goal updated = service.update(user, 22L, kidsRequest(explicitFalse, "150", "50"));
+
+        assertEquals(anchoredAt, updated.getPlanAnchoredAt());
+        assertEquals(bd("100"), updated.getAnchorBalance());
+        assertEquals(Boolean.FALSE, storedConfigOf(stored).giftDays());
     }
 
     @Test
@@ -481,7 +540,7 @@ class GoalServiceTest {
     }
 
     private KidsConfig fundGoal(String brokerageTarget, String plan529Target, Boolean fund, KidsConfig.Kid... kids) {
-        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids), fund);
+        return new KidsConfig(bd(brokerageTarget), bd(plan529Target), List.of(kids), fund, null);
     }
 
     private KidsConfig oneFundKid(String balance, String target, int dueYear) {
@@ -742,7 +801,7 @@ class GoalServiceTest {
         Goal stored = rawStoredKidsGoal(11L, legacy);
         var anchoredAt = stored.getPlanAnchoredAt();
         KidsConfig sent = new KidsConfig(bd("50000"), bd("80000"), List.of(new KidsConfig.Kid("Ava", year - 3, 4,
-                new KidsConfig.Accounts(acct("1000", "100"), acct("2500", "200"), null), null, null, null)), null);
+                new KidsConfig.Accounts(acct("1000", "100"), acct("2500", "200"), null), null, null, null)), null, null);
 
         Goal updated = service.update(user, 11L, kidsRequest(sent, "3500", "300"));
 
@@ -929,7 +988,7 @@ class GoalServiceTest {
     @Test
     void kidsRejectANullKidElement() {
         KidsConfig config = new KidsConfig(bd("50000"), bd("30000"),
-                java.util.Arrays.asList(kid("Sam", year - 3, acct("0", "0"), acct("0", "0")), null), null);
+                java.util.Arrays.asList(kid("Sam", year - 3, acct("0", "0"), acct("0", "0")), null), null, null);
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
                 () -> service.create(user, kidsRequest(config, "0", "0")));

@@ -96,6 +96,16 @@ describe('QuizSliderComponent', () => {
     expect(emitted).toEqual([]);
   });
 
+  it('paints the track fill from the blue-flow tokens, not literal colors', () => {
+    setup({ value: 250_000, min: 0, max: 500_000, step: 10_000, format: dollars });
+
+    const range = el().querySelector('input.sim-range') as HTMLInputElement;
+    const fill = range.style.getPropertyValue('--track');
+    expect(fill).toContain('var(--bf-ink');
+    expect(fill).toContain('var(--bf-track');
+    expect(fill).toContain('50%');
+  });
+
   it('renders a plain readout with no tap target when tapToType is off', () => {
     setup({ value: 2_000, min: 0, max: 5_000, step: 100, format: dollars, tapToType: false });
 

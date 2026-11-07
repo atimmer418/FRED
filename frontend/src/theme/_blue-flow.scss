@@ -19,6 +19,25 @@
 
 $controls-only: false !default;
 
+// ─── Control tokens ───────────────────────────────────────────────────────────
+// Default values for the --bf-* custom properties. .flow-host sets them, and
+// every control rule reads them as var(--bf-*, $default), so a control still
+// paints correctly outside .flow-host (for example on the white plan page).
+// A tone (such as .bf-row.light) is a plain override of these properties.
+
+$bf-ink:          #fff;                          // text and icons on blue
+$bf-ink-soft:     rgba(255, 255, 255, 0.7);      // unselected chip text
+$bf-ink-line:     rgba(255, 255, 255, 0.68);     // helper line under a row title
+$bf-thumb:        #fff;                          // switch knob
+$bf-fill-faint:   rgba(255, 255, 255, 0.04);     // row that is switched off
+$bf-fill-soft:    rgba(255, 255, 255, 0.1);      // chip track
+$bf-fill:         rgba(255, 255, 255, 0.12);     // stepper button
+$bf-ic-bg:        rgba(255, 255, 255, 0.16);     // row icon chip
+$bf-switch-off:   rgba(255, 255, 255, 0.22);     // switch track, off
+$bf-track:        rgba(255, 255, 255, 0.22);     // slider track past the thumb
+$bf-fill-press:   rgba(255, 255, 255, 0.24);     // stepper border and pressed state
+$bf-shadow:       rgba(8, 28, 78, 0.45);         // glow under big numbers
+
 @if not $controls-only {
 
   // ─── CSS custom properties for the blue sub-theme ───────────────────────────
@@ -33,6 +52,23 @@ $controls-only: false !default;
     --mint:             #34d399;
     --amber:            #fbbf24;
     --coral:            #f87171;
+
+    // Control tokens (see the defaults at the top of this file).
+    --bf-ink:           #{$bf-ink};
+    --bf-ink-soft:      #{$bf-ink-soft};
+    --bf-ink-line:      #{$bf-ink-line};
+    --bf-thumb:         #{$bf-thumb};
+    --bf-fill-faint:    #{$bf-fill-faint};
+    --bf-fill-soft:     #{$bf-fill-soft};
+    --bf-fill:          #{$bf-fill};
+    --bf-ic-bg:         #{$bf-ic-bg};
+    --bf-ic-ink:        #{$bf-ink};
+    --bf-switch-off:    #{$bf-switch-off};
+    --bf-track:         #{$bf-track};
+    --bf-switch-on:     var(--mint);
+    --bf-saves:         var(--mint);
+    --bf-fill-press:    #{$bf-fill-press};
+    --bf-shadow:        #{$bf-shadow};
 
     position: absolute;
     inset: 0;
@@ -359,7 +395,7 @@ $controls-only: false !default;
 
 .bf-chips {
   display: flex;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bf-fill-soft, #{$bf-fill-soft});
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 3px;
@@ -370,7 +406,7 @@ $controls-only: false !default;
   flex: 1;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--bf-ink-soft, #{$bf-ink-soft});
   font-family: 'Manrope', sans-serif;
   font-size: 12.5px;
   font-weight: 800;
@@ -403,7 +439,7 @@ $controls-only: false !default;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
-  color: #fff;
+  color: var(--bf-ink, #{$bf-ink});
   font-family: 'Manrope', sans-serif;
   text-align: left;
   cursor: pointer;
@@ -439,7 +475,7 @@ $controls-only: false !default;
   width: 46px;
   height: 28px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--bf-switch-off, #{$bf-switch-off});
   position: relative;
   flex-shrink: 0;
   transition: background 0.2s;
@@ -452,11 +488,11 @@ $controls-only: false !default;
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--bf-thumb, #{$bf-thumb});
     transition: transform 0.2s;
   }
 
-  &.on { background: var(--mint); }
+  &.on { background: var(--bf-switch-on, var(--mint)); }
   &.on::after { transform: translateX(18px); }
 }
 
@@ -471,7 +507,7 @@ $controls-only: false !default;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
-  color: #fff;
+  color: var(--bf-ink, #{$bf-ink});
   font-family: 'Manrope', sans-serif;
   text-align: left;
   cursor: pointer;
@@ -481,7 +517,8 @@ $controls-only: false !default;
     width: 34px;
     height: 34px;
     border-radius: 11px;
-    background: rgba(255, 255, 255, 0.16);
+    background: var(--bf-ic-bg, #{$bf-ic-bg});
+    color: var(--bf-ic-ink, #{$bf-ink});
     display: flex;
     align-items: center;
     justify-content: center;
@@ -507,41 +544,38 @@ $controls-only: false !default;
     display: block;
     font-size: 11.5px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.68);
+    color: var(--bf-ink-line, #{$bf-ink-line});
     margin-top: 3px;
     line-height: 1.4;
     white-space: nowrap;
 
-    &.saves { color: var(--mint); }
+    &.saves { color: var(--bf-saves, var(--mint)); }
   }
 
   &.off {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bf-fill-faint, #{$bf-fill-faint});
 
     .bf-row-ic,
     .bf-row-title { opacity: 0.5; }
   }
 
-  // White card row for the plan page.
+  // White card row for the plan page (Ruling P2). The tone only re-points the
+  // tokens; every rule above stays the same. Text, line, saves and border are
+  // the P2 values. The icon chip (#eef4ff / #2563eb), the switch (#dbe1ec off,
+  // #2563eb on) and the off fill (#f8fafc) come from the mockup's .ins card,
+  // because P2 does not name them; Task 6 confirms them against the plan page.
   &.light {
-    background: #fff;
-    border-color: #e5e7eb;
-    color: #111827;
-
-    .bf-row-ic {
-      background: #eef4ff;
-      color: #2563eb;
-    }
-
-    .bf-row-line {
-      color: #6b7280;
-      &.saves { color: #059669; }
-    }
-
-    .bf-switch { background: #dbe1ec; }
-    .bf-switch.on { background: #2563eb; }
-
-    &.off { background: #f8fafc; }
+    --glass:            #fff;
+    --glass-border:     #e5e7eb;
+    --bf-ink:           #111827;
+    --bf-ink-line:      #6b7280;
+    --bf-saves:         #059669;
+    --bf-ic-bg:         #eef4ff;
+    --bf-ic-ink:        #2563eb;
+    --bf-switch-off:    #dbe1ec;
+    --bf-switch-on:     #2563eb;
+    --bf-thumb:         #fff;
+    --bf-fill-faint:    #f8fafc;
   }
 }
 
@@ -557,9 +591,9 @@ $controls-only: false !default;
     width: 54px;
     height: 54px;
     border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.24);
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
+    border: 1px solid var(--bf-fill-press, #{$bf-fill-press});
+    background: var(--bf-fill, #{$bf-fill});
+    color: var(--bf-ink, #{$bf-ink});
     font-family: 'Manrope', sans-serif;
     font-size: 26px;
     font-weight: 700;
@@ -569,7 +603,7 @@ $controls-only: false !default;
     justify-content: center;
     transition: opacity 0.2s;
 
-    &:active { background: rgba(255, 255, 255, 0.24); }
+    &:active { background: var(--bf-fill-press, #{$bf-fill-press}); }
     &:disabled { opacity: 0.35; pointer-events: none; }
   }
 
@@ -580,8 +614,8 @@ $controls-only: false !default;
     letter-spacing: -0.04em;
     line-height: 1;
     text-align: center;
-    color: #fff;
-    text-shadow: 0 6px 30px rgba(8, 28, 78, 0.45);
+    color: var(--bf-ink, #{$bf-ink});
+    text-shadow: 0 6px 30px var(--bf-shadow, #{$bf-shadow});
     font-variant-numeric: tabular-nums;
   }
 }

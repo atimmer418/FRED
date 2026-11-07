@@ -55,11 +55,16 @@ export class QuizSliderComponent {
     return this.valueToTrack(this.value);
   }
 
-  /** Paints the track white up to the thumb. */
+  /**
+   * Paints the track up to the thumb from the blue-flow tokens (--bf-ink, then
+   * --bf-track past the thumb). The fallbacks match the token defaults.
+   */
   get trackFill(): string {
     const span = this.trackMax - this.trackMin;
     const pct = span > 0 ? ((this.trackPosition - this.trackMin) / span) * 100 : 0;
-    return `linear-gradient(to right, #fff 0%, #fff ${pct}%, rgba(255,255,255,.22) ${pct}%)`;
+    const ink = 'var(--bf-ink, #fff)';
+    const rest = 'var(--bf-track, rgba(255,255,255,.22))';
+    return `linear-gradient(to right, ${ink} 0%, ${ink} ${pct}%, ${rest} ${pct}%)`;
   }
 
   get typedValue(): string {

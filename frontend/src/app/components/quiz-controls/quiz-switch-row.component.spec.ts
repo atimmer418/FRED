@@ -66,4 +66,19 @@ describe('QuizSwitchRowComponent', () => {
     fixture.detectChanges();
     expect(row().classList).toContain('light');
   });
+
+  it('light tone is a token override, so the row paints from custom properties', () => {
+    setup({ tone: 'light' });
+    const styles = getComputedStyle(row());
+    const token = (name: string): string => styles.getPropertyValue(name).trim();
+
+    expect(token('--bf-ink')).toBe('#111827');
+    expect(token('--bf-ink-line')).toBe('#6b7280');
+    expect(token('--bf-saves')).toBe('#059669');
+    expect(token('--glass-border')).toBe('#e5e7eb');
+    expect(styles.color).toBe('rgb(17, 24, 39)');
+
+    const sw = fixture.nativeElement.querySelector('.bf-switch') as HTMLElement;
+    expect(getComputedStyle(sw).backgroundColor).toBe('rgb(37, 99, 235)');
+  });
 });

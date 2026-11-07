@@ -767,11 +767,12 @@ describe('GoalPage', () => {
     page.quizCard.set(5);
     fixture.detectChanges();
     expect(rowText()).toEqual(['$25,000', '$50,000', '$100,000', '$250,000', 'Another amount', 'Nothing extra']);
-    expect(rows()[0].classList).toContain('selected');
-    rows()[2].click();
+    // The at-18 default is $100,000 (the quiz's nest egg default).
+    expect(rows()[2].classList).toContain('selected');
+    rows()[3].click();
     fixture.detectChanges();
-    expect(page.form().kids.brokerageTarget).toBe(100_000);
-    expect(page.form().kids.at18Choice).toBe(100_000);
+    expect(page.form().kids.brokerageTarget).toBe(250_000);
+    expect(page.form().kids.at18Choice).toBe(250_000);
     rows()[5].click();
     expect(page.form().kids.brokerageTarget).toBeNull();
     expect(page.form().kids.at18Choice).toBe('none');

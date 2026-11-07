@@ -1,0 +1,496 @@
+import { signal } from '@angular/core';
+import { ComponentFixture, TestBed, discardPeriodicTasks, fakeAsync, tick } from '@angular/core/testing';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { NavController } from '@ionic/angular/standalone';
+import { of, throwError } from 'rxjs';
+
+import { GoalQuizPage } from './goal-quiz.page';
+import { GOAL_PAGE_NOW } from '../goal/goal-clock';
+import { GoalDraftService } from '../../services/goal-draft.service';
+import { GoalsService } from '../../services/goals.service';
+import { RateAssumptionsService } from '../../services/rate-assumptions.service';
+import { defaultFirstYearFund, formFromGoal, formToConfig } from '../goal/goal-form.model';
+import { Goal, GoalConfig, GoalType, KidsConfig } from '../../models/goal.model';
+import { kidYearBounds } from '../../utils/goal-quiz.utils';
+
+/** 15 Nov 2026: the spec's sample family (born 2024, expected 2028, undated) reads against this clock. */
+const NOW = new Date(2026, 10, 15);
+const YEAR = NOW.getFullYear();
+
+function goalOf(id: number, type: GoalType, config: GoalConfig, extra: Partial<Goal> = {}): Goal {
+  return {
+    id, clientId: null, type, name: 'G', icon: 'flag', config,
+    currentBalance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0,
+    planRate: 0.1, planRateKind: 'market', planAnchoredAt: '2026-01-01',
+    completed: false, sortOrder: 0, createdAt: '', updatedAt: '',
+    ...extra,
+  };
+}
+
+function houseGoal(id: number): Goal {
+  return goalOf(id, 'HOUSE', { price: 400_000, downPaymentPct: 20, targetYear: YEAR + 5 }, { name: 'First home', icon: 'home' });
+}
+
+function kidsGoal(id: number, kids: Array<{ birthYear: number | null; birthMonth: number | null }>): Goal {
+  const fresh = () => ({ balance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 });
+  const config: KidsConfig = {
+    brokerageTarget: 100_000,
+    plan529Target: 47_800,
+    firstYearFund: false,
+    giftDays: false,
+    kids: kids.map((k, i) => ({
+      label: `Kid ${i + 1}`, birthYear: k.birthYear, birthMonth: k.birthMonth,
+      accounts: { brokerage: fresh(), plan529: fresh() },
+    })),
+  };
+  return goalOf(id, 'KIDS', config, { name: 'Our kids', icon: 'child_care' });
+}
+
+describe('GoalQuizPage', () => {
+  let navCtrl: jasmine.SpyObj<NavController>;
+  let goals: ReturnType<typeof signal<Goal[]>>;
+  let refresh: jasmine.Spy;
+  let draft: GoalDraftService;
+
+  async function create(
+    params: Record<string, string>,
+    opts: { goals?: Goal[]; loaded?: Goal[]; refreshError?: boolean } = {},
+  ): Promise<ComponentFixture<GoalQuizPage>> {
+    // Some specs build a second page; the module must be reset between them.
+    TestBed.resetTestingModule();
+    goals = signal<Goal[]>(opts.goals ?? []);
+    refresh = jasmine.createSpy('refresh').and.callFake(() => {
+      if (opts.refreshError) return throwError(() => new Error('down'));
+      if (opts.loaded) goals.set(opts.loaded);
+      return of(goals());
+    });
+    navCtrl = jasmine.createSpyObj<NavController>('NavController', ['navigateBack', 'navigateForward']);
+    navCtrl.navigateForward.and.resolveTo(true);
+    navCtrl.navigateBack.and.resolveTo(true);
+
+    await TestBed.configureTestingModule({
+      imports: [GoalQuizPage],
+      providers: [
+        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap(params) } } },
+        { provide: NavController, useValue: navCtrl },
+        { provide: GoalsService, useValue: { goals, refresh } },
+        { provide: RateAssumptionsService, useValue: { annualReturn: signal(0.10), ensureUser: () => {} } },
+        { provide: GOAL_PAGE_NOW, useValue: () => NOW },
+      ],
+    }).compileComponents();
+
+    draft = TestBed.inject(GoalDraftService);
+    draft.clear();
+    const fixture = TestBed.createComponent(GoalQuizPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  function text(fixture: ComponentFixture<GoalQuizPage>, selector: string): string {
+    return (fixture.nativeElement.querySelector(selector)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  function onScreen(fixture: ComponentFixture<GoalQuizPage>): HTMLElement {
+    return fixture.nativeElement.querySelector('.fscreen.on') as HTMLElement;
+  }
+
+  function goTo(fixture: ComponentFixture<GoalQuizPage>, index: number): void {
+    fixture.componentInstance.stepIndex.set(index);
+    fixture.detectChanges();
+  }
+
+  it('starts at the type default form for /goals/new/kids and at formFromGoal for /goals/:id/edit', async () => {
+    const fresh = await create({ type: 'KIDS' });
+    const page = fresh.componentInstance;
+    expect(page.form().type).toBe('KIDS');
+    expect(page.form().name).toBe('Our kids');
+    expect(page.existing()).toBeNull();
+    expect(page.stepIndex()).toBe(0);
+    expect(text(fresh, '.fscreen.on .fs-h1')).toBe('How many kids are you planning for?');
+    expect(text(fresh, '.fscreen.on .fs-cta')).toBe('Continue');
+    expect(fresh.nativeElement.querySelectorAll('.flow-dots .dot').length).toBe(6);
+
+    const goal = houseGoal(3);
+    const edit = await create({ id: '3' }, { goals: [goal] });
+    expect(edit.componentInstance.existing()).toBe(goal);
+    expect(edit.componentInstance.form()).toEqual(formFromGoal(goal));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the goals on a cold deep link and leaves when the goal is still missing', async () => {
+    const goal = houseGoal(5);
+    const warm = await create({ id: '5' }, { loaded: [goal] });
+    expect(refresh).toHaveBeenCalled();
+    expect(warm.componentInstance.existing()).toBe(goal);
+
+    await create({ id: '9' }, { loaded: [goal] });
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+
+    await create({ type: 'BOAT' });
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+  });
+
+  it('the Baby fund row is hidden when every kid is born', async () => {
+    const born = await create({ id: '1' }, { goals: [kidsGoal(1, [{ birthYear: 2020, birthMonth: 3 }])] });
+    goTo(born, 3);
+    expect(text(born, '.fscreen.on .fs-h1')).toBe('Choose what to fund');
+    const rows = Array.from(onScreen(born).querySelectorAll('app-quiz-switch-row')) as HTMLElement[];
+    expect(rows.length).toBe(2);
+    expect(rows.map(r => r.textContent)).not.toContain(jasmine.stringContaining('Baby fund'));
+  });
+
+  it('a kid expected this year is not yet born: the Baby fund row shows and the fund defaults on (ruling R4)', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.form.update(f => ({
+      ...f, kids: { ...f.kids, kids: [{ label: 'Kid 1', birthYear: YEAR, birthMonth: null, undecided: false }] },
+    }));
+    expect(defaultFirstYearFund(page.form().kids.kids, NOW)).toBeTrue();
+    goTo(fixture, 3);
+    const rows = Array.from(onScreen(fixture).querySelectorAll('app-quiz-switch-row')) as HTMLElement[];
+    expect(rows.length).toBe(3);
+    expect(rows[0].textContent).toContain('Baby fund');
+    expect(rows[0].textContent).toContain('$25,700 ready on day one.');
+  });
+
+  it('turning College off on step 4 changes the CTA of the new last step to Show my plan with the icon', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 3);
+    expect(text(fixture, '.fscreen.on .fs-cta')).toBe('Continue');
+    expect(page.steps().length).toBe(6);
+
+    page.setFund('nest', false);
+    fixture.detectChanges();
+    expect(page.steps().map(s => s.id)).not.toContain('kids_nest');
+    expect(page.form().kids.at18Choice).toBe('none');
+    expect(text(fixture, '.fscreen.on .fs-cta')).toBe('Continue');
+
+    page.setFund('college', false);
+    fixture.detectChanges();
+    expect(page.form().kids.collegeChoice).toBe('none');
+    expect(page.form().kids.plan529Target).toBeNull();
+    expect(page.isLast()).toBeTrue();
+    const cta = onScreen(fixture).querySelector('.fs-cta') as HTMLElement;
+    expect(cta.textContent).toContain('Show my plan');
+    expect(cta.querySelector('.material-symbols-outlined')?.textContent?.trim()).toBe('auto_awesome');
+    expect(fixture.nativeElement.querySelectorAll('.flow-dots .dot').length).toBe(4);
+
+    // Off rows read what they save, in green.
+    const rows = Array.from(onScreen(fixture).querySelectorAll('app-quiz-switch-row .bf-row-line')) as HTMLElement[];
+    const lines = rows.map(r => r.textContent?.trim());
+    expect(lines).toContain(jasmine.stringMatching(/^Saves you \$\d+K( to \$\d+K)?\.$/));
+    expect(rows.filter(r => r.classList.contains('saves')).length).toBe(2);
+
+    // All three off: the CTA is disabled and the subtitle asks for one.
+    page.setFund('baby', false);
+    fixture.detectChanges();
+    expect((onScreen(fixture).querySelector('.fs-cta') as HTMLButtonElement).disabled).toBeTrue();
+    expect(text(fixture, '.fscreen.on .fs-sub')).toBe('Pick at least one.');
+
+    // Back on: the step returns and the college default is restored.
+    page.setFund('college', true);
+    fixture.detectChanges();
+    expect(page.form().kids.collegeChoice).toBe('public_tuition');
+    expect(page.form().kids.plan529Target).toBe(47_800);
+    expect(page.steps().map(s => s.id)).toContain('kids_college');
+  });
+
+  it('the when-step slider past the end marks the kid undecided and labels it Not sure', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.setKidCount(2);
+    goTo(fixture, 1);
+    const { min, max } = kidYearBounds(NOW);
+    const sliders = Array.from(onScreen(fixture).querySelectorAll('input[type="range"]')) as HTMLInputElement[];
+    expect(sliders.length).toBe(2);
+    expect(sliders[0].min).toBe(String(min));
+    expect(sliders[0].max).toBe(String(max + 1));
+
+    sliders[0].value = '2024';
+    sliders[0].dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(page.form().kids.kids[0]).toEqual(jasmine.objectContaining({ birthYear: 2024, birthMonth: null, undecided: false }));
+    expect(onScreen(fixture).querySelectorAll('.kid-when')[0].textContent?.trim()).toBe('Born 2024');
+
+    sliders[0].value = String(YEAR);
+    sliders[0].dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(onScreen(fixture).querySelectorAll('.kid-when')[0].textContent?.trim()).toBe('This year');
+
+    sliders[0].value = String(max + 1);
+    sliders[0].dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(page.form().kids.kids[0]).toEqual(jasmine.objectContaining({ birthYear: null, undecided: true }));
+    expect(onScreen(fixture).querySelectorAll('.kid-when')[0].textContent?.trim()).toBe('Not sure');
+  });
+
+  it('the count step caps at five kids and says so', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.setKidCount(5);
+    fixture.detectChanges();
+    expect(page.form().kids.kids.length).toBe(5);
+    expect(onScreen(fixture).querySelectorAll('.kid-icons .material-symbols-outlined').length).toBe(5);
+    expect(text(fixture, '.fscreen.on .kids-cap')).toBe('Five is the most FRED plans for at once');
+    page.setKidCount(6);
+    expect(page.form().kids.kids.length).toBe(5);
+    page.setKidCount(2);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.fscreen.on .kids-cap')).toBeNull();
+  });
+
+  it('the cost screen shows the general stat first and the family monthly after the crossfade; tap flips back', fakeAsync(async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.setKidCount(3);
+    const animate = spyOn(HTMLElement.prototype, 'animate').and.callThrough();
+    goTo(fixture, 2);
+    const statA = onScreen(fixture).querySelector('.stat-a') as HTMLElement;
+    const statB = onScreen(fixture).querySelector('.stat-b') as HTMLElement;
+    expect(statA.textContent?.replace(/\s+/g, ' ')).toContain('$252K');
+    expect(statA.textContent).toContain('From birth to 18');
+    expect(statB.textContent?.replace(/\s+/g, ' ')).toContain('$3,510');
+    expect(statB.textContent).toContain('/mo');
+    expect(statB.textContent).toContain('For all 3 kids');
+    expect(statA.classList).toContain('on');
+    expect(statB.classList).not.toContain('on');
+
+    tick(2199);
+    expect(page.costStat()).toBe('A');
+    tick(1);
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(statB.classList).toContain('on');
+
+    (onScreen(fixture).querySelector('.xfade') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('A');
+    expect(animate).toHaveBeenCalledTimes(4);
+    discardPeriodicTasks();
+  }));
+
+  it('the cost screen swaps without animate() under reduced motion and reads the one and two kid hints', fakeAsync(async () => {
+    spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    const animate = spyOn(HTMLElement.prototype, 'animate').and.callThrough();
+    goTo(fixture, 2);
+    expect(text(fixture, '.fscreen.on .stat-a .big-readout')).toBe('$422K');
+    expect(text(fixture, '.fscreen.on .stat-a .readout-hint')).toBe('From birth to 18');
+    expect(text(fixture, '.fscreen.on .stat-b .big-readout')).toBe('$1,950 /mo');
+    expect(text(fixture, '.fscreen.on .stat-b .readout-hint')).toBe('For your kid');
+    tick(2200);
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    expect(animate).not.toHaveBeenCalled();
+
+    page.setKidCount(2);
+    fixture.detectChanges();
+    expect(text(fixture, '.fscreen.on .stat-a .big-readout')).toBe('$332K');
+    expect(text(fixture, '.fscreen.on .stat-b .readout-hint')).toBe('For both kids');
+    page.setKidCount(4);
+    fixture.detectChanges();
+    expect(text(fixture, '.fscreen.on .stat-a .big-readout')).toBe('$213K');
+    page.setKidCount(5);
+    fixture.detectChanges();
+    expect(text(fixture, '.fscreen.on .stat-a .big-readout')).toBe('$189K');
+  }));
+
+  it('college: Skip for now holds in the grid until Continue, then the step is gone; Set my own amount swaps in the slider', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 4);
+    expect(text(fixture, '.fscreen.on .fs-h1')).toBe('Saving for college?');
+    expect(onScreen(fixture).querySelectorAll('app-quiz-pick-grid .bf-pick').length).toBe(4);
+    expect(text(fixture, '.fscreen.on app-quiz-pick-grid .bf-pick.on')).toContain('In-state public');
+
+    page.pickCollege('public_full');
+    expect(page.form().kids.collegeChoice).toBe('public_full');
+    expect(page.form().kids.plan529Target).toBe(123_960);
+
+    page.pickCollege('none');
+    fixture.detectChanges();
+    expect(page.form().kids.collegeChoice).toBe('public_full');
+    expect(page.collegeGridValue()).toBe('none');
+    expect(page.steps().map(s => s.id)).toContain('kids_college');
+    page.next();
+    fixture.detectChanges();
+    expect(page.form().kids.collegeChoice).toBe('none');
+    expect(page.steps().map(s => s.id)).toEqual(['kids_count', 'kids_when', 'kids_cost', 'kids_fund', 'kids_nest']);
+    expect(page.currentStep().id).toBe('kids_nest');
+
+    page.setFund('college', true);
+    goTo(fixture, 4);
+    page.toggleCollegeCustom();
+    fixture.detectChanges();
+    const slider = onScreen(fixture).querySelector('app-quiz-slider');
+    expect(slider).not.toBeNull();
+    expect(onScreen(fixture).querySelector('app-quiz-pick-grid')).toBeNull();
+    page.setCollegeCustom(60_000);
+    expect(page.form().kids.collegeChoice).toBe('custom');
+    expect(page.form().kids.plan529Target).toBe(60_000);
+    expect(text(fixture, '.fscreen.on .college-swap')).toBe('Back to the presets');
+  });
+
+  it('nest egg: default $100,000, live chip from the flat monthly, and $0 reads as off', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 5);
+    expect(text(fixture, '.fscreen.on .fs-h1')).toBe('How much per kid?');
+    expect(page.nestAmount()).toBe(100_000);
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toMatch(/^~\$\d{1,3}(,\d{3})* a month per kid$/);
+    page.setNest(0);
+    fixture.detectChanges();
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toBe('Nothing extra at 18');
+    expect(page.steps().map(s => s.id)).toContain('kids_nest');
+    page.setNest(250_000);
+    expect(page.form().kids.brokerageTarget).toBe(250_000);
+    expect(page.form().kids.at18Choice).toBe(250_000);
+    page.setNest(120_000);
+    expect(page.form().kids.at18Choice).toBe('custom');
+  });
+
+  it('Show my plan stores the draft, shows the calc screen for at least 900ms, then navigates to the plan preview route', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    expect(page.isLast()).toBeTrue();
+    expect(text(fixture, '.fscreen.on .fs-cta')).toContain('Show my plan');
+    expect(text(fixture, '.fscreen.on .fs-cta .material-symbols-outlined')).toBe('auto_awesome');
+
+    page.next();
+    fixture.detectChanges();
+    expect(draft.draft()).toEqual({ form: page.form(), existing: null });
+    expect(page.calcShowing()).toBeTrue();
+    expect(fixture.nativeElement.querySelector('app-goal-quiz-calc')).not.toBeNull();
+    expect(text(fixture, 'app-goal-quiz-calc .calc-title')).toBe("Working out this month's number");
+
+    tick(899);
+    expect(navCtrl.navigateForward).not.toHaveBeenCalled();
+    tick(1601);
+    expect(navCtrl.navigateForward).toHaveBeenCalledWith(['/goals/new', 'HOUSE', 'plan']);
+    discardPeriodicTasks();
+  }));
+
+  it('Show my plan on an edit navigates to the goal page and keeps the existing goal in the draft', fakeAsync(async () => {
+    const goal = houseGoal(4);
+    const fixture = await create({ id: '4' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.next();
+    fixture.detectChanges();
+    expect(draft.draft()?.existing).toBe(goal);
+    tick(2500);
+    expect(navCtrl.navigateForward).toHaveBeenCalledWith(['/goals', 4]);
+    discardPeriodicTasks();
+  }));
+
+  it('Continue is gated by validateForm: a $0 price shows the error and stays', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    page.setPrice(0);
+    page.next();
+    fixture.detectChanges();
+    expect(page.stepIndex()).toBe(0);
+    expect(text(fixture, '.fscreen.on .fs-error')).toBe('Enter an amount greater than $0.');
+    page.setPrice(500_000);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.fscreen.on .fs-error')).toBeNull();
+    page.next();
+    expect(page.stepIndex()).toBe(1);
+  });
+
+  it('close on a new quiz navigates back to /my-profile without touching the draft service', async () => {
+    const fixture = await create({ type: 'VACATION' });
+    const set = spyOn(draft, 'set').and.callThrough();
+    fixture.componentInstance.close();
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+    expect(set).not.toHaveBeenCalled();
+    expect(draft.draft()).toBeNull();
+
+    // Back on the first step is the same as close; close on an edit returns to the plan page.
+    fixture.componentInstance.back();
+    expect(navCtrl.navigateBack).toHaveBeenCalledTimes(2);
+    const edit = await create({ id: '3' }, { goals: [houseGoal(3)] });
+    edit.componentInstance.close();
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith(['/goals', 3]);
+  });
+
+  it('house terms: down payment chips, a year slider from next year, and the live chip', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    expect(page.form().price).toBe(650_000);
+    goTo(fixture, 1);
+    expect(text(fixture, '.fscreen.on .fs-h1')).toBe('How much, and when?');
+    expect(page.form().downPaymentPct).toBe(20);
+    expect(page.form().targetYear).toBe(YEAR + 5);
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toMatch(/^\$130K down · ~\$\d{1,3}(,\d{3})* a month$/);
+    page.setDownPayment('full');
+    fixture.detectChanges();
+    expect(page.form().fullPrice).toBeTrue();
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toMatch(/^\$650,000 in full · ~\$\d{1,3}(,\d{3})* a month$/);
+    page.setDownPayment(10);
+    expect(page.form().fullPrice).toBeFalse();
+    expect(page.form().downPaymentPct).toBe(10);
+    expect(page.yearBounds()).toEqual({ min: YEAR + 1, max: YEAR + 20 });
+  });
+
+  it('vacation: trips 1..10 with a budget slider and the monthly chip', async () => {
+    const fixture = await create({ type: 'VACATION' });
+    const page = fixture.componentInstance;
+    expect(page.form().tripsPerYear).toBe(2);
+    expect(page.form().budgetPerTrip).toBe(5_000);
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toBe('~$834 a month');
+    page.setTrips(11);
+    expect(page.form().tripsPerYear).toBe(10);
+    page.setTrips(0);
+    expect(page.form().tripsPerYear).toBe(1);
+  });
+
+  it('emergency: the By chips write targetYear = year + n and the chip reads the target and month', async () => {
+    const fixture = await create({ type: 'EMERGENCY_FUND' });
+    const page = fixture.componentInstance;
+    expect(page.form().targetYear).toBe(YEAR + 2);
+    expect(page.form().months).toBe(6);
+    expect(page.form().monthlyExpenses).toBe(4_000);
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toBe(`$24,000 by Dec ${YEAR + 2}`);
+    page.setByYears(3);
+    expect(page.form().targetYear).toBe(YEAR + 3);
+    page.setMonths(3);
+    fixture.detectChanges();
+    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toBe(`$12,000 by Dec ${YEAR + 3}`);
+  });
+
+  it('wedding and custom: one screen each; custom offers the icon chips and keeps the default name', async () => {
+    const wedding = await create({ type: 'WEDDING' });
+    expect(text(wedding, '.fscreen.on .fs-h1')).toBe('The budget, and when');
+    expect(wedding.componentInstance.form().targetAmount).toBe(30_000);
+    expect(text(wedding, '.fscreen.on .fetch-chip .chip-text')).toMatch(/^~\$\d{1,3}(,\d{3})* a month$/);
+
+    const custom = await create({ type: 'CUSTOM' });
+    const page = custom.componentInstance;
+    expect(text(custom, '.fscreen.on .fs-h1')).toBe('How much, and when?');
+    expect(page.form().name).toBe('My goal');
+    expect(onScreen(custom).querySelectorAll('.icon-chips button').length).toBe(7);
+    page.setIcon('savings');
+    expect(page.form().icon).toBe('savings');
+  });
+
+  it('edit round trip: formFromGoal then formToConfig equals the stored config for KIDS, HOUSE, VACATION, EMERGENCY_FUND, WEDDING, CUSTOM', () => {
+    const goals: Goal[] = [
+      kidsGoal(1, [{ birthYear: 2024, birthMonth: null }, { birthYear: 2028, birthMonth: 4 }, { birthYear: null, birthMonth: null }]),
+      houseGoal(2),
+      goalOf(3, 'VACATION', { tripsPerYear: 3, budgetPerTrip: 2_500, savedThisYear: 400, savedYear: YEAR }),
+      goalOf(4, 'EMERGENCY_FUND', { monthlyExpenses: 4_000, months: 3, targetYear: YEAR + 2 }),
+      goalOf(5, 'WEDDING', { targetAmount: 30_000, targetYear: YEAR + 3 }),
+      goalOf(6, 'CUSTOM', { targetAmount: 12_000, targetYear: YEAR + 4 }),
+    ];
+    for (const goal of goals) {
+      expect(formToConfig(formFromGoal(goal), goal, NOW)).withContext(goal.type).toEqual(goal.config);
+    }
+  });
+});

@@ -109,8 +109,9 @@ export function defaultFirstYearFund(kids: KidFormRow[], now: Date): boolean {
   return kids.map(kidTiming).some(t => isKidNotYetBorn(t.birthYear, t.birthMonth, now));
 }
 
-const DEFAULT_COLLEGE: CollegeChoice = 'public_tuition';
-const DEFAULT_AT_18 = 25_000;
+export const DEFAULT_COLLEGE: CollegeChoice = 'public_tuition';
+/** The nest egg slider's starting point: most users slide up from here. */
+export const DEFAULT_AT_18 = 100_000;
 
 /** The 529 target a college row sets; null for none (custom keeps whatever is typed). */
 export function collegeAmount(choice: CollegeChoice): number | null {
@@ -122,7 +123,8 @@ function collegeChoiceFor(target: number): CollegeChoice {
   return collegePresets().find(p => p.amount === target)?.key ?? 'custom';
 }
 
-function at18ChoiceFor(target: number): At18Choice {
+/** The at-18 row a stored or slid target reads as: a preset amount, custom, or none at $0. */
+export function at18ChoiceFor(target: number): At18Choice {
   if (!(target > 0)) return 'none';
   return AT_18_PRESETS.includes(target) ? target : 'custom';
 }

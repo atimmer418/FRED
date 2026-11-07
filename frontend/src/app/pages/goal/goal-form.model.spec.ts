@@ -73,12 +73,12 @@ describe('goal-form.model', () => {
     expect(defaultForm('EMERGENCY_FUND', NOW).targetYear).toBe(2028);
   });
 
-  it('defaults the kids quiz to public tuition, $25,000 at 18 and the fund on for an undecided kid', () => {
+  it('defaults the kids quiz to public tuition, $100,000 at 18 and the fund on for an undecided kid', () => {
     const f = defaultForm('KIDS', NOW);
     expect(f.kids.collegeChoice).toBe('public_tuition');
     expect(f.kids.plan529Target).toBe(47_800);
-    expect(f.kids.at18Choice).toBe(25_000);
-    expect(f.kids.brokerageTarget).toBe(25_000);
+    expect(f.kids.at18Choice).toBe(100_000);
+    expect(f.kids.brokerageTarget).toBe(100_000);
     expect(f.kids.firstYearFund).toBeTrue();
     expect(validateForm(f, NOW)).toEqual({});
   });

@@ -111,9 +111,18 @@ export const routes: Routes = [
     redirectTo: 'get-started',
     pathMatch: 'full'
   },
+  // Goals: the quiz builds or edits a plan; the goal page shows it (and previews a quiz draft).
+  {
+    path: 'goals/new/:type/plan',
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+  },
   {
     path: 'goals/new/:type',
-    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+    loadComponent: () => import('./pages/goal-quiz/goal-quiz.page').then(m => m.GoalQuizPage)
+  },
+  {
+    path: 'goals/:id/edit',
+    loadComponent: () => import('./pages/goal-quiz/goal-quiz.page').then(m => m.GoalQuizPage)
   },
   {
     path: 'goals/:id',

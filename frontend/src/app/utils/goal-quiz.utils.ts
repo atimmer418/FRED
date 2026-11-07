@@ -1,6 +1,6 @@
 /**
- * Derived copy and figures for the goals quiz: what a fund would save, the cost lead line, the
- * audience phrase of a plan, and the kid year slider's bounds and labels. Pure and framework-free.
+ * Derived copy and figures for the goals quiz: what a fund would save, the audience phrase of a
+ * plan, and the kid year slider's bounds and labels. Pure and framework-free.
  */
 
 import { collegePresets, firstYearTargetForRank, kidRanks } from './kid-cost.utils';
@@ -64,13 +64,6 @@ export function formatSavings(r: { low: number; high: number }): string {
   const low = compactSavings(r.low);
   const high = compactSavings(r.high);
   return low === high ? low : `${low} to ${high}`;
-}
-
-/** The lead above the monthly cost figure. */
-export function costLead(kidsCount: number): string {
-  if (kidsCount <= 1) return "That's about";
-  if (kidsCount === 2) return "For both kids, that's about";
-  return `For all ${kidsCount} kids, that's about`;
 }
 
 /** Who a kids plan is for: "for Ellie", "for both kids", "for all 3 kids". */

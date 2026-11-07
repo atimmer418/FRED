@@ -193,12 +193,22 @@ describe('isKidNotYetBorn', () => {
   it('is true for undecided', () => expect(isKidNotYetBorn(null, null, NOW)).toBeTrue());
   it('is false for a birth month that has started', () => expect(isKidNotYetBorn(2026, 11, NOW)).toBeFalse());
   it('is true from next month on', () => expect(isKidNotYetBorn(2026, 12, NOW)).toBeTrue());
-  it('assumes July when the month is unknown', () => { expect(isKidNotYetBorn(2026, null, NOW)).toBeFalse(); expect(isKidNotYetBorn(2027, null, NOW)).toBeTrue(); });
+  it('assumes July when the month is unknown and the year is ahead', () => expect(isKidNotYetBorn(2027, null, NOW)).toBeTrue());
+  it('is false for an earlier year with no month', () => expect(isKidNotYetBorn(2025, null, NOW)).toBeFalse());
+  // Spec decision 3: "This year" with no month means expecting this year, so the kid is not yet born.
+  it('is true for the current year with no month, even in December', () => {
+    expect(isKidNotYetBorn(2026, null, NOW)).toBeTrue();
+    expect(isKidNotYetBorn(2026, null, new Date(2026, 11, 20))).toBeTrue();
+  });
 });
 
 describe('firstYearDue', () => {
   it('uses the birth month when decided', () => expect(firstYearDue(2028, 11, NOW)).toEqual({ year: 2028, month: 11 }));
   it('assumes July for an unknown month', () => expect(firstYearDue(2028, null, NOW)).toEqual({ year: 2028, month: 7 }));
+  it('is December of this year for a kid expected this year with no month', () =>
+    expect(firstYearDue(2026, null, NOW)).toEqual({ year: 2026, month: 12 }));
+  it('keeps July for a born kid with no month (age math is unchanged)', () =>
+    expect(kidDeadline(NOW, 2026, null)).toEqual({ year: 2044, month: 7, assumedBirthYear: false }));
   it('is 36 months after the creation month when undecided', () => expect(firstYearDue(null, null, NOW)).toEqual({ year: 2029, month: 11 }));
 });
 

@@ -209,19 +209,33 @@ export function kidAccountRateKind(anchorDate: Date, endYear: number, endMonth: 
   return horizonMonths(anchorDate, endYear, endMonth) < CASH_HORIZON_MONTHS ? 'cash' : 'market';
 }
 
-/** True while the birth month has not started yet. An unknown birth year counts as not yet born. */
+/** A kid expected "this year" with no month is due in December (spec decision 3); born kids' age math keeps July. */
+function expectedThisYear(birthYear: number | null, birthMonth: number | null, now: Date): boolean {
+  return birthMonth === null && birthYear === now.getFullYear();
+}
+
+/**
+ * True while the birth month has not started yet. An unknown birth year counts as not yet born,
+ * and so does the current year with no month: "This year" means expecting this year.
+ */
 export function isKidNotYetBorn(birthYear: number | null, birthMonth: number | null, now: Date): boolean {
   if (birthYear === null) return true;
+  if (expectedThisYear(birthYear, birthMonth, now)) return true;
   return horizonMonths(now, birthYear, birthMonth ?? 7) > 0;
 }
 
-/** The month a first-year fund ends: the birth month when decided, else 36 months after `createdAt`'s month. */
+/**
+ * The month a first-year fund ends: the birth month when decided (December for a kid expected this
+ * year with no month, July for any other unknown month), else 36 months after `createdAt`'s month.
+ */
 export function firstYearDue(
   birthYear: number | null,
   birthMonth: number | null,
   createdAt: Date,
 ): { year: number; month: number } {
-  if (birthYear !== null) return { year: birthYear, month: birthMonth ?? 7 };
+  if (birthYear !== null) {
+    return { year: birthYear, month: birthMonth ?? (expectedThisYear(birthYear, birthMonth, createdAt) ? 12 : 7) };
+  }
   const total = createdAt.getFullYear() * 12 + createdAt.getMonth() + FIRST_YEAR_UNDECIDED_MONTHS;
   return { year: Math.floor(total / 12), month: (total % 12) + 1 };
 }

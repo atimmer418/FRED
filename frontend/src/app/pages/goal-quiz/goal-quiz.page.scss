@@ -1,0 +1,247 @@
+// The goal quiz: the blue flow shell (host, top bar, screens, typography, CTA, controls) comes
+// from the shared partial; this file adds only what the quiz screens need on top of it.
+@use '../../../theme/blue-flow';
+
+:host {
+  display: block;
+  position: absolute;
+  inset: 0;
+  font-family: 'Manrope', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+// ─── Shell additions ─────────────────────────────────────────────────────────
+
+.flow-top.hidden { opacity: 0; pointer-events: none; }
+
+// Steps slide horizontally: the screen behind sits a little to the left, the one ahead to the right.
+.fscreen {
+  transform: translateX(0);
+  &.before { transform: translateX(-28px); }
+  &.after { transform: translateX(28px); }
+  &.on { transform: translateX(0); }
+}
+
+// Uppercase label over a control group (the mockup's .lab).
+.bf-lab {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 22px 0 10px;
+  flex-shrink: 0;
+
+  &.first { margin-top: 0; }
+}
+
+// A live figure under a control. The shared .fetch-chip is a button; here it only reads.
+.fetch-chip.static {
+  cursor: default;
+  &:active { background: rgba(255, 255, 255, 0.12); }
+}
+
+// The one-line error under a control, in the subtitle's voice but warm.
+.fs-error {
+  text-align: center;
+  color: var(--amber, #fbbf24);
+  margin: 14px 0 0;
+}
+
+// ─── Year slider (terms, wedding, custom) ────────────────────────────────────
+
+.year-readout {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-align: center;
+  line-height: 1;
+  text-shadow: 0 6px 30px rgba(8, 28, 78, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.year-range { margin-top: 16px; }
+
+// ─── Kids 1: the icon row and the cap line ───────────────────────────────────
+
+.kid-icons {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.kid-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+
+  .material-symbols-outlined { font-size: 22px; }
+}
+
+.kids-cap {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+// ─── Kids 2: one compact row per kid ─────────────────────────────────────────
+
+.kid-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kid-row {
+  gap: 8px;
+  padding: 4px 8px 4px 10px;
+  height: 50px;
+  cursor: default;
+
+  .kid-av {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--bf-ic-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    .material-symbols-outlined { font-size: 15px; }
+  }
+
+  .kid-name {
+    font-size: 12px;
+    font-weight: 800;
+    width: 44px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kid-range {
+    flex: 1;
+    min-width: 0;
+    margin-top: 0;
+    height: 28px;
+
+    &::-webkit-slider-thumb {
+      width: 22px;
+      height: 22px;
+      margin-top: -8.5px;
+    }
+  }
+
+  .kid-when {
+    font-style: normal;
+    font-size: 12.5px;
+    font-weight: 800;
+    width: 64px;
+    text-align: right;
+    flex-shrink: 0;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.kid-ends {
+  margin-top: 10px;
+  padding: 0 10px;
+}
+
+// ─── Kids 3: the crossfade pair ──────────────────────────────────────────────
+
+.xfade {
+  position: relative;
+  height: 96px;
+  cursor: pointer;
+
+  .stat {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+
+    &.on { opacity: 1; pointer-events: auto; }
+  }
+
+  .big-readout { cursor: inherit; }
+}
+
+// ─── Kids 4: the switch rows ─────────────────────────────────────────────────
+
+.fund-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+// ─── Kids 5: the presets link ────────────────────────────────────────────────
+
+.college-swap {
+  margin: 18px auto 0;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.78);
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
+// ─── Something else: the icon chips ──────────────────────────────────────────
+
+.icon-chips {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.icon-chip {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+
+  .material-symbols-outlined { font-size: 20px; }
+
+  &.on {
+    background: #fff;
+    border-color: #fff;
+    color: #1d4ed8;
+  }
+}
+
+// ─── The calc screen ─────────────────────────────────────────────────────────
+
+.calc-screen {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-chip { transition: none !important; }
+}

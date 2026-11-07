@@ -153,14 +153,13 @@ No pen, no names here. Names are given on the plan page.
 
 Eyebrow "The real number". Title "What one kid costs". Subtitle "The U.S. average, adjusted to
 today's prices." Body, centered: the big number with no
-tilde, "$422K" for one kid, "$332K" for two, "$252K" for three, **"$212K" for four, "$189K" for
+tilde, "$422K" for one kid, "$332K" for two, "$252K" for three, **"$213K" for four, "$189K" for
 five**; hint line "From birth to 18". That is the general statistic. It holds for about 2.2
 seconds, then **crossfades (500ms, opacity only, WAAPI) into the one that matters, in exactly the
 same styling**: the big number becomes "$3,510" with a smaller "/mo" unit after it and the hint
 line becomes "For all 3 kids" ("For your kid", "For both kids"). Nothing else is on the screen;
 no extra lines under the number. Tapping the number flips between the two (my call). With reduced
-motion on, the swap is instant after the same hold. For one kid the first line is
-"That's about"; for two, "For both kids, that's about". Nothing else on the screen: no per-kid
+motion on, the swap is instant after the same hold. Nothing else on the screen: no per-kid
 monthly line, no family card. The info button in the top bar opens the existing sources sheet.
 
 The four- and five-kid figures are FRED's own extension of the USDA table, which stops at "three or
@@ -187,7 +186,7 @@ in K, as a realistic range for the units whose target is a choice:
 
 - **Baby fund:** one figure, the unborn kids' rank targets added: "Saves you $37K."
 - **College:** from the in-state preset to the out-of-state preset, contributions summed over all
-  the kids: "Saves you $50K to $135K."
+  the kids: "Saves you $55K to $135K."
 - **Nest egg:** from a $50,000 to a $250,000 target per kid, contributions summed over all the
   kids: "Saves you $55K to $275K."
 

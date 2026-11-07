@@ -1,6 +1,5 @@
 import {
   audienceLabel,
-  costLead,
   formatSavings,
   fundSavingsRange,
   kidYearBounds,
@@ -26,14 +25,10 @@ describe('fundSavingsRange', () => {
     expect(fundSavingsRange('baby', [{ birthYear: 2020, birthMonth: null }], NOW, 0.10)).toEqual({ low: 0, high: 0 });
   });
 
-  // The spec's sample reads "$50K to $135K" for college. The rule as written (sum of monthly x months,
-  // nearest $5K) gives 19,928 + 15,576 + 17,596 = 53,100 -> $55K for the low end, one rounding step
-  // above the spec. Pending an owner call, the spec pin is held within one $5K step and the exact
-  // computed figures are pinned below so any drift still fails.
-  it('college savings for the sample family is within one rounding step of the spec pin $50K to $135K', () => {
-    const college = fundSavingsRange('college', SAMPLE, NOW, 0.10);
-    expect(Math.abs(college.low - 50_000)).toBeLessThanOrEqual(5_000);
-    expect(college.high).toBe(135_000);
+  // Ruling R1: the sample family's College range is "$55K to $135K" (exact sums 53,100 / 137,400
+  // under the spec's rounding rule). The spec and the mockup carry the same figure.
+  it('college savings for the sample family is the spec pin $55K to $135K', () => {
+    expect(formatSavings(fundSavingsRange('college', SAMPLE, NOW, 0.10))).toBe('$55K to $135K');
   });
 
   it('college savings for the sample family computes to 55K to 135K and nest 55K to 275K', () => {
@@ -63,15 +58,6 @@ describe('formatSavings', () => {
   });
   it('shows one figure when the ends format the same', () =>
     expect(formatSavings({ low: 37_300, high: 37_400 })).toBe('$37K'));
-});
-
-describe('costLead', () => {
-  it('reads by family size', () => {
-    expect(costLead(1)).toBe("That's about");
-    expect(costLead(2)).toBe("For both kids, that's about");
-    expect(costLead(3)).toBe("For all 3 kids, that's about");
-    expect(costLead(5)).toBe("For all 5 kids, that's about");
-  });
 });
 
 describe('audienceLabel', () => {

@@ -1,4 +1,4 @@
-import { Component, InjectionToken, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -7,6 +7,7 @@ import { IonContent, IonHeader, ModalController, NavController } from '@ionic/an
 import { Observable, catchError, filter, firstValueFrom, of, take, timeout } from 'rxjs';
 
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
+import { GOAL_PAGE_NOW } from './goal-clock';
 import { AuthService } from '../../services/auth.service';
 import { GoalsService } from '../../services/goals.service';
 import { ToastService } from '../../services/toast.service';
@@ -46,11 +47,8 @@ export type BalancePath = 'current' | 'vacation' | { kid: number; account: KidBa
 
 type NumericField = 'price' | 'targetYear' | 'budgetPerTrip' | 'monthlyExpenses' | 'targetAmount';
 
-/** The page's clock. One value per page, read once; specs provide a fixed date. */
-export const GOAL_PAGE_NOW = new InjectionToken<() => Date>('GOAL_PAGE_NOW', {
-  providedIn: 'root',
-  factory: () => () => new Date(),
-});
+// The clock token lives in goal-clock.ts so the quiz page shares it without importing this page.
+export { GOAL_PAGE_NOW };
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

@@ -1,0 +1,260 @@
+<!-- The goal quiz: every step shares the blue flow shell (theme/_blue-flow.scss). -->
+<div class="flow-host quiz-host">
+
+  <!-- Top bar: back (from the second step on), the dots for the steps that will run, close. -->
+  <div class="flow-top" [class.hidden]="calcShowing()">
+    <button type="button" class="flow-back" [class.show]="stepIndex() > 0" (click)="back()" aria-label="Back">
+      <span class="material-symbols-outlined">arrow_back_ios_new</span>
+    </button>
+    <div class="flow-dots">
+      @for (step of steps(); track step.id) {
+        <span class="dot" [class.on]="$index === stepIndex()"></span>
+      }
+    </div>
+    <button type="button" class="flow-x" (click)="close()" aria-label="Close">
+      <span class="material-symbols-outlined">close</span>
+    </button>
+  </div>
+
+  @if (ready()) {
+    @for (step of steps(); track step.id) {
+      <div class="fscreen"
+           [class.on]="!calcShowing() && $index === stepIndex()"
+           [class.before]="$index < stepIndex()"
+           [class.after]="$index > stepIndex()">
+        <div class="fs-eyebrow">{{ step.eyebrow }}</div>
+        <h1 class="fs-h1">{{ step.title }}</h1>
+        <p class="fs-sub">{{ subtitleFor(step) }}</p>
+
+        <div class="fs-center">
+          @switch (step.id) {
+
+            <!-- ── Kids 1: how many ─────────────────────────────────────── -->
+            @case ('kids_count') {
+              <div class="kid-icons" aria-hidden="true">
+                @for (row of kidRows(); track $index) {
+                  <span class="kid-icon"><span class="material-symbols-outlined">child_care</span></span>
+                }
+              </div>
+              <app-quiz-stepper [value]="kidCount()" [min]="1" [max]="maxKids" (valueChange)="setKidCount($event)" />
+              @if (kidCount() >= maxKids) {
+                <div class="kids-cap">Five is the most FRED plans for at once</div>
+              }
+            }
+
+            <!-- ── Kids 2: when ─────────────────────────────────────────── -->
+            @case ('kids_when') {
+              <div class="kid-rows">
+                @for (row of kidRows(); track $index) {
+                  <div class="bf-row kid-row">
+                    <span class="kid-av"><span class="material-symbols-outlined">child_care</span></span>
+                    <b class="kid-name">{{ row.label }}</b>
+                    <input type="range"
+                           class="sim-range kid-range"
+                           [attr.aria-label]="row.label + ' arrival'"
+                           [min]="kidYearRange().min"
+                           [max]="kidYearRange().max + 1"
+                           step="1"
+                           [value]="kidSliderValue($index)"
+                           [style.--track]="trackFill(kidSliderValue($index), kidYearRange().min, kidYearRange().max + 1)"
+                           (input)="onKidSlider($index, $event)">
+                    <em class="kid-when">{{ kidWhenLabel($index) }}</em>
+                  </div>
+                }
+              </div>
+              <div class="range-ends kid-ends"><span>Already here</span><span>Soon</span><span>Not sure</span></div>
+            }
+
+            <!-- ── Kids 3: what a kid costs ─────────────────────────────── -->
+            @case ('kids_cost') {
+              <div class="xfade" role="button" tabindex="0" aria-label="Flip between the average and your family's monthly"
+                   (click)="flipCostStat()" (keydown.enter)="flipCostStat()">
+                <div class="stat stat-a" [class.on]="costStat() === 'A'">
+                  <div class="big-readout static">{{ costBig() }}</div>
+                  <div class="readout-hint">From birth to 18</div>
+                </div>
+                <div class="stat stat-b" [class.on]="costStat() === 'B'">
+                  <div class="big-readout static">{{ costMonthly() }}<span class="unit"> /mo</span></div>
+                  <div class="readout-hint">{{ costHint() }}</div>
+                </div>
+              </div>
+            }
+
+            <!-- ── Kids 4: choose what to fund ──────────────────────────── -->
+            @case ('kids_fund') {
+              <div class="fund-rows">
+                @if (showBabyRow()) {
+                  <app-quiz-switch-row icon="child_care" title="Baby fund"
+                                       [line]="fundLine('baby')" [lineTone]="fundLineTone('baby')"
+                                       [on]="fundOn('baby')" (onChange)="setFund('baby', $event)" />
+                }
+                <app-quiz-switch-row icon="school" title="College"
+                                     [line]="fundLine('college')" [lineTone]="fundLineTone('college')"
+                                     [on]="fundOn('college')" (onChange)="setFund('college', $event)" />
+                <app-quiz-switch-row icon="savings" title="A nest egg at 18"
+                                     [line]="fundLine('nest')" [lineTone]="fundLineTone('nest')"
+                                     [on]="fundOn('nest')" (onChange)="setFund('nest', $event)" />
+              </div>
+            }
+
+            <!-- ── Kids 5: college ──────────────────────────────────────── -->
+            @case ('kids_college') {
+              @if (collegeCustomOpen()) {
+                <app-quiz-slider [value]="collegeCustomAmount()" [min]="5000" [max]="300000" [step]="1000"
+                                 [format]="fmtMoney" hint="Per kid · tap to type"
+                                 [endLabels]="['$5K', '$300K']"
+                                 (valueChange)="setCollegeCustom($event)" />
+              } @else {
+                <app-quiz-pick-grid [options]="collegeOptions" [value]="collegeGridValue()" (valueChange)="pickCollege($event)" />
+              }
+              <button type="button" class="college-swap" (click)="toggleCollegeCustom()">
+                {{ collegeCustomOpen() ? 'Back to the presets' : 'Set my own amount' }}
+              </button>
+            }
+
+            <!-- ── Kids 6: the nest egg ─────────────────────────────────── -->
+            @case ('kids_nest') {
+              <app-quiz-slider [value]="nestAmount()" [min]="0" [max]="500000" [step]="10000"
+                               [format]="fmtMoney" hint="Per kid · tap to type"
+                               [endLabels]="['$0', '$500K']"
+                               (valueChange)="setNest($event)" />
+              <div class="fetch-chip static">
+                <span class="material-symbols-outlined">trending_up</span>
+                <span class="chip-text">{{ nestChip() }}</span>
+              </div>
+            }
+
+            <!-- ── House and Car 1: price ───────────────────────────────── -->
+            @case ('house_price') {
+              <app-quiz-slider [value]="form().price ?? 0" [min]="100000" [max]="3000000" [step]="5000" scale="log"
+                               [format]="fmtMoney" hint="Tap to type" [endLabels]="['$100K', '$3M']"
+                               (valueChange)="setPrice($event)" />
+            }
+            @case ('car_price') {
+              <app-quiz-slider [value]="form().price ?? 0" [min]="5000" [max]="200000" [step]="500" scale="log"
+                               [format]="fmtMoney" hint="Tap to type" [endLabels]="['$5K', '$200K']"
+                               (valueChange)="setPrice($event)" />
+            }
+
+            <!-- ── House and Car 2: down payment and when ───────────────── -->
+            @case ('house_terms') {
+              <ng-container *ngTemplateOutlet="terms"></ng-container>
+            }
+            @case ('car_terms') {
+              <ng-container *ngTemplateOutlet="terms"></ng-container>
+            }
+
+            <!-- ── Vacation ─────────────────────────────────────────────── -->
+            @case ('vacation') {
+              <div class="bf-lab first">Trips a year</div>
+              <app-quiz-stepper [value]="form().tripsPerYear" [min]="1" [max]="10" (valueChange)="setTrips($event)" />
+              <div class="bf-lab">Budget per trip</div>
+              <app-quiz-slider [value]="form().budgetPerTrip ?? 0" [min]="500" [max]="15000" [step]="250"
+                               [format]="fmtMoney" [endLabels]="['$500', '$15K']"
+                               (valueChange)="setBudget($event)" />
+              <div class="fetch-chip static">
+                <span class="material-symbols-outlined">payments</span>
+                <span class="chip-text">{{ vacationChip() }}</span>
+              </div>
+            }
+
+            <!-- ── Emergency fund ───────────────────────────────────────── -->
+            @case ('emergency') {
+              <div class="bf-lab first">Monthly expenses</div>
+              <app-quiz-slider [value]="form().monthlyExpenses ?? 0" [min]="1000" [max]="20000" [step]="100"
+                               [format]="fmtMoney" [endLabels]="['$1,000', '$20K']"
+                               (valueChange)="setExpenses($event)" />
+              <div class="bf-lab">Months</div>
+              <app-quiz-chips [options]="monthsOptions" [value]="form().months" (valueChange)="setMonths($event)" />
+              <div class="bf-lab">By</div>
+              <app-quiz-chips [options]="byOptions" [value]="byYears()" (valueChange)="setByYears($event)" />
+              <div class="fetch-chip static">
+                <span class="material-symbols-outlined">health_and_safety</span>
+                <span class="chip-text">{{ emergencyChip() }}</span>
+              </div>
+            }
+
+            <!-- ── Wedding ──────────────────────────────────────────────── -->
+            @case ('wedding') {
+              <app-quiz-slider [value]="form().targetAmount ?? 0" [min]="5000" [max]="150000" [step]="1000"
+                               [format]="fmtMoney" hint="Tap to type" [endLabels]="['$5K', '$150K']"
+                               (valueChange)="setTargetAmount($event)" />
+              <div class="bf-lab">By</div>
+              <ng-container *ngTemplateOutlet="yearSlider"></ng-container>
+              <div class="fetch-chip static">
+                <span class="material-symbols-outlined">favorite</span>
+                <span class="chip-text">{{ amountChip() }}</span>
+              </div>
+            }
+
+            <!-- ── Something else ───────────────────────────────────────── -->
+            @case ('custom') {
+              <app-quiz-slider [value]="form().targetAmount ?? 0" [min]="500" [max]="1000000" [step]="100" scale="log"
+                               [format]="fmtMoney" hint="Tap to type" [endLabels]="['$500', '$1M']"
+                               (valueChange)="setTargetAmount($event)" />
+              <div class="bf-lab">By</div>
+              <ng-container *ngTemplateOutlet="yearSlider"></ng-container>
+              <div class="icon-chips" role="group" aria-label="Icon">
+                @for (opt of iconOptions; track opt.icon) {
+                  <button type="button" class="icon-chip" [class.on]="form().icon === opt.icon"
+                          [attr.aria-pressed]="form().icon === opt.icon" [attr.aria-label]="opt.label"
+                          (click)="setIcon(opt.icon)">
+                    <span class="material-symbols-outlined">{{ opt.icon }}</span>
+                  </button>
+                }
+              </div>
+              <div class="fetch-chip static">
+                <span class="material-symbols-outlined">flag</span>
+                <span class="chip-text">{{ amountChip() }}</span>
+              </div>
+            }
+          }
+
+          @if (error() && $index === stepIndex()) {
+            <p class="fs-sub fs-error" role="alert">{{ error() }}</p>
+          }
+        </div>
+
+        <button type="button" class="fs-cta" [disabled]="ctaDisabled()" (click)="next()">
+          @if (isLast()) {
+            <span class="material-symbols-outlined">auto_awesome</span>
+          }
+          {{ isLast() ? 'Show my plan' : 'Continue' }}
+        </button>
+      </div>
+    }
+  }
+
+  <!-- The calc screen between "Show my plan" and the preview. -->
+  @if (calcShowing()) {
+    <div class="fscreen on calc-screen">
+      <app-goal-quiz-calc [lines]="calcLines()" [reducedMotion]="reducedMotion()" />
+    </div>
+  }
+</div>
+
+<!-- Shared bodies: the "How much, and when?" screen and the year slider. -->
+<ng-template #terms>
+  <div class="bf-lab first">Down payment</div>
+  <app-quiz-chips [options]="downPaymentOptions" [value]="downPayment()" (valueChange)="setDownPayment($event)" />
+  <div class="bf-lab">Buy in</div>
+  <ng-container *ngTemplateOutlet="yearSlider"></ng-container>
+  <div class="fetch-chip static">
+    <span class="material-symbols-outlined">trending_up</span>
+    <span class="chip-text">{{ termsChip() }}</span>
+  </div>
+</ng-template>
+
+<ng-template #yearSlider>
+  <div class="year-readout">{{ form().targetYear }}</div>
+  <input type="range"
+         class="sim-range year-range"
+         aria-label="Target year"
+         [min]="yearBounds().min"
+         [max]="yearBounds().max"
+         step="1"
+         [value]="form().targetYear"
+         [style.--track]="trackFill(form().targetYear ?? yearBounds().min, yearBounds().min, yearBounds().max)"
+         (input)="onYearSlider($event)">
+  <div class="range-ends"><span>{{ yearBounds().min }}</span><span>{{ yearBounds().max }}</span></div>
+</ng-template>

@@ -1,7 +1,7 @@
 import { Component, ElementRef, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
-import { NavController } from '@ionic/angular/standalone';
+import { ModalController, NavController } from '@ionic/angular/standalone';
 import { firstValueFrom } from 'rxjs';
 
 import { Goal, GoalIcon, GoalType } from '../../models/goal.model';
@@ -14,6 +14,8 @@ import { QuizSliderComponent } from '../../components/quiz-controls/quiz-slider.
 import { QuizStepperComponent } from '../../components/quiz-controls/quiz-stepper.component';
 import { QuizSwitchRowComponent } from '../../components/quiz-controls/quiz-switch-row.component';
 import { tickHaptic } from '../../components/quiz-controls/haptics';
+import { KidCostSourcesSheetComponent } from '../../components/kid-cost-sources-sheet/kid-cost-sources-sheet.component';
+import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GOAL_PAGE_NOW } from '../goal/goal-clock';
 import {
   CUSTOM_ICON_OPTIONS, CollegeChoice, DEFAULT_AT_18, DEFAULT_COLLEGE, GoalForm, KidFormRow, KidsForm, MAX_KIDS,
@@ -41,7 +43,9 @@ function stepOwnsError(id: QuizStepId, key: string): boolean {
   switch (id) {
     case 'kids_when': return key.startsWith('kid.');
     case 'kids_fund': return key === 'kidsTargets';
-    case 'kids_college': return key === 'plan529Target';
+    // Skip for now equals the switch being off, so a college step that is the last one must also
+    // refuse to continue when it would leave the kids with no target at all.
+    case 'kids_college': return key === 'plan529Target' || key === 'kidsTargets';
     case 'kids_nest': return key === 'brokerageTarget' || key === 'kidsTargets';
     case 'house_price':
     case 'car_price': return key === 'price';
@@ -74,6 +78,7 @@ function stepOwnsError(id: QuizStepId, key: string): boolean {
 export class GoalQuizPage implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly navCtrl = inject(NavController);
+  private readonly modalCtrl = inject(ModalController);
   private readonly goalsService = inject(GoalsService);
   private readonly draftService = inject(GoalDraftService);
   private readonly rates = inject(RateAssumptionsService);
@@ -114,6 +119,8 @@ export class GoalQuizPage implements OnInit, OnDestroy {
     return k.collegeChoice === 'none' && k.at18Choice === 'none' && !(k.firstYearFund && this.showBabyRow());
   });
 
+  /** The cost step trades the close button for an info button that opens the sources sheet. */
+  readonly showInfo = computed(() => this.currentStep()?.id === 'kids_cost' && !this.calcShowing());
   /** 'A' is the general statistic, 'B' the family monthly. */
   readonly costStat = signal<'A' | 'B'>('A');
   readonly costBig = computed(() => `$${Math.round(kidCostFigures(this.kidCount()).perChildTotal / 1000)}K`);
@@ -370,15 +377,40 @@ export class GoalQuizPage implements OnInit, OnDestroy {
   flipCostStat(): void {
     this.clearCostTimer();
     const next = this.costStat() === 'A' ? 'B' : 'A';
-    const host = this.el.nativeElement;
-    const a = host.querySelector<HTMLElement>('.stat-a');
-    const b = host.querySelector<HTMLElement>('.stat-b');
+    const [a, b] = this.costStatElements();
     if (!this.reducedMotion() && a && b) {
       const [out, into] = next === 'B' ? [a, b] : [b, a];
-      out.animate([{ opacity: 1 }, { opacity: 0 }], { duration: COST_FADE_MS, fill: 'forwards' });
-      into.animate([{ opacity: 0 }, { opacity: 1 }], { duration: COST_FADE_MS, fill: 'forwards' });
+      this.fadeTo(out, 0);
+      this.fadeTo(into, 1);
     }
     this.costStat.set(next);
+  }
+
+  /**
+   * One fade per element at a time, starting from wherever a running fade left it. The finished
+   * effect cancels itself: the screens stay in the DOM across steps, and a held fill-forwards
+   * effect would otherwise outrank the stylesheet (the .on class) for as long as the page lives.
+   */
+  private fadeTo(el: HTMLElement, opacity: 0 | 1): void {
+    const from = Number(getComputedStyle(el).opacity);
+    el.getAnimations().forEach(anim => anim.cancel());
+    const fade = el.animate([{ opacity: from }, { opacity }], { duration: COST_FADE_MS, fill: 'forwards' });
+    fade.onfinish = () => fade.cancel();
+  }
+
+  private costStatElements(): [HTMLElement | null, HTMLElement | null] {
+    const host = this.el.nativeElement;
+    return [host.querySelector<HTMLElement>('.stat-a'), host.querySelector<HTMLElement>('.stat-b')];
+  }
+
+  /** "Where these numbers come from", for the family size the cost screen is showing. */
+  async openSources(): Promise<void> {
+    const modal = await this.modalCtrl.create({
+      component: KidCostSourcesSheetComponent,
+      componentProps: { kidsCount: this.kidCount() },
+      ...BOTTOM_SHEET_MODAL_OPTS,
+    });
+    await modal.present();
   }
 
   // ── Kids: fund switches ───────────────────────────────────────────────────
@@ -578,6 +610,8 @@ export class GoalQuizPage implements OnInit, OnDestroy {
 
   private startCostHold(): void {
     this.clearCostTimer();
+    // A re-entry drops whatever fade the last visit left running or held, so the .on class paints.
+    this.costStatElements().forEach(el => el?.getAnimations().forEach(anim => anim.cancel()));
     this.costStat.set('A');
     this.costTimer = setTimeout(() => {
       this.costTimer = null;

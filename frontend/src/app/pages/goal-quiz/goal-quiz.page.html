@@ -1,7 +1,8 @@
 <!-- The goal quiz: every step shares the blue flow shell (theme/_blue-flow.scss). -->
 <div class="flow-host quiz-host">
 
-  <!-- Top bar: back (from the second step on), the dots for the steps that will run, close. -->
+  <!-- Top bar: back (from the second step on), the dots for the steps that will run, and close,
+       which the cost step trades for the info button that opens the sources sheet (the mockup). -->
   <div class="flow-top" [class.hidden]="calcShowing()">
     <button type="button" class="flow-back" [class.show]="stepIndex() > 0" (click)="back()" aria-label="Back">
       <span class="material-symbols-outlined">arrow_back_ios_new</span>
@@ -11,9 +12,15 @@
         <span class="dot" [class.on]="$index === stepIndex()"></span>
       }
     </div>
-    <button type="button" class="flow-x" (click)="close()" aria-label="Close">
-      <span class="material-symbols-outlined">close</span>
-    </button>
+    @if (showInfo()) {
+      <button type="button" class="flow-x flow-info" (click)="openSources()" aria-label="Where these numbers come from">
+        <span class="material-symbols-outlined">info</span>
+      </button>
+    } @else {
+      <button type="button" class="flow-x" (click)="close()" aria-label="Close">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    }
   </div>
 
   @if (ready()) {
@@ -246,7 +253,8 @@
 </ng-template>
 
 <ng-template #yearSlider>
-  <div class="year-readout">{{ form().targetYear }}</div>
+  <!-- The same big readout as the dollar sliders, without tap-to-type: a year is picked, not typed. -->
+  <div class="big-readout static year-readout">{{ form().targetYear }}</div>
   <input type="range"
          class="sim-range year-range"
          aria-label="Target year"

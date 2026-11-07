@@ -1,10 +1,11 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed, discardPeriodicTasks, fakeAsync, tick } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
-import { NavController } from '@ionic/angular/standalone';
+import { ModalController, NavController } from '@ionic/angular/standalone';
 import { of, throwError } from 'rxjs';
 
 import { GoalQuizPage } from './goal-quiz.page';
+import { KidCostSourcesSheetComponent } from '../../components/kid-cost-sources-sheet/kid-cost-sources-sheet.component';
 import { GOAL_PAGE_NOW } from '../goal/goal-clock';
 import { GoalDraftService } from '../../services/goal-draft.service';
 import { GoalsService } from '../../services/goals.service';
@@ -48,6 +49,8 @@ function kidsGoal(id: number, kids: Array<{ birthYear: number | null; birthMonth
 
 describe('GoalQuizPage', () => {
   let navCtrl: jasmine.SpyObj<NavController>;
+  let modalCtrl: jasmine.SpyObj<ModalController>;
+  let modal: { present: jasmine.Spy; onDidDismiss: jasmine.Spy };
   let goals: ReturnType<typeof signal<Goal[]>>;
   let refresh: jasmine.Spy;
   let draft: GoalDraftService;
@@ -67,12 +70,19 @@ describe('GoalQuizPage', () => {
     navCtrl = jasmine.createSpyObj<NavController>('NavController', ['navigateBack', 'navigateForward']);
     navCtrl.navigateForward.and.resolveTo(true);
     navCtrl.navigateBack.and.resolveTo(true);
+    modal = {
+      present: jasmine.createSpy('present').and.resolveTo(),
+      onDidDismiss: jasmine.createSpy('onDidDismiss').and.resolveTo({ role: undefined }),
+    };
+    modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
+    modalCtrl.create.and.resolveTo(modal as unknown as HTMLIonModalElement);
 
     await TestBed.configureTestingModule({
       imports: [GoalQuizPage],
       providers: [
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap(params) } } },
         { provide: NavController, useValue: navCtrl },
+        { provide: ModalController, useValue: modalCtrl },
         { provide: GoalsService, useValue: { goals, refresh } },
         { provide: RateAssumptionsService, useValue: { annualReturn: signal(0.10), ensureUser: () => {} } },
         { provide: GOAL_PAGE_NOW, useValue: () => NOW },
@@ -273,6 +283,77 @@ describe('GoalQuizPage', () => {
     discardPeriodicTasks();
   }));
 
+  it('re-entering the cost step after the flip shows the general stat again: finished fades no longer hold the stats', fakeAsync(async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 2);
+    const statA = onScreen(fixture).querySelector('.stat-a') as HTMLElement;
+    const statB = onScreen(fixture).querySelector('.stat-b') as HTMLElement;
+    const xfade = onScreen(fixture).querySelector('.xfade') as HTMLElement;
+    tick(2200);
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    // Land the fades the way 500ms on a device would.
+    [statA, statB].forEach(el => el.getAnimations().forEach(a => a.finish()));
+    expect(getComputedStyle(statA).opacity).toBe('0');
+    expect(getComputedStyle(statB).opacity).toBe('1');
+
+    // Continue, then Back onto the cost step: the hold restarts on the general stat and the
+    // stylesheet (the .on class) is what paints, not the finished fill-forwards effects.
+    goTo(fixture, 3);
+    goTo(fixture, 2);
+    expect(page.costStat()).toBe('A');
+    expect(statA.classList).toContain('on');
+    expect(getComputedStyle(statA).opacity).toBe('1');
+    expect(getComputedStyle(statB).opacity).toBe('0');
+    expect(statA.getAnimations().length).toBe(0);
+    expect(statB.getAnimations().length).toBe(0);
+
+    // The second visit flips again, with a real crossfade.
+    tick(2200);
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    expect(statA.getAnimations().length).toBe(1);
+    expect(statB.getAnimations().length).toBe(1);
+
+    // Taps replace the running fade instead of stacking a new pair every time.
+    xfade.click();
+    xfade.click();
+    xfade.click();
+    expect(statA.getAnimations().length).toBe(1);
+    expect(statB.getAnimations().length).toBe(1);
+    discardPeriodicTasks();
+  }));
+
+  it('the cost step swaps the close button for an info button that opens the sources sheet for this family size', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    page.setKidCount(4);
+    fixture.detectChanges();
+    const closeBtn = () => fixture.nativeElement.querySelector('.flow-top [aria-label="Close"]');
+    expect(closeBtn()).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.flow-top .flow-info')).toBeNull();
+
+    goTo(fixture, 2);
+    expect(closeBtn()).toBeNull();
+    const info = fixture.nativeElement.querySelector('.flow-top .flow-info') as HTMLButtonElement;
+    expect(info).not.toBeNull();
+    expect(info.querySelector('.material-symbols-outlined')?.textContent?.trim()).toBe('info');
+
+    info.click();
+    await fixture.whenStable();
+    expect(modalCtrl.create).toHaveBeenCalledWith(jasmine.objectContaining({
+      component: KidCostSourcesSheetComponent,
+      componentProps: { kidsCount: 4 },
+      cssClass: 'mc-bottom-sheet-modal',
+    }));
+    expect(modal.present).toHaveBeenCalled();
+
+    goTo(fixture, 3);
+    expect(closeBtn()).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.flow-top .flow-info')).toBeNull();
+  });
+
   it('the cost screen swaps without animate() under reduced motion and reads the one and two kid hints', fakeAsync(async () => {
     spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
     const fixture = await create({ type: 'KIDS' });
@@ -335,6 +416,40 @@ describe('GoalQuizPage', () => {
     expect(page.form().kids.plan529Target).toBe(60_000);
     expect(text(fixture, '.fscreen.on .college-swap')).toBe('Back to the presets');
   });
+
+  it('college as the last step: Skip for now with the nest egg and Baby fund off shows the kids error and never shows the plan', fakeAsync(async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 3);
+    page.setFund('nest', false);
+    page.setFund('baby', false);
+    fixture.detectChanges();
+    expect(page.steps().map(s => s.id)).toEqual(['kids_count', 'kids_when', 'kids_cost', 'kids_fund', 'kids_college']);
+
+    goTo(fixture, 4);
+    expect(page.isLast()).toBeTrue();
+    page.pickCollege('none');
+    fixture.detectChanges();
+    page.next();
+    fixture.detectChanges();
+
+    expect(page.calcShowing()).toBeFalse();
+    expect(draft.draft()).toBeNull();
+    expect(page.currentStep().id).toBe('kids_college');
+    expect(page.form().kids.collegeChoice).toBe('public_tuition');
+    expect(text(fixture, '.fscreen.on .fs-error')).toBe('Enter at least one target for your kids.');
+
+    // Picking a preset clears the error and Show my plan goes through.
+    page.pickCollege('private_tuition');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.fscreen.on .fs-error')).toBeNull();
+    page.next();
+    expect(page.calcShowing()).toBeTrue();
+    expect(draft.draft()?.form.kids.plan529Target).toBe(180_000);
+    tick(2500);
+    expect(navCtrl.navigateForward).toHaveBeenCalledWith(['/goals/new', 'KIDS', 'plan']);
+    discardPeriodicTasks();
+  }));
 
   it('nest egg: default $100,000, live chip from the flat monthly, and $0 reads as off', async () => {
     const fixture = await create({ type: 'KIDS' });

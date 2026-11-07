@@ -50,14 +50,9 @@
 
 // ─── Year slider (terms, wedding, custom) ────────────────────────────────────
 
+// The shared .big-readout, read-only; tabular digits keep the year from shifting as it changes.
 .year-readout {
-  font-size: 40px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  color: #fff;
-  text-align: center;
-  line-height: 1;
-  text-shadow: 0 6px 30px rgba(8, 28, 78, 0.45);
+  cursor: default;
   font-variant-numeric: tabular-nums;
 }
 

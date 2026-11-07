@@ -160,7 +160,8 @@ same styling**: the big number becomes "$3,510" with a smaller "/mo" unit after 
 line becomes "For all 3 kids" ("For your kid", "For both kids"). Nothing else is on the screen;
 no extra lines under the number. Tapping the number flips between the two (my call). With reduced
 motion on, the swap is instant after the same hold. Nothing else on the screen: no per-kid
-monthly line, no family card. The info button in the top bar opens the existing sources sheet.
+monthly line, no family card. The info button in the top bar (in the close button's place on this
+step, as the mockup shows) opens the sources sheet, `KidCostSourcesSheetComponent`.
 
 The four- and five-kid figures are FRED's own extension of the USDA table, which stops at "three or
 more". The USDA marginal cost of a third child is 0.28 of a two-child-average child (2.28 − 2.00 in
@@ -204,8 +205,10 @@ subtitle reads "Pick at least one."
 
 ### Step 5, college (only if College is on)
 
-Eyebrow "College". Title "Saving for college?". Subtitle "Pick a target per kid. Four years of
-tuition at today's prices." Body: four tappable glass cards in a 2×2 grid, each with an icon, a
+Eyebrow "College". Title "Saving for college?". Subtitle "Four years of tuition per kid, at today's
+prices." (shortened from "Pick a target per kid. Four years of tuition at today's prices.", which
+measured 351px in Manrope against the 338px a 390px screen gives it; see the one-line rule under
+"The other quizzes"). Body: four tappable glass cards in a 2×2 grid, each with an icon, a
 label and the amount: `school` "In-state public" $47,800 (selected by default), `travel_explore`
 "Out-of-state" $123,960, `account_balance` "Private" $180,000, `do_not_disturb_on` "Skip for now"
 $0. Under the grid a text link "Set my own amount" that swaps the grid for a big readout and a
@@ -214,8 +217,9 @@ now" is the same as the switch being off.
 
 ### Step 6, the nest egg (only if the nest egg is on)
 
-Eyebrow "A nest egg at 18". Title "How much per kid?". Subtitle "You invest it as they grow up.
-It's theirs on their 18th birthday." Body: big readout, slider $0 to $500,000 step $10,000,
+Eyebrow "A nest egg at 18". Title "How much per kid?". Subtitle "You invest it as they grow. Theirs
+at 18." (shortened from "You invest it as they grow up. It's theirs on their 18th birthday.", which
+measured 366px against the same 338px). Body: big readout, slider $0 to $500,000 step $10,000,
 ends "$0" and "$500K", hint "Per kid · tap to type", and under the slider the live chip
 "~$342 a month per kid" (the flat monthly for a kid born this year at the chosen rate; "Nothing
 extra at 18" at $0). **Default $100,000** (my call; Andy's examples used $250,000, and a default

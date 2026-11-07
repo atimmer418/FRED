@@ -108,7 +108,7 @@ describe('MyProfilePage: goals rendering (freeze hunt)', () => {
     const rows = fixture.nativeElement.querySelectorAll('.goal-row');
     expect(rows.length).toBe(2); // Freedom Date row + the goal
     const sub = (fixture.nativeElement.querySelectorAll('.goal-sub')[1]?.textContent ?? '').trim();
-    expect(sub).toMatch(new RegExp(`^\\$[\\d,]+/mo · \\$20K by ${YEAR + 4}$`));
+    expect(sub).toMatch(/^\$[\d,]+\/mo Test goal$/);
   });
 
   it('survives 25 change-detection cycles without exploding or churning', () => {

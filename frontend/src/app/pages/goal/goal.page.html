@@ -307,34 +307,6 @@
             <p class="gl-stale" *ngIf="showUpdateBalance()">Update your balance</p>
           </div>
 
-          <!-- KIDS: what a kid costs -->
-          <div class="gl-card gl-costs" *ngIf="v.kidCosts as c">
-            <div class="gl-account-title">What a kid costs</div>
-            <p class="gl-costs-headline">{{ costHeadline(c) }}</p>
-            <p class="gl-account-line" *ngIf="costFamilyLine(c) as family">{{ family }}</p>
-
-            <ng-container *ngIf="costsOpen(); else costsCollapsed">
-              <div class="gl-ritual gl-stage" *ngFor="let stage of c.stages; trackBy: trackLabel">
-                <span>{{ stage.label }}</span><b>{{ costStageLine(stage) }}</b>
-              </div>
-              <p class="gl-costs-birth">{{ costBirthLine(c) }}</p>
-              <p class="gl-helper">{{ costNote(c, hasCollege()) }}</p>
-            </ng-container>
-            <ng-template #costsCollapsed>
-              <p class="gl-helper">{{ costSourceLine(c) }}</p>
-            </ng-template>
-
-            <div class="gl-costs-links">
-              <button type="button" class="gl-link gl-costs-toggle" (click)="toggleCosts()">
-                {{ costsOpen() ? 'Hide costs by age' : 'Show costs by age' }}
-              </button>
-              <button type="button" class="gl-link gl-costs-sources-toggle" (click)="toggleCostSources()">Where these numbers come from</button>
-            </div>
-            <ul class="gl-sources" *ngIf="costSourcesOpen()">
-              <li *ngFor="let s of costSources">{{ s.name }}, {{ s.year }}</li>
-            </ul>
-          </div>
-
           <!-- KIDS: first-year fund (when any kid holds one) -->
           <ng-container *ngIf="visibleFundRows().length > 0">
             <div class="gl-card gl-fund">
@@ -353,7 +325,7 @@
                   </div>
                 </div>
               </div>
-              <p class="gl-helper gl-fund-footer">FRED estimate: first-year average (USDA, adjusted to {{ v.kidCosts?.asOfLabel }} dollars) plus birth costs (Peterson-KFF, {{ childbirthYearLabel }}), rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move goal money.</p>
+              <p class="gl-helper gl-fund-footer">FRED estimate: first-year average (USDA, adjusted to {{ quizCosts().asOfLabel }} dollars) plus birth costs (Peterson-KFF, {{ childbirthYearLabel }}), rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move goal money.</p>
             </div>
             <p class="gl-note" *ngIf="showInvestedFundNote()">Markets can be down when the day comes, so treat this as a head start. Once you pick a date less than three years away, FRED plans this fund as cash.</p>
           </ng-container>

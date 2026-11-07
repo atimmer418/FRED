@@ -1,6 +1,8 @@
-import { buildGoalPlanView, fmtCompact, GoalPlanContext, GoalPlanInput } from './goal-plan.view-model';
+import { buildGoalPlanView, fmtCompact, fmtMoney, GoalPlanContext, GoalPlanInput } from './goal-plan.view-model';
+import { buildKidTimeline } from './kid-timeline.model';
 import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
-import { futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
+import { GIFT_DAY_LUMP, futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
+import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
@@ -13,6 +15,7 @@ function account(balance = 0, extra: Partial<AccountState> = {}): AccountState {
 function base(partial: Partial<GoalPlanInput>): GoalPlanInput {
   return {
     type: 'CUSTOM',
+    name: 'Boat fund',
     config: { targetAmount: 200_000, targetYear: Y + 6 },
     currentBalance: 0,
     completed: false,
@@ -104,14 +107,14 @@ describe('buildGoalPlanView', () => {
       { label: 'C', birthYear: Y, birthMonth: 1, accounts: { plan529: account(), brokerage: account() } },
     ]);
     const kidsView = buildGoalPlanView(decided, ctx());
-    expect(kidsView.subtitle).toMatch(new RegExp(`^\\$[\\d,]+/mo · 3 kids · ${Y + 14} to ${Y + 18}$`));
+    expect(kidsView.subtitle).toMatch(/^\$[\d,]+\/mo for all 3 kids$/);
 
     const undecided = kidsGoal([
       { label: 'A', birthYear: null, birthMonth: null, accounts: { plan529: account(), brokerage: account() } },
       { label: 'B', birthYear: Y + 2, birthMonth: 4, accounts: { plan529: account(), brokerage: account() } },
     ]);
     const relView = buildGoalPlanView(undecided, ctx());
-    expect(relView.subtitle).toMatch(/^\$[\d,]+\/mo · 2 kids · 18-year plans$/);
+    expect(relView.subtitle).toMatch(/^\$[\d,]+\/mo for both kids$/);
     expect(relView.relative).toBeTrue();
     expect(relView.kids![0].perKid.every(k => k.relative)).toBeTrue();
 
@@ -119,23 +122,23 @@ describe('buildGoalPlanView', () => {
       type: 'VACATION',
       config: { tripsPerYear: 4, budgetPerTrip: 2_500, savedThisYear: 0, savedYear: Y },
     }), ctx());
-    expect(vacation.subtitle).toBe('$834/mo · 4 trips a year');
+    expect(vacation.subtitle).toBe('$834/mo for 4 trips a year');
     expect(vacation.vacation?.monthly).toBe(834);
 
     const house = buildGoalPlanView(base({
       type: 'HOUSE',
       config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 },
     }), ctx());
-    expect(house.subtitle).toMatch(new RegExp(`^\\$[\\d,]+/mo · 20% down · ${Y + 6}$`));
+    expect(house.subtitle).toMatch(/^\$[\d,]+\/mo for your home$/);
 
     const car = buildGoalPlanView(base({
       type: 'CAR',
       config: { price: 40_000, downPaymentPct: null, targetYear: Y + 4 },
     }), ctx());
-    expect(car.subtitle).toMatch(new RegExp(`^\\$[\\d,]+/mo · full price · ${Y + 4}$`));
+    expect(car.subtitle).toMatch(/^\$[\d,]+\/mo for your car$/);
 
     const custom = buildGoalPlanView(base({}), ctx());
-    expect(custom.subtitle).toMatch(new RegExp(`^\\$[\\d,]+/mo · \\$200K by ${Y + 6}$`));
+    expect(custom.subtitle).toMatch(/^\$[\d,]+\/mo Boat fund$/);
     expect(custom.headline).toBe(`Reaches $200K in Dec ${Y + 6}`);
 
     const shortKid = kidsGoal([
@@ -144,7 +147,7 @@ describe('buildGoalPlanView', () => {
 
     const all = [kidsView, relView, vacation, house, car, custom, buildGoalPlanView(shortKid, ctx())];
     for (const v of all) {
-      const text = [v.headline, v.subtitle].join(' ');
+      const text = [v.headline, v.subtitle, v.heroLabel, v.audience, v.howFredHelps].join(' ');
       expect(text).not.toContain('\u2014');
     }
 
@@ -267,13 +270,11 @@ function fundGoal(
 describe('buildGoalPlanView first-year fund', () => {
   const noTargets = { plan529Target: 0, brokerageTarget: 0 };
 
-  it('always carries kid cost figures for a kids goal, sized by the kid count', () => {
+  it('has no first-year block when no kid holds a fund', () => {
     const three = kidsGoal([0, 1, 2].map(i => ({
       label: `K${i}`, birthYear: Y - 3 - i, birthMonth: 4, accounts: { plan529: account(), brokerage: account() },
     })));
     const view = buildGoalPlanView(three, ctx());
-    expect(view.kidCosts?.kidsCount).toBe(3);
-    expect(view.kidCosts?.perChildTotal).toBe(252393);
     expect(view.firstYear).toBeUndefined();
   });
 
@@ -405,13 +406,13 @@ describe('buildGoalPlanView first-year fund', () => {
     const goal = fundGoal([fundKid('A', null, null, [2029, 11], 20800)], noTargets);
     const view = buildGoalPlanView(goal, ctx());
     expect(view.headline).toBe('Ready for the first year');
-    expect(view.subtitle).toBe('$498/mo · 1 kid · first-year fund');
+    expect(view.subtitle).toBe('$498/mo for A');
     expect(view.kids).toEqual([]);
     expect(view.rateKind).toBe('market');
     expect(view.status.kind).toBe('started');
 
     const two = fundGoal([fundKid('A', null, null, [2029, 11], 20800), fundKid('B', null, null, [2029, 11], 20800)], noTargets);
-    expect(buildGoalPlanView(two, ctx()).subtitle).toBe('$996/mo · 2 kids · first-year fund');
+    expect(buildGoalPlanView(two, ctx()).subtitle).toBe('$996/mo for both kids');
   });
 
   it('keeps the usual headline when a 529 target exists beside the fund', () => {
@@ -453,7 +454,6 @@ describe('buildGoalPlanView first-year fund', () => {
     };
     const view = buildGoalPlanView(base({ type: 'KIDS', config }), ctx());
     expect(view.firstYear).toBeUndefined();
-    expect(view.kidCosts?.kidsCount).toBe(1);
     expect(view.monthlyTotal).toBeGreaterThan(0);
   });
 });
@@ -496,7 +496,8 @@ describe('buildGoalPlanView final review fixes', () => {
     expect(view.monthlyTotal).toBe(0);
     expect(view.dueNow).toBe(6_000);
     expect(view.headline).toBe('Target month reached');
-    expect(view.subtitle).toBe('$6,000 due now · $30K by 2026');
+    expect(view.subtitle).toBe('$6,000 due now Boat fund');
+    expect(view.heroLabel).toBe('Due now');
     expect(view.simple!.fromGrowth).toBe(0);
   });
 
@@ -511,13 +512,15 @@ describe('buildGoalPlanView final review fixes', () => {
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2026, 11, 5) }));
     expect(view.monthlyTotal).toBe(0);
     expect(view.dueNow).toBe(20_000);
-    expect(view.subtitle.startsWith('$20,000 due now · 1 kid')).toBeTrue();
+    expect(view.subtitle).toBe('$20,000 due now for Teen');
+    expect(view.heroLabel).toBe('Due now');
   });
 
   it('keeps the monthly subtitle and no due amount while months remain', () => {
     const view = buildGoalPlanView(base({}), ctx());
     expect(view.dueNow).toBe(0);
-    expect(view.subtitle).toMatch(/^\$[\d,]+\/mo · /);
+    expect(view.subtitle).toMatch(/^\$[\d,]+\/mo Boat fund$/);
+    expect(view.heroLabel).toBe('Save this month');
   });
 
   it('reads Plan started for a vacation created in November with nothing saved', () => {
@@ -548,5 +551,195 @@ describe('buildGoalPlanView final review fixes', () => {
     const view = buildGoalPlanView(goal, ctx());
     expect(view.progressPct).toBeCloseTo(1, 6);
     expect(view.status.asOf).toBe('2026-06-01T00:00:00');
+  });
+});
+
+// ── One-screen plan page: hero copy, timeline, pills, gift days, How FRED helps ──
+
+describe('buildGoalPlanView one-screen page', () => {
+  const ANCHOR = '2026-11-15T00:00:00';
+  const INVEST_LEAD = (m: number) =>
+    `Already investing ${fmtMoney(m)} or more a month? FRED sets this plan's share aside inside your portfolio`;
+
+  function kid(label: string, birthYear: number | null, birthMonth: number | null, fund?: { due: [number, number]; target: number }): KidInput {
+    return {
+      label, birthYear, birthMonth,
+      ...(fund
+        ? { firstYearTarget: fund.target, firstYearDueYear: fund.due[0], firstYearDueMonth: fund.due[1] }
+        : {}),
+      accounts: { plan529: account(), brokerage: account(), ...(fund ? { firstYear: account() } : {}) },
+    };
+  }
+
+  function family(kids: KidInput[], extra: Partial<KidsConfig> = {}, goalExtra: Partial<GoalPlanInput> = {}): GoalPlanInput {
+    const config: KidsConfig = { plan529Target: 47_800, brokerageTarget: 100_000, kids, ...extra };
+    return base({ type: 'KIDS', config, planAnchoredAt: ANCHOR, ...goalExtra });
+  }
+
+  /** Ellie born 2024, Theo due Jun 2028 with a baby fund, and an undated kid with a baby fund. */
+  const sample = (extra: Partial<KidsConfig> = {}) => family([
+    kid('Ellie', 2024, null),
+    kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 }),
+    kid('', null, null, { due: [2029, 11], target: 16_500 }),
+  ], extra);
+
+  it('KIDS subtitle reads "$X/mo for all 3 kids" and audience uses a single kid label', () => {
+    const view = buildGoalPlanView(sample(), ctx());
+    expect(view.audience).toBe('for all 3 kids');
+    expect(view.subtitle).toBe(`${fmtMoney(view.monthlyTotal)}/mo for all 3 kids`);
+    expect(view.heroLabel).toBe('Save this month');
+
+    const one = buildGoalPlanView(family([kid('Ellie', 2024, null)]), ctx());
+    expect(one.audience).toBe('for Ellie');
+    expect(one.subtitle).toBe(`${fmtMoney(one.monthlyTotal)}/mo for Ellie`);
+    expect(buildGoalPlanView(family([kid(' ', 2024, null)]), ctx()).audience).toBe('for your kid');
+    expect(buildGoalPlanView(family([kid('A', 2024, null), kid('B', 2025, 3)]), ctx()).audience).toBe('for both kids');
+  });
+
+  it('names the audience of every other goal type', () => {
+    const audience = (partial: Partial<GoalPlanInput>) => buildGoalPlanView(base(partial), ctx()).audience;
+    expect(audience({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } })).toBe('for your home');
+    expect(audience({ type: 'CAR', config: { price: 40_000, downPaymentPct: null, targetYear: Y + 4 } })).toBe('for your car');
+    expect(audience({ type: 'VACATION', config: { tripsPerYear: 3, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } })).toBe('for 3 trips a year');
+    expect(audience({ type: 'VACATION', config: { tripsPerYear: 1, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } })).toBe('for your trip');
+    expect(audience({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 2 } })).toBe('for your safety net');
+    expect(audience({ type: 'WEDDING', config: { targetAmount: 30_000, targetYear: Y + 2 } })).toBe('for the wedding');
+    expect(audience({})).toBe('Boat fund');
+    expect(audience({ name: '  ' })).toBe('My goal');
+  });
+
+  it('giftDays payoff: monthlyIfOn is lower by about $1,000 × kids ÷ 12 and perPaycheckIfOn follows', () => {
+    const off = buildGoalPlanView(sample(), ctx());
+    expect(off.giftDays).toBeDefined();
+    const g = off.giftDays!;
+    expect(g.on).toBeFalse();
+    expect(g.available).toBeTrue();
+    expect(g.lump).toBe(GIFT_DAY_LUMP);
+    const drop = off.monthlyTotal - g.monthlyIfOn;
+    const even = (GIFT_DAY_LUMP * 3) / 12;
+    expect(drop).toBeGreaterThan(even * 0.9);
+    expect(drop).toBeLessThan(even * 1.25);
+    expect(g.perPaycheckIfOn).toBe(InvestmentFrequencyUtils.toPerPaycheckEquivalent(g.monthlyIfOn, 'biweekly'));
+    expect(off.howFredHelps).toContain(fmtMoney(off.monthlyTotal));
+
+    // Stored on: the hero shows the lower monthly, and the payoff equals it.
+    const on = buildGoalPlanView(sample({ giftDays: true }), ctx());
+    expect(on.monthlyTotal).toBe(g.monthlyIfOn);
+    expect(on.giftDays!.on).toBeTrue();
+    expect(on.giftDays!.monthlyIfOn).toBe(on.monthlyTotal);
+    expect(on.perPaycheck).toBe(g.perPaycheckIfOn);
+    expect(on.howFredHelps).toContain(fmtMoney(g.monthlyIfOn));
+
+    // No schedule: no per paycheck figure.
+    expect(buildGoalPlanView(sample(), ctx({ frequency: '' })).giftDays!.perPaycheckIfOn).toBeNull();
+  });
+
+  it('giftDays is absent when no kid unit has giftDaysAvailable', () => {
+    // $1,000 every January from now to 18 grows past a $20,000 nest egg on its own.
+    const small = family([kid('A', null, null), kid('B', Y - 1, 4)], { plan529Target: 0, brokerageTarget: 20_000 });
+    expect(buildGoalPlanView(small, ctx()).giftDays).toBeUndefined();
+    // A kid within 24 months of 18 is never offered.
+    const teen = family([kid('Teen', Y - 17, 3)]);
+    expect(buildGoalPlanView(teen, ctx()).giftDays).toBeUndefined();
+  });
+
+  it('gift days go to the nest egg only: a nest egg the lumps would outgrow hides the offer even beside a large 529', () => {
+    const goal = family([kid('A', null, null)], { plan529Target: 123_960, brokerageTarget: 20_000, giftDays: true });
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.giftDays).toBeUndefined();
+    const lumps = view.kids!.map(a => a.perKid[0].plan.newYearLump);
+    expect(lumps).toEqual([0, 0]);
+    // The 529 alone would have taken it.
+    expect(view.kids!.find(a => a.account === 'plan529')!.perKid[0].plan.giftDaysAvailable).toBeTrue();
+  });
+
+  it('pills: college and nest egg are Invested at 18 years out, a baby fund due in 19 months is Cash', () => {
+    const view = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
+    for (const acct of view.kids!) expect(acct.perKid[0].pill).withContext(acct.account).toBe('Invested');
+    expect(view.firstYear!.rows[0].plan.n).toBe(19);
+    expect(view.firstYear!.rows[0].pill).toBe('Cash');
+    expect(view.pill).toBeUndefined();
+
+    // A kid within 36 months of 18 is Cash; an undated kid's fund (36-month runway) is Invested.
+    const mixed = buildGoalPlanView(family([
+      kid('Teen', Y - 16, 6),
+      kid('', null, null, { due: [2029, 11], target: 20_800 }),
+    ]), ctx());
+    for (const acct of mixed.kids!) {
+      expect(acct.perKid[0].pill).toBe('Cash');
+      expect(acct.perKid[1].pill).toBe('Invested');
+    }
+    expect(mixed.firstYear!.rows[0].pill).toBe('Invested');
+
+    // Simple goals: one pill on the view.
+    expect(buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx()).pill).toBe('Invested');
+    expect(buildGoalPlanView(base({ type: 'CAR', config: { price: 40_000, downPaymentPct: null, targetYear: Y + 1 } }), ctx()).pill).toBe('Cash');
+    expect(buildGoalPlanView(base({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 5 } }), ctx()).pill).toBe('Cash');
+    expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).pill).toBe('Cash');
+  });
+
+  it('howFredHelps: all invested, mixed (names the baby funds), all cash (vacation)', () => {
+    const invested = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
+    expect(invested.howFredHelps).toBe(`${INVEST_LEAD(invested.monthlyTotal)} and handles where it goes.`);
+
+    const oneFund = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
+    expect(oneFund.howFredHelps).toBe(`${INVEST_LEAD(oneFund.monthlyTotal)}, keeps the baby fund in cash, and handles where it goes.`);
+
+    const twoFunds = buildGoalPlanView(family([
+      kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 }),
+      kid('Mia', 2028, 9, { due: [2028, 9], target: 16_500 }),
+    ]), ctx());
+    expect(twoFunds.howFredHelps).toBe(`${INVEST_LEAD(twoFunds.monthlyTotal)}, keeps the baby funds in cash, and handles where it goes.`);
+
+    // A cash unit that is not a baby fund: a kid within 36 months of 18.
+    const teen = buildGoalPlanView(family([kid('Teen', Y - 16, 6), kid('B', 2023, 8)]), ctx());
+    expect(teen.howFredHelps).toBe(`${INVEST_LEAD(teen.monthlyTotal)}, keeps the short-dated money in cash, and handles where it goes.`);
+
+    const cash = 'FRED keeps this in cash, ready the day you need it.';
+    expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).howFredHelps).toBe(cash);
+    expect(buildGoalPlanView(base({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 2 } }), ctx()).howFredHelps).toBe(cash);
+    expect(buildGoalPlanView(family([kid('Teen', Y - 16, 6)]), ctx()).howFredHelps).toBe(cash);
+    const house = buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx());
+    expect(house.howFredHelps).toBe(`${INVEST_LEAD(house.monthlyTotal)} and handles where it goes.`);
+  });
+
+  it('a plan with no unborn kid has no fund rows and no timeline undated dots', () => {
+    const view = buildGoalPlanView(family([kid('Ava', 2019, 4), kid('Ben', 2022, 9)]), ctx());
+    expect(view.firstYear).toBeUndefined();
+    expect(view.timeline).toBeDefined();
+    expect(view.timeline!.dots.some(d => d.undated)).toBeFalse();
+    expect(buildGoalPlanView(base({}), ctx()).timeline).toBeUndefined();
+  });
+
+  it('builds the family timeline from the kids and today', () => {
+    const goal = sample();
+    const view = buildGoalPlanView(goal, ctx());
+    expect(view.timeline).toEqual(buildKidTimeline((goal.config as KidsConfig).kids, NOW));
+    expect(view.timeline!.dots.map(d => d.label)).toEqual(['Ellie', 'Now', 'Kid 3', 'Theo', 'All 18']);
+  });
+
+  it('treats a kid expected this year with no month as not yet born: a dated dot, a December baby fund', () => {
+    const k = kid('Ellie', Y, null);
+    const goal = family([{ ...k, firstYearTarget: 25_700, accounts: { ...k.accounts, firstYear: account() } }]);
+    const view = buildGoalPlanView(goal, ctx());
+    const dot = view.timeline!.dots.find(d => d.kind === 'kid')!;
+    expect(dot.undated).toBeFalse();
+    expect(dot.passed).toBeFalse();
+    expect(dot.year).toBe(Y);
+    expect(view.firstYear!.rows[0].plan.due).toEqual({ year: Y, month: 12 });
+    expect(view.firstYear!.rows[0].plan.finished).toBeFalse();
+  });
+
+  it('ends a this-year baby fund in December for a goal anchored last year', () => {
+    const k = kid('Ellie', Y, null);
+    const goal = family(
+      [{ ...k, firstYearTarget: 25_700, accounts: { ...k.accounts, firstYear: account() } }],
+      {},
+      { planAnchoredAt: `${Y - 1}-06-15T00:00:00` },
+    );
+    const row = buildGoalPlanView(goal, ctx()).firstYear!.rows[0];
+    expect(row.plan.due).toEqual({ year: Y, month: 12 });
+    expect(row.plan.n).toBe(1);
+    expect(row.plan.finished).toBeFalse();
   });
 });

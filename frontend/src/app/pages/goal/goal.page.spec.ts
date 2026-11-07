@@ -778,75 +778,19 @@ describe('GoalPage', () => {
     expect(page.form().kids.at18Choice).toBe('none');
   });
 
-  it('orders the plan view: hero, return assumption, inputs, status, costs, fund, accounts', async () => {
+  it('orders the plan view: hero, return assumption, inputs, status, fund, accounts', async () => {
     const goal = fundKidsGoal(5, [{ label: 'Kid 1', birthYear: null, birthMonth: null, due: monthsOut(36) }],
       { plan529Target: 47_800, brokerageTarget: 25_000 });
     const fixture = await create({ id: '5' }, { goals: [goal] });
     const root: HTMLElement = fixture.nativeElement;
-    const order = Array.from(root.querySelectorAll('.gl-hero, .gl-rate, .gl-inputs-row, .gl-status, .gl-costs, .gl-fund, .gl-account'))
-      .map(el => ['gl-hero', 'gl-rate', 'gl-inputs-row', 'gl-status', 'gl-costs', 'gl-fund', 'gl-account']
+    const order = Array.from(root.querySelectorAll('.gl-hero, .gl-rate, .gl-inputs-row, .gl-status, .gl-fund, .gl-account'))
+      .map(el => ['gl-hero', 'gl-rate', 'gl-inputs-row', 'gl-status', 'gl-fund', 'gl-account']
         .find(c => el.classList.contains(c)));
-    expect(order).toEqual(['gl-hero', 'gl-rate', 'gl-inputs-row', 'gl-status', 'gl-costs', 'gl-fund', 'gl-account', 'gl-account']);
+    expect(order).toEqual(['gl-hero', 'gl-rate', 'gl-inputs-row', 'gl-status', 'gl-fund', 'gl-account', 'gl-account']);
     expect(text(fixture, '.gl-inputs-row')).toContain('1 kid \u00b7 $48K college \u00b7 $25K at 18 \u00b7 first-year fund');
     const fund = fixture.componentInstance.view().firstYear!;
     expect(text(fixture, '.gl-hero')).toContain(`${usd(fund.totalMonthly)} of this is the first-year fund, which ends ${monLabel(monthsOut(36))}.`);
     expect(text(fixture, '.gl-account')).toContain('Based on 2025-26 college prices, which tend to rise.');
-  });
-
-  it('words the per-child headline by family size', async () => {
-    const fixture = await create({ type: 'KIDS' });
-    const page = fixture.componentInstance;
-    page.showPlan();
-    fixture.detectChanges();
-    expect(text(fixture, '.gl-costs')).toContain('About $422,000 to raise an only child to 18');
-    expect(text(fixture, '.gl-costs')).not.toContain('in all');
-    // Setup opens the card: rows, birth row and the note with the college ending.
-    expect(text(fixture, '.gl-costs')).toContain('Pregnancy and birth, with employer insurance: about $2,700 out of pocket (Peterson-KFF, 2023 dollars)');
-    expect(text(fixture, '.gl-costs')).toContain('College is not included, which is what the 529 below is for.');
-
-    page.addKid();
-    page.showPlan();
-    fixture.detectChanges();
-    const two = text(fixture, '.gl-costs');
-    expect(two).toContain('About $332,000 per child to 18 in a two-child family');
-    expect(two).toContain('For your 2 kids, about $664,000 in all, if they are home at the same time.');
-    expect(two).toContain('Baby and toddler, 0 to 2');
-    expect(two).toContain('about $18,000 a year, $1,500 a month');
-    expect(two).toContain('Preschool, 3 to 5');
-    expect(two).toContain('Grade school, 6 to 11');
-    expect(two).toContain('about $18,100 a year, $1,510 a month');
-    expect(two).toContain('Teen years, 12 to 17');
-    expect(two).toContain('about $19,100 a year, $1,600 a month');
-    expect(two).toContain('Yearly costs are national averages for a middle-income, two-parent family: USDA figures from 2015, adjusted to September 2026 dollars by FRED. Families with more children spend less on each one, and an only child costs more (USDA). Your costs will differ.');
-
-    page.addKid();
-    page.setCollegeChoice('none');
-    page.showPlan();
-    fixture.detectChanges();
-    const three = text(fixture, '.gl-costs');
-    expect(three).toContain('About $252,000 per child to 18 in a family of three or more');
-    expect(three).toContain('For your 3 kids, about $757,000 in all, if they are home at the same time.');
-    expect(three).toContain('College is not included. You can add a college plan from Edit.');
-
-    // Sources list the three cost sources and leave the College Board to the college question.
-    (fixture.nativeElement.querySelector('.gl-costs-sources-toggle') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    const sources = text(fixture, '.gl-costs');
-    expect(sources).toContain('USDA, Expenditures on Children by Families');
-    expect(sources).toContain('U.S. Bureau of Labor Statistics, Consumer Price Index');
-    expect(sources).toContain('Peterson-KFF Health System Tracker');
-    expect(sources).not.toContain('College Board');
-  });
-
-  it('collapses the cost card in edit mode behind Show costs by age', async () => {
-    const fixture = await create({ id: '5' }, { goals: [kidsGoalFixture(5, null)] });
-    expect(text(fixture, '.gl-costs')).toContain('About $422,000 to raise an only child to 18');
-    expect(text(fixture, '.gl-costs')).not.toContain('Baby and toddler, 0 to 2');
-    const toggle = fixture.nativeElement.querySelector('.gl-costs-toggle') as HTMLButtonElement;
-    expect(toggle.textContent).toContain('Show costs by age');
-    toggle.click();
-    fixture.detectChanges();
-    expect(text(fixture, '.gl-costs')).toContain('Baby and toddler, 0 to 2');
   });
 
   it('lists a decided fund until its month, an undecided fund with its date and the invested note, and a finished fund as saved of target', async () => {
@@ -1063,7 +1007,7 @@ describe('GoalPage', () => {
     expect(text(fixture, '.gl-fund')).toContain('Keep this in your own savings or brokerage account. FRED does not hold or move goal money.');
   });
 
-  it('has no em dash in the quiz, the cost card or the fund card', async () => {
+  it('has no em dash in the quiz or the fund card', async () => {
     const fixture = await create({ type: 'KIDS' });
     const page = fixture.componentInstance;
     page.addKid();
@@ -1076,8 +1020,6 @@ describe('GoalPage', () => {
     // The fund defaults on for a kid four months out (no runway rule any more).
     expect(page.form().kids.firstYearFund).toBeTrue();
     page.showPlan();
-    fixture.detectChanges();
-    (fixture.nativeElement.querySelector('.gl-costs-sources-toggle') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.gl-fund')).not.toBeNull();
     expect(text(fixture)).not.toContain('\u2014');

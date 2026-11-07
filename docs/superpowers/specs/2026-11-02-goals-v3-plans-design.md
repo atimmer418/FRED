@@ -388,6 +388,8 @@ All paths relative to `/Users/andrewtimmer/PersonalTypeshit/FRED`.
 
 ## Amendments from the final whole-branch review (2026-11-05)
 
+The quiz and plan page UI is redesigned in `docs/superpowers/specs/2026-11-06-goals-quiz-and-plan-page-redesign.md`; where the two differ on UI, that design wins.
+
 A six-lens review of the finished branch found cross-task defects. These rules were added or
 sharpened; where they differ from the text above, this section wins.
 

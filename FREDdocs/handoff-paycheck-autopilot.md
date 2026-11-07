@@ -436,10 +436,10 @@ Count from the XML rather than the console, because the console does not total t
 grep -ho 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' build/test-results/test/*.xml
 ```
 
-The frontend suite has **14 pre-existing failures** that are not yours and not analytics: eight
-`should create` smoke specs, `FreedomDetailSheetComponent`, `SecuritySettingsPage`, the `TabsPage`
-pager, and two `swipe-settle` velocity specs. They are tracked as FRED-226. Anything beyond those
-14 is yours. Karma also disconnects occasionally with "no message in 30000 ms"; that is
+The frontend suite has **13 pre-existing failures** that are not yours and not analytics: nine
+`should create` smoke specs, `SecuritySettingsPage`, the `TabsPage` pager, and two `swipe-settle`
+velocity specs. They are tracked as FRED-226. Anything beyond those 13 is yours. (The Freedom sheet's
+4% rule spec, once the fourteenth, went with the sheet when Goals v3.1 moved it to `FreedomPlanPage`.) Karma also disconnects occasionally with "no message in 30000 ms"; that is
 environmental, so re-run before investigating.
 
 ---

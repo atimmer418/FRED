@@ -122,6 +122,7 @@ an active goal sees the Plus nudge when they tap "Add a goal", before any quiz.
 ## The Kids quiz
 
 Sample used throughout the mockup: three kids, born 2024, expected 2028, not yet dated.
+The sample family's figures assume a $250,000 nest egg per kid, as the mockup card shows; at the quiz's $100,000 default the hero is $2,249/mo (~$1,036 a paycheck), dropping to ~$1,988 (~$916) with gift days on.
 
 ### Step 1, how many
 
@@ -249,7 +250,7 @@ defaults unless stated.
 - **Emergency fund**, one screen: "Your safety net" / "Three to six months of expenses, in cash.",
   a "Monthly expenses" big readout over a slider $1,000 to $20,000 step $100, a "Months" chip row
   3 / 6, a "By" chip row 1 year / 2 years / 3 years (default 2), and a live chip
-  "$24,000 by Nov 2028".
+  "$24,000 by Dec 2028".
 - **Wedding**, one screen: "The budget, and when" / "What you'd like to have set aside by the
   day.", amount slider $5,000 to $150,000 step $1,000 and a year slider; live chip with the
   monthly.

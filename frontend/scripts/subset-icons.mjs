@@ -38,6 +38,8 @@ const DYNAMIC_ICONS = [
   'photo_camera', 'add_circle',
   // goals v3: Kids, Vacation and Wedding icons live in TS (picker tiles, goal-form.model)
   'child_care', 'flight', 'favorite',
+  // goals v3.1: gift-days switch-row icon input, college pick-grid options, calc screen tick
+  'cake', 'travel_explore', 'do_not_disturb_on', 'check_circle',
 ];
 
 // Material Symbols renamed some legacy icon glyphs. The ligature text (used in templates)

@@ -308,22 +308,25 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
       ? this.exactAnnualIncome
       : income * 12;
     this.saving.set(true);
-    this.authService.updateUserProfile({ monthlyInvestment: invest, retirementIncome }).subscribe({
-      next: () => {
-        this.saving.set(false);
-        this.toastService.showToast('Profile updated!', 'success');
-        this.authService.loadUserProgress();
-        this.goBack();
-      },
-      error: (error) => {
-        this.saving.set(false);
-        this.toastService.showToast('Failed to save changes.', 'danger');
-        // Split by analytics-error.utils' rule rather than by message: a request that never
-        // reached a server is a network failure, anything with a status is a failed save.
-        const category: ErrorCategory = isNetworkFailure(error) ? 'network' : 'save_failed';
-        this.analytics.trackErrorShown(category, 'freedom_sheet', 'toast', httpStatusOf(error), true);
-      },
-    });
+    // Tied to the page: a back tap mid-save must not later run goBack from another page.
+    this.authService.updateUserProfile({ monthlyInvestment: invest, retirementIncome })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.saving.set(false);
+          this.toastService.showToast('Profile updated!', 'success');
+          this.authService.loadUserProgress();
+          this.goBack();
+        },
+        error: (error) => {
+          this.saving.set(false);
+          this.toastService.showToast('Failed to save changes.', 'danger');
+          // Split by analytics-error.utils' rule rather than by message: a request that never
+          // reached a server is a network failure, anything with a status is a failed save.
+          const category: ErrorCategory = isNetworkFailure(error) ? 'network' : 'save_failed';
+          this.analytics.trackErrorShown(category, 'freedom_sheet', 'toast', httpStatusOf(error), true);
+        },
+      });
   }
 
   /**

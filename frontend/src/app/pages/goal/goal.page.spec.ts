@@ -932,7 +932,7 @@ describe('GoalPage', () => {
 
     expect(page.existing()).toBe(updated);
     expect(page.selectedRate()).toBe(0.12);
-    expect(page.isDefaultRate()).toBeTrue();
+    expect(page.selectedRate()).toBe(rates.annualReturn());
     expect(page.view().monthlyTotal).toBeLessThan(before);
     expect(text(fixture, '.fd-hero-big')).toBe(`${fmtMoney(page.view().monthlyTotal)}/mo`);
     const on = fixture.nativeElement.querySelector('.fd-scenario-chips button.on') as HTMLElement;

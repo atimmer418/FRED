@@ -128,7 +128,8 @@ export class KeyboardAvoidDirective implements OnInit, OnDestroy {
       this.elementRef.nativeElement.removeEventListener(type, this.blockGesture);
     }
     if (this.modalEl) this.modalEl.style.transform = '';
-    this.kbShow?.then(h => h.remove());
-    this.kbHide?.then(h => h.remove());
+    // On web the Keyboard plugin rejects ("not implemented on web"); there is nothing to remove.
+    this.kbShow?.then(h => h.remove()).catch(() => {});
+    this.kbHide?.then(h => h.remove()).catch(() => {});
   }
 }

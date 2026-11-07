@@ -4,12 +4,9 @@ import {
   AccountState, EmergencyFundConfig, Goal, GoalConfig, GoalIcon, GoalType, HouseCarConfig,
   KidInput, KidsConfig, TargetConfig, VacationConfig,
 } from '../../models/goal.model';
-import { AT_18_PRESETS, CHILDBIRTH_DOLLAR_YEAR_LABEL } from '../../constants/kid-costs';
-import {
-  KidCostFigures, KidCostStage, collegePresets, firstYearTargetForRank, kidRanks,
-} from '../../utils/kid-cost.utils';
+import { AT_18_PRESETS } from '../../constants/kid-costs';
+import { collegePresets, firstYearTargetForRank, kidRanks } from '../../utils/kid-cost.utils';
 import { firstYearDue, isKidNotYetBorn } from '../../utils/goal-plan.utils';
-import { FirstYearRow, fmtMoney } from './goal-plan.view-model';
 
 export interface KidFormRow {
   label: string;
@@ -479,114 +476,13 @@ export function validateForm(form: GoalForm, now: Date, existing: Goal | null = 
   return errors;
 }
 
-export type KidsQuizCard = 1 | 2 | 3 | 4 | 5;
-
-/** Which error keys each kids quiz card owns. Cards 1 and 3 have no fields that can be wrong. */
-function quizCardOwns(card: KidsQuizCard, key: string): boolean {
-  switch (card) {
-    case 2: return key.startsWith('kid.');
-    case 4: return key === 'plan529Target';
-    case 5: return key === 'brokerageTarget' || key === 'name' || key === 'kidsTargets';
-    default: return false;
-  }
-}
-
-/** The errors one kids quiz card shows and blocks Next on. */
-export function kidsQuizErrors(
-  form: GoalForm,
-  card: KidsQuizCard,
-  now: Date,
-  existing: Goal | null = null,
-): Record<string, string> {
-  const all = validateForm(form, now, existing);
-  const out: Record<string, string> = {};
-  for (const key of Object.keys(all)) {
-    if (quizCardOwns(card, key)) out[key] = all[key];
-  }
-  return out;
-}
-
-// ── Kids copy: the quiz, "What a kid costs" and "First-year fund" ─────────────
-// Wording is verbatim from docs/superpowers/specs/2026-11-05-goals-v3-kid-costs-addendum.md.
+// ── Labels ───────────────────────────────────────────────────────────────────
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function roundTo(value: number, step: number): number {
-  return Math.round(value / step) * step;
-}
 
 /** "Mon YYYY" for a stored year and month (1..12). */
 export function monthYearLabel(due: { year: number; month: number }): string {
   return `${MONTH_ABBR[due.month - 1]} ${due.year}`;
-}
-
-/** The per-child headline by family size, to the nearest $1,000 (no closing period). */
-export function costHeadline(c: KidCostFigures): string {
-  const amount = fmtMoney(roundTo(c.perChildTotal, 1000));
-  switch (c.sizeWording) {
-    case 'only': return `About ${amount} to raise an only child to 18`;
-    case 'two': return `About ${amount} per child to 18 in a two-child family`;
-    case 'four': return `About ${amount} per child to 18 for a family of four`;
-    case 'five': return `About ${amount} per child to 18 for a family of five`;
-    default: return `About ${amount} per child to 18 in a family of three or more`;
-  }
-}
-
-/** "For your 3 kids, about $757,000 in all, ..." for more than one kid, else null. */
-export function costFamilyLine(c: KidCostFigures): string | null {
-  if (c.kidsCount < 2) return null;
-  return `For your ${c.kidsCount} kids, about ${fmtMoney(roundTo(c.familyTotal, 1000))} in all, if they are home at the same time.`;
-}
-
-/** "about $18,000 a year, $1,500 a month" (nearest $100 and $10). */
-export function costStageLine(stage: KidCostStage): string {
-  return `about ${fmtMoney(roundTo(stage.annual, 100))} a year, ${fmtMoney(roundTo(stage.monthly, 10))} a month`;
-}
-
-export function costBirthLine(c: KidCostFigures): string {
-  return `Pregnancy and birth, with employer insurance: about ${fmtMoney(roundTo(c.childbirthOutOfPocket, 100))} out of pocket (Peterson-KFF, ${CHILDBIRTH_DOLLAR_YEAR_LABEL})`;
-}
-
-/** The quiz's one-line source under the cost figures. */
-export function costSourceLine(c: KidCostFigures): string {
-  return `National averages for a middle-income, two-parent family. USDA figures from 2015, adjusted to ${c.asOfLabel} dollars by FRED. Birth cost from Peterson-KFF, ${CHILDBIRTH_DOLLAR_YEAR_LABEL}, with employer insurance.`;
-}
-
-/** The cost card note; its ending depends on whether a college amount is set. */
-export function costNote(c: KidCostFigures, hasCollege: boolean): string {
-  const lead = `Yearly costs are national averages for a middle-income, two-parent family: USDA figures from 2015, adjusted to ${c.asOfLabel} dollars by FRED. Families with more children spend less on each one, and an only child costs more (USDA). Your costs will differ. College is not included`;
-  return lead + (hasCollege ? ', which is what the 529 below is for.' : '. You can add a college plan from Edit.');
-}
-
-export function firstChildLine(): string {
-  return `The first year alone, with birth costs: about ${fmtMoney(firstYearTargetForRank(1))} for a first child.`;
-}
-
-export function shortRunwayLine(months: number): string {
-  return `That is a lot to save in ${months} ${months === 1 ? 'month' : 'months'}. Most of the first year is paid from your income as you go, so save what you can.`;
-}
-
-/** The lines one first-year fund row shows: a lead line and, while unfinished, its monthly line. */
-export function fundRowLines(row: FirstYearRow): { lead: string; plan: string | null } {
-  const { plan, label } = row;
-  const target = fmtMoney(plan.target);
-  if (plan.finished) {
-    const saved = `${label}: ${fmtMoney(row.balance)} saved of ${target}`;
-    return {
-      lead: plan.undecided ? `${saved}. Three years are up, so set a date to keep planning.` : `${saved} for the first year.`,
-      plan: null,
-    };
-  }
-  const monthly = `${fmtMoney(plan.monthly)} a month until ${monthYearLabel(plan.due)}.`;
-  let line: string;
-  if (plan.undecided) {
-    line = plan.rateKind === 'cash'
-      ? `${monthly} No date yet. Planned as cash at about 4%, since this runway ends within 3 years.`
-      : `${monthly} No date yet, so this one is invested at your return assumption.`;
-  } else {
-    line = plan.rateKind === 'cash' ? `${monthly} Planned as cash at about 4%, since you need it within 3 years.` : monthly;
-  }
-  return { lead: `${label}: about ${target} for birth costs and the first year.`, plan: line };
 }
 
 /** Local ISO timestamp without a Z suffix (yyyy-MM-ddTHH:mm:ss), the shape the backend stores. */

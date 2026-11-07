@@ -1,6 +1,6 @@
 import { AccountState, Goal, KidInput, KidsConfig } from '../../models/goal.model';
 import {
-  GoalForm, MAX_KIDS, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, kidsQuizErrors, planInputsChanged,
+  GoalForm, MAX_KIDS, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, planInputsChanged,
   validateForm,
 } from './goal-form.model';
 
@@ -290,21 +290,6 @@ describe('goal-form.model', () => {
     // Timing changed, so the target is recomputed for the kid's rank.
     expect(config.kids[0].firstYearTarget).toBe(25_700);
     expect(config.firstYearFund).toBeTrue();
-  });
-
-  it('validates one quiz card at a time', () => {
-    const f = kidsForm([{ birthYear: 2050, birthMonth: null }]);
-    f.kids.kids[0].undecided = false;
-    f.kids.collegeChoice = 'custom';
-    f.kids.plan529Target = null;
-    f.kids.at18Choice = 'custom';
-    f.kids.brokerageTarget = null;
-    f.name = ' ';
-    expect(kidsQuizErrors(f, 1, NOW)).toEqual({});
-    expect(Object.keys(kidsQuizErrors(f, 2, NOW))).toEqual(['kid.0.birthYear']);
-    expect(kidsQuizErrors(f, 3, NOW)).toEqual({});
-    expect(kidsQuizErrors(f, 4, NOW)).toEqual({ plan529Target: 'Enter an amount greater than $0.' });
-    expect(Object.keys(kidsQuizErrors(f, 5, NOW)).sort()).toEqual(['brokerageTarget', 'name']);
   });
 
   it('rejects an empty name', () => {

@@ -205,8 +205,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
     return this.existing()?.name || 'Goal';
   });
 
-  readonly goalType = computed<GoalType>(() => this.planInput().type);
-
   readonly ctaLabel = computed<string | null>(() => {
     switch (this.mode()) {
       case 'preview-new': return 'Start this plan';
@@ -254,8 +252,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
     const v = this.view();
     return v.vacation ? v.vacation.savedThisYear : this.planInput().currentBalance;
   });
-
-  readonly isDefaultRate = computed(() => this.selectedRate() === this.rates.annualReturn());
 
   /** The gift-days row copy, by the stored switch. The light row wraps the line as text. */
   readonly giftRow = computed<{ title: string; line: string } | null>(() => {

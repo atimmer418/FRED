@@ -41,6 +41,8 @@ export interface KidsConfig {
   kids: KidInput[];
   /** Whether the family plans a first-year fund for kids not yet born. Missing and null both mean off. */
   firstYearFund?: boolean | null;
+  /** Gift days: $1,000 per kid every January, monthly solved net of it. Missing and null both mean off. */
+  giftDays?: boolean | null;
 }
 
 export interface HouseCarConfig {
@@ -50,7 +52,8 @@ export interface HouseCarConfig {
 }
 
 export interface VacationConfig {
-  tripsPerYear: 1 | 2 | 3 | 4;
+  /** 1 to 10. */
+  tripsPerYear: number;
   budgetPerTrip: number;
   savedThisYear: number;
   savedYear: number;

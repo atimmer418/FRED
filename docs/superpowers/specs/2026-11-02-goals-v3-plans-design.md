@@ -127,6 +127,8 @@ Pinned worked example (10%, $0 start, $250K brokerage, 18-year runway):
 | milestone at 22 | $372,338.52 |
 | milestone at 30 | $825,912.24 |
 
+Superseded (2026-11-06 redesign): the rituals row above is gone. Gift days replace it with $1,000 every January, monthly solved net of it; see the gift-days pins in `frontend/src/app/utils/goal-plan.utils.spec.ts` and `docs/superpowers/specs/2026-11-06-goals-quiz-and-plan-page-redesign.md` ("Gift days").
+
 ## Plan anchor and status
 
 The plan FRED shows is always LIVE: re-solved from today's balance and today's inputs, because

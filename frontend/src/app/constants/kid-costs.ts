@@ -23,6 +23,16 @@ export const USDA_2015_ANNUAL_BY_BAND: ReadonlyArray<{ fromAge: number; toAge: n
 /** USDA total spending on a child, birth through age 17: Table 1, middle-income married-couple family, 2015 dollars. */
 export const USDA_2015_TOTAL = 233610;
 
+/** USDA per-child family-size factors: Table 1 adjustment, only child, two children, three or more. */
+export const USDA_FAMILY_SIZE_FACTORS = { one: 1.27, two: 1, threeOrMore: 0.76 };
+
+/**
+ * FRED estimate, not a USDA figure: per-kid factors for four and five kids. USDA stops at "three or
+ * more", so FRED applies the third child's marginal cost (0.76 x 3 - 1.00 x 2 = 0.28) to the fourth
+ * and fifth: (2.28 + 0.28) / 4 = 0.64 and (2.56 + 0.28) / 5 = 0.568. See FREDdocs/kid-cost-figures.md.
+ */
+export const FRED_ESTIMATE_FAMILY_SIZE_FACTORS = { four: 0.64, five: 0.568 };
+
 /** BLS CPI-U, all items, not seasonally adjusted, series CUUR0000SA0: 2015 annual average. */
 export const CPI_U_2015_AVERAGE = 237.017;
 

@@ -467,10 +467,9 @@ export class GoalPage implements OnInit {
     this.kidDetailsOpen.update(open => ({ ...open, [account]: !open[account] }));
   }
 
-  /** "$X/mo, $B each birthday, $Y each New Year, all kids" (zero lumps left out). */
-  accountLine(totals: { monthly: number; birthday: number; newYear: number }): string {
+  /** "$X/mo, $Y each New Year, all kids" (a zero lump left out). */
+  accountLine(totals: { monthly: number; newYear: number }): string {
     const parts = [`${fmtMoney(totals.monthly)}/mo`];
-    if (totals.birthday > 0) parts.push(`${fmtMoney(totals.birthday)} each birthday`);
     if (totals.newYear > 0) parts.push(`${fmtMoney(totals.newYear)} each New Year`);
     parts.push('all kids');
     return parts.join(', ');

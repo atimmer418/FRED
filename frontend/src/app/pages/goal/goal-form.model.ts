@@ -8,7 +8,7 @@ import { AT_18_PRESETS, CHILDBIRTH_DOLLAR_YEAR_LABEL } from '../../constants/kid
 import {
   KidCostFigures, KidCostStage, collegePresets, firstYearTargetForRank, kidRanks,
 } from '../../utils/kid-cost.utils';
-import { firstYearDue, horizonMonths, isKidNotYetBorn } from '../../utils/goal-plan.utils';
+import { firstYearDue, isKidNotYetBorn } from '../../utils/goal-plan.utils';
 import { FirstYearRow, fmtMoney } from './goal-plan.view-model';
 
 export interface KidFormRow {
@@ -28,6 +28,8 @@ export interface KidsForm {
   plan529Target: number | null;
   kids: KidFormRow[];
   firstYearFund: boolean;
+  /** $1,000 per kid every January. Off by default. */
+  giftDays: boolean;
   collegeChoice: CollegeChoice;
   at18Choice: At18Choice;
 }
@@ -41,7 +43,8 @@ export interface GoalForm {
   downPaymentPct: number | null;
   fullPrice: boolean;
   targetYear: number | null;
-  tripsPerYear: 1 | 2 | 3 | 4;
+  /** 1 to 10. */
+  tripsPerYear: number;
   budgetPerTrip: number | null;
   monthlyExpenses: number | null;
   months: 3 | 6;
@@ -64,7 +67,7 @@ export const CUSTOM_ICON_OPTIONS: ReadonlyArray<{ icon: GoalIcon; label: string 
 ];
 
 export const MAX_AMOUNT = 100_000_000;
-export const MAX_KIDS = 10;
+export const MAX_KIDS = 5;
 
 const TYPE_ICON: Record<GoalType, GoalIcon> = {
   KIDS: 'child_care',
@@ -101,14 +104,9 @@ export function kidTiming(row: KidFormRow): { birthYear: number | null; birthMon
     : { birthYear: row.birthYear, birthMonth: row.birthMonth };
 }
 
-/**
- * The fund switch default for a NEW goal: on only when at least one kid is not yet born and every
- * such kid is undecided or at least 12 months away (unknown month counted as July).
- */
+/** The fund switch default for a NEW goal: on whenever at least one kid is not yet born, whatever the runway. */
 export function defaultFirstYearFund(kids: KidFormRow[], now: Date): boolean {
-  const eligible = kids.map(kidTiming).filter(t => isKidNotYetBorn(t.birthYear, t.birthMonth, now));
-  return eligible.length > 0
-    && eligible.every(t => t.birthYear === null || horizonMonths(now, t.birthYear, t.birthMonth ?? 7) >= 12);
+  return kids.map(kidTiming).some(t => isKidNotYetBorn(t.birthYear, t.birthMonth, now));
 }
 
 const DEFAULT_COLLEGE: CollegeChoice = 'public_tuition';
@@ -132,13 +130,17 @@ function at18ChoiceFor(target: number): At18Choice {
 function defaultKidsForm(type: GoalType, now: Date): KidsForm {
   const kids = [newKidRow(0)];
   if (type !== 'KIDS') {
-    return { brokerageTarget: null, plan529Target: null, kids, firstYearFund: false, collegeChoice: 'none', at18Choice: 'none' };
+    return {
+      brokerageTarget: null, plan529Target: null, kids, firstYearFund: false, giftDays: false,
+      collegeChoice: 'none', at18Choice: 'none',
+    };
   }
   return {
     brokerageTarget: DEFAULT_AT_18,
     plan529Target: collegeAmount(DEFAULT_COLLEGE),
     kids,
     firstYearFund: defaultFirstYearFund(kids, now),
+    giftDays: false,
     collegeChoice: DEFAULT_COLLEGE,
     at18Choice: DEFAULT_AT_18,
   };
@@ -185,6 +187,7 @@ export function formFromGoal(goal: Goal): GoalForm {
         })),
         // A saved goal keeps its switch: missing and null both read as off.
         firstYearFund: c.firstYearFund === true,
+        giftDays: c.giftDays === true,
         collegeChoice: collegeChoiceFor(c.plan529Target),
         at18Choice: at18ChoiceFor(c.brokerageTarget),
       };
@@ -289,6 +292,7 @@ function kidsToConfig(form: KidsForm, existing: Goal | null, now: Date): KidsCon
     kids,
     // On only when the switch is on and at least one kid ends up holding a fund.
     firstYearFund: kids.some(k => !!k.accounts.firstYear),
+    giftDays: form.giftDays,
   };
 }
 
@@ -346,6 +350,7 @@ export function planInputsChanged(form: GoalForm, existing: Goal, now: Date): bo
       if (next.brokerageTarget !== c.brokerageTarget) return true;
       if (next.plan529Target !== c.plan529Target) return true;
       if ((next.firstYearFund ?? false) !== (c.firstYearFund ?? false)) return true;
+      if ((next.giftDays ?? false) !== (c.giftDays ?? false)) return true;
       if (next.kids.length !== c.kids.length) return true;
       return next.kids.some((kid, i) => {
         const was = c.kids[i];

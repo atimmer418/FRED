@@ -300,8 +300,6 @@
             <span class="gl-inputs-edit">Edit</span>
           </button>
 
-          <p class="gl-reason" *ngIf="v.reasonLine">{{ v.reasonLine }}</p>
-
           <!-- Status (edit mode) -->
           <div class="gl-status" *ngIf="statusLine() as line" [class.behind]="v.status.kind === 'behind'">
             <p class="gl-status-line">{{ line }}</p>
@@ -375,11 +373,6 @@
                   <div class="gl-kid-name">{{ row.label }}</div>
                   <div class="gl-ritual">
                     <span>Every month</span><b>{{ fmtMoney(row.plan.monthly) }}</b>
-                  </div>
-                  <div class="gl-ritual" *ngIf="row.plan.birthdayLump > 0">
-                    <span *ngIf="!row.relative">Every birthday</span>
-                    <span *ngIf="row.relative">Every summer <small>(becomes the birthday gift once they arrive)</small></span>
-                    <b>{{ fmtMoney(row.plan.birthdayLump) }}</b>
                   </div>
                   <div class="gl-ritual" *ngIf="row.plan.newYearLump > 0">
                     <span>Every New Year</span><b>{{ fmtMoney(row.plan.newYearLump) }}</b>

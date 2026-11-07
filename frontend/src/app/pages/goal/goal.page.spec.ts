@@ -246,13 +246,13 @@ describe('GoalPage', () => {
     expect(page.step()).toBe(2);
   });
 
-  it('bounds the kid stepper at 1 and 10', async () => {
+  it('bounds the kid stepper at 1 and 5', async () => {
     const fixture = await create({ type: 'KIDS' });
     const page = fixture.componentInstance;
     page.removeKid(0);
     expect(page.form().kids.kids.length).toBe(1);
     for (let i = 0; i < 15; i++) page.addKid();
-    expect(page.form().kids.kids.length).toBe(10);
+    expect(page.form().kids.kids.length).toBe(5);
     for (let i = 0; i < 15; i++) page.removeKid(page.form().kids.kids.length - 1);
     expect(page.form().kids.kids.length).toBe(1);
   });
@@ -713,11 +713,11 @@ describe('GoalPage', () => {
     expect(text(fixture)).toContain(`Adds about $616 a month until ${monLabel(monthsOut(36))}`);
     expect(text(fixture)).not.toContain('That is a lot to save');
 
-    // Six months out: the default turns off, the line still shows what it would add.
+    // Six months out: the default stays on (no runway rule any more), the line still shows what it adds.
     const due = monthsOut(6);
     page.patchKid(0, { undecided: false, birthYear: due.year, birthMonth: due.month });
     fixture.detectChanges();
-    expect(page.form().kids.firstYearFund).toBeFalse();
+    expect(page.form().kids.firstYearFund).toBeTrue();
     expect(page.fundShortRunwayMonths()).toBe(6);
     expect(text(fixture)).toContain(`a month until ${monLabel(due)}`);
     expect(text(fixture)).toContain('That is a lot to save in 6 months. Most of the first year is paid from your income as you go, so save what you can.');
@@ -727,7 +727,7 @@ describe('GoalPage', () => {
     const later = monthsOut(30);
     page.patchKid(0, { birthYear: later.year, birthMonth: later.month });
     page.patchKid(0, { birthYear: due.year, birthMonth: due.month });
-    expect(page.form().kids.firstYearFund).toBeTrue();
+    expect(page.form().kids.firstYearFund).toBeFalse();
   });
 
   it('sets the 529 target from a college row and the brokerage target from an at-18 row', async () => {
@@ -1072,7 +1072,8 @@ describe('GoalPage', () => {
       showCard(fixture, card);
       expect(text(fixture)).withContext(`card ${card}`).not.toContain('\u2014');
     }
-    page.toggleFirstYearFund();
+    // The fund defaults on for a kid four months out (no runway rule any more).
+    expect(page.form().kids.firstYearFund).toBeTrue();
     page.showPlan();
     fixture.detectChanges();
     (fixture.nativeElement.querySelector('.gl-costs-sources-toggle') as HTMLButtonElement).click();

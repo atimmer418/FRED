@@ -4,9 +4,11 @@ import {
   CPI_U_2015_AVERAGE,
   CPI_U_LATEST,
   CPI_U_LATEST_LABEL,
+  FRED_ESTIMATE_FAMILY_SIZE_FACTORS,
   KID_COST_SOURCES,
   USDA_2015_ANNUAL_BY_BAND,
   USDA_2015_TOTAL,
+  USDA_FAMILY_SIZE_FACTORS,
 } from '../constants/kid-costs';
 
 // Pure helpers over the kid cost constants. Derived values here are FRED's own arithmetic.
@@ -23,7 +25,7 @@ export interface KidCostStage {
   total: number;
 }
 
-export type FamilySizeWording = 'only' | 'two' | 'three_plus';
+export type FamilySizeWording = 'only' | 'two' | 'three_plus' | 'four' | 'five';
 
 export interface KidCostFigures {
   kidsCount: number;
@@ -47,17 +49,50 @@ export function inflationFactor(): number {
   return CPI_U_LATEST / CPI_U_2015_AVERAGE;
 }
 
-/** USDA Table 1 family-size factor: only child 1.27, two children 1.00, three or more 0.76 each. */
+/**
+ * Per-kid family-size factor: USDA Table 1 for 1 to 3 kids (1.27 / 1.00 / 0.76), the FRED estimate
+ * for 4 and 5 (0.64 / 0.568, see kid-costs.ts). Five is the cap, so anything higher reads as five.
+ */
 export function familySizeFactor(kidsCount: number): number {
-  if (kidsCount <= 1) return 1.27;
-  if (kidsCount === 2) return 1;
-  return 0.76;
+  if (kidsCount <= 2) return firstYearFactor(kidsCount);
+  if (kidsCount === 3) return USDA_FAMILY_SIZE_FACTORS.threeOrMore;
+  if (kidsCount === 4) return FRED_ESTIMATE_FAMILY_SIZE_FACTORS.four;
+  return FRED_ESTIMATE_FAMILY_SIZE_FACTORS.five;
+}
+
+/**
+ * The factor for a first-year fund at this birth rank: 1.27, 1.00, then 0.76 for every later
+ * rank (USDA only). The 4 and 5 kid estimates never apply to a fund.
+ */
+export function firstYearFactor(rank: number): number {
+  if (rank <= 1) return USDA_FAMILY_SIZE_FACTORS.one;
+  if (rank === 2) return USDA_FAMILY_SIZE_FACTORS.two;
+  return USDA_FAMILY_SIZE_FACTORS.threeOrMore;
 }
 
 function sizeWordingFor(kidsCount: number): FamilySizeWording {
   if (kidsCount <= 1) return 'only';
   if (kidsCount === 2) return 'two';
-  return 'three_plus';
+  if (kidsCount === 3) return 'three_plus';
+  if (kidsCount === 4) return 'four';
+  return 'five';
+}
+
+const MONTHS_TO_18 = 216;
+
+function perKidTotal(kidsCount: number): number {
+  return USDA_2015_TOTAL * inflationFactor() * familySizeFactor(kidsCount);
+}
+
+/** What one kid costs a month, birth to 18, in a family of this size: per-kid total / 216, nearest $10. */
+export function perKidMonthly(kidsCount: number): number {
+  return Math.round(perKidTotal(kidsCount) / MONTHS_TO_18 / 10) * 10;
+}
+
+/** What the whole family's kids cost a month: per-kid total x count / 216, nearest $10. */
+export function familyMonthly(kidsCount: number): number {
+  const count = Math.max(1, kidsCount);
+  return Math.round((perKidTotal(count) * count) / MONTHS_TO_18 / 10) * 10;
 }
 
 const STAGE_DEFS: ReadonlyArray<{ key: KidCostStageKey; label: string; fromAges: ReadonlyArray<number> }> = [
@@ -98,7 +133,7 @@ export function kidCostFigures(kidsCount: number): KidCostFigures {
  */
 export function firstYearTargetForRank(rank: number): number {
   const zeroToTwo = USDA_2015_ANNUAL_BY_BAND[0].annual;
-  const sum = zeroToTwo * inflationFactor() * familySizeFactor(rank) + CHILDBIRTH_OUT_OF_POCKET;
+  const sum = zeroToTwo * inflationFactor() * firstYearFactor(rank) + CHILDBIRTH_OUT_OF_POCKET;
   const cents = Math.round(sum * 100) / 100; // guard the ceil against floating-point noise
   return Math.ceil(cents / 100) * 100;
 }

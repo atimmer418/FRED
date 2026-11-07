@@ -80,7 +80,7 @@ export interface KidPlanRow {
 export interface KidAccountView {
   account: KidAccountKey;
   label: '529 plans' | 'Brokerage';
-  totals: { monthly: number; birthday: number; newYear: number };
+  totals: { monthly: number; newYear: number };
   perKid: KidPlanRow[];
 }
 
@@ -108,7 +108,6 @@ export interface GoalPlanView {
   status: PlanStatus;
   progressPct: number;
   relative: boolean;
-  reasonLine: string | null;
   kids?: KidAccountView[];
   /** Always set for a KIDS goal. */
   kidCosts?: KidCostFigures;
@@ -119,11 +118,6 @@ export interface GoalPlanView {
 }
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-const REASON_COPY: Record<'short_horizon' | 'small_plan', string> = {
-  short_horizon: 'Under two years to go, so this one is a steady monthly amount',
-  small_plan: 'A small plan, so this one is a steady monthly amount',
-};
 
 const IMPORTED_SUBTITLE = 'Plan updated, take a look';
 
@@ -228,6 +222,10 @@ function kidsView(
   // like planStatus does, and the chip can never move them.
   const anchorLumps: LumpOccurrence[] = [];
 
+  // Gift days post to the brokerage (the nest egg) when it has a target, else to the 529.
+  const giftAccount: KidAccountKey = cfg.brokerageTarget > 0 ? 'brokerage' : 'plan529';
+  const giftDays = !!cfg.giftDays;
+
   // An account with no target has nothing to plan (a 529-only family is valid).
   const accounts: KidAccountView[] = accountDefs
     .filter(def => def.target > 0)
@@ -244,6 +242,7 @@ function kidsView(
           marketRate: ctx.marketRate,
           rateKindOverride: kind,
           now: ctx.now,
+          giftDays: giftDays && def.account === giftAccount,
         });
         const anchorPlan = proposeKidAccountPlan({
           target: def.target,
@@ -253,6 +252,7 @@ function kidsView(
           marketRate: goal.planRate,
           rateKindOverride: kind,
           now: anchorDate,
+          giftDays: giftDays && def.account === giftAccount,
         });
         anchorLumps.push(...anchorPlan.lumps);
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);
@@ -261,10 +261,9 @@ function kidsView(
       const totals = perKid.reduce(
         (t, k) => ({
           monthly: t.monthly + k.plan.monthly,
-          birthday: t.birthday + k.plan.birthdayLump,
           newYear: t.newYear + k.plan.newYearLump,
         }),
-        { monthly: 0, birthday: 0, newYear: 0 },
+        { monthly: 0, newYear: 0 },
       );
       return { account: def.account, label: def.label, totals, perKid };
     });
@@ -352,12 +351,6 @@ function kidsView(
     span = lo === hi ? String(lo) : `${lo} to ${hi}`;
   }
 
-  // Reason line only when no account of any kid carries rituals.
-  let reasonLine: string | null = null;
-  if (plans.length > 0 && plans.every(p => p.ritualsReason !== null)) {
-    reasonLine = REASON_COPY[plans.some(p => p.ritualsReason === 'short_horizon') ? 'short_horizon' : 'small_plan'];
-  }
-
   // A fund exists and neither long-term account has a target: nothing here runs to an 18th birthday.
   const fundOnly = fundRows.length > 0 && !(cfg.plan529Target > 0) && !(cfg.brokerageTarget > 0);
   const kidsLabel = plural(kids.length, 'kid', 'kids');
@@ -383,7 +376,6 @@ function kidsView(
     status,
     progressPct: clampPct(balance, target),
     relative: perKidRelative.some(Boolean),
-    reasonLine,
     kids: accounts,
     kidCosts: kidCostFigures(kids.length),
     ...(fundRows.length > 0
@@ -449,7 +441,6 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): Omit<GoalPlanV
     status: vacationStatus(plan, ctx.now),
     progressPct: clampPct(plan.savedThisYear, plan.annual),
     relative: false,
-    reasonLine: null,
     vacation: plan,
   };
 }
@@ -519,7 +510,6 @@ function simpleView(
     status,
     progressPct: clampPct(goal.currentBalance, target),
     relative: false,
-    reasonLine: null,
     simple: plan,
   };
 }

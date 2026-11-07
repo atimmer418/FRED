@@ -1,6 +1,7 @@
 import {
+  GIFT_DAY_LUMP,
+  GIFT_MIN_MONTHS,
   firstYearDue,
-  friendlyRound,
   futureValue,
   horizonMonths,
   isKidNotYetBorn,
@@ -50,22 +51,13 @@ describe('futureValue', () => {
   it('posts a lump at its index after growth', () => expect(futureValue(0, 0, 2, 0.12, [{ monthIndex: 1, amount: 100 }])).toBeCloseTo(101, 2));
 });
 
-describe('friendlyRound', () => {
-  it('rounds by band', () => { expect(friendlyRound(999)).toBe(1000); expect(friendlyRound(480)).toBe(500); expect(friendlyRound(2130)).toBe(2250); expect(friendlyRound(20)).toBe(0); });
-});
-
 describe('kidLumpSchedule', () => {
-  it('starts birthdays the year after birth and never in the deadline month', () => {
-    const s = kidLumpSchedule(217, NOW, 2026, 12);   // born Dec 2026, 18 in Dec 2044 = index 217
-    expect(s.birthday[0]).toBe(13);                  // Dec 2027
-    expect(s.birthday).not.toContain(217);
-    expect(s.birthday.length).toBe(17);
+  it('kidLumpSchedule returns every January index inside 1..n', () => {
+    expect(kidLumpSchedule(26, NOW)).toEqual([2, 14, 26]);
+    expect(kidLumpSchedule(25, NOW)).toEqual([2, 14]);
+    expect(kidLumpSchedule(1, NOW)).toEqual([]);
   });
-  it('shifts correctly when viewed in January', () => { const s = kidLumpSchedule(215, JAN, 2026, 12); expect(s.birthday[0]).toBe(11); expect(s.birthday).not.toContain(1); });
-  it('places an unknown birth month in July', () => expect(kidLumpSchedule(212, NOW, 2026, null).birthday[0]).toBe(8));
-  it('has no birthday lumps before a future birth year', () => expect(kidLumpSchedule(60, NOW, 2030, 5).birthday[0]).toBe(horizonMonths(NOW, 2031, 5)));
-  it('is empty when the only birthday would be the deadline month', () => expect(kidLumpSchedule(13, NOW, 2026, 12).birthday).toEqual([]));
-  it('lists every January', () => expect(kidLumpSchedule(24, NOW, 2026, 7).newYear).toEqual([2, 14]));
+  it('counts from the month after now when viewed in January', () => expect(kidLumpSchedule(25, JAN)).toEqual([12, 24]));
 });
 
 describe('kidDeadline', () => {
@@ -74,7 +66,7 @@ describe('kidDeadline', () => {
 
 describe('non-finite guards', () => {
   it('returns an empty schedule and zero horizon for NaN inputs', () => {
-    expect(kidLumpSchedule(NaN, NOW, 2026, 12)).toEqual({ birthday: [], newYear: [] });
+    expect(kidLumpSchedule(NaN, NOW)).toEqual([]);
     expect(horizonMonths(NOW, NaN, 12)).toBe(0);
   });
   it('returns zero from the other math for NaN inputs', () => {
@@ -85,31 +77,59 @@ describe('non-finite guards', () => {
 });
 
 describe('proposeKidAccountPlan', () => {
-  const base = { target: 250000, balance: 0, birthYear: 2026, birthMonth: 11, marketRate: 0.10, rateKindOverride: null, now: NOW };
-  it('pins the ritual example: $296 a month, $1,000 birthday, $500 New Year, FV $250,526', () => {
-    const p = proposeKidAccountPlan(base);
-    expect(p.n).toBe(216); expect(p.monthly).toBe(296); expect(p.birthdayLump).toBe(1000); expect(p.newYearLump).toBe(500);
-    expect(Math.round(futureValue(0, p.monthly, p.n, p.rate, p.lumps))).toBe(250526);
+  const base = { target: 250000, balance: 0, birthYear: 2026, birthMonth: 11, marketRate: 0.10, rateKindOverride: null, now: NOW, giftDays: false };
+  it('proposeKidAccountPlan with giftDays posts $1,000 each January and solves a lower monthly', () => {
+    const plain = proposeKidAccountPlan(base);
+    expect(plain.n).toBe(216); expect(plain.monthly).toBe(417);
+    expect(plain.newYearLump).toBe(0); expect(plain.lumps).toEqual([]); expect(plain.giftDaysAvailable).toBeTrue();
+
+    const gifts = proposeKidAccountPlan({ ...base, giftDays: true });
+    expect(gifts.newYearLump).toBe(1000);
+    expect(gifts.lumps.length).toBe(18);
+    expect(gifts.lumps.every(l => l.amount === GIFT_DAY_LUMP)).toBeTrue();
+    expect(gifts.monthly).toBeLessThan(417);
+    expect(gifts.monthly).toBeGreaterThan(0);
+    expect(futureValue(0, gifts.monthly, gifts.n, gifts.rate, gifts.lumps)).toBeGreaterThanOrEqual(250000);
   });
-  it('pins milestones from the target', () => { const p = proposeKidAccountPlan(base); expect(p.milestones.at18).toBe(250000); expect(p.milestones.at22).toBeCloseTo(372338.52, 0); expect(p.milestones.at30).toBeCloseTo(825912.24, 0); });
-  it('keeps lumps at or under 35% of the yearly plan across horizons', () => {
-    for (const birthYear of [2010, 2011, 2018, 2026]) {
-      const p = proposeKidAccountPlan({ ...base, birthYear });
-      expect(p.ritualsReason).toBeNull();
-      expect((p.birthdayLump + p.newYearLump) / (12 * p.monthly + p.birthdayLump + p.newYearLump)).toBeLessThanOrEqual(0.35);
+  it('giftDaysAvailable is false when the lumps alone reach the target', () => {
+    const p = proposeKidAccountPlan({ ...base, target: 10000, giftDays: true });
+    expect(p.n).toBe(216);
+    expect(p.giftDaysAvailable).toBeFalse();
+    expect(p.newYearLump).toBe(0);
+    expect(p.lumps).toEqual([]);
+    expect(p.monthly).toBeGreaterThan(0);
+  });
+  it('giftDaysAvailable is false under 24 months', () => {
+    // Born Oct 2009: 18 in Oct 2027, 11 months out.
+    const p = proposeKidAccountPlan({ ...base, birthYear: 2009, birthMonth: 10, giftDays: true });
+    expect(p.n).toBeLessThan(GIFT_MIN_MONTHS);
+    expect(p.giftDaysAvailable).toBeFalse();
+    expect(p.newYearLump).toBe(0);
+    expect(p.lumps).toEqual([]);
+    // 24 months exactly is enough.
+    const at24 = proposeKidAccountPlan({ ...base, birthYear: 2010, birthMonth: 11, giftDays: true });
+    expect(at24.n).toBe(24);
+    expect(at24.giftDaysAvailable).toBeTrue();
+  });
+  it('no birthday lumps exist anywhere in the schedule', () => {
+    for (const birthMonth of [1, 3, 7, 11, null]) {
+      const p = proposeKidAccountPlan({ ...base, birthMonth, giftDays: true });
+      expect(p.lumps.length).toBeGreaterThan(0);
+      for (const l of p.lumps) expect((NOW.getMonth() + l.monthIndex) % 12).withContext(`index ${l.monthIndex}`).toBe(0);
     }
   });
+  it('pins milestones from the target', () => { const p = proposeKidAccountPlan(base); expect(p.milestones.at18).toBe(250000); expect(p.milestones.at22).toBeCloseTo(372338.52, 0); expect(p.milestones.at30).toBeCloseTo(825912.24, 0); });
   it('reaches at least the target with the proposed plan across the grid', () => {
     for (const birthYear of [2010, 2011, 2018, 2026]) {
       for (const balance of [0, 20000]) {
-        const p = proposeKidAccountPlan({ ...base, birthYear, balance });
-        if (p.n === 0) continue;
-        expect(futureValue(balance, p.monthly, p.n, p.rate, p.lumps)).toBeGreaterThanOrEqual(250000);
+        for (const giftDays of [false, true]) {
+          const p = proposeKidAccountPlan({ ...base, birthYear, balance, giftDays });
+          if (p.n === 0) continue;
+          expect(futureValue(balance, p.monthly, p.n, p.rate, p.lumps)).toBeGreaterThanOrEqual(250000);
+        }
       }
     }
   });
-  it('drops rituals under 24 months with a reason', () => { const p = proposeKidAccountPlan({ ...base, birthYear: 2010, birthMonth: 1 }); expect(p.ritualsReason).toBe('short_horizon'); expect(p.birthdayLump).toBe(0); expect(p.newYearLump).toBe(0); });
-  it('drops rituals for a small plan', () => expect(proposeKidAccountPlan({ ...base, target: 3000 }).ritualsReason).toBe('small_plan'));
   it('uses the cash rate under 36 months', () => expect(proposeKidAccountPlan({ ...base, birthYear: 2009, birthMonth: 6 }).rateKind).toBe('cash'));
   it('keeps a market plan at market when overridden', () => expect(proposeKidAccountPlan({ ...base, birthYear: 2009, birthMonth: 6, rateKindOverride: 'market' }).rateKind).toBe('market'));
   it('handles n = 0 as due now', () => { const p = proposeKidAccountPlan({ ...base, birthYear: 2008, birthMonth: 10 }); expect(p.n).toBe(0); expect(p.monthly).toBe(0); expect(p.dueNow).toBe(250000); });

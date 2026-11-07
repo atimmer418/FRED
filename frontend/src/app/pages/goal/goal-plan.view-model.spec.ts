@@ -141,12 +141,10 @@ describe('buildGoalPlanView', () => {
     const shortKid = kidsGoal([
       { label: 'Teen', birthYear: Y - 17, birthMonth: 12, accounts: { plan529: account(), brokerage: account() } },
     ]);
-    expect(buildGoalPlanView(shortKid, ctx()).reasonLine)
-      .toBe('Under two years to go, so this one is a steady monthly amount');
 
     const all = [kidsView, relView, vacation, house, car, custom, buildGoalPlanView(shortKid, ctx())];
     for (const v of all) {
-      const text = [v.headline, v.subtitle, v.reasonLine ?? ''].join(' ');
+      const text = [v.headline, v.subtitle].join(' ');
       expect(text).not.toContain('\u2014');
     }
 
@@ -170,20 +168,21 @@ describe('buildGoalPlanView', () => {
     expect(at12.status).toEqual(at8.status);
   });
 
-  it('reads on_plan when a kid account matches the anchor-time plan, birthday lump included', () => {
-    const anchoredAt = '2026-01-01T00:00:00';
-    const loggedAt = '2026-06-01T00:00:00'; // 5 months after the anchor
+  it('reads on_plan when a kid account matches the anchor-time plan, January gift lump included', () => {
+    const anchoredAt = '2025-11-01T00:00:00';
+    const loggedAt = '2026-02-01T00:00:00'; // 3 months after the anchor
     const anchorPlan = proposeKidAccountPlan({
       target: 100_000, balance: 0, birthYear: Y - 3, birthMonth: 3,
-      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt),
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt), giftDays: true,
     });
-    const lumpsSoFar = anchorPlan.lumps.filter(l => l.monthIndex <= 5);
-    expect(lumpsSoFar.length).withContext('one March birthday lump inside the window').toBe(1);
-    const expected = futureValue(0, anchorPlan.monthly, 5, 0.10, lumpsSoFar);
+    const lumpsSoFar = anchorPlan.lumps.filter(l => l.monthIndex <= 3);
+    expect(lumpsSoFar).withContext('one January gift lump inside the window').toEqual([{ monthIndex: 2, amount: 1000 }]);
+    const expected = futureValue(0, anchorPlan.monthly, 3, 0.10, lumpsSoFar);
 
     const config: KidsConfig = {
       plan529Target: 100_000,
       brokerageTarget: 0,
+      giftDays: true,
       kids: [{
         label: 'Ada', birthYear: Y - 3, birthMonth: 3,
         accounts: {
@@ -328,9 +327,19 @@ describe('buildGoalPlanView first-year fund', () => {
     const row = view.kids!.find(k => k.account === 'plan529')!.perKid[0];
     expect(row.plan.n).toBe(240);
     expect(row.plan.rateKind).toBe('market');
-    expect(row.plan.monthly).toBe(46);
-    expect(row.plan.birthdayLump).toBe(150);
-    expect(row.plan.newYearLump).toBe(100);
+    expect(row.plan.monthly).toBe(63);
+    expect(row.plan.newYearLump).toBe(0);
+    expect(row.plan.lumps).toEqual([]);
+  });
+
+  it('posts gift days to the brokerage when it has a target, else to the 529', () => {
+    const kid = (): KidInput => ({ label: 'A', birthYear: null, birthMonth: null, accounts: { plan529: account(), brokerage: account() } });
+    const both = buildGoalPlanView(base({ type: 'KIDS', config: { plan529Target: 47_800, brokerageTarget: 100_000, giftDays: true, kids: [kid()] } }), ctx());
+    expect(both.kids!.find(k => k.account === 'brokerage')!.perKid[0].plan.newYearLump).toBe(1000);
+    expect(both.kids!.find(k => k.account === 'plan529')!.perKid[0].plan.newYearLump).toBe(0);
+    // $1,000 every January for 212 months grows past $47,800 on its own, so this one uses $123,960.
+    const only529 = buildGoalPlanView(base({ type: 'KIDS', config: { plan529Target: 123_960, brokerageTarget: 0, giftDays: true, kids: [kid()] } }), ctx());
+    expect(only529.kids![0].perKid[0].plan.newYearLump).toBe(1000);
   });
 
   it('grades a cash fund beside a market 529 at the cash rate', () => {
@@ -338,7 +347,7 @@ describe('buildGoalPlanView first-year fund', () => {
     const loggedAt = '2028-10-10T00:00:00';
     const anchor529 = proposeKidAccountPlan({
       target: 47_800, balance: 0, birthYear: 2028, birthMonth: 11,
-      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt),
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt), giftDays: false,
     });
     const bal529 = futureValue(0, anchor529.monthly, 23, 0.10, anchor529.lumps.filter(l => l.monthIndex <= 23));
     const balFund = futureValue(0, 834, 23, 0.04, []);
@@ -358,7 +367,7 @@ describe('buildGoalPlanView first-year fund', () => {
     const loggedAt = '2028-04-10T00:00:00'; // 17 months after the anchor
     const anchor529 = proposeKidAccountPlan({
       target: 47_800, balance: 0, birthYear: 2028, birthMonth: 11,
-      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt),
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt), giftDays: false,
     });
     const bal529 = futureValue(0, anchor529.monthly, 17, 0.10, anchor529.lumps.filter(l => l.monthIndex <= 17));
     const goal = fundGoal([

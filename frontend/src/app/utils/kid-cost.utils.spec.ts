@@ -2,11 +2,14 @@ import { KID_COST_SOURCES, USDA_2015_ANNUAL_BY_BAND, USDA_2015_TOTAL } from '../
 import {
   collegePresets,
   costCardSources,
+  familyMonthly,
   familySizeFactor,
+  firstYearFactor,
   firstYearTargetForRank,
   inflationFactor,
   kidCostFigures,
   kidRanks,
+  perKidMonthly,
 } from './kid-cost.utils';
 
 describe('kid cost constants', () => {
@@ -16,12 +19,34 @@ describe('kid cost constants', () => {
 });
 
 describe('familySizeFactor', () => {
-  it('follows the USDA table', () => {
+  it('follows the USDA table for 1 to 3 and the FRED estimate for 4 and 5', () => {
     expect(familySizeFactor(1)).toBe(1.27);
     expect(familySizeFactor(2)).toBe(1);
     expect(familySizeFactor(3)).toBe(0.76);
-    expect(familySizeFactor(7)).toBe(0.76);
+    expect(familySizeFactor(4)).toBe(0.64);
+    expect(familySizeFactor(5)).toBe(0.568);
+    expect(familySizeFactor(7)).toBe(0.568);
     expect(familySizeFactor(0)).toBe(1.27);
+  });
+  it('extends by the third-child marginal of 0.28', () => {
+    expect(4 * familySizeFactor(4) - 3 * familySizeFactor(3)).toBeCloseTo(0.28, 10);
+    expect(5 * familySizeFactor(5) - 4 * familySizeFactor(4)).toBeCloseTo(0.28, 10);
+  });
+});
+
+describe('firstYearFactor', () => {
+  it('is 1.27, 1.00, then 0.76 for every later rank', () =>
+    expect([1, 2, 3, 4, 5].map(firstYearFactor)).toEqual([1.27, 1, 0.76, 0.76, 0.76]));
+});
+
+describe('perKidMonthly and familyMonthly', () => {
+  it('familyMonthly(3) is 3510 and perKidMonthly(2) is 1540', () => {
+    expect(familyMonthly(3)).toBe(3510);
+    expect(perKidMonthly(2)).toBe(1540);
+  });
+  it('pins every family size to the nearest $10', () => {
+    expect([1, 2, 3, 4, 5].map(perKidMonthly)).toEqual([1950, 1540, 1170, 980, 870]);
+    expect([1, 2, 3, 4, 5].map(familyMonthly)).toEqual([1950, 3070, 3510, 3940, 4370]);
   });
 });
 
@@ -34,8 +59,14 @@ describe('kidCostFigures', () => {
     expect(kidCostFigures(3).perChildTotal).toBe(252393);
     expect(kidCostFigures(3).familyTotal).toBe(757180);
   });
+  it('per-kid totals for 1..5 kids are 421763, 332097, 252393, 212542, 188631 within $1', () => {
+    const pins = [421763, 332097, 252393, 212542, 188631];
+    [1, 2, 3, 4, 5].forEach((n, i) =>
+      expect(Math.abs(kidCostFigures(n).perChildTotal - pins[i])).withContext(`${n} kids`).toBeLessThanOrEqual(1));
+  });
   it('names the family size', () =>
-    expect([1, 2, 3, 5].map(n => kidCostFigures(n).sizeWording)).toEqual(['only', 'two', 'three_plus', 'three_plus']));
+    expect([1, 2, 3, 4, 5, 6].map(n => kidCostFigures(n).sizeWording))
+      .toEqual(['only', 'two', 'three_plus', 'four', 'five', 'five']));
   it('pins the four stages for two kids', () => {
     const s = kidCostFigures(2).stages;
     expect(s.map(x => x.key)).toEqual(['0-2', '3-5', '6-11', '12-17']);
@@ -56,8 +87,8 @@ describe('kidCostFigures', () => {
 });
 
 describe('firstYearTargetForRank', () => {
-  it('goes by birth order', () =>
-    expect([1, 2, 3, 4].map(firstYearTargetForRank)).toEqual([25700, 20800, 16500, 16500]));
+  it('firstYearTargetForRank keeps 25700, 20800, 16500 and 16500 for rank 5', () =>
+    expect([1, 2, 3, 4, 5].map(firstYearTargetForRank)).toEqual([25700, 20800, 16500, 16500, 16500]));
 });
 
 describe('kidRanks', () => {

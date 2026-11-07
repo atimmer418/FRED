@@ -24,8 +24,9 @@ import { CASH_RATE } from '../services/rate-assumptions.service';
 // ---------------------------------------------------------------------------
 
 export const CASH_HORIZON_MONTHS = 36;
-export const RITUAL_MIN_MONTHS = 24;
-export const RITUAL_MIN_ANNUAL = 600;
+/** Gift days: a flat amount per kid every January, offered from a 24-month horizon. */
+export const GIFT_DAY_LUMP = 1000;
+export const GIFT_MIN_MONTHS = 24;
 export const STALE_BALANCE_DAYS = 60;
 
 export interface LumpOccurrence {
@@ -84,51 +85,18 @@ export function futureValue(
   return v;
 }
 
-/** Nearest 50 under 500, nearest 100 under 2,000, nearest 250 above. */
-export function friendlyRound(x: number): number {
-  const step = x < 500 ? 50 : x < 2000 ? 100 : 250;
-  return Math.round(x / step) * step;
-}
-
 // ---------------------------------------------------------------------------
 // Kid plan schedule
 // ---------------------------------------------------------------------------
 
-export interface KidLumpSchedule {
-  /** Month indices of birthday lumps, within 1..n-1. */
-  birthday: number[];
-  /** Month indices of every January within 1..n. */
-  newYear: number[];
-}
-
-/**
- * Lump months for a kid's goal. Birthdays start the year after birth, fall in
- * `birthMonth` (July when unknown) and never land on the deadline month itself.
- * An undecided birth year is treated as the current year.
- */
-export function kidLumpSchedule(
-  n: number,
-  now: Date,
-  birthYear: number | null,
-  birthMonth: number | null,
-): KidLumpSchedule {
-  const by = birthYear ?? now.getFullYear();
-  const bm = birthMonth ?? 7;
-  if (![n, by, bm].every(Number.isFinite)) return { birthday: [], newYear: [] };
-
-  const birthday: number[] = [];
-  for (let year = by + 1; ; year++) {
-    const index = (year - now.getFullYear()) * 12 + (bm - (now.getMonth() + 1));
-    if (index > n - 1) break;
-    if (index >= 1) birthday.push(index);
-  }
-
-  const newYear: number[] = [];
+/** Month indices of every January within 1..n (index 1 is the month after `now`). */
+export function kidLumpSchedule(n: number, now: Date): number[] {
+  if (!Number.isFinite(n)) return [];
+  const januaries: number[] = [];
   for (let index = 1; index <= n; index++) {
-    if ((now.getMonth() + index) % 12 === 0) newYear.push(index);
+    if ((now.getMonth() + index) % 12 === 0) januaries.push(index);
   }
-
-  return { birthday, newYear };
+  return januaries;
 }
 
 /** The month a kid turns 18. Month is 1..12 (July when unknown). */
@@ -170,22 +138,18 @@ export interface AccountPlan {
   rateKind: RateKind;
   rate: number;
   monthly: number;
-  birthdayLump: number;
+  /** GIFT_DAY_LUMP when gift days are on and available, else 0. */
   newYearLump: number;
   lumps: LumpOccurrence[];
-  ritualsReason: 'short_horizon' | 'small_plan' | null;
+  /** True when the horizon is at least GIFT_MIN_MONTHS and the January lumps alone fall short of the target. */
+  giftDaysAvailable: boolean;
   dueNow: number;
   deadline: { year: number; month: number };
   assumedBirthYear: boolean;
   milestones: { at18: number; at22: number; at30: number };
 }
 
-/** One friendly notch down: the step size of the band the value sits in (500 steps by 50). */
-function lowerOneNotch(x: number): number {
-  const step = x <= 500 ? 50 : x <= 2000 ? 100 : 250;
-  return Math.max(0, x - step);
-}
-
+/** The account plan for one kid. With gift days on (and available), $1,000 lands every January and the monthly is solved net of it. */
 export function proposeKidAccountPlan(input: {
   target: number;
   balance: number;
@@ -194,6 +158,7 @@ export function proposeKidAccountPlan(input: {
   marketRate: number;
   rateKindOverride: RateKind | null;
   now: Date;
+  giftDays: boolean;
 }): AccountPlan {
   const { target, balance, now } = input;
   const dl = kidDeadline(now, input.birthYear, input.birthMonth);
@@ -206,39 +171,15 @@ export function proposeKidAccountPlan(input: {
   });
   const r = rate / 12;
 
-  let birthdayLump = 0;
-  let newYearLump = 0;
-  let ritualsReason: AccountPlan['ritualsReason'] = null;
-
-  const schedule = kidLumpSchedule(n, now, input.birthYear, input.birthMonth);
-  const buildLumps = (): LumpOccurrence[] =>
-    [
-      ...schedule.birthday.map((monthIndex) => ({ monthIndex, amount: birthdayLump })),
-      ...schedule.newYear.map((monthIndex) => ({ monthIndex, amount: newYearLump })),
-    ].filter((l) => l.amount > 0);
-  const lumpsOvershoot = (): boolean => target - futureValue(0, 0, n, rate, buildLumps()) <= 0;
-
-  // s0 is the yearly cost of the plain plan; rituals are carved out of it.
-  const s0 = 12 * requiredMonthly(balance, target, n, rate);
-  if (n < RITUAL_MIN_MONTHS) {
-    ritualsReason = 'short_horizon';
-  } else if (s0 < RITUAL_MIN_ANNUAL) {
-    ritualsReason = 'small_plan';
-  } else {
-    birthdayLump = schedule.birthday.length > 0 ? friendlyRound(0.2 * s0) : 0;
-    newYearLump = schedule.newYear.length > 0 ? friendlyRound(0.1 * s0) : 0;
-    for (let step = 0; step < 6 && lumpsOvershoot(); step++) {
-      if (step % 2 === 0) birthdayLump = lowerOneNotch(birthdayLump);
-      else newYearLump = lowerOneNotch(newYearLump);
-    }
-    if (lumpsOvershoot()) {
-      birthdayLump = 0;
-      newYearLump = 0;
-      ritualsReason = 'small_plan';
-    }
-  }
-
-  const lumps = buildLumps();
+  const januaryLumps: LumpOccurrence[] = kidLumpSchedule(n, now).map((monthIndex) => ({
+    monthIndex,
+    amount: GIFT_DAY_LUMP,
+  }));
+  // No shrink loop and no cap: when the lumps alone would reach the target, the offer is absent.
+  const giftDaysAvailable = n >= GIFT_MIN_MONTHS && target - futureValue(0, 0, n, rate, januaryLumps) > 0;
+  const giftsOn = input.giftDays && giftDaysAvailable;
+  const lumps = giftsOn ? januaryLumps : [];
+  const newYearLump = giftsOn ? GIFT_DAY_LUMP : 0;
   const monthly = requiredMonthly(balance, target - futureValue(0, 0, n, rate, lumps), n, rate);
 
   return {
@@ -246,10 +187,9 @@ export function proposeKidAccountPlan(input: {
     rateKind,
     rate,
     monthly,
-    birthdayLump,
     newYearLump,
     lumps,
-    ritualsReason,
+    giftDaysAvailable,
     dueNow: n === 0 ? Math.max(0, target - balance) : 0,
     deadline: { year: dl.year, month: dl.month },
     assumedBirthYear: dl.assumedBirthYear,

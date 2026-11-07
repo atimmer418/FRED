@@ -1,6 +1,6 @@
 import { AccountState, Goal, KidInput, KidsConfig } from '../../models/goal.model';
 import {
-  GoalForm, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, kidsQuizErrors, planInputsChanged,
+  GoalForm, MAX_KIDS, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, kidsQuizErrors, planInputsChanged,
   validateForm,
 } from './goal-form.model';
 
@@ -83,17 +83,51 @@ describe('goal-form.model', () => {
     expect(validateForm(f, NOW)).toEqual({});
   });
 
-  it('defaults the fund off when an eligible kid is under 12 months out and on at 12', () => {
-    // NOW is June 2026: May 2027 is 11 months out, June 2027 is 12.
+  it('MAX_KIDS is 5 and defaultFirstYearFund is true whenever a kid is unborn', () => {
+    expect(MAX_KIDS).toBe(5);
+    // NOW is June 2026. The old under-12-months rule is gone: one month out still defaults on.
     const row = (birthYear: number | null, birthMonth: number | null) =>
       ({ label: 'K', birthYear, birthMonth, undecided: birthYear == null });
-    expect(defaultFirstYearFund([row(2027, 5)], NOW)).toBeFalse();
-    expect(defaultFirstYearFund([row(2027, 6)], NOW)).toBeTrue();
+    expect(defaultFirstYearFund([row(2026, 7)], NOW)).toBeTrue();
+    expect(defaultFirstYearFund([row(2027, 5)], NOW)).toBeTrue();
     expect(defaultFirstYearFund([row(null, null)], NOW)).toBeTrue();
-    expect(defaultFirstYearFund([row(2027, 6), row(2027, 5)], NOW)).toBeFalse();
-    // Born kids are not eligible and do not count against the default.
+    expect(defaultFirstYearFund([row(2027, 6), row(2027, 5)], NOW)).toBeTrue();
     expect(defaultFirstYearFund([row(2020, 3), row(null, null)], NOW)).toBeTrue();
+    // Born kids only: off.
     expect(defaultFirstYearFund([row(2020, 3)], NOW)).toBeFalse();
+    expect(defaultFirstYearFund([row(2020, 3), row(2026, 6)], NOW)).toBeFalse();
+  });
+
+  it('formToConfig carries giftDays and formFromGoal reads a missing giftDays as false', () => {
+    const f = defaultForm('KIDS', NOW);
+    expect(f.kids.giftDays).toBeFalse();
+    expect((formToConfig(f, null, NOW) as KidsConfig).giftDays).toBeFalse();
+    f.kids.giftDays = true;
+    expect((formToConfig(f, null, NOW) as KidsConfig).giftDays).toBeTrue();
+
+    const missing = kidsGoal();
+    expect(formFromGoal(missing).kids.giftDays).toBeFalse();
+    const nulled = kidsGoal();
+    (nulled.config as KidsConfig).giftDays = null;
+    expect(formFromGoal(nulled).kids.giftDays).toBeFalse();
+    const on = kidsGoal();
+    (on.config as KidsConfig).giftDays = true;
+    expect(formFromGoal(on).kids.giftDays).toBeTrue();
+  });
+
+  it('flags a giftDays flip as a plan input change', () => {
+    const existing = kidsGoal();
+    const form = formFromGoal(existing);
+    expect(planInputsChanged(form, existing, NOW)).toBeFalse();
+    form.kids.giftDays = true;
+    expect(planInputsChanged(form, existing, NOW)).toBeTrue();
+  });
+
+  it('carries any trip count from 1 to 10', () => {
+    const f = defaultForm('VACATION', NOW);
+    f.tripsPerYear = 10;
+    f.budgetPerTrip = 1_000;
+    expect((formToConfig(f, null, NOW) as { tripsPerYear: number }).tripsPerYear).toBe(10);
   });
 
   it('gives the first child the rank 1 target even in a three-kid plan', () => {

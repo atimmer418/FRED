@@ -1,419 +1,189 @@
 <ion-header class="ion-no-border">
   <div class="blue-hero-header">
     <div class="hero-nav">
-      <button class="back-btn" (click)="goBack()" aria-label="Back">
+      <button type="button" class="back-btn" (click)="goBack()" aria-label="Back">
         <span class="material-symbols-outlined">arrow_back_ios_new</span>
       </button>
-      <h2 class="header-title">{{ title }}</h2>
-      <div class="back-btn-spacer"></div>
+      <h2 class="header-title">{{ title() }}</h2>
+      @if (mode() === 'saved') {
+        <button type="button" class="hero-action-btn gp-menu" (click)="openMenu()" aria-label="More">
+          <span class="material-symbols-outlined">more_horiz</span>
+        </button>
+      } @else {
+        <div class="back-btn-spacer"></div>
+      }
     </div>
   </div>
 </ion-header>
 
 <ion-content class="shell-content" appKeyboardAvoid>
-  <div class="shell-inner">
-    <ng-container *ngIf="ready()">
+  <div class="shell-inner gp-inner">
+    @if (ready()) {
+      @if (view(); as v) {
 
-      <!-- Step 1: setup inputs -->
-      <ng-container *ngIf="step() === 1">
-
-        <!-- KIDS: a five-card quiz, one card at a time -->
-        <div class="gl-card gl-quiz" *ngIf="form().type === 'KIDS'">
-          <div class="gl-dots" aria-hidden="true">
-            <span *ngFor="let c of quizCards" [class.on]="c === quizCard()" [class.done]="c < quizCard()"></span>
+        <!-- Hero: the monthly, who it is for, and the band -->
+        <section class="fd-hero gp-hero">
+          <p class="fd-hero-label">{{ v.heroLabel }}</p>
+          @if (isDueNow()) {
+            <div class="fd-hero-big">{{ fmtMoney(v.dueNow) }}<span> due now</span></div>
+          } @else {
+            <div class="fd-hero-big">{{ fmtMoney(heroAmount()) }}<span>/mo</span></div>
+          }
+          <div class="fd-hero-meta">
+            <span>{{ v.audience }}</span>
+            @if (v.perPaycheck !== null && !isDueNow()) {
+              <span class="fd-dot">·</span><span>~{{ fmtMoney(v.perPaycheck) }} a paycheck</span>
+            }
           </div>
 
-          <!-- Card 1: how many -->
-          <ng-container *ngIf="quizCard() === 1">
-            <h3 class="gl-q">How many kids are you planning for?</h3>
-            <div class="gl-field gl-count">
-              <div class="gl-stepper gl-stepper-lg">
-                <button type="button" (click)="removeKid(form().kids.kids.length - 1)"
-                        [disabled]="form().kids.kids.length <= 1" aria-label="Remove a kid">−</button>
-                <span class="gl-stepper-val">{{ form().kids.kids.length }}</span>
-                <button type="button" (click)="addKid()"
-                        [disabled]="form().kids.kids.length >= maxKids" aria-label="Add a kid">+</button>
-              </div>
-              <p class="gl-helper">Count the ones already here too.</p>
-              <p class="gl-helper gl-warn gl-dropped" *ngFor="let line of droppedKidLines()">{{ line }}</p>
+          @if (v.timeline) {
+            <app-kid-timeline [timeline]="v.timeline"></app-kid-timeline>
+          } @else {
+            <div class="fd-hero-bar"><i [style.width.%]="v.progressPct"></i></div>
+            <!-- &ngsp; keeps a space between the flex items in the text (a flex box never renders it). -->
+            <div class="fd-hero-labels gp-band">
+              <span>{{ bandLine().saved }}</span>&ngsp;
+              <span class="gp-band-right">· {{ bandLine().target }}&ngsp;
+                @if (v.pill) { <span class="fd-pill" [class.cash]="v.pill === 'Cash'">{{ v.pill }}</span> }
+              </span>
             </div>
-          </ng-container>
+          }
+        </section>
 
-          <!-- Card 2: when -->
-          <ng-container *ngIf="quizCard() === 2">
-            <h3 class="gl-q">When?</h3>
-            <div class="gl-kid" *ngFor="let kid of form().kids.kids; let i = index; trackBy: trackIndex">
-              <input class="gl-input gl-kid-label" type="text" maxlength="30" [attr.aria-label]="'Name for ' + kid.label"
-                     [ngModel]="kid.label" (ngModelChange)="patchKid(i, { label: $event })" />
-              <div class="gl-kid-row">
-                <select class="gl-input gl-select" [attr.aria-label]="'Birth month for ' + kid.label" [disabled]="kid.undecided"
-                        [ngModel]="kid.birthMonth" (ngModelChange)="setKidMonth(i, $event)">
-                  <option [ngValue]="null">Not sure</option>
-                  <option *ngFor="let m of monthNames; let mi = index" [ngValue]="mi + 1">{{ m }}</option>
-                </select>
-                <input class="gl-input gl-year" type="text" inputmode="numeric" placeholder="Year" [attr.aria-label]="'Birth year for ' + kid.label"
-                       [disabled]="kid.undecided" [value]="fmtNumber(kid.birthYear)" (input)="onKidYear(i, $event)" />
-              </div>
-              <label class="gl-check">
-                <input type="checkbox" [checked]="kid.undecided" (change)="toggleUndecided(i)" />
-                <span>Not sure yet</span>
+        <!-- KIDS: one card per kid -->
+        @if (v.kids) {
+          <div class="fd-zone gp-zone">
+            <span>Per kid</span>
+            <span class="gp-zone-right">
+              <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
+              @if (kidCards().length > 1) {
+                <span class="gp-dots" aria-hidden="true">
+                  @for (card of kidCards(); track card.index) {
+                    <i [class.on]="card.index === activeKid()"></i>
+                  }
+                </span>
+              }
+            </span>
+          </div>
+
+          <swiper-container #pager class="gp-pager" [class.single]="kidCards().length === 1" init="false" (swiperslidechange)="onKidSlide($event)">
+            @for (card of kidCards(); track card.index) {
+              <swiper-slide class="gp-slide">
+                <div class="gp-kcard">
+                  <div class="gp-kh">
+                    <div class="gp-av"><span class="material-symbols-outlined">child_care</span></div>
+                    <div class="gp-kname">
+                      @if (renaming() === card.index) {
+                        <span class="gp-kname-edit">
+                          <input class="gp-rename" type="text" maxlength="30" autocapitalize="words" autofocus
+                                 [attr.aria-label]="'Name for ' + card.label" [value]="card.label"
+                                 (keydown.enter)="commitRenameFrom(card.index, $event)" (blur)="commitRenameFrom(card.index, $event)" />
+                          <button type="button" class="gp-check" aria-label="Save name" (mousedown)="$event.preventDefault()" (click)="commitRenameFrom(card.index, $event)">
+                            <span class="material-symbols-outlined">check</span>
+                          </button>
+                        </span>
+                      } @else {
+                        <span class="gp-kname-row">
+                          <b>{{ card.label }}</b>
+                          <button type="button" class="gp-pen" [attr.aria-label]="'Rename ' + card.label" (click)="beginRename(card.index)">
+                            <span class="material-symbols-outlined">edit</span>
+                          </button>
+                        </span>
+                      }
+                      <span class="gp-ksub">{{ card.subLine }}</span>
+                    </div>
+                    <em class="gp-kmonthly">{{ fmtMoney(card.monthly) }}/mo</em>
+                  </div>
+
+                  @for (unit of card.units; track unit.key) {
+                    <div class="gp-krow">
+                      <div class="gp-kic"><span class="material-symbols-outlined">{{ unit.icon }}</span></div>
+                      <div class="gp-ktx">
+                        <button type="button" class="gp-klabel" (click)="openUnitDetail(card.index, unit.key)">
+                          <b>{{ unit.title }}</b><span class="fd-pill" [class.cash]="unit.pill === 'Cash'">{{ unit.pill }}</span>
+                        </button>
+                        <button type="button" class="gp-ktarget" (click)="toggleBalance(card.index, unit.key)">{{ unit.targetLine }}</button>
+                      </div>
+                      @if (unit.finished) {
+                        <em class="gp-kdone"><span class="material-symbols-outlined">check</span>Done</em>
+                      } @else {
+                        <em>{{ fmtMoney(unit.monthly) }}</em>
+                      }
+                    </div>
+                    @if (balanceOpen() === balanceKey(card.index, unit.key)) {
+                      <div class="gp-bal">
+                        <label class="gp-bal-label" [attr.for]="'gp-bal-' + unit.key + '-' + card.index">Saved so far</label>
+                        <div class="gp-bal-field">
+                          <span class="gp-bal-pre">$</span>
+                          <input class="gp-bal-input" type="text" inputmode="numeric" [id]="'gp-bal-' + unit.key + '-' + card.index"
+                                 [value]="fmtNumber(unit.balance)" (blur)="onBalanceBlur({ kid: card.index, account: unit.key }, $event)" />
+                        </div>
+                      </div>
+                    }
+                  }
+                </div>
+              </swiper-slide>
+            }
+          </swiper-container>
+        } @else {
+          <!-- Every other type: the status chip on the zone label, then the one Saved so far tile -->
+          <div class="fd-zone gp-zone">
+            <span>Your plan</span>
+            <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
+          </div>
+          <div class="fd-tiles gp-tiles">
+            <div class="fd-tile">
+              <label class="fd-tile-label" [attr.for]="v.vacation ? 'gp-bal-vacation' : 'gp-bal-current'">
+                {{ v.vacation ? 'Saved so far this year' : 'Saved so far' }}
               </label>
-              <p class="gl-error" role="alert" *ngIf="errors()['kid.' + i + '.birthYear']">{{ errors()['kid.' + i + '.birthYear'] }}</p>
-            </div>
-          </ng-container>
-
-          <!-- Card 3: what a kid costs, and the first-year switch -->
-          <ng-container *ngIf="quizCard() === 3">
-            <h3 class="gl-q">What a kid costs</h3>
-            <ng-container *ngIf="quizCosts() as c">
-              <p class="gl-quiz-big">{{ costHeadline(c) }}.</p>
-              <p class="gl-quiz-line">{{ firstChildLine }}</p>
-              <p class="gl-helper">{{ costSourceLine(c) }}</p>
-            </ng-container>
-
-            <div class="gl-fund-switch" *ngIf="anyKidEligible(); else allBorn">
-              <div class="gl-switch-row">
-                <span class="gl-switch-label" id="gl-fund-switch-label">Plan for the first year</span>
-                <button type="button" role="switch" class="gl-switch" aria-labelledby="gl-fund-switch-label"
-                        [class.on]="form().kids.firstYearFund" [attr.aria-checked]="form().kids.firstYearFund"
-                        (click)="toggleFirstYearFund()">
-                  <span class="gl-switch-knob"></span>
-                </button>
-              </div>
-              <p class="gl-quiz-line" *ngIf="fundPreview() as p">Adds about {{ fmtMoney(p.monthly) }} a month until {{ p.endsLabel }}</p>
-              <p class="gl-helper" *ngIf="fundShortRunwayMonths() as n">{{ shortRunwayLine(n) }}</p>
-              <p class="gl-helper gl-warn" *ngIf="form().kids.firstYearFund && fundLoggedBalance() > 0">Turning this off removes the {{ fmtMoney(fundLoggedBalance()) }} you logged for it from this plan.</p>
-            </div>
-            <ng-template #allBorn>
-              <p class="gl-helper gl-all-born">Your kids are already here, so there is no first-year fund to plan.</p>
-            </ng-template>
-          </ng-container>
-
-          <!-- Card 4: college -->
-          <ng-container *ngIf="quizCard() === 4">
-            <h3 class="gl-q">How much do you want to set aside for college?</h3>
-            <div class="gl-select-rows">
-              <button type="button" class="gl-select-row" *ngFor="let p of collegeRows"
-                      [class.selected]="isCollegeChoice(p.key)" [attr.aria-pressed]="isCollegeChoice(p.key)" (click)="setCollegeChoice(p.key)">
-                <span class="gl-select-label">{{ p.label }}</span>
-                <span class="gl-select-amount">{{ fmtMoney(p.amount) }}</span>
-              </button>
-              <button type="button" class="gl-select-row" [class.selected]="isCollegeChoice('custom')" [attr.aria-pressed]="isCollegeChoice('custom')" (click)="setCollegeChoice('custom')">
-                <span class="gl-select-label">Another amount</span>
-              </button>
-              <button type="button" class="gl-select-row" [class.selected]="isCollegeChoice('none')" [attr.aria-pressed]="isCollegeChoice('none')" (click)="setCollegeChoice('none')">
-                <span class="gl-select-label">None for now</span>
-              </button>
-            </div>
-            <div class="gl-field gl-custom" *ngIf="isCollegeChoice('custom')">
-              <label class="gl-label" for="gl-college-custom">College amount per kid</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-college-custom" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(form().kids.plan529Target)" (input)="onKidsTarget('plan529Target', $event)" />
-              </div>
-            </div>
-            <p class="gl-error" role="alert" *ngIf="errors()['plan529Target']">{{ errors()['plan529Target'] }}</p>
-            <p class="gl-helper">This goes in a 529, a state college savings plan you open outside FRED. Per kid, four years at 2025-26 prices from the College Board. College will likely cost more by the time your kid starts: at 3% a year, $47,800 today is about $81,000 in 18 years. Raise the amount any time.</p>
-          </ng-container>
-
-          <!-- Card 5: at 18, the goal name, and the CTA -->
-          <ng-container *ngIf="quizCard() === 5">
-            <h3 class="gl-q">How much do you want each kid to start adult life with?</h3>
-            <div class="gl-select-rows">
-              <button type="button" class="gl-select-row" *ngFor="let amount of at18Presets"
-                      [class.selected]="isAt18Choice(amount)" [attr.aria-pressed]="isAt18Choice(amount)" (click)="setAt18Choice(amount)">
-                <span class="gl-select-label">{{ fmtMoney(amount) }}</span>
-              </button>
-              <button type="button" class="gl-select-row" [class.selected]="isAt18Choice('custom')" [attr.aria-pressed]="isAt18Choice('custom')" (click)="setAt18Choice('custom')">
-                <span class="gl-select-label">Another amount</span>
-              </button>
-              <button type="button" class="gl-select-row" [class.selected]="isAt18Choice('none')" [attr.aria-pressed]="isAt18Choice('none')" (click)="setAt18Choice('none')">
-                <span class="gl-select-label">Nothing extra</span>
-              </button>
-            </div>
-            <div class="gl-field gl-custom" *ngIf="isAt18Choice('custom')">
-              <label class="gl-label" for="gl-at18-custom">Amount per kid at 18</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-at18-custom" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(form().kids.brokerageTarget)" (input)="onKidsTarget('brokerageTarget', $event)" />
-              </div>
-            </div>
-            <p class="gl-error" role="alert" *ngIf="errors()['brokerageTarget']">{{ errors()['brokerageTarget'] }}</p>
-            <p class="gl-helper">A custodial or regular brokerage account you open outside FRED.</p>
-
-            <div class="gl-field gl-quiz-name">
-              <label class="gl-label" for="gl-name">Goal name</label>
-              <input id="gl-name" class="gl-input" type="text" maxlength="50"
-                     [ngModel]="form().name" (ngModelChange)="patch({ name: $event })" />
-              <p class="gl-error" role="alert" *ngIf="errors()['name']">{{ errors()['name'] }}</p>
-            </div>
-            <p class="gl-error" role="alert" *ngIf="errors()['kidsTargets']">{{ errors()['kidsTargets'] }}</p>
-          </ng-container>
-
-          <div class="gl-quiz-nav">
-            <button type="button" class="gl-quiz-back" *ngIf="quizCard() > 1" (click)="prevQuizCard()">Back</button>
-            <button type="button" class="gl-cta" (click)="nextQuizCard()">{{ quizCard() === 5 ? 'Show my plan' : 'Next' }}</button>
-          </div>
-        </div>
-
-        <div class="gl-card" *ngIf="form().type !== 'KIDS'">
-
-          <!-- Goal name (every type but KIDS, which asks on its last quiz card) -->
-          <div class="gl-field">
-            <label class="gl-label" for="gl-name">Goal name</label>
-            <input id="gl-name" class="gl-input" type="text" maxlength="50"
-                   [ngModel]="form().name" (ngModelChange)="patch({ name: $event })" />
-            <p class="gl-error" role="alert" *ngIf="errors()['name']">{{ errors()['name'] }}</p>
-          </div>
-
-          <!-- Icon row (CUSTOM only) -->
-          <div class="gl-field" *ngIf="form().type === 'CUSTOM'">
-            <span class="gl-label">Icon</span>
-            <div class="gl-icons">
-              <button type="button" *ngFor="let opt of iconOptions" class="gl-icon-btn"
-                      [class.on]="form().icon === opt.icon" [attr.aria-pressed]="form().icon === opt.icon" [attr.aria-label]="opt.label"
-                      (click)="setIcon(opt.icon)">
-                <span class="material-symbols-outlined">{{ opt.icon }}</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- HOUSE / CAR -->
-          <ng-container *ngIf="form().type === 'HOUSE' || form().type === 'CAR'">
-            <div class="gl-field">
-              <label class="gl-label" for="gl-price">Price</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-price" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(form().price)" (input)="onNumber('price', $event)" />
-              </div>
-              <p class="gl-error" role="alert" *ngIf="errors()['price']">{{ errors()['price'] }}</p>
-            </div>
-            <div class="gl-field">
-              <span class="gl-label">Down payment</span>
-              <div class="gl-chips">
-                <button type="button" [class.on]="!form().fullPrice && form().downPaymentPct === 10" [attr.aria-pressed]="!form().fullPrice && form().downPaymentPct === 10" (click)="setDownPaymentPct(10)">10%</button>
-                <button type="button" [class.on]="!form().fullPrice && form().downPaymentPct === 20" [attr.aria-pressed]="!form().fullPrice && form().downPaymentPct === 20" (click)="setDownPaymentPct(20)">20%</button>
-                <button type="button" [class.on]="form().fullPrice" [attr.aria-pressed]="form().fullPrice" (click)="setFullPrice()">Full price</button>
-              </div>
-            </div>
-          </ng-container>
-
-          <!-- VACATION -->
-          <ng-container *ngIf="form().type === 'VACATION'">
-            <div class="gl-field">
-              <span class="gl-label">Trips a year</span>
-              <div class="gl-chips">
-                <button type="button" *ngFor="let n of tripChoices" [class.on]="form().tripsPerYear === n" [attr.aria-pressed]="form().tripsPerYear === n" (click)="setTrips(n)">{{ n }}</button>
-              </div>
-            </div>
-            <div class="gl-field">
-              <label class="gl-label" for="gl-budget">Budget per trip</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-budget" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(form().budgetPerTrip)" (input)="onNumber('budgetPerTrip', $event)" />
-              </div>
-              <p class="gl-error" role="alert" *ngIf="errors()['budgetPerTrip']">{{ errors()['budgetPerTrip'] }}</p>
-            </div>
-          </ng-container>
-
-          <!-- EMERGENCY_FUND -->
-          <ng-container *ngIf="form().type === 'EMERGENCY_FUND'">
-            <div class="gl-field">
-              <label class="gl-label" for="gl-expenses">Monthly expenses</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-expenses" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(form().monthlyExpenses)" (input)="onNumber('monthlyExpenses', $event)" />
-              </div>
-              <p class="gl-error" role="alert" *ngIf="errors()['monthlyExpenses']">{{ errors()['monthlyExpenses'] }}</p>
-            </div>
-            <div class="gl-field">
-              <span class="gl-label">Cover</span>
-              <div class="gl-chips">
-                <button type="button" *ngFor="let n of monthChoices" [class.on]="form().months === n" [attr.aria-pressed]="form().months === n" (click)="setMonths(n)">{{ n }} months</button>
-              </div>
-            </div>
-          </ng-container>
-
-          <!-- WEDDING / CUSTOM -->
-          <div class="gl-field" *ngIf="form().type === 'WEDDING' || form().type === 'CUSTOM'">
-            <label class="gl-label" for="gl-amount">Target amount</label>
-            <div class="gl-money">
-              <span class="gl-prefix">$</span>
-              <input id="gl-amount" class="gl-input" type="text" inputmode="numeric"
-                     [value]="fmtNumber(form().targetAmount)" (input)="onNumber('targetAmount', $event)" />
-            </div>
-            <p class="gl-error" role="alert" *ngIf="errors()['targetAmount']">{{ errors()['targetAmount'] }}</p>
-          </div>
-
-          <!-- Target year (everything except KIDS and VACATION) -->
-          <div class="gl-field" *ngIf="form().type !== 'KIDS' && form().type !== 'VACATION'">
-            <label class="gl-label" for="gl-year">Target year</label>
-            <input id="gl-year" class="gl-input" type="text" inputmode="numeric" maxlength="4"
-                   [value]="fmtNumber(form().targetYear)" (input)="onNumber('targetYear', $event)" />
-            <p class="gl-error" role="alert" *ngIf="errors()['targetYear']">{{ errors()['targetYear'] }}</p>
-          </div>
-
-          <button type="button" class="gl-cta" (click)="showPlan()">Show my plan</button>
-        </div>
-      </ng-container>
-
-      <!-- Step 2: plan view -->
-      <ng-container *ngIf="step() === 2">
-        <ng-container *ngIf="view() as v">
-
-          <!-- Hero: the monthly figure -->
-          <div class="gl-hero">
-            <div class="gl-hero-amount" *ngIf="!showDueNow(); else dueNowHero">{{ fmtMoney(v.monthlyTotal) }}<span class="gl-hero-unit">/mo</span></div>
-            <ng-template #dueNowHero>
-              <div class="gl-hero-amount">{{ fmtMoney(v.dueNow) }}<span class="gl-hero-unit"> due now</span></div>
-            </ng-template>
-            <p class="gl-hero-paycheck" *ngIf="v.perPaycheck !== null && !showDueNow()">about {{ fmtMoney(v.perPaycheck) }} a paycheck</p>
-            <p class="gl-hero-headline">{{ v.headline }}</p>
-            <p class="gl-hero-fund" *ngIf="heroFundLine() as fundLine">{{ fundLine }}</p>
-          </div>
-
-          <!-- Return assumption (vacation money never grows, so it has none) -->
-          <div class="gl-card gl-rate" *ngIf="form().type !== 'VACATION'">
-            <ng-container *ngIf="v.rateKind === 'market'; else cashRate">
-              <div class="gl-rate-head">
-                <span class="gl-label">Return assumption, shared with your Freedom Date</span>
-                <button type="button" class="gl-reset" *ngIf="!isDefaultRate()" (click)="resetRate()">Reset to standard</button>
-              </div>
-              <div class="fd-scenario-chips">
-                <button type="button" *ngFor="let s of returnScenarios"
-                        [class.on]="selectedRate() === s.rate" [attr.aria-pressed]="selectedRate() === s.rate" (click)="selectRate(s.rate)">{{ s.label }}</button>
-              </div>
-            </ng-container>
-            <ng-template #cashRate>
-              <p class="gl-cash-note">Planned as cash at about 4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
-            </ng-template>
-          </div>
-
-          <!-- Collapsed inputs -->
-          <button type="button" class="gl-inputs-row" (click)="backToInputs()">
-            <span class="gl-inputs-text">{{ inputsSummary() }}</span>
-            <span class="gl-inputs-edit">Edit</span>
-          </button>
-
-          <!-- Status (edit mode) -->
-          <div class="gl-status" *ngIf="statusLine() as line" [class.behind]="v.status.kind === 'behind'">
-            <p class="gl-status-line">{{ line }}</p>
-            <p class="gl-catchup" *ngIf="catchUpLine() as catchUp">{{ catchUp }}</p>
-            <p class="gl-stale" *ngIf="showUpdateBalance()">Update your balance</p>
-          </div>
-
-          <!-- KIDS: first-year fund (when any kid holds one) -->
-          <ng-container *ngIf="visibleFundRows().length > 0">
-            <div class="gl-card gl-fund">
-              <div class="gl-account-title">First-year fund</div>
-              <div class="gl-fund-row" *ngFor="let row of visibleFundRows(); trackBy: trackFundRow">
-                <ng-container *ngIf="fundRowLines(row) as lines">
-                  <p class="gl-fund-lead">{{ lines.lead }}</p>
-                  <p class="gl-account-line" *ngIf="lines.plan">{{ lines.plan }}</p>
-                </ng-container>
-                <div class="gl-field gl-balance">
-                  <label class="gl-label" [attr.for]="'gl-bal-firstYear-' + row.kidIndex">Saved so far</label>
-                  <div class="gl-money">
-                    <span class="gl-prefix">$</span>
-                    <input class="gl-input" type="text" inputmode="numeric" [id]="'gl-bal-firstYear-' + row.kidIndex"
-                           [value]="fmtNumber(row.balance)" (blur)="onBalanceBlur({ kid: row.kidIndex, account: 'firstYear' }, $event)" />
-                  </div>
-                </div>
-              </div>
-              <p class="gl-helper gl-fund-footer">FRED estimate: first-year average (USDA, adjusted to {{ quizCosts().asOfLabel }} dollars) plus birth costs (Peterson-KFF, {{ childbirthYearLabel }}), rounded up. Keep this in your own savings or brokerage account. FRED does not hold or move goal money.</p>
-            </div>
-            <p class="gl-note" *ngIf="showInvestedFundNote()">Markets can be down when the day comes, so treat this as a head start. Once you pick a date less than three years away, FRED plans this fund as cash.</p>
-          </ng-container>
-
-          <!-- KIDS: one card per account, each kid on demand -->
-          <ng-container *ngIf="v.kids">
-            <div class="gl-card gl-account" *ngFor="let acct of v.kids; trackBy: trackAccount">
-              <div class="gl-account-title">{{ acct.label }}</div>
-              <p class="gl-account-line">{{ accountLine(acct.totals) }}</p>
-              <p class="gl-helper" *ngIf="acct.account === 'plan529' && collegePresetSelected()">Based on {{ collegePriceYear }} college prices, which tend to rise.</p>
-              <button type="button" class="gl-link" (click)="toggleKidDetails(acct.account)">
-                {{ kidDetailsOpen()[acct.account] ? 'Hide each kid' : 'Show each kid' }}
-              </button>
-
-              <ng-container *ngIf="kidDetailsOpen()[acct.account]">
-                <div class="gl-kid-card" *ngFor="let row of acct.perKid; let i = index; trackBy: trackIndex">
-                  <div class="gl-kid-name">{{ row.label }}</div>
-                  <div class="gl-ritual">
-                    <span>Every month</span><b>{{ fmtMoney(row.plan.monthly) }}</b>
-                  </div>
-                  <div class="gl-ritual" *ngIf="row.plan.newYearLump > 0">
-                    <span>Every New Year</span><b>{{ fmtMoney(row.plan.newYearLump) }}</b>
-                  </div>
-                  <div class="gl-milestones">
-                    <div class="gl-milestone" *ngFor="let m of milestones(row); trackBy: trackLabel">
-                      <span class="gl-ms-label">{{ m.label }}</span>
-                      <span class="gl-ms-year" *ngIf="m.year">{{ m.year }}</span>
-                      <b>{{ m.value }}</b>
-                    </div>
-                  </div>
-                  <div class="gl-field gl-balance">
-                    <label class="gl-label" [attr.for]="'gl-bal-' + acct.account + '-' + i">
-                      {{ acct.account === 'plan529' ? '529 balance' : 'Brokerage balance' }}
-                    </label>
-                    <div class="gl-money">
-                      <span class="gl-prefix">$</span>
-                      <input class="gl-input" type="text" inputmode="numeric" [id]="'gl-bal-' + acct.account + '-' + i"
-                             [value]="fmtNumber(row.balance)" (blur)="onBalanceBlur({ kid: i, account: acct.account }, $event)" />
-                    </div>
-                  </div>
-                </div>
-              </ng-container>
-            </div>
-            <p class="gl-note" *ngIf="hasUndecidedKid()">A kid with no date yet is planned as if born this year, so you save a little more than you may need.</p>
-          </ng-container>
-
-          <!-- Simple goals -->
-          <div class="gl-card gl-simple" *ngIf="v.simple as s">
-            <p class="gl-split" *ngIf="!showDueNow()">from you {{ fmtMoney(s.fromYou) }}, from growth {{ fmtMoney(s.fromGrowth) }}</p>
-            <div class="gl-field gl-balance">
-              <label class="gl-label" for="gl-bal-current">Saved so far</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-bal-current" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(draftGoal().currentBalance)" (blur)="onBalanceBlur('current', $event)" />
+              <div class="fd-tile-edit">
+                <span class="fd-pre">$</span>
+                @if (v.vacation) {
+                  <input id="gp-bal-vacation" class="fd-tile-input" type="text" inputmode="numeric"
+                         [value]="fmtNumber(simpleBalance())" (blur)="onBalanceBlur('vacation', $event)" />
+                } @else {
+                  <input id="gp-bal-current" class="fd-tile-input" type="text" inputmode="numeric"
+                         [value]="fmtNumber(simpleBalance())" (blur)="onBalanceBlur('current', $event)" />
+                }
               </div>
             </div>
           </div>
+        }
 
-          <!-- Vacation: saved so far this year (setup and edit), progress line in edit -->
-          <div class="gl-card gl-vacation" *ngIf="v.vacation as vac">
-            <label class="gl-reset-line" for="gl-bal-vacation" *ngIf="mode() === 'edit' && vac.resetNeeded">
-              New year, new trips. Saved so far resets, tap to update.
-            </label>
-            <p class="gl-split" *ngIf="mode() === 'edit'">On plan, {{ fmtMoney(vac.expectedSoFar) }} is set aside by now this year</p>
-            <div class="gl-field gl-balance">
-              <label class="gl-label" for="gl-bal-vacation">Saved so far this year</label>
-              <div class="gl-money">
-                <span class="gl-prefix">$</span>
-                <input id="gl-bal-vacation" class="gl-input" type="text" inputmode="numeric"
-                       [value]="fmtNumber(vac.savedThisYear)" (blur)="onBalanceBlur('vacation', $event)" />
-              </div>
+        <!-- Gift days (KIDS, when every receiving unit can take the January lump) -->
+        @if (giftRow(); as g) {
+          <app-quiz-switch-row tone="light" icon="cake" [title]="g.title" [line]="g.line" [on]="v.giftDays!.on"
+                               (onChange)="toggleGiftDays($event)"></app-quiz-switch-row>
+        }
+
+        <!-- Return assumption -->
+        @if (v.rateKind === 'market') {
+          <div class="fd-seg">
+            <span class="fd-seg-label">Return</span>
+            <div class="fd-scenario-chips">
+              @for (s of returnScenarios; track s.rate) {
+                <button type="button" [class.on]="selectedRate() === s.rate" [attr.aria-pressed]="selectedRate() === s.rate" (click)="selectRate(s.rate)">{{ s.label }}</button>
+              }
             </div>
           </div>
+        } @else {
+          <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
+        }
 
-          <!-- Footer -->
-          <div class="gl-footer">
-            <button type="button" class="gl-cta" [disabled]="saving()" (click)="save()">{{ ctaLabel() }}</button>
-            <button type="button" class="gl-complete" *ngIf="mode() === 'edit' && form().type !== 'VACATION'"
-                    [disabled]="saving()" (click)="markCompleted()">
-              {{ existing()?.completed ? 'Reopen goal' : 'Mark completed' }}
-            </button>
-            <button type="button" class="gl-remove" *ngIf="mode() === 'edit'" (click)="confirmRemove()">Remove goal</button>
+        <!-- How FRED helps -->
+        @if (!isDueNow()) {
+          <div class="fd-how">
+            <span class="material-symbols-outlined">account_balance_wallet</span>
+            <p><b>How FRED helps.</b> {{ v.howFredHelps }}</p>
           </div>
+        }
 
-        </ng-container>
-      </ng-container>
+        <!-- CTA, preview modes only -->
+        @if (ctaLabel(); as label) {
+          <button type="button" class="fd-cta gp-cta" [disabled]="saving()" (click)="mode() === 'preview-new' ? startPlan() : updatePlan()">{{ label }}</button>
+        }
 
-    </ng-container>
+      }
+    }
   </div>
 </ion-content>

@@ -491,7 +491,7 @@ describe('GoalQuizPage', () => {
     discardPeriodicTasks();
   }));
 
-  it('Show my plan on an edit navigates to the goal page and keeps the existing goal in the draft', fakeAsync(async () => {
+  it('Show my plan on an edit navigates to the edit preview route and keeps the existing goal in the draft', fakeAsync(async () => {
     const goal = houseGoal(4);
     const fixture = await create({ id: '4' }, { goals: [goal] });
     const page = fixture.componentInstance;
@@ -500,7 +500,8 @@ describe('GoalQuizPage', () => {
     fixture.detectChanges();
     expect(draft.draft()?.existing).toBe(goal);
     tick(2500);
-    expect(navCtrl.navigateForward).toHaveBeenCalledWith(['/goals', 4]);
+    // The preview stacks over the quiz; Update my plan pops back to the saved page beneath (Ruling P4).
+    expect(navCtrl.navigateForward).toHaveBeenCalledWith(['/goals', 4, 'edit', 'plan']);
     discardPeriodicTasks();
   }));
 

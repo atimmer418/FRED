@@ -1,0 +1,357 @@
+// ─── Plan page pieces ──────────────────────────────────────────────────────────
+// The gradient hero, tiles, insight rows, segmented return chips, zone labels,
+// the Invested/Cash pill, the "How FRED helps" note and the black CTA that the
+// goal plan page and the Freedom plan page share. Lifted from the Freedom detail
+// sheet (components/freedom-detail-sheet), which the Freedom page replaces.
+//
+// Import from a page SCSS:
+//   src/app/pages/<page>/*.scss  →  @use '../../../theme/plan-page';
+
+// ── Hero ─────────────────────────────────────────────────────────────────────
+.fd-hero {
+  background: linear-gradient(160deg, #1e60e3, #0e3a96);
+  border-radius: 20px;
+  padding: 18px 18px 16px;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 14px 30px -12px rgba(22, 48, 155, 0.55);
+  font-family: 'Manrope', sans-serif;
+}
+
+.fd-hero-label {
+  margin: 0;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+// The year on the Freedom page, the monthly on a goal page.
+.fd-hero-year,
+.fd-hero-big {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+
+  span {
+    font-size: 17px;
+    font-weight: 700;
+    opacity: 0.7;
+  }
+
+  &--empty { opacity: 0.5; }
+}
+
+.fd-hero-year {
+  font-size: 46px;
+}
+
+.fd-hero-meta {
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
+
+  .fd-dot { margin: 0 5px; opacity: 0.55; }
+}
+
+.fd-hero-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+  margin-top: 16px;
+
+  i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: #fff;
+  }
+}
+
+.fd-hero-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+// ── Section labels ───────────────────────────────────────────────────────────
+.fd-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+  margin: 0;
+  font-family: 'Manrope', sans-serif;
+}
+
+.fd-reset {
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: #2563eb;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+// ── Tiles ────────────────────────────────────────────────────────────────────
+.fd-tiles {
+  display: flex;
+  gap: 9px;
+}
+
+.fd-tile {
+  flex: 1;
+  min-width: 0;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 11px 12px;
+  font-family: 'Manrope', sans-serif;
+}
+
+.fd-tile-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+  display: block;
+}
+
+.fd-tile-edit {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.fd-pre,
+.fd-suf {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9aa6ba;
+}
+.fd-suf { font-size: 11px; }
+
+.fd-tile-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
+
+  &::placeholder { color: #cbd5e1; font-weight: 600; }
+}
+
+// ── Insight rows ─────────────────────────────────────────────────────────────
+.fd-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fd-insight {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 11px 13px;
+  font-family: 'Manrope', sans-serif;
+}
+
+.fd-insight-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #eef4ff;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 18px; }
+}
+
+.fd-insight-text {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6b7280;
+  line-height: 1.5;
+
+  strong { color: #0f172a; font-weight: 800; }
+}
+
+// ── Return chips (segmented) ─────────────────────────────────────────────────
+.fd-seg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Manrope', sans-serif;
+
+  .fd-seg-label {
+    font-size: 11.5px;
+    font-weight: 800;
+    color: #4b5563;
+    flex-shrink: 0;
+  }
+
+  .fd-scenario-chips { flex: 1; }
+}
+
+.fd-scenario-chips {
+  display: flex;
+  background: #eef1f6;
+  border-radius: 11px;
+  padding: 3px;
+  gap: 2px;
+
+  button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    border-radius: 9px;
+    padding: 7px 0;
+    font-family: 'Manrope', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    color: #6b7280;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &.on {
+      background: #fff;
+      color: #111827;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+    }
+  }
+}
+
+// ── Invested / Cash pill ─────────────────────────────────────────────────────
+.fd-pill {
+  display: inline-block;
+  font-family: 'Manrope', sans-serif;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 6px;
+  vertical-align: 1px;
+  background: #eef4ff;
+  color: #2563eb;
+  white-space: nowrap;
+
+  &.cash {
+    background: #ecfdf5;
+    color: #059669;
+  }
+}
+
+// ── How FRED helps / notes ───────────────────────────────────────────────────
+.fd-how {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border-radius: 13px;
+  background: #eef4ff;
+  font-family: 'Manrope', sans-serif;
+
+  .material-symbols-outlined {
+    font-size: 18px;
+    color: #2563eb;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  p {
+    margin: 0;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #1e3a8a;
+    line-height: 1.45;
+
+    b { font-weight: 800; }
+  }
+}
+
+.fd-note {
+  font-size: 10px;
+  font-weight: 500;
+  color: #b3bccb;
+  margin: 0 2px;
+  line-height: 1.5;
+  font-family: 'Manrope', sans-serif;
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+.fd-cta {
+  display: block;
+  width: 100%;
+  height: 50px;
+  border: none;
+  border-radius: 13px;
+  cursor: pointer;
+  background: #111827;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14.5px;
+  font-weight: 800;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.85; }
+
+  &[disabled] {
+    background: #cbd5e1;
+    cursor: default;
+
+    &:active { opacity: 1; }
+  }
+}
+
+.fd-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 0;
+  text-align: center;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}

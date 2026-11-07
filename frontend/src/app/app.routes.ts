@@ -111,14 +111,21 @@ export const routes: Routes = [
     redirectTo: 'get-started',
     pathMatch: 'full'
   },
-  // Goals: the quiz builds or edits a plan; the goal page shows it (and previews a quiz draft).
+  // Goals: the quiz builds or edits a plan; the goal page shows it. The two `plan` routes preview
+  // the quiz's draft (data.preview) with a Start / Update CTA; `goals/:id` is the saved plan.
   {
     path: 'goals/new/:type/plan',
+    data: { preview: true },
     loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
   },
   {
     path: 'goals/new/:type',
     loadComponent: () => import('./pages/goal-quiz/goal-quiz.page').then(m => m.GoalQuizPage)
+  },
+  {
+    path: 'goals/:id/edit/plan',
+    data: { preview: true },
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
   },
   {
     path: 'goals/:id/edit',

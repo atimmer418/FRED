@@ -653,6 +653,36 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(view.kids!.find(a => a.account === 'plan529')!.perKid[0].plan.giftDaysAvailable).toBeTrue();
   });
 
+  it('the offer needs EVERY receiving unit to take the lump: one nest egg the lumps outgrow hides it for the family (R7)', () => {
+    // Kid A has 18 Januaries ahead: $1,000 each grows past a $20,000 nest egg on its own.
+    // Kid B is four years from 18: three or four lumps, well under the target, so B alone could take it.
+    const goal = family([kid('A', null, null), kid('B', Y - 14, 3)], { plan529Target: 47_800, brokerageTarget: 20_000 });
+    const view = buildGoalPlanView(goal, ctx());
+    const nest = view.kids!.find(a => a.account === 'brokerage')!;
+    expect(nest.perKid.map(k => k.plan.giftDaysAvailable)).toEqual([false, true]);
+    expect(view.giftDays).toBeUndefined();
+
+    // With gift days stored on, no unit posts a lump either: the family either all takes it or none does.
+    const on = buildGoalPlanView(family([kid('A', null, null), kid('B', Y - 14, 3)], { plan529Target: 47_800, brokerageTarget: 20_000, giftDays: true }), ctx());
+    expect(on.kids!.find(a => a.account === 'brokerage')!.perKid.map(k => k.plan.newYearLump)).toEqual([0, 0]);
+    expect(on.giftDays).toBeUndefined();
+  });
+
+  it('pins the sample family hero figures: $47,800 college and $100,000 nest egg per kid, baby funds for the two unborn, 10%, biweekly', () => {
+    const off = buildGoalPlanView(sample(), ctx());
+    expect(off.heroLabel).toBe('Save this month');
+    expect(off.audience).toBe('for all 3 kids');
+    // The spec copy says $2,830/mo and ~$1,306 a paycheck, dropping to ~$2,580 and ~$1,191 with gift
+    // days on; those figures were drawn with a $250,000 nest egg. At the spec's $100,000 default the
+    // real numbers are pinned here (reported to the controller in the Task 6 report).
+    expect(Math.round(off.monthlyTotal)).toBe(2_249);
+    expect(Math.round(off.perPaycheck!)).toBe(1_036);
+    expect(off.giftDays).toBeDefined();
+    expect(Math.round(off.giftDays!.monthlyIfOn)).toBe(1_988);
+    expect(Math.round(off.giftDays!.perPaycheckIfOn!)).toBe(916);
+    expect(off.subtitle).toBe('$2,249/mo for all 3 kids');
+  });
+
   it('pills: college and nest egg are Invested at 18 years out, a baby fund due in 19 months is Cash', () => {
     const view = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
     for (const acct of view.kids!) expect(acct.perKid[0].pill).withContext(acct.account).toBe('Invested');

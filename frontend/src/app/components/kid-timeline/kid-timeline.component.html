@@ -1,0 +1,24 @@
+@if (timeline; as t) {
+  <div class="ktl" aria-hidden="true">
+    <div class="ktl-bar">
+      <div class="ktl-done" [style.width.%]="t.passedPct"></div>
+      @for (d of t.dots; track $index) {
+        <i class="ktl-dot"
+           [class.past]="d.kind === 'kid' && d.passed && !d.undated"
+           [class.now]="d.kind === 'now'"
+           [class.unsure]="d.kind === 'kid' && d.undated"
+           [style.left.%]="d.position"></i>
+      }
+    </div>
+    @for (l of labels; track $index) {
+      <span class="ktl-lb"
+            [class.up]="l.up"
+            [class.dn]="!l.up"
+            [class.l]="l.edge === 'l'"
+            [class.r]="l.edge === 'r'"
+            [style.left.%]="l.dot.position">
+        <b>{{ l.dot.label }}</b>{{ l.sub }}
+      </span>
+    }
+  </div>
+}

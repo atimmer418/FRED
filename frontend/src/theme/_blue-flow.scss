@@ -576,6 +576,10 @@ $bf-shadow:       rgba(8, 28, 78, 0.45);         // glow under big numbers
     --bf-switch-on:     #2563eb;
     --bf-thumb:         #fff;
     --bf-fill-faint:    #f8fafc;
+
+    // The plan page's helper line is a full sentence (the mockup's .ins .tx wraps it); a
+    // newline from the page breaks it at its clause, otherwise it wraps as text does.
+    .bf-row-line { white-space: pre-line; }
   }
 }
 

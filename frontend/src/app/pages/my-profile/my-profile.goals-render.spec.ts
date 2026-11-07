@@ -111,6 +111,26 @@ describe('MyProfilePage: goals rendering (freeze hunt)', () => {
     expect(sub).toMatch(/^\$[\d,]+\/mo Test goal$/);
   });
 
+  it('my-profile row subtitle reads "$X/mo for all 3 kids" for the sample family, and the disclaimer is gone', () => {
+    const fresh = () => ({ balance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 });
+    const kids: Goal = {
+      ...GOAL, id: 2, type: 'KIDS', name: 'Our kids', icon: 'child_care',
+      config: {
+        plan529Target: 47_800, brokerageTarget: 100_000,
+        kids: [
+          { label: 'Ellie', birthYear: YEAR - 2, birthMonth: null, accounts: { plan529: fresh(), brokerage: fresh() } },
+          { label: 'Theo', birthYear: YEAR + 2, birthMonth: 6, accounts: { plan529: fresh(), brokerage: fresh() } },
+          { label: 'Kid 3', birthYear: null, birthMonth: null, accounts: { plan529: fresh(), brokerage: fresh() } },
+        ],
+      },
+    };
+    const fixture = setup([kids]);
+    const sub = (fixture.nativeElement.querySelectorAll('.goal-sub')[1]?.textContent ?? '').trim();
+    expect(sub).toMatch(/^\$[\d,]+\/mo for all 3 kids$/);
+    expect(fixture.nativeElement.querySelector('.goals-disclaimer')).toBeNull();
+    expect((fixture.nativeElement.textContent as string)).not.toContain('FRED invests only toward your Freedom Date');
+  });
+
   it('survives 25 change-detection cycles without exploding or churning', () => {
     const fixture = setup([GOAL]);
     const rowBefore = fixture.nativeElement.querySelectorAll('.goal-row')[1];

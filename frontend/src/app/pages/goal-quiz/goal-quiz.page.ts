@@ -624,11 +624,15 @@ export class GoalQuizPage implements OnInit, OnDestroy {
     this.costTimer = null;
   }
 
+  /**
+   * Pushes the plan page in preview mode. An edit goes to its own preview route so the saved page
+   * beneath the quiz is not pushed a second time; Update my plan pops back to it (Ruling P4).
+   */
   private navigateToPlan(): void {
     this.calcTimer = null;
     const existing = this.existing();
     const type: GoalType = this.form().type;
-    if (existing) void this.navCtrl.navigateForward(['/goals', existing.id]);
+    if (existing) void this.navCtrl.navigateForward(['/goals', existing.id, 'edit', 'plan']);
     else void this.navCtrl.navigateForward(['/goals/new', type, 'plan']);
   }
 }

@@ -306,11 +306,24 @@ function kidsView(
   const anchorLumps: LumpOccurrence[] = [];
 
   // Gift days post to the brokerage (the nest egg) when it has a target, else to the 529. Only
-  // those units decide the offer: a nest egg the lumps alone would outgrow hides it, even when
-  // the 529 beside it could have taken the lump.
+  // those units decide the offer, and EVERY one of them has to take the lump (Ruling R7): one
+  // nest egg the lumps alone would outgrow hides the offer for the family, even when the 529
+  // beside it, or another kid's nest egg, could have taken it.
   const giftAccount: KidAccountKey = cfg.brokerageTarget > 0 ? 'brokerage' : 'plan529';
   const giftDays = !!cfg.giftDays;
-  let giftDaysAvailable = false;
+  const giftTarget = giftAccount === 'brokerage' ? cfg.brokerageTarget : cfg.plan529Target;
+  const giftDaysAvailable = giftTarget > 0 && kids.length > 0 && kids.every(kid => proposeKidAccountPlan({
+    target: giftTarget,
+    balance: kid.accounts[giftAccount].balance,
+    birthYear: kid.birthYear,
+    birthMonth: kid.birthMonth,
+    marketRate: ctx.marketRate,
+    rateKindOverride: accountKind(kid.birthYear, kid.birthMonth),
+    now: ctx.now,
+    giftDays: false,
+  }).giftDaysAvailable);
+  // The lumps post only when the whole family can take them, whatever the stored flag says.
+  const giftsPost = giftDays && giftDaysAvailable;
   // How much lower the live family monthly would be with gift days on (0 once they are on).
   let giftSaving = 0;
 
@@ -333,11 +346,8 @@ function kidsView(
           now: ctx.now,
           giftDays: gifts,
         });
-        const plan = live(giftDays && takesGifts);
-        if (takesGifts) {
-          if (plan.giftDaysAvailable) giftDaysAvailable = true;
-          if (!giftDays) giftSaving += plan.monthly - live(true).monthly;
-        }
+        const plan = live(giftsPost && takesGifts);
+        if (takesGifts && giftDaysAvailable && !giftDays) giftSaving += plan.monthly - live(true).monthly;
         const anchorPlan = proposeKidAccountPlan({
           target: def.target,
           balance: account.anchorBalance,
@@ -346,7 +356,7 @@ function kidsView(
           marketRate: goal.planRate,
           rateKindOverride: kind,
           now: anchorDate,
-          giftDays: giftDays && takesGifts,
+          giftDays: giftsPost && takesGifts,
         });
         anchorLumps.push(...anchorPlan.lumps);
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);

@@ -1,0 +1,165 @@
+// Kid unit detail sheet. The ion-modal shell (mc-bottom-sheet-modal in global.scss) provides the
+// rounded white chrome; this styles the content inside it.
+@use '../../../theme/plan-page';
+
+:host {
+  display: block;
+}
+
+.ud-body {
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  font-family: 'Manrope', sans-serif;
+  color: #0f172a;
+}
+
+.ud-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 16px;
+}
+
+.ud-kid {
+  margin: 0 0 2px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+}
+
+h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+}
+
+.ud-sub {
+  font-size: 12.5px;
+  color: #6b7280;
+  font-weight: 600;
+  margin: 0 0 14px;
+}
+
+.ud-tile-val {
+  display: block;
+  margin-top: 4px;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+
+  small {
+    font-size: 11px;
+    font-weight: 700;
+    color: #9aa6ba;
+    letter-spacing: 0;
+  }
+}
+
+.ud-done-val {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #059669;
+
+  .material-symbols-outlined { font-size: 18px; }
+}
+
+.ud-zone {
+  margin: 16px 0 8px;
+}
+
+.ud-ms {
+  display: flex;
+  gap: 8px;
+}
+
+.ud-ms-tile {
+  flex: 1;
+  min-width: 0;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+
+  .ud-ms-label {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #9aa6ba;
+  }
+
+  .ud-ms-year {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #9aa6ba;
+  }
+
+  b {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.ud-note {
+  margin: 12px 0 0;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: #eef4ff;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #1e3a8a;
+  line-height: 1.45;
+}
+
+.ud-sources {
+  margin: 14px 2px 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #9aa6ba;
+  line-height: 1.5;
+}
+
+.ud-link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: 'Manrope', sans-serif;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #2563eb;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ud-done {
+  display: block;
+  width: 100%;
+  height: 50px;
+  margin-top: 16px;
+  border: none;
+  border-radius: 13px;
+  cursor: pointer;
+  background: #111827;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.9; }
+}

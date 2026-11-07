@@ -1,758 +1,364 @@
+// The one-screen plan page. The header and white sheet come from settings-shell; the hero, tiles,
+// chips, pill, note card and CTA from plan-page (shared with the Freedom plan page). Values below
+// follow the approved mockup's plan page frame (.kcard, .krow, .zone, .pd).
 @use '../../../theme/settings-shell';
+@use '../../../theme/plan-page';
 
-.gl-card {
-  background: #fff;
-  border-radius: 20px;
-  padding: 20px 18px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 6px 20px rgba(15, 23, 42, 0.05);
-  font-family: 'Manrope', sans-serif;
+.gp-inner {
+  gap: 10px;
   color: #111827;
 }
 
-.gl-field {
-  margin-bottom: 18px;
+.gp-hero {
+  padding-bottom: 12px;
 }
 
-.gl-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 800;
-  color: #374151;
-  letter-spacing: -0.01em;
-  margin-bottom: 6px;
+.gp-band-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
-.gl-input {
-  width: 100%;
-  box-sizing: border-box;
-  height: 46px;
-  padding: 0 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #f9fafb;
-  font-family: 'Manrope', sans-serif;
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
-  outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-
-  &:focus { border-color: #2563eb; background: #fff; }
-  &:disabled { opacity: 0.45; }
-  &::placeholder { color: #9ca3af; font-weight: 600; }
+// ── Zone label: "PER KID", the status chip, the swipe dots ────────────────────
+.gp-zone {
+  margin-top: 4px;
 }
 
-.gl-money {
-  position: relative;
-
-  .gl-prefix {
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 16px;
-    font-weight: 700;
-    color: #6b7280;
-    pointer-events: none;
-  }
-
-  .gl-input { padding-left: 28px; }
-}
-
-.gl-helper {
-  margin: 8px 0 0;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: #6b7280;
-}
-
-.gl-error {
-  margin: 6px 0 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: #dc2626;
-}
-
-// Icon row (CUSTOM)
-.gl-icons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.gl-icon-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
-  color: #6b7280;
+.gp-zone-right {
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  gap: 10px;
+}
+
+.gp-chip {
+  font-family: 'Manrope', sans-serif;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #059669;
+  background: #ecfdf5;
+  border: none;
+  border-radius: 7px;
+  padding: 3px 8px;
+  cursor: default;
   -webkit-tap-highlight-color: transparent;
 
-  .material-symbols-outlined { font-size: 22px; }
+  &.behind {
+    color: #b45309;
+    background: #fffbeb;
+  }
 
-  &.on {
-    background: #eef4ff;
-    border-color: #2563eb;
+  &.stale {
     color: #2563eb;
+    background: #eef4ff;
+    cursor: pointer;
   }
 }
 
-// Chips (copied from the freedom sheet scenario chips)
-.gl-chips {
+.gp-dots {
   display: flex;
-  background: #eef1f6;
-  border-radius: 12px;
-  padding: 3px;
-  gap: 2px;
+  gap: 4px;
 
-  button {
-    flex: 1;
-    border: none;
-    background: transparent;
-    border-radius: 10px;
-    padding: 10px 0;
-    font-family: 'Manrope', sans-serif;
-    font-size: 12px;
-    font-weight: 800;
-    color: #6b7280;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
+  i {
+    display: block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #d5dbe6;
+    transition: width 0.2s, background 0.2s;
 
     &.on {
-      background: #fff;
-      color: #2563eb;
-      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
+      width: 14px;
+      border-radius: 3px;
+      background: #2563eb;
     }
   }
 }
 
-// Kids
-.gl-stepper {
-  display: flex;
-  align-items: center;
-  background: #eef1f6;
-  border-radius: 12px;
-
-  button {
-    width: 34px;
-    height: 34px;
-    border: none;
-    background: transparent;
-    color: #2563eb;
-    font-family: 'Manrope', sans-serif;
-    font-size: 18px;
-    font-weight: 800;
-    border-radius: 12px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    &:active { background: rgba(37, 99, 235, 0.1); }
-    &:disabled { opacity: 0.4; pointer-events: none; }
-  }
-
-  .gl-stepper-val {
-    min-width: 24px;
-    text-align: center;
-    font-size: 14px;
-    font-weight: 800;
-    color: #111827;
-  }
+// ── The pager: one card per kid, the next card peeking 20px ──────────────────
+.gp-pager {
+  display: block;
+  width: calc(100% + 20px);
+  margin-right: -20px;
+  overflow: hidden;
 }
 
-.gl-kid {
+.gp-slide {
+  // 10px between cards plus a 20px peek of the next one, inside the 20px gutter the pager extends into.
+  width: calc(100% - 50px);
+  height: auto;
+  display: block;
+}
+
+.gp-pager.single .gp-slide {
+  width: calc(100% - 20px);
+}
+
+.gp-kcard {
+  background: #f8fafc;
   border: 1px solid #eef1f6;
-  border-radius: 14px;
-  padding: 12px;
-  margin-bottom: 10px;
-}
-
-.gl-kid-label { margin-bottom: 8px; }
-
-.gl-kid-row {
-  display: flex;
-  gap: 8px;
-
-  .gl-select { flex: 3; }
-  .gl-year { flex: 2; }
-}
-
-.gl-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #374151;
-
-  input { width: 18px; height: 18px; accent-color: #2563eb; }
-}
-
-// ─── Kids quiz (step 1) ──────────────────────────────────────────────────────
-
-.gl-dots {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-bottom: 18px;
-
-  span {
-    width: 6px;
-    height: 6px;
-    border-radius: 3px;
-    background: #e5e7eb;
-    transition: width 0.2s ease, background 0.2s ease;
-
-    &.done { background: #93b4f5; }
-    &.on { width: 18px; background: #2563eb; }
-  }
-}
-
-.gl-q {
-  margin: 0 0 16px;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-  color: #111827;
-}
-
-.gl-count {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.gl-stepper-lg {
-  button { width: 48px; height: 48px; font-size: 22px; }
-  .gl-stepper-val { min-width: 40px; font-size: 22px; }
-}
-
-.gl-quiz-big {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
-  color: #111827;
-}
-
-.gl-quiz-line {
-  margin: 8px 0 0;
-  font-size: 13.5px;
-  font-weight: 700;
-  line-height: 1.45;
-  color: #374151;
-}
-
-.gl-fund-switch {
-  margin-top: 18px;
-  padding: 14px;
-  border: 1px solid #eef1f6;
-  border-radius: 14px;
-}
-
-.gl-switch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.gl-switch-label {
-  font-size: 14px;
-  font-weight: 800;
-  color: #111827;
-}
-
-.gl-switch {
-  position: relative;
-  flex-shrink: 0;
-  width: 50px;
-  height: 30px;
-  padding: 0;
-  border: none;
   border-radius: 15px;
-  background: #e5e7eb;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
-
-  .gl-switch-knob {
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
-    transition: transform 0.2s ease;
-  }
-
-  &.on {
-    background: #2563eb;
-    .gl-switch-knob { transform: translateX(20px); }
-  }
+  padding: 11px 12px 6px;
+  font-family: 'Manrope', sans-serif;
+  min-height: 100%;
+  box-sizing: border-box;
 }
 
-.gl-warn { color: #b45309; }
-.gl-all-born { margin-top: 18px; }
-
-// Selection rows (style guide "Selection cards"): label left, amount right, selected border.
-.gl-select-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.gl-select-row {
+.gp-kh {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 52px;
-  padding: 12px 14px;
-  border: 2px solid #e5e7eb;
-  border-radius: 14px;
-  background: #fff;
-  font-family: 'Manrope', sans-serif;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
-
-  .gl-select-label { font-size: 13.5px; font-weight: 700; color: #111827; line-height: 1.35; }
-  .gl-select-amount { flex-shrink: 0; font-size: 14px; font-weight: 800; color: #111827; }
-
-  &.selected {
-    border-color: #2563eb;
-    box-shadow: 0 3px 14px rgba(37, 99, 235, 0.13);
-    .gl-select-amount { color: #2563eb; }
-  }
+  gap: 9px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eef1f6;
 }
 
-.gl-custom { margin: 12px 0 0; }
-.gl-quiz-name { margin-top: 18px; }
-
-.gl-quiz-nav {
+.gp-av {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #eef4ff;
+  color: #2563eb;
   display: flex;
-  gap: 10px;
-  margin-top: 22px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 
-  .gl-cta { flex: 1; }
+  .material-symbols-outlined { font-size: 17px; }
 }
 
-.gl-quiz-back {
-  flex: 0 0 96px;
-  height: 52px;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  background: #fff;
-  font-family: 'Manrope', sans-serif;
-  font-size: 15px;
-  font-weight: 800;
-  color: #111827;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+.gp-kname {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-// CTA
-.gl-cta {
-  width: 100%;
-  height: 52px;
-  border: none;
-  border-radius: 16px;
-  background: #2563eb;
-  color: #fff;
-  font-family: 'Manrope', sans-serif;
-  font-size: 16px;
-  font-weight: 800;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+.gp-kname-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
 
-  &:active { background: #1d4ed8; }
-}
-
-// ─── Plan view (step 2) ──────────────────────────────────────────────────────
-
-.gl-hero {
-  background: linear-gradient(160deg, #2563eb, #1d4ed8);
-  border-radius: 20px;
-  padding: 22px 20px 20px;
-  margin-bottom: 12px;
-  color: #fff;
-  font-family: 'Manrope', sans-serif;
-
-  .gl-hero-amount {
-    font-size: 40px;
+  b {
+    font-size: 13.5px;
     font-weight: 800;
-    letter-spacing: -0.03em;
-    line-height: 1.05;
-  }
-
-  .gl-hero-unit {
-    font-size: 18px;
-    font-weight: 700;
-    opacity: 0.8;
-    margin-left: 2px;
-  }
-
-  .gl-hero-paycheck {
-    margin: 6px 0 0;
-    font-size: 13px;
-    font-weight: 700;
-    opacity: 0.9;
-  }
-
-  .gl-hero-headline {
-    margin: 12px 0 0;
-    font-size: 13px;
-    font-weight: 700;
-    opacity: 0.85;
-  }
-
-  .gl-hero-fund {
-    margin: 4px 0 0;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.45;
-    opacity: 0.85;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
-// Step 2 stacks several cards.
-.gl-card + .gl-card,
-.gl-inputs-row + .gl-card,
-.gl-status + .gl-card,
-.gl-reason + .gl-card,
-.gl-note + .gl-card {
-  margin-top: 12px;
-}
-
-// ─── Kids plan view: what a kid costs, first-year fund ──────────────────────
-
-.gl-costs-headline {
-  margin: 6px 0 0;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.35;
-  color: #111827;
-}
-
-.gl-stage {
-  border-bottom: 1px solid #f3f4f6;
-  padding: 8px 0;
-
-  b { font-weight: 700; color: #111827; }
-}
-
-.gl-stage:first-of-type { margin-top: 10px; }
-
-.gl-costs-birth {
-  margin: 10px 0 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: #374151;
-}
-
-.gl-costs-links {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 18px;
-}
-
-.gl-sources {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  font-size: 11.5px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: #6b7280;
-}
-
-.gl-fund-row {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid #eef1f6;
-  border-radius: 14px;
-}
-
-.gl-fund-lead {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.4;
-  color: #111827;
-}
-
-.gl-fund-footer { margin-top: 12px; }
-
-.gl-rate-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-
-  .gl-label { margin-bottom: 0; }
-}
-
-.gl-reset {
+.gp-pen,
+.gp-check {
+  width: 24px;
+  height: 24px;
   border: none;
-  background: none;
+  background: transparent;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gp-pen {
+  color: #9aa6ba;
+  .material-symbols-outlined { font-size: 13px; }
+}
+
+.gp-check {
+  color: #2563eb;
+  .material-symbols-outlined { font-size: 16px; }
+}
+
+.gp-kname-edit {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.gp-rename {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  border-bottom: 2px solid #2563eb;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 1px;
   font-family: 'Manrope', sans-serif;
-  font-size: 11px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #111827;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.gp-ksub {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #8a94a6;
+}
+
+.gp-kmonthly {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 13.5px;
   font-weight: 800;
   color: #2563eb;
   white-space: nowrap;
-  cursor: pointer;
+  font-variant-numeric: tabular-nums;
 }
 
-// Copied from the freedom detail sheet so the shared rate looks the same in both places.
-.fd-scenario-chips {
+// ── Unit rows ────────────────────────────────────────────────────────────────
+.gp-krow {
   display: flex;
-  background: #eef1f6;
-  border-radius: 12px;
-  padding: 3px;
-  gap: 2px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
 
-  button {
-    flex: 1;
-    border: none;
-    background: transparent;
-    border-radius: 10px;
-    padding: 8px 0;
-    font-family: 'Manrope', sans-serif;
-    font-size: 9.5px;
+  em {
+    font-style: normal;
+    font-size: 12px;
     font-weight: 800;
-    color: #6b7280;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-
-    &.on {
-      background: #fff;
-      color: #2563eb;
-      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
-    }
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 }
 
-.gl-cash-note {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: #374151;
-}
-
-.gl-inputs-row {
-  width: 100%;
-  margin-top: 12px;
+.gp-kic {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  color: #2563eb;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  background: #fff;
+  justify-content: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 16px; }
+}
+
+.gp-ktx {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.gp-klabel,
+.gp-ktarget {
+  border: none;
+  background: none;
+  padding: 0;
   font-family: 'Manrope', sans-serif;
   text-align: left;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-
-  .gl-inputs-text {
-    font-size: 12.5px;
-    font-weight: 700;
-    color: #374151;
-  }
-
-  .gl-inputs-edit {
-    flex-shrink: 0;
-    font-size: 12.5px;
-    font-weight: 800;
-    color: #2563eb;
-  }
 }
 
-.gl-reason,
-.gl-note {
-  margin: 12px 4px 0;
-  font-family: 'Manrope', sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: #6b7280;
-}
-
-.gl-status {
-  margin-top: 12px;
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: #f0fdf4;
-  font-family: 'Manrope', sans-serif;
-
-  &.behind { background: #fffbeb; }
-
-  p { margin: 0; }
-
-  .gl-status-line {
-    font-size: 13px;
-    font-weight: 800;
-    color: #111827;
-  }
-
-  .gl-catchup,
-  .gl-stale {
-    margin-top: 4px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #4b5563;
-  }
-}
-
-.gl-account-title {
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
-
-.gl-account-line {
-  margin: 4px 0 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: #374151;
-}
-
-.gl-link {
-  margin-top: 10px;
-  padding: 0;
-  border: none;
-  background: none;
-  font-family: 'Manrope', sans-serif;
-  font-size: 12.5px;
-  font-weight: 800;
-  color: #2563eb;
-  cursor: pointer;
-}
-
-.gl-kid-card {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid #eef1f6;
-  border-radius: 14px;
-
-  .gl-kid-name {
-    font-size: 13px;
-    font-weight: 800;
-    margin-bottom: 6px;
-  }
-}
-
-.gl-ritual {
+.gp-klabel {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #374151;
-
-  small {
-    display: block;
-    font-size: 11px;
-    color: #6b7280;
-  }
-
-  b { font-weight: 800; color: #111827; white-space: nowrap; }
-}
-
-.gl-milestones {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.gl-milestone {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 8px 4px;
-  border-radius: 10px;
-  background: #f5f7fb;
-
-  .gl-ms-label { font-size: 10.5px; font-weight: 700; color: #6b7280; }
-  .gl-ms-year { font-size: 10px; font-weight: 600; color: #9ca3af; }
-  b { margin-top: 2px; font-size: 14px; font-weight: 800; color: #111827; }
-}
-
-.gl-balance {
-  margin: 12px 0 0;
-}
-
-.gl-split {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: #374151;
-}
-
-.gl-reset-line {
-  display: block;
-  margin-bottom: 10px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: #2563eb;
-}
-
-.gl-footer {
-  margin-top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-
-  .gl-cta:disabled { opacity: 0.6; }
-}
-
-.gl-complete,
-.gl-remove {
-  width: 100%;
-  height: 46px;
-  border-radius: 14px;
-  font-family: 'Manrope', sans-serif;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 12px;
   font-weight: 800;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.gl-complete {
-  border: 1px solid #e5e7eb;
-  background: #fff;
   color: #111827;
 
-  &:disabled { opacity: 0.6; }
+  b { font-weight: 800; }
 }
 
-.gl-remove {
+.gp-ktarget {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #8a94a6;
+  text-decoration: underline dotted rgba(138, 148, 166, 0.6);
+  text-underline-offset: 2px;
+}
+
+.gp-kdone {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #059669;
+
+  .material-symbols-outlined { font-size: 15px; }
+}
+
+// ── Inline "Saved so far" under a unit row ───────────────────────────────────
+.gp-bal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 6px 37px;
+  padding: 7px 10px;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+}
+
+.gp-bal-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+  flex-shrink: 0;
+}
+
+.gp-bal-field {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gp-bal-pre {
+  font-size: 12px;
+  font-weight: 700;
+  color: #9aa6ba;
+}
+
+.gp-bal-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
   border: none;
+  outline: none;
   background: transparent;
-  color: #dc2626;
+  padding: 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Cash note ────────────────────────────────────────────────────────────────
+.gp-cash-note {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 13px;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.gp-cta {
+  margin-top: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gp-dots i { transition: none; }
 }

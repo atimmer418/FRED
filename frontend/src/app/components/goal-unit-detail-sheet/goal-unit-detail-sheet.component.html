@@ -1,0 +1,49 @@
+<div class="ud-body">
+  <div class="ud-handle"></div>
+  <p class="ud-kid">{{ detail.kidLabel }}</p>
+  <h3>{{ detail.title }}<span class="fd-pill" [class.cash]="detail.pill === 'Cash'">{{ detail.pill }}</span></h3>
+  <p class="ud-sub">{{ detail.targetLine }}</p>
+
+  <div class="fd-tiles ud-tiles">
+    <div class="fd-tile">
+      <span class="fd-tile-label">Every month</span>
+      @if (detail.finished) {
+        <span class="ud-tile-val ud-done-val"><span class="material-symbols-outlined">check</span>Done</span>
+      } @else {
+        <span class="ud-tile-val">{{ fmtMoney(detail.monthly) }}</span>
+      }
+    </div>
+    @if (!detail.finished && detail.perPaycheck !== null) {
+      <div class="fd-tile">
+        <span class="fd-tile-label">From your pay</span>
+        <span class="ud-tile-val">~{{ fmtMoney(detail.perPaycheck) }} <small>a paycheck</small></span>
+      </div>
+    }
+  </div>
+
+  @if (detail.milestones.length) {
+    <p class="fd-zone ud-zone">What it grows to</p>
+    <div class="ud-ms">
+      @for (m of detail.milestones; track m.label) {
+        <div class="ud-ms-tile">
+          <span class="ud-ms-label">{{ m.label }}</span>
+          @if (m.year) { <span class="ud-ms-year">{{ m.year }}</span> }
+          <b>{{ m.value }}</b>
+        </div>
+      }
+    </div>
+  }
+
+  @for (n of detail.notes; track n) {
+    <p class="ud-note">{{ n }}</p>
+  }
+
+  <p class="ud-sources">
+    {{ detail.sourcesLine }}
+    @if (detail.sourcesSheetKids !== null) {
+      <button type="button" class="ud-link" (click)="openSources()">Where these numbers come from</button>
+    }
+  </p>
+
+  <button type="button" class="ud-done" (click)="close()">Done</button>
+</div>

@@ -1,0 +1,34 @@
+@if (typing) {
+  <input #typeInput
+         class="big-input"
+         type="tel"
+         inputmode="numeric"
+         [value]="typedValue"
+         (input)="onTypedInput($event)"
+         (blur)="commitTyping()"
+         (keydown)="onTypedKeydown($event)">
+} @else if (tapToType) {
+  <button type="button"
+          class="big-readout"
+          (click)="startTyping()"
+          aria-label="Tap to type an exact amount">{{ format(value) }}</button>
+} @else {
+  <div class="big-readout static">{{ format(value) }}</div>
+}
+
+@if (hint) {
+  <div class="readout-hint">{{ hint }}</div>
+}
+
+<input type="range"
+       class="sim-range"
+       [min]="trackMin"
+       [max]="trackMax"
+       [step]="trackStep"
+       [value]="trackPosition"
+       [style.--track]="trackFill"
+       (input)="onTrackInput($event)">
+
+@if (endLabels) {
+  <div class="range-ends"><span>{{ endLabels[0] }}</span><span>{{ endLabels[1] }}</span></div>
+}

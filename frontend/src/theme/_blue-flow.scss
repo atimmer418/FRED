@@ -1,0 +1,594 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Blue flow: the shared full-screen blue gradient shell used by the Monte
+// Carlo flow and the goal quiz, plus the quiz controls.
+//
+// USAGE
+//   Page-level component (emits the whole shell and the control classes):
+//     src/app/components/<name>/*.scss  →  @use '../../../theme/blue-flow';
+//
+//   Quiz control component (emits only the control classes). Controls use
+//   emulated encapsulation, so page-level rules never reach inside them; they
+//   load the rules they need here and read the colour tokens that the
+//   .flow-host ancestor sets as CSS custom properties:
+//     @use '../../../theme/blue-flow' with ($controls-only: true);
+//
+// Two hosts:
+//   .flow-host              the Monte Carlo flow (titles at 30px)
+//   .flow-host.quiz-host    the goal quiz (titles at 27px, one class for all)
+// ─────────────────────────────────────────────────────────────────────────────
+
+$controls-only: false !default;
+
+@if not $controls-only {
+
+  // ─── CSS custom properties for the blue sub-theme ───────────────────────────
+
+  .flow-host {
+    --sim-deep:         #0e3a96;
+    --sim-mid:          #1e60e3;
+    --sim-primary:      #2563EB;
+    --sim-bright:       #3b82f6;
+    --glass:            rgba(255, 255, 255, 0.09);
+    --glass-border:     rgba(255, 255, 255, 0.16);
+    --mint:             #34d399;
+    --amber:            #fbbf24;
+    --coral:            #f87171;
+
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+
+    // Multi-layer blue gradient background
+    background: linear-gradient(160deg, #1e60e3 0%, #1a58d0 60%, #0e3a96 100%);
+  }
+
+  // ─── Top navigation bar ─────────────────────────────────────────────────────
+
+  .flow-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    // Account for iOS status bar safe area
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 0;
+  }
+
+  .flow-back,
+  .flow-x {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s, opacity 0.25s, visibility 0.25s;
+    flex-shrink: 0;
+
+    &:active { background: rgba(255, 255, 255, 0.24); }
+
+    .material-symbols-outlined { font-size: 20px; }
+  }
+
+  .flow-back {
+    opacity: 0;
+    pointer-events: none;
+    &.show { opacity: 1; pointer-events: auto; }
+  }
+
+  // Step dots
+  .flow-dots {
+    display: flex;
+    gap: 6px;
+    transition: opacity 0.3s ease;
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.28);
+      transition: all 0.3s ease;
+
+      &.on {
+        background: #fff;
+        width: 18px;
+        border-radius: 4px;
+      }
+    }
+  }
+
+  // ─── Full-screen step panels ────────────────────────────────────────────────
+
+  .fscreen {
+    position: absolute;
+    inset: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 80px) 26px
+             calc(env(safe-area-inset-bottom, 0px) + 36px);
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.38s ease, transform 250ms ease;
+    overflow: hidden;
+
+    &.on {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  // ─── Step typography ────────────────────────────────────────────────────────
+
+  .fs-eyebrow {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: pre-line; // honour \n in resultsEyebrow
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .fs-h1 {
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #fff;
+    line-height: 1.12;
+    margin: 8px 0 0;
+    flex-shrink: 0;
+  }
+
+  // The quiz sets every title at 27px, the same class on every step.
+  .quiz-host .fs-h1 { font-size: 27px; }
+
+  .fs-sub {
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.65);
+    font-weight: 500;
+    margin: 8px 0 8px;
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+
+  .fs-center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  // ─── Fetch chip ─────────────────────────────────────────────────────────────
+
+  .fetch-chip {
+    margin: 26px auto 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #fff;
+    font-family: 'Manrope', sans-serif;
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 24px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s;
+
+    &:active { background: rgba(255, 255, 255, 0.24); }
+    &.loading .material-symbols-outlined { animation: spin 1s linear infinite; }
+
+    .material-symbols-outlined { font-size: 16px; }
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  // ─── Primary CTA button ─────────────────────────────────────────────────────
+
+  .fs-cta {
+    flex-shrink: 0;
+    height: 54px;
+    border: none;
+    border-radius: 14px;
+    cursor: pointer;
+    background: #fff;
+    color: #1d4ed8;
+    font-family: 'Manrope', sans-serif;
+    font-size: 15.5px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 10px 30px -6px rgba(8, 28, 78, 0.55);
+    transition: transform 0.15s, opacity 0.2s;
+    margin-top: 16px;
+
+    &:active { transform: scale(0.98); }
+
+    &:disabled {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    .material-symbols-outlined { font-size: 20px; font-variation-settings: 'FILL' 1; }
+  }
+
+  // ─── Glass input field ──────────────────────────────────────────────────────
+
+  .glass-field {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 14px 16px;
+    backdrop-filter: blur(12px);
+    margin-top: 12px;
+
+    label {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.5);
+      display: block;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fscreen { transition: none !important; }
+    .fetch-chip.loading .material-symbols-outlined { animation: none !important; }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Controls: emitted for page hosts and for the quiz control components.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─── Big dollar readout ─────────────────────────────────────────────────────
+
+.big-readout {
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-align: center;
+  cursor: pointer;
+  line-height: 1;
+  text-shadow: 0 6px 30px rgba(8, 28, 78, 0.45);
+  border: none;
+  background: none;
+  font-family: 'Manrope', sans-serif;
+  width: 100%;
+  padding: 0;
+
+  .unit {
+    font-size: 20px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.55);
+    letter-spacing: -0.01em;
+  }
+}
+
+.big-input {
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-align: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.5);
+  padding-bottom: 4px;
+  outline: none;
+  font-family: 'Manrope', sans-serif;
+  -webkit-appearance: none;
+}
+
+.readout-hint {
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 10px;
+}
+
+// ─── Range slider ───────────────────────────────────────────────────────────
+
+.sim-range {
+  margin-top: 34px;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 36px;
+  background: transparent;
+  cursor: pointer;
+
+  &::-webkit-slider-runnable-track {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--track, rgba(255, 255, 255, 0.22));
+  }
+
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #fff;
+    margin-top: -12.5px;
+    box-shadow: 0 4px 16px rgba(8, 28, 78, 0.5), inset 0 -3px 6px rgba(37, 99, 235, 0.18);
+    border: none;
+  }
+}
+
+.range-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.04em;
+}
+
+// ─── Glass surface ──────────────────────────────────────────────────────────
+
+.glass {
+  background: var(--glass, rgba(255, 255, 255, 0.09));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.16));
+  border-radius: 16px;
+}
+
+// ─── Chips (segmented choice) ───────────────────────────────────────────────
+
+.bf-chips {
+  display: flex;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.bf-chip {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: 'Manrope', sans-serif;
+  font-size: 12.5px;
+  font-weight: 800;
+  padding: 8px 0;
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &.on {
+    background: #fff;
+    color: #1d4ed8;
+  }
+}
+
+// ─── Pick cards (2x2 grid) ──────────────────────────────────────────────────
+
+.bf-pick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.bf-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 13px 13px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+
+  .material-symbols-outlined { font-size: 22px; margin-bottom: 4px; }
+
+  .bf-pick-label {
+    font-size: 12.5px;
+    font-weight: 700;
+    opacity: 0.8;
+    white-space: nowrap;
+  }
+
+  .bf-pick-amt {
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &.on {
+    background: #fff;
+    border-color: #fff;
+    color: #1d4ed8;
+  }
+}
+
+// ─── Switch ─────────────────────────────────────────────────────────────────
+
+.bf-switch {
+  display: block;
+  width: 46px;
+  height: 28px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.22);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.2s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s;
+  }
+
+  &.on { background: var(--mint); }
+  &.on::after { transform: translateX(18px); }
+}
+
+// ─── Compact glass row (icon, title, helper line, switch) ───────────────────
+
+.bf-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 12px 13px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  .bf-row-ic {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.16);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    .material-symbols-outlined { font-size: 19px; }
+  }
+
+  .bf-row-tx {
+    display: block;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .bf-row-title {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .bf-row-line {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.68);
+    margin-top: 3px;
+    line-height: 1.4;
+    white-space: nowrap;
+
+    &.saves { color: var(--mint); }
+  }
+
+  &.off {
+    background: rgba(255, 255, 255, 0.04);
+
+    .bf-row-ic,
+    .bf-row-title { opacity: 0.5; }
+  }
+
+  // White card row for the plan page.
+  &.light {
+    background: #fff;
+    border-color: #e5e7eb;
+    color: #111827;
+
+    .bf-row-ic {
+      background: #eef4ff;
+      color: #2563eb;
+    }
+
+    .bf-row-line {
+      color: #6b7280;
+      &.saves { color: #059669; }
+    }
+
+    .bf-switch { background: #dbe1ec; }
+    .bf-switch.on { background: #2563eb; }
+
+    &.off { background: #f8fafc; }
+  }
+}
+
+// ─── Stepper (minus, big number, plus) ──────────────────────────────────────
+
+.bf-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+
+  button {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-family: 'Manrope', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s;
+
+    &:active { background: rgba(255, 255, 255, 0.24); }
+    &:disabled { opacity: 0.35; pointer-events: none; }
+  }
+
+  .bf-stepper-val {
+    min-width: 70px;
+    font-size: 64px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    text-align: center;
+    color: #fff;
+    text-shadow: 0 6px 30px rgba(8, 28, 78, 0.45);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-switch,
+  .bf-switch::after,
+  .bf-row,
+  .bf-pick { transition: none !important; }
+}

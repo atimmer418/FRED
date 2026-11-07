@@ -87,6 +87,14 @@
   font-size: 12.5px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.62);
+
+  // A stored kid the lower count would drop, with the balance that goes with them.
+  &.kids-warn {
+    color: #fff;
+    opacity: 0.92;
+  }
+
+  & + & { margin-top: 8px; }
 }
 
 // ─── Kids 2: one compact row per kid ─────────────────────────────────────────

@@ -307,6 +307,22 @@ describe('GoalPage', () => {
     expect(showToast).toHaveBeenCalledWith('Plan updated', 'success');
   });
 
+  it('back from a preview pops to the quiz and leaves the draft for it; back from a saved page goes to my-profile', async () => {
+    const form = newDraft('WEDDING');
+    const fixture = await create({ type: 'WEDDING', preview: '1' }, { draft: { form, existing: null } });
+    click(fixture, '.back-btn');
+    expect(navCtrl.back).toHaveBeenCalledTimes(1);
+    expect(navCtrl.navigateBack).not.toHaveBeenCalled();
+    // The quiz beneath reads the draft to tell this return from a created plan, and clears it itself.
+    expect(draftService.draft()).toEqual({ form, existing: null });
+    TestBed.resetTestingModule();
+
+    const saved = await create({ id: '7' }, { goals: [houseGoal(7)] });
+    click(saved, '.back-btn');
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+    expect(navCtrl.back).not.toHaveBeenCalled();
+  });
+
   it('saved mode shows no CTA; the menu offers Edit plan, Rename, Mark completed, Remove goal', async () => {
     const fixture = await create({ id: '7' }, { goals: [houseGoal(7)] });
     const page = fixture.componentInstance;

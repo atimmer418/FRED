@@ -1,10 +1,10 @@
 import { Component, ElementRef, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
-import { ModalController, NavController } from '@ionic/angular/standalone';
+import { ModalController, NavController, ViewDidEnter, ViewWillEnter } from '@ionic/angular/standalone';
 import { firstValueFrom } from 'rxjs';
 
-import { Goal, GoalIcon, GoalType } from '../../models/goal.model';
+import { Goal, GoalIcon, GoalType, KidsConfig } from '../../models/goal.model';
 import { GoalsService } from '../../services/goals.service';
 import { GoalDraftService } from '../../services/goal-draft.service';
 import { RateAssumptionsService } from '../../services/rate-assumptions.service';
@@ -63,6 +63,11 @@ function stepOwnsError(id: QuizStepId, key: string): boolean {
  * The quiz: one pushed page for every goal type. `/goals/new/:type` starts from the type's
  * defaults; `/goals/:id/edit` starts from the saved goal. The last step's "Show my plan" hands the
  * form to GoalDraftService, shows the calc screen, then pushes the plan page in preview mode.
+ *
+ * The quiz stays alive beneath the preview. Back from the preview reveals it again with the draft
+ * still in the service, and the last step repaints. Start replaces the preview with the saved page
+ * and clears the draft, so a later swipe back from that page reveals a quiz whose draft is gone:
+ * it shows nothing and pops itself once the reveal completes (see ionViewWillEnter).
  */
 @Component({
   selector: 'app-goal-quiz',
@@ -75,7 +80,7 @@ function stepOwnsError(id: QuizStepId, key: string): boolean {
   templateUrl: './goal-quiz.page.html',
   styleUrls: ['./goal-quiz.page.scss'],
 })
-export class GoalQuizPage implements OnInit, OnDestroy {
+export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEnter {
   private readonly route = inject(ActivatedRoute);
   private readonly navCtrl = inject(NavController);
   private readonly modalCtrl = inject(ModalController);
@@ -98,6 +103,11 @@ export class GoalQuizPage implements OnInit, OnDestroy {
   /** True once the route resolved to a form. */
   readonly ready = signal(false);
   readonly calcShowing = signal(false);
+  /**
+   * True when the quiz is revealed after its plan was created (or its draft replaced): the screen
+   * stays blank and the page pops itself in ionViewDidEnter.
+   */
+  readonly evicting = signal(false);
   /** The one-line error under the current step's control, set by Continue and cleared by any change. */
   readonly error = signal<string | null>(null);
 
@@ -130,6 +140,25 @@ export class GoalQuizPage implements OnInit, OnDestroy {
     if (n <= 1) return 'For your kid';
     if (n === 2) return 'For both kids';
     return `For all ${n} kids`;
+  });
+  /**
+   * Edit only: one line per stored kid the lower count drops who holds a logged balance. Saving
+   * removes the kid and the money, so the count step says so before Update does it.
+   */
+  readonly droppedKidLines = computed<string[]>(() => {
+    const existing = this.existing();
+    if (!existing || existing.type !== 'KIDS') return [];
+    const stored = (existing.config as KidsConfig).kids ?? [];
+    const count = this.kidCount();
+    const lines: string[] = [];
+    stored.slice(count).forEach((kid, j) => {
+      const a = kid.accounts;
+      const logged = a.plan529.balance + a.brokerage.balance + (a.firstYear?.balance ?? 0);
+      if (!(logged > 0)) return;
+      const label = kid.label.trim() || `Kid ${count + j + 1}`;
+      lines.push(`Saving removes ${label} and the ${fmtMoney(logged)} you logged for them.`);
+    });
+    return lines;
   });
 
   /** "Skip for now" is held in the grid until Continue, so the step does not vanish under the user. */
@@ -189,6 +218,8 @@ export class GoalQuizPage implements OnInit, OnDestroy {
   private costTimer: ReturnType<typeof setTimeout> | null = null;
   private calcTimer: ReturnType<typeof setTimeout> | null = null;
   private enteredStepId: QuizStepId | null = null;
+  /** True once Show my plan has handed a draft over; a reveal before that is not a return. */
+  private handedOff = false;
 
   constructor() {
     // The cost screen's hold starts the moment that step is entered and stops when it is left.
@@ -246,7 +277,29 @@ export class GoalQuizPage implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.clearCostTimer();
-    if (this.calcTimer) clearTimeout(this.calcTimer);
+    this.clearCalcTimer();
+    // A quiz popped by a swipe leaves no draft behind for a quiz still lower in the stack to mistake
+    // for its own. The plan page copies the draft on init, so a preview above is never blanked.
+    if (this.handedOff) this.draftService.clear();
+  }
+
+  /**
+   * The quiz is revealed again: back from the preview, or a swipe back from the saved page that
+   * Start put over it. Fires when a swipe-back gesture starts, before it is known to complete, so
+   * this only decides what to paint; the pop itself waits for ionViewDidEnter.
+   */
+  ionViewWillEnter(): void {
+    if (!this.handedOff) return;
+    this.clearCalcTimer();
+    this.calcShowing.set(false);
+    const draft = this.draftService.draft();
+    const mine = draft !== null && draft.form === this.form();
+    this.evicting.set(!mine);
+  }
+
+  /** The reveal completed: a quiz whose plan was created pops itself. */
+  ionViewDidEnter(): void {
+    if (this.evicting()) this.close();
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -292,8 +345,9 @@ export class GoalQuizPage implements OnInit, OnDestroy {
     this.stepIndex.update(i => i - 1);
   }
 
-  /** Discards: a new quiz returns to my-profile, an edit returns to its plan page. */
+  /** Discards the draft: a new quiz returns to my-profile, an edit returns to its plan page. */
   close(): void {
+    this.draftService.clear();
     const existing = this.existing();
     if (existing) void this.navCtrl.navigateBack(['/goals', existing.id]);
     else void this.navCtrl.navigateBack('/my-profile');
@@ -302,6 +356,7 @@ export class GoalQuizPage implements OnInit, OnDestroy {
   /** Hands the draft over, shows the calc screen for 0.9 to 2.5 seconds, then pushes the preview. */
   showPlan(): void {
     this.draftService.set(this.form(), this.existing());
+    this.handedOff = true;
     this.calcShowing.set(true);
     const lines = this.calcLines().length;
     const hold = this.reducedMotion()
@@ -622,6 +677,11 @@ export class GoalQuizPage implements OnInit, OnDestroy {
   private clearCostTimer(): void {
     if (this.costTimer) clearTimeout(this.costTimer);
     this.costTimer = null;
+  }
+
+  private clearCalcTimer(): void {
+    if (this.calcTimer) clearTimeout(this.calcTimer);
+    this.calcTimer = null;
   }
 
   /**

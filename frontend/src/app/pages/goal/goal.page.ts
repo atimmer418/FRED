@@ -366,10 +366,13 @@ export class GoalPage implements OnInit, ViewWillEnter {
     this.selectedRate.set(this.rates.annualReturn());
   }
 
-  /** A preview's back returns to the quiz and drops the draft; a saved page returns to my-profile. */
+  /**
+   * A preview's back returns to the quiz beneath; a saved page returns to my-profile. The draft is
+   * left in place: the quiz reads it to tell "back to tweak an answer" from "my plan was created",
+   * and clears it itself when it closes. Start and Update clear it here.
+   */
   goBack(): void {
     if (this.previewRoute() && this.ready()) {
-      this.draftService.clear();
       void this.navCtrl.back();
       return;
     }

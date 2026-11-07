@@ -505,6 +505,171 @@ describe('GoalQuizPage', () => {
     discardPeriodicTasks();
   }));
 
+  it('back from the preview repaints the last step: the calc screen is gone, the top bar and the CTA are back, and the draft stays', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.showPlan();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-goal-quiz-calc')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.flow-top').classList).toContain('hidden');
+    tick(2500);
+    expect(navCtrl.navigateForward).toHaveBeenCalledTimes(1);
+
+    // The preview pops: Ionic re-enters the quiz with the draft still in the service.
+    page.ionViewWillEnter();
+    fixture.detectChanges();
+    expect(page.calcShowing()).toBeFalse();
+    expect(page.evicting()).toBeFalse();
+    expect(fixture.nativeElement.querySelector('app-goal-quiz-calc')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.flow-top').classList).not.toContain('hidden');
+    expect(onScreen(fixture)).not.toBeNull();
+    expect(text(fixture, '.fscreen.on .fs-h1')).toBe('How much, and when?');
+    expect(text(fixture, '.fscreen.on .fs-cta')).toContain('Show my plan');
+    expect(draft.draft()).toEqual({ form: page.form(), existing: null });
+    page.ionViewDidEnter();
+    expect(navCtrl.navigateBack).not.toHaveBeenCalled();
+
+    // A second Show my plan runs the calc screen again and pushes the preview again.
+    page.next();
+    fixture.detectChanges();
+    expect(page.calcShowing()).toBeTrue();
+    tick(2500);
+    expect(navCtrl.navigateForward).toHaveBeenCalledTimes(2);
+    discardPeriodicTasks();
+  }));
+
+  it('re-entering while the calc timer still runs cancels the pending push', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.showPlan();
+    tick(100);
+    page.ionViewWillEnter();
+    tick(5000);
+    expect(navCtrl.navigateForward).not.toHaveBeenCalled();
+    expect(page.calcShowing()).toBeFalse();
+    discardPeriodicTasks();
+  }));
+
+  it('revealed after Start created the plan (the draft is gone), the quiz paints nothing and pops itself once the reveal completes', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.showPlan();
+    tick(2500);
+
+    // Start this plan on the preview: POST, replaceUrl to the saved page, clear the draft.
+    draft.clear();
+
+    // A swipe back from the saved page starts: ionViewWillEnter fires before the gesture is known
+    // to complete, so nothing navigates yet, and no step or top bar is there to tap.
+    page.ionViewWillEnter();
+    fixture.detectChanges();
+    expect(page.evicting()).toBeTrue();
+    expect(page.calcShowing()).toBeFalse();
+    expect(fixture.nativeElement.querySelector('app-goal-quiz-calc')).toBeNull();
+    expect(onScreen(fixture)).toBeNull();
+    expect(fixture.nativeElement.querySelector('.flow-top').classList).toContain('hidden');
+    expect(navCtrl.navigateBack).not.toHaveBeenCalled();
+
+    // The gesture completes: the quiz pops to my-profile.
+    page.ionViewDidEnter();
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+    expect(navCtrl.navigateBack).toHaveBeenCalledTimes(1);
+    discardPeriodicTasks();
+  }));
+
+  it('a cancelled swipe back from the preview, then Start, still evicts the quiz on the next reveal', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.showPlan();
+    tick(2500);
+
+    // The gesture starts (the quiz repaints its last step) and is cancelled: the preview stays on top.
+    page.ionViewWillEnter();
+    expect(page.calcShowing()).toBeFalse();
+    expect(page.evicting()).toBeFalse();
+
+    // Start on the preview clears the draft; a later swipe back from the saved page reveals the quiz.
+    draft.clear();
+    page.ionViewWillEnter();
+    expect(page.evicting()).toBeTrue();
+    page.ionViewDidEnter();
+    expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
+
+    // A draft another quiz set is not this quiz's either.
+    const other = await create({ type: 'CAR' });
+    const otherPage = other.componentInstance;
+    goTo(other, 1);
+    otherPage.showPlan();
+    tick(2500);
+    draft.set({ ...otherPage.form(), price: 1 }, null);
+    otherPage.ionViewWillEnter();
+    expect(otherPage.evicting()).toBeTrue();
+    discardPeriodicTasks();
+  }));
+
+  it('a reveal before Show my plan ever ran changes nothing', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    page.ionViewWillEnter();
+    page.ionViewDidEnter();
+    expect(page.evicting()).toBeFalse();
+    expect(navCtrl.navigateBack).not.toHaveBeenCalled();
+    expect(onScreen(fixture)).not.toBeNull();
+  });
+
+  it('a quiz popped after handing its draft over clears it on destroy', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.showPlan();
+    tick(2500);
+    expect(draft.draft()).not.toBeNull();
+    fixture.destroy();
+    expect(draft.draft()).toBeNull();
+    discardPeriodicTasks();
+  }));
+
+  it('edit: lowering the count below a stored kid with logged balances warns on the count step; a new quiz never warns', async () => {
+    const goal = kidsGoal(5, [{ birthYear: 2022, birthMonth: 3 }, { birthYear: 2024, birthMonth: null }]);
+    const config = goal.config as KidsConfig;
+    const ben = {
+      ...config.kids[1], label: 'Ben', accounts: {
+        plan529: { balance: 800, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 },
+        brokerage: { balance: 400, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 },
+      },
+    };
+    const fixture = await create({ id: '5' }, { goals: [{ ...goal, config: { ...config, kids: [config.kids[0], ben] } }] });
+    const page = fixture.componentInstance;
+    expect(page.currentStep().id).toBe('kids_count');
+    expect(fixture.nativeElement.querySelector('.fscreen.on .kids-warn')).toBeNull();
+
+    page.setKidCount(1);
+    fixture.detectChanges();
+    expect(text(fixture, '.fscreen.on .kids-warn')).toBe('Saving removes Ben and the $1,200 you logged for them.');
+
+    // Back up to two: the stored kid is kept, so the warning goes.
+    page.setKidCount(2);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.fscreen.on .kids-warn')).toBeNull();
+
+    // A dropped kid with nothing logged is not worth a line.
+    const quiet = await create({ id: '6' }, { goals: [kidsGoal(6, [{ birthYear: 2022, birthMonth: 3 }, { birthYear: 2024, birthMonth: null }])] });
+    quiet.componentInstance.setKidCount(1);
+    quiet.detectChanges();
+    expect(quiet.nativeElement.querySelector('.fscreen.on .kids-warn')).toBeNull();
+
+    const fresh = await create({ type: 'KIDS' });
+    fresh.componentInstance.setKidCount(3);
+    fresh.componentInstance.setKidCount(1);
+    fresh.detectChanges();
+    expect(fresh.componentInstance.droppedKidLines()).toEqual([]);
+    expect(fresh.nativeElement.querySelector('.fscreen.on .kids-warn')).toBeNull();
+  });
+
   it('Continue is gated by validateForm: a $0 price shows the error and stays', async () => {
     const fixture = await create({ type: 'HOUSE' });
     const page = fixture.componentInstance;
@@ -520,12 +685,13 @@ describe('GoalQuizPage', () => {
     expect(page.stepIndex()).toBe(1);
   });
 
-  it('close on a new quiz navigates back to /my-profile without touching the draft service', async () => {
+  it('close on a new quiz clears the draft and navigates back to /my-profile', async () => {
     const fixture = await create({ type: 'VACATION' });
     const set = spyOn(draft, 'set').and.callThrough();
+    draft.set(fixture.componentInstance.form(), null);
     fixture.componentInstance.close();
     expect(navCtrl.navigateBack).toHaveBeenCalledWith('/my-profile');
-    expect(set).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledTimes(1);
     expect(draft.draft()).toBeNull();
 
     // Back on the first step is the same as close; close on an edit returns to the plan page.

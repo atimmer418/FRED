@@ -3,7 +3,7 @@
 
   <!-- Top bar: back (from the second step on), the dots for the steps that will run, and close,
        which the cost step trades for the info button that opens the sources sheet (the mockup). -->
-  <div class="flow-top" [class.hidden]="calcShowing()">
+  <div class="flow-top" [class.hidden]="calcShowing() || evicting()">
     <button type="button" class="flow-back" [class.show]="stepIndex() > 0" (click)="back()" aria-label="Back">
       <span class="material-symbols-outlined">arrow_back_ios_new</span>
     </button>
@@ -26,7 +26,7 @@
   @if (ready()) {
     @for (step of steps(); track step.id) {
       <div class="fscreen"
-           [class.on]="!calcShowing() && $index === stepIndex()"
+           [class.on]="!calcShowing() && !evicting() && $index === stepIndex()"
            [class.before]="$index < stepIndex()"
            [class.after]="$index > stepIndex()">
         <div class="fs-eyebrow">{{ step.eyebrow }}</div>
@@ -46,6 +46,9 @@
               <app-quiz-stepper [value]="kidCount()" [min]="1" [max]="maxKids" (valueChange)="setKidCount($event)" />
               @if (kidCount() >= maxKids) {
                 <div class="kids-cap">Five is the most FRED plans for at once</div>
+              }
+              @for (line of droppedKidLines(); track line) {
+                <div class="kids-cap kids-warn" role="alert">{{ line }}</div>
               }
             }
 

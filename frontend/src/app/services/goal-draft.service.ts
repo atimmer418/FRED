@@ -12,8 +12,9 @@ export interface GoalDraft {
 /**
  * The quiz's answers on their way to the plan page. The quiz sets the draft before it pushes the
  * plan page; the plan page renders preview mode whenever a draft is present and clears it when the
- * plan is saved or the preview is left. Held in memory only, so a reload of the preview URL finds
- * nothing and falls back to my-profile.
+ * plan is saved. Back from the preview leaves it: the quiz beneath reads it to tell a return from a
+ * created plan apart, and clears it when it closes. Held in memory only, so a reload of the preview
+ * URL finds nothing and falls back to my-profile.
  */
 @Injectable({ providedIn: 'root' })
 export class GoalDraftService {

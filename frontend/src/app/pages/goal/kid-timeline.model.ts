@@ -9,6 +9,8 @@ export interface TimelineDot {
   year: number | null;
   /** A kid with no birth year: drawn dashed at this year. */
   undated: boolean;
+  /** A kid expected this year with no month known: labelled "This year", like the card (Ruling R4). */
+  expectedThisYear: boolean;
   /** Strictly before Now on the bar (drawn filled green). */
   passed: boolean;
   /** 0..100 along the bar. */
@@ -24,10 +26,11 @@ const NEAR_PCT = 65;
  * year when that is earlier) to the last 18th birthday. The first ten years map linearly onto
  * 0..65 and the rest onto 65..100, so near-term dots never pile up; a span of ten years or less
  * maps linearly onto 0..100. Years are whole calendar years: Now sits at this year, so a kid
- * expected this year sits beside Now and is not passed.
+ * expected this year sits beside Now and is not passed. The month only decides the label: a kid
+ * dated this year with no month reads "This year"; with a month, the year (born or arriving).
  */
 export function buildKidTimeline(
-  kids: ReadonlyArray<{ label: string; birthYear: number | null }>,
+  kids: ReadonlyArray<{ label: string; birthYear: number | null; birthMonth?: number | null }>,
   now: Date,
 ): { dots: TimelineDot[]; passedPct: number } {
   const thisYear = now.getFullYear();
@@ -48,7 +51,9 @@ export function buildKidTimeline(
   };
 
   const nowPct = position(thisYear);
-  const nowDot: TimelineDot = { kind: 'now', label: 'Now', year: thisYear, undated: false, passed: false, position: nowPct };
+  const nowDot: TimelineDot = {
+    kind: 'now', label: 'Now', year: thisYear, undated: false, expectedThisYear: false, passed: false, position: nowPct,
+  };
   const kidDots: TimelineDot[] = kids.map((kid, i) => {
     const pct = position(kid.birthYear ?? thisYear);
     return {
@@ -56,6 +61,7 @@ export function buildKidTimeline(
       label: kid.label.trim() || `Kid ${i + 1}`,
       year: kid.birthYear,
       undated: kid.birthYear === null,
+      expectedThisYear: kid.birthYear === thisYear && (kid.birthMonth ?? null) === null,
       passed: pct < nowPct,
       position: pct,
     };
@@ -65,6 +71,7 @@ export function buildKidTimeline(
     label: kids.length >= 2 ? 'All 18' : '18',
     year: last,
     undated: false,
+    expectedThisYear: false,
     passed: false,
     position: 100,
   };

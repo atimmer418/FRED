@@ -14,16 +14,16 @@ describe('buildKidTimeline', () => {
     expect(dots.map(d => d.kind)).toEqual(['kid', 'now', 'kid', 'kid', 'end']);
 
     const [kid1, now, kid3, kid2, end] = dots;
-    expect(kid1).toEqual({ kind: 'kid', label: 'Kid 1', year: 2024, undated: false, passed: true, position: 0 });
+    expect(kid1).toEqual({ kind: 'kid', label: 'Kid 1', year: 2024, undated: false, expectedThisYear: false, passed: true, position: 0 });
     // Two years into the first ten: 2 / 10 of 65.
     expect(now.position).toBeCloseTo(13, 6);
     expect(now.year).toBe(2026);
     expect(now.passed).toBeFalse();
-    expect(kid3).toEqual({ kind: 'kid', label: 'Kid 3', year: null, undated: true, passed: false, position: now.position });
+    expect(kid3).toEqual({ kind: 'kid', label: 'Kid 3', year: null, undated: true, expectedThisYear: false, passed: false, position: now.position });
     expect(kid2.position).toBeCloseTo(26, 6);
     expect(kid2.passed).toBeFalse();
     expect(kid2.undated).toBeFalse();
-    expect(end).toEqual({ kind: 'end', label: 'All 18', year: 2046, undated: false, passed: false, position: 100 });
+    expect(end).toEqual({ kind: 'end', label: 'All 18', year: 2046, undated: false, expectedThisYear: false, passed: false, position: 100 });
     expect(passedPct).toBe(now.position);
   });
 
@@ -60,8 +60,24 @@ describe('buildKidTimeline', () => {
     expect(ellie.undated).toBeFalse();
     expect(ellie.passed).toBeFalse();
     expect(ellie.year).toBe(2026);
+    expect(ellie.expectedThisYear).toBeTrue();
     expect(ellie.position).toBe(dots[0].position);
     expect(dots[2].year).toBe(2044);
+  });
+
+  it('flags This year only for a kid dated this year with no month (Ruling R4)', () => {
+    const { dots } = buildKidTimeline([
+      { label: 'Born', birthYear: 2026, birthMonth: 3 },
+      { label: 'Due', birthYear: 2026, birthMonth: 12 },
+      { label: 'Sometime', birthYear: 2026, birthMonth: null },
+      { label: 'Later', birthYear: 2027 },
+    ], NOW);
+    const flag = (label: string) => dots.find(d => d.label === label)!.expectedThisYear;
+    expect(flag('Born')).toBeFalse();
+    expect(flag('Due')).toBeFalse();
+    expect(flag('Sometime')).toBeTrue();
+    expect(flag('Later')).toBeFalse();
+    expect(dots.find(d => d.kind === 'now')!.expectedThisYear).toBeFalse();
   });
 
   it('ends at the last kid\'s 18th birthday, not 18 years from now, and keeps Now on the bar', () => {

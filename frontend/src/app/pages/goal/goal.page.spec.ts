@@ -457,16 +457,22 @@ describe('GoalPage', () => {
     expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).completed).toBeTrue();
   });
 
-  it('the band for a simple goal reads saved, percent and target with the Invested pill; a vacation reads this year and trips', async () => {
+  it('the band for a simple goal reads saved, percent and target with the pill and the status chip at its right end; a vacation reads this year and trips', async () => {
     const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
-    expect(text(fixture, '.gp-band')).toBe(`Saved $8,000 · 10% there · Target $80K by Dec ${YEAR + 5} Invested`);
+    expect(text(fixture, '.gp-band-text')).toBe(`Saved $8,000 · 10% there · Target $80K by Dec ${YEAR + 5}`);
+    expect(text(fixture, '.gp-band .gp-band-right .fd-pill')).toBe('Invested');
+    expect(text(fixture, '.gp-band .gp-band-right .gp-chip')).toBe('Plan started');
+    expect(fixture.nativeElement.querySelector('.gp-zone')).toBeNull();
+    expect(text(fixture)).not.toContain('Your plan');
     expect(fixture.nativeElement.querySelector('app-kid-timeline')).toBeNull();
     expect(fixture.nativeElement.querySelector('#gp-bal-current')).not.toBeNull();
     TestBed.resetTestingModule();
 
     const trips = await create({ id: '6' }, { goals: [vacationGoalFixture(6)] });
-    expect(text(trips, '.gp-band')).toBe('Saved $0 this year · 0% there · $6,000 for 2 trips Cash');
+    expect(text(trips, '.gp-band-text')).toBe('Saved $0 this year · 0% there · $6,000 for 2 trips');
+    expect(text(trips, '.gp-band .gp-band-right .fd-pill')).toBe('Cash');
+    expect(text(trips, '.gp-band .gp-band-right .gp-chip')).toBe('Plan started');
     expect(trips.nativeElement.querySelector('#gp-bal-vacation')).not.toBeNull();
     expect(text(trips, '.gp-cash-note')).toContain('Planned as cash at ~4%');
   });
@@ -906,6 +912,31 @@ describe('GoalPage', () => {
     expect(page.view().monthlyTotal).toBeLessThan(before);
     expect(text(fixture, '.fd-hero-big')).toBe(`${fmtMoney(page.view().monthlyTotal)}/mo`);
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the goal and the shared rate when revealed beneath a popped edit preview', async () => {
+    const goal = { ...houseGoal(7), planRate: 0.10 };
+    const fixture = await create({ id: '7' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    finishCountUp(fixture);
+    const rates = TestBed.inject(RateAssumptionsService);
+    expect(page.selectedRate()).toBe(rates.annualReturn());
+    const before = page.view().monthlyTotal;
+
+    // The edit preview PUT the goal at 12% and committed 12% to the shared rate, then popped back here.
+    const updated: Goal = { ...goal, planRate: 0.12, anchorMonthly: 777 };
+    goals.set([updated]);
+    rates.annualReturn.set(0.12);
+    page.ionViewWillEnter();
+    fixture.detectChanges();
+
+    expect(page.existing()).toBe(updated);
+    expect(page.selectedRate()).toBe(0.12);
+    expect(page.isDefaultRate()).toBeTrue();
+    expect(page.view().monthlyTotal).toBeLessThan(before);
+    expect(text(fixture, '.fd-hero-big')).toBe(`${fmtMoney(page.view().monthlyTotal)}/mo`);
+    const on = fixture.nativeElement.querySelector('.fd-scenario-chips button.on') as HTMLElement;
+    expect(on.textContent!.trim()).toContain('12%');
   });
 
   it('has no em dash in rendered text', async () => {

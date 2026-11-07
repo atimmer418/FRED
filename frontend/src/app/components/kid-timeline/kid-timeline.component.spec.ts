@@ -6,7 +6,7 @@ import { buildKidTimeline } from '../../pages/goal/kid-timeline.model';
 const NOW = new Date(2026, 10, 15);
 
 describe('KidTimelineComponent', () => {
-  function create(kids: Array<{ label: string; birthYear: number | null }>): ComponentFixture<KidTimelineComponent> {
+  function create(kids: Array<{ label: string; birthYear: number | null; birthMonth?: number | null }>): ComponentFixture<KidTimelineComponent> {
     TestBed.configureTestingModule({ imports: [KidTimelineComponent] });
     const fixture = TestBed.createComponent(KidTimelineComponent);
     fixture.componentInstance.timeline = buildKidTimeline(kids, NOW);
@@ -44,6 +44,11 @@ describe('KidTimelineComponent', () => {
     const dots = Array.from(fixture.nativeElement.querySelectorAll('.ktl-dot')) as HTMLElement[];
     expect(dots[1].classList).not.toContain('past');
     expect(dots[1].classList).not.toContain('unsure');
+  });
+
+  it('reads the year, not This year, for a kid born earlier this year with a known month (Ruling R4, as the card does)', () => {
+    const fixture = create([{ label: 'Bea', birthYear: 2026, birthMonth: 3 }]);
+    expect(labels(fixture)).toEqual(['Now 2026', 'Bea 2026', '18 2044']);
   });
 
   it('renders nothing without a timeline', () => {

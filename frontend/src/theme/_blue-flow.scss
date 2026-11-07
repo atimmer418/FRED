@@ -577,9 +577,9 @@ $bf-shadow:       rgba(8, 28, 78, 0.45);         // glow under big numbers
     --bf-thumb:         #fff;
     --bf-fill-faint:    #f8fafc;
 
-    // The plan page's helper line is a full sentence (the mockup's .ins .tx wraps it); a
-    // newline from the page breaks it at its clause, otherwise it wraps as text does.
-    .bf-row-line { white-space: pre-line; }
+    // The plan page's helper line is a full sentence; it wraps as text does (the mockup's
+    // .ins .tx wraps too), where the quiz's short lines stay on one line.
+    .bf-row-line { white-space: normal; }
   }
 }
 

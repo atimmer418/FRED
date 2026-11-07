@@ -13,10 +13,18 @@
   padding-bottom: 12px;
 }
 
+// The band text wraps as text; the pill and the status chip stay together at the right end,
+// on a second line when the text leaves no room (margin-left keeps them right-aligned there).
+.gp-band-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .gp-band-right {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-left: auto;
   white-space: nowrap;
 }
 

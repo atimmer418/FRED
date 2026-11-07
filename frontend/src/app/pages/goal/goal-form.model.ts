@@ -526,9 +526,9 @@ export function costHeadline(c: KidCostFigures): string {
   switch (c.sizeWording) {
     case 'only': return `About ${amount} to raise an only child to 18`;
     case 'two': return `About ${amount} per child to 18 in a two-child family`;
-    case 'four': return `About ${amount} per child to 18 in a four-child family`;
-    case 'five': return `About ${amount} per child to 18 in a five-child family`;
-    default: return `About ${amount} per child to 18 in a three-child family`;
+    case 'four': return `About ${amount} per child to 18 for a family of four`;
+    case 'five': return `About ${amount} per child to 18 for a family of five`;
+    default: return `About ${amount} per child to 18 in a family of three or more`;
   }
 }
 

@@ -30,19 +30,19 @@ export class KidTimelineComponent {
 
   get labels(): TimelineLabel[] {
     const dots = this.timeline?.dots ?? [];
-    const thisYear = dots.find(d => d.kind === 'now')?.year ?? new Date().getFullYear();
     return dots.map((dot, i) => ({
       dot,
-      sub: this.subLabel(dot, thisYear),
+      sub: this.subLabel(dot),
       up: i % 2 === 0,
       edge: i === 0 ? 'l' : i === dots.length - 1 ? 'r' : null,
     }));
   }
 
-  private subLabel(dot: TimelineDot, thisYear: number): string {
+  /** Ruling R4: "This year" only for a kid dated this year with no month; a dated kid reads its year. */
+  private subLabel(dot: TimelineDot): string {
     if (dot.kind === 'kid') {
       if (dot.undated || dot.year === null) return 'not yet';
-      if (dot.year === thisYear) return 'This year';
+      if (dot.expectedThisYear) return 'This year';
     }
     return String(dot.year ?? '');
   }

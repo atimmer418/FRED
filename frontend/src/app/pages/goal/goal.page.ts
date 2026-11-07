@@ -257,14 +257,14 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   readonly isDefaultRate = computed(() => this.selectedRate() === this.rates.annualReturn());
 
-  /** The gift-days row copy, by the stored switch. The off line breaks at its comma (the row renders pre-line). */
+  /** The gift-days row copy, by the stored switch. The light row wraps the line as text. */
   readonly giftRow = computed<{ title: string; line: string } | null>(() => {
     const g = this.view().giftDays;
     if (!g) return null;
     if (g.on) return { title: 'Next up:', line: `New Year, ${fmtMoney(g.lump)} for each kid.` };
     return {
       title: 'Lighten the monthly.',
-      line: `Put in ${fmtMoney(g.lump)} per kid every New Year,\nand this drops to ~${fmtMoney(g.monthlyIfOn)}.`,
+      line: `Put in ${fmtMoney(g.lump)} per kid every New Year, and this drops to ~${fmtMoney(g.monthlyIfOn)}.`,
     };
   });
 
@@ -358,12 +358,16 @@ export class GoalPage implements OnInit, ViewWillEnter {
     this.startCountUp();
   }
 
-  /** Back from an edit preview lands here: pick up the goal the Update wrote. */
+  /**
+   * Back from an edit preview lands here: pick up the goal the Update wrote and the shared rate it
+   * committed, so the hero and the chip row match what was just saved.
+   */
   ionViewWillEnter(): void {
     const goal = this.existing();
     if (this.mode() !== 'saved' || !goal) return;
     const latest = this.goalsService.goals().find(g => g.id === goal.id);
     if (latest && latest !== goal) this.existing.set(latest);
+    this.selectedRate.set(this.rates.annualReturn());
   }
 
   /** A preview's back returns to the quiz and drops the draft; a saved page returns to my-profile. */

@@ -40,11 +40,12 @@
             <app-kid-timeline [timeline]="v.timeline"></app-kid-timeline>
           } @else {
             <div class="fd-hero-bar"><i [style.width.%]="v.progressPct"></i></div>
-            <!-- &ngsp; keeps a space between the flex items in the text (a flex box never renders it). -->
+            <!-- The pill and the status chip sit at the right end of the band (spec). -->
             <div class="fd-hero-labels gp-band">
-              <span>{{ bandLine().saved }}</span>&ngsp;
-              <span class="gp-band-right">· {{ bandLine().target }}&ngsp;
+              <span class="gp-band-text">{{ bandLine().saved }} · {{ bandLine().target }}</span>
+              <span class="gp-band-right">
                 @if (v.pill) { <span class="fd-pill" [class.cash]="v.pill === 'Cash'">{{ v.pill }}</span> }
+                <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
               </span>
             </div>
           }
@@ -126,11 +127,7 @@
             }
           </swiper-container>
         } @else {
-          <!-- Every other type: the status chip on the zone label, then the one Saved so far tile -->
-          <div class="fd-zone gp-zone">
-            <span>Your plan</span>
-            <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
-          </div>
+          <!-- Every other type: the one Saved so far tile (the status chip is on the band above) -->
           <div class="fd-tiles gp-tiles">
             <div class="fd-tile">
               <label class="fd-tile-label" [attr.for]="v.vacation ? 'gp-bal-vacation' : 'gp-bal-current'">

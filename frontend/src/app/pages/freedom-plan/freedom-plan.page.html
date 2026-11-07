@@ -1,0 +1,125 @@
+<ion-header class="ion-no-border">
+  <div class="blue-hero-header">
+    <div class="hero-nav">
+      <button type="button" class="back-btn" (click)="goBack()" aria-label="Back">
+        <span class="material-symbols-outlined">arrow_back_ios_new</span>
+      </button>
+      <h2 class="header-title">Freedom Plan</h2>
+      <div class="back-btn-spacer"></div>
+    </div>
+  </div>
+</ion-header>
+
+<ion-content class="shell-content" appKeyboardAvoid=".fd-tile">
+  <div class="shell-inner fp-inner">
+    <!-- Two sentences, one line each: the copy breaks only between them. -->
+    <p class="fp-sub">
+      <span>Your path to work-optional.</span>
+      <span>Adjust the plan and watch the date move.</span>
+    </p>
+
+    <!-- Hero: the date, front and center -->
+    <section class="fd-hero">
+      <div class="fd-hero-year" *ngIf="freedomYear() as year; else fdHeroEmpty">{{ year }}</div>
+      <ng-template #fdHeroEmpty><div class="fd-hero-year fd-hero-year--empty">—</div></ng-template>
+      <div class="fd-hero-meta">
+        <span *ngIf="freedomAge() as age">Age {{ age }}</span>
+        <span class="fd-dot" *ngIf="freedomAge() !== null && timeAwayLabel() !== null">·</span>
+        <span *ngIf="timeAwayLabel() as away">{{ away }}</span>
+        <span *ngIf="freedomYear() === null">Set your plan below to see your freedom date</span>
+      </div>
+      <div class="fd-hero-bar"><i [style.width.%]="progressPct()"></i></div>
+      <div class="fd-hero-labels">
+        <span>Now {{ equity() | currency:'USD':'symbol':'1.0-0' }}</span>
+        <span>{{ progressPct() }}% there</span>
+        <span>Goal {{ portfolioGoal() | currency:'USD':'symbol':'1.0-0' }}</span>
+      </div>
+    </section>
+
+    <!-- Editable plan -->
+    <p class="fd-zone fp-zone">Your plan</p>
+    <div class="fd-tiles">
+      <div class="fd-tile">
+        <label class="fd-tile-label" for="fp-income">Income goal</label>
+        <div class="fd-tile-edit">
+          <span class="fd-pre">$</span>
+          <input
+            id="fp-income"
+            type="text"
+            inputmode="numeric"
+            class="fd-tile-input"
+            [value]="incomeSig() || ''"
+            (input)="onIncomeInput($event)"
+            placeholder="5,000"
+          />
+          <span class="fd-suf">/mo</span>
+        </div>
+      </div>
+      <div class="fd-tile">
+        <label class="fd-tile-label" for="fp-invest">Investing</label>
+        <div class="fd-tile-edit">
+          <span class="fd-pre">$</span>
+          <input
+            id="fp-invest"
+            type="text"
+            inputmode="numeric"
+            class="fd-tile-input"
+            [value]="investSig() || ''"
+            (input)="onInvestInput($event)"
+            placeholder="500"
+          />
+          <span class="fd-suf">/mo</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Insights -->
+    <p class="fd-zone fp-zone">Insights</p>
+    <div class="fd-insights">
+      <div class="fd-insight" *ngIf="plus100Months() as sooner">
+        <div class="fd-insight-icon"><span class="material-symbols-outlined">trending_up</span></div>
+        <div class="fd-insight-text">
+          <strong>+$100/mo</strong> would bring your freedom date
+          <strong>~{{ sooner }} {{ sooner === 1 ? 'month' : 'months' }} closer</strong>
+        </div>
+      </div>
+      <div class="fd-insight" *ngIf="portfolioGoal() > 0">
+        <div class="fd-insight-icon"><span class="material-symbols-outlined">account_balance</span></div>
+        <div class="fd-insight-text">
+          A <strong>{{ portfolioGoal() | currency:'USD':'symbol':'1.0-0' }}</strong> portfolio pays you
+          <strong>{{ incomeSig() | currency:'USD':'symbol':'1.0-0' }}/mo</strong> at a
+          {{ pct(withdrawalRate()) }}% withdrawal rate
+        </div>
+      </div>
+    </div>
+
+    <!-- Assumptions -->
+    <p class="fd-zone fp-zone">
+      Assumptions
+      <button class="fd-reset" *ngIf="!isDefaultRates()" (click)="resetRates()" type="button">
+        Reset to standard
+      </button>
+    </p>
+    <div class="fp-assume">
+      <div class="fp-assume-name">
+        Avg annual return
+        <span class="fp-assume-sub">what your portfolio grows by</span>
+      </div>
+      <div class="fd-scenario-chips fp-chips">
+        <button
+          *ngFor="let s of RETURN_SCENARIOS"
+          [class.on]="annualReturn() === s.rate"
+          [attr.aria-pressed]="annualReturn() === s.rate"
+          (click)="selectReturn(s.rate)"
+          type="button"
+        >{{ s.label }}</button>
+      </div>
+    </div>
+    <p class="fd-note">
+      <span>Withdrawals follow the industry-standard 4% rule.</span>
+      <span>Past performance is not indicative of future results.</span>
+    </p>
+
+    <button class="fd-cta fp-cta" (click)="save()" [disabled]="!canSave() || saving()" type="button">Save plan</button>
+  </div>
+</ion-content>

@@ -74,7 +74,7 @@ function setup(goals: Goal[]): ComponentFixture<MyProfilePage> {
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
       { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {} },
-      { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy('suspend'), freedomSheetClosed: jasmine.createSpy('freedomSheetClosed') } },
+      { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy('freedomPlanLeft') } },
       { provide: GoalsService, useValue: {
           goals: signal(goals),
           load: () => of(goals),

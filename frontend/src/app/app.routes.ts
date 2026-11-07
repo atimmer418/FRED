@@ -135,6 +135,11 @@ export const routes: Routes = [
     path: 'goals/:id',
     loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
   },
+  // The Freedom Plan, pushed from the my-profile Freedom Date row.
+  {
+    path: 'freedom',
+    loadComponent: () => import('./pages/freedom-plan/freedom-plan.page').then(m => m.FreedomPlanPage)
+  },
   {
     path: 'my-profile',
     loadComponent: () => import('./pages/my-profile/my-profile.page').then( m => m.MyProfilePage)

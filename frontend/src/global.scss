@@ -804,17 +804,6 @@ ion-modal.mc-bottom-sheet-modal .ion-page {
   max-height: 85vh;
 }
 
-/* Tall variant (Freedom detail sheet): nearly full-screen so the content fits
-   without scrolling — a backdrop sliver stays for sheet feel + drag-dismiss.
-   Still auto-height: shorter content keeps a shorter sheet. */
-ion-modal.mc-bottom-sheet-tall {
-  --max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px);
-}
-
-ion-modal.mc-bottom-sheet-tall .ion-page {
-  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px);
-}
-
 /* Monthly Freedom Update modal - blurred backdrop
    To change blur: edit the blur() value below (e.g. 4px, 8px, 12px, 20px) */
 ion-modal.monthly-freedom-update-modal {

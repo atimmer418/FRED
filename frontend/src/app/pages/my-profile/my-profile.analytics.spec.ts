@@ -2,13 +2,13 @@
  * my-profile.analytics.spec.ts
  *
  * Payload specs for every event this page fires. Each one drives the real UI path (a tapped chip,
- * the header Save button, a sheet dismiss role) and asserts the EXACT props object, so any change
+ * the header Save button, a modal dismiss role) and asserts the EXACT props object, so any change
  * to a payload fails here rather than silently changing what lands in the vendor.
  *
  * What is deliberately asserted as ABSENT matters as much as what is present:
  *   - no goal name and no goal id (the only two free-text/identifier fields a goal has),
  *   - no raw dollar amount anywhere (everything is banded),
- *   - no second `freedom_plan_changed`: the sheet owns that event, this page must not double it.
+ *   - no `freedom_plan_changed`: the Freedom page owns that event, this page must not double it.
  */
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -110,7 +110,7 @@ function setup(opts: Options = {}): Harness {
       { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 0 } }) } },
       { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
-      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy() } },
+      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true)) } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
       { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {
@@ -120,8 +120,7 @@ function setup(opts: Options = {}): Harness {
           })),
       } },
       { provide: FirstTimeTourService, useValue: {
-          suspend: jasmine.createSpy('suspend'),
-          freedomSheetClosed: jasmine.createSpy('freedomSheetClosed'),
+          freedomPlanLeft: jasmine.createSpy('freedomPlanLeft'),
       } },
       { provide: GoalsService, useValue: {
           goals: signal<Goal[]>(goals),
@@ -346,34 +345,20 @@ describe('MyProfilePage analytics — error_shown', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// freedom_plan_changed belongs to the sheet. This page must not double it.
+// freedom_plan_changed belongs to the Freedom page. This page must not double it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('MyProfilePage analytics — the freedom sheet is counted once', () => {
+describe('MyProfilePage analytics: the Freedom plan is counted on its own page', () => {
   afterEach(cleanup);
 
-  it('persists a saved plan without firing a second freedom_plan_changed', async () => {
-    const h = setup({
-      tier: 'pro',
-      dismiss: { role: 'saved', data: { income: 4000, invest: 3000, annualReturn: 0.08, withdrawalRate: 0.04 } },
-    });
+  it('opening the Freedom page and coming back fires nothing and writes nothing from here', async () => {
+    const h = setup({ tier: 'pro' });
 
-    await h.page.openFreedomSheet();
+    (h.fixture.nativeElement.querySelector('[data-tour="freedom-row"]') as HTMLElement).click();
+    await flush();
+    h.page.ionViewWillEnter();                            // back from /freedom
 
-    expect(h.updateUserProfile).toHaveBeenCalledWith({ monthlyInvestment: 3000, retirementIncome: 48000 });
-    expect(h.track.calls.allArgs().map((a) => a[0].name)).not.toContain('freedom_plan_changed');
-  });
-
-  it('applies a rates-only change without firing anything from the page', async () => {
-    const h = setup({
-      tier: 'pro',
-      // The plan the page already holds ($5,000 income / $7,000 invest) with a new preset.
-      dismiss: { role: 'saved', data: { income: 5000, invest: 7000, annualReturn: 0.12, withdrawalRate: 0.04 } },
-    });
-
-    await h.page.openFreedomSheet();
-
-    expect(h.updateUserProfile).not.toHaveBeenCalled();   // nothing dirty, no server write
+    expect(h.updateUserProfile).not.toHaveBeenCalled();
     expect(h.track).not.toHaveBeenCalled();
   });
 });

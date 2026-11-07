@@ -17,6 +17,15 @@ export const TOUR_STORAGE_KEY = 'hasSeenFirstTimeTour';
 /** Flip to true to run the tour on every tab1 load (dev only, never commit true). */
 const FORCE_FIRST_TIME_TOUR = false;
 
+/**
+ * True for the Freedom page's route (`/freedom`, with or without a query or
+ * fragment). The tour overlay hides there, and the profileFreedom exit waits
+ * for the route to leave it.
+ */
+export function isFreedomPlanUrl(url: string): boolean {
+  return url.split(/[?#]/)[0] === '/freedom';
+}
+
 /** Pause on tab3 after popping back from my-profile, before the pager swipes to chat. */
 export const TAB3_BEAT_MS = 900;
 /** Poll cadence while waiting for the pager's chat slide to settle. */
@@ -34,12 +43,12 @@ export class FirstTimeTourService {
   readonly step$ = this.stepSubject.asObservable();
 
   private suspendedSubject = new BehaviorSubject<boolean>(false);
-  /** True while the overlay should be hidden without changing step (Freedom sheet open). */
+  /** True while the overlay should be hidden without changing step. */
   readonly suspended$ = this.suspendedSubject.asObservable();
 
   private transitSubject = new BehaviorSubject<boolean>(false);
   /**
-   * True while the tour ferries the user from the Freedom sheet back to chat
+   * True while the tour ferries the user from the Freedom page back to chat
    * (pop to tab3, beat, swipe). The overlay shows a plain dim veil: no card,
    * no spotlight, but the screen never flashes back to normal mid-tour.
    */
@@ -47,6 +56,9 @@ export class FirstTimeTourService {
 
   /** Pending timer for the tab3 beat / settle poll while returning to chat. */
   private transitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** The Freedom page was left while the route was still /freedom (a swipe-back in progress). */
+  private freedomExitPending = false;
 
   constructor(
     private router: Router,
@@ -117,7 +129,7 @@ export class FirstTimeTourService {
         this.stepSubject.next('profileFreedom');
         break;
       case 'profileFreedom':
-        this.freedomSheetClosed();
+        this.freedomPlanLeft();
         break;
       case 'chatStory':
         this.complete();
@@ -135,7 +147,10 @@ export class FirstTimeTourService {
   }
 
   /**
-   * Called by my-profile after the Freedom sheet dismisses (any role).
+   * Called when the user leaves the Freedom page (/freedom) for my-profile:
+   * from the page's ionViewWillLeave and again from my-profile's
+   * ionViewWillEnter. Idempotent, so only the first report starts the ride.
+   *
    * The return to chat is staged so the user can follow it: pop back so tab3
    * visibly lands, rest a beat, swipe the pager to chat, and only show the
    * story-chip step once that slide has settled. A dim transit veil covers
@@ -143,15 +158,26 @@ export class FirstTimeTourService {
    * (a router navigation to /tabs/chat would create a second TabsPage, see
    * TabActivationService).
    */
-  freedomSheetClosed(): void {
+  freedomPlanLeft(): void {
     if (this.currentStep !== 'profileFreedom') {
       // Off-step a suspend must still lift, or the overlay stays hidden for good.
+      this.freedomExitPending = false;
       this.suspendedSubject.next(false);
       this.transitSubject.next(false);
       return;
     }
-    // Lift the sheet's suspend and raise the transit veil instead: the screen
-    // stays grayed out for the whole ride back to chat.
+    // Already reported: the ride is under way, or waiting for the route below.
+    if (this.transitSubject.value || this.freedomExitPending) return;
+    if (isFreedomPlanUrl(this.router.url ?? '')) {
+      // A swipe-back fires ionViewWillLeave as the gesture starts, while the
+      // route is still /freedom and the gesture can still be cancelled. A pop
+      // from here would land on my-profile, not tab3. Wait for the route to
+      // leave /freedom (onNavigationEnd) and run then.
+      this.freedomExitPending = true;
+      return;
+    }
+    // Lift any suspend and raise the transit veil instead: the screen stays
+    // grayed out for the whole ride back to chat.
     this.suspendedSubject.next(false);
     this.transitSubject.next(true);
     this.navCtrl.pop()
@@ -213,6 +239,7 @@ export class FirstTimeTourService {
       this.transitTimer = null;
     }
     localStorage.setItem(TOUR_STORAGE_KEY, 'true');
+    this.freedomExitPending = false;
     this.suspendedSubject.next(false);
     this.transitSubject.next(false);
     this.stepSubject.next(null);
@@ -221,6 +248,10 @@ export class FirstTimeTourService {
   private onNavigationEnd(url: string): void {
     if (this.currentStep === 'tab3Avatar' && url.startsWith('/my-profile')) {
       this.stepSubject.next('profileFreedom');
+    }
+    if (this.freedomExitPending && !isFreedomPlanUrl(url)) {
+      this.freedomExitPending = false;
+      this.freedomPlanLeft();
     }
   }
 

@@ -28,7 +28,6 @@ import { GoalPlanView, buildGoalPlanView } from '../goal/goal-plan.view-model';
 import { PlanStatusKind } from '../../utils/goal-plan.utils';
 import { RateAssumptionsService, DEFAULT_ANNUAL_RETURN, DEFAULT_WITHDRAWAL_RATE } from '../../services/rate-assumptions.service';
 import { monthsToTarget } from '../../utils/freedom-projection.utils';
-import { FreedomDetailSheetComponent, FreedomSheetResult } from '../../components/freedom-detail-sheet/freedom-detail-sheet.component';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { ErrorCategory, GatedFeature, Tier } from '../../services/analytics/analytics-events';
@@ -221,6 +220,9 @@ export class MyProfilePage implements OnInit, OnDestroy {
     try { return inject(FirstTimeTourService); } catch { return null; }
   })();
 
+  /** Set by openFreedom(); the next ionViewWillEnter is the return from /freedom. */
+  private returningFromFreedom = false;
+
   // ── Rebalancing ────────────────────────────────────────────────────────────
   readonly rebalanceSchedules = REBALANCE_SCHEDULES;
   selectedSchedule: RebalanceSchedule = 'Quarterly';
@@ -358,9 +360,18 @@ export class MyProfilePage implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  /** Coming back from a goal page: reload so its save, completion or removal shows. */
+  /**
+   * Coming back from a goal page: reload so its save, completion or removal shows.
+   * Coming back from the Freedom page: also report the exit to the tour (a no-op
+   * unless the tour is on profileFreedom, and idempotent with the Freedom page's
+   * own ionViewWillLeave report).
+   */
   ionViewWillEnter(): void {
     this.goalsService.refresh().subscribe({ error: () => {} });
+    if (this.returningFromFreedom) {
+      this.returningFromFreedom = false;
+      this.tourService?.freedomPlanLeft();
+    }
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -720,43 +731,24 @@ export class MyProfilePage implements OnInit, OnDestroy {
     return schedule.toLowerCase().replace(/[^a-z0-9]+/g, '_');
   }
 
-  // ── Freedom detail sheet ──────────────────────────────────────────────────
+  // ── Freedom page ──────────────────────────────────────────────────────────
 
   /**
-   * Full Freedom Plan story — editing tiles, insights, and adjustable rate
-   * assumptions. Opened from the Freedom Plan card and the Freedom Date row.
+   * The Freedom Date row opens the Freedom Plan as a pushed page (/freedom):
+   * the editable tiles, insights and return chips. That page saves the plan
+   * itself; coming back re-seeds this page from the reloaded userProgress$.
+   *
+   * Tour: the overlay hides while /freedom is up (FirstTimeTourComponent), and
+   * the profileFreedom gate passes on the way back, in ionViewWillEnter. The
+   * flag is set before navigating and cleared again if the navigation fails.
    */
-  async openFreedomSheet(): Promise<void> {
-    this.ratesService?.ensureUser();
-    const modal = await this.modalController.create({
-      component: FreedomDetailSheetComponent,
-      componentProps: {
-        income: this.retirementIncomeGoal(),
-        invest: this.monthlyInvestGoal(),
-        equity: this.currentPortfolioValue(),
-      },
-      ...BOTTOM_SHEET_MODAL_OPTS,
-      // Tall variant: this sheet's content should fit without scrolling.
-      cssClass: 'mc-bottom-sheet-modal mc-bottom-sheet-tall',
-    });
-    // Tour: hide the overlay while the sheet is up, then hand control back
-    // when it closes (either call is a no-op unless the tour is on this step).
-    this.tourService?.suspend();
-    await modal.present();
-    const { role, data } = await modal.onDidDismiss<FreedomSheetResult>();
-    this.tourService?.freedomSheetClosed();
-    if (role === 'saved' && data) {
-      this.ratesService?.setRates(data.annualReturn, data.withdrawalRate);
-      // The sheet's Save is gated on a complete plan; guard anyway so a
-      // zeroed payload can never wipe the live signals.
-      if (data.income > 0) this.retirementIncomeGoal.set(data.income);
-      if (data.invest > 0) this.monthlyInvestGoal.set(data.invest);
-      if (this.isDirty()) {
-        this.saveChanges();
-      } else {
-        // Only the assumptions moved — no server write needed.
-        this.toastService.showToast('Plan updated', 'success');
-      }
+  async openFreedom(): Promise<void> {
+    this.returningFromFreedom = true;
+    try {
+      const navigated = await this.router.navigateByUrl('/freedom');
+      if (navigated === false) this.returningFromFreedom = false;
+    } catch {
+      this.returningFromFreedom = false;
     }
   }
 

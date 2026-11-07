@@ -253,7 +253,7 @@ function setupDom(initialProgress: any, schedule$ = of(null as any)): DomHarness
       { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 0 } }) } },
       { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
-      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy() } },
+      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true)) } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
       { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {
@@ -262,7 +262,7 @@ function setupDom(initialProgress: any, schedule$ = of(null as any)): DomHarness
             onDidDismiss: () => Promise.resolve({ role: 'cancel' }),
           }))
       } },
-      { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy('suspend'), freedomSheetClosed: jasmine.createSpy('freedomSheetClosed') } },
+      { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy('freedomPlanLeft') } },
       { provide: GoalsService, useValue: {
           goals: signal<Goal[]>([]),
           load: () => of([]),
@@ -290,7 +290,7 @@ describe('MyProfilePage — live plan rendering (DOM)', () => {
     harness = setupDom(SAVED_PROGRESS);
   });
 
-  /** Tiles moved into the Freedom detail sheet (2026-08-15); plan edits now
+  /** Tiles moved to the Freedom page (first a sheet, 2026-08-15); plan edits now
    *  arrive through the same sanitizing handlers, driven directly. */
   function editInvest(value: string): void {
     harness.fixture.componentInstance.onInvestInput(inputEvent(value).event);
@@ -331,15 +331,43 @@ describe('MyProfilePage — live plan rendering (DOM)', () => {
     expect(harness.fixture.componentInstance.monthlyInvestGoal()).toBe(700);
   });
 
-  it('openFreedomSheet suspends the tour before presenting and reports the close after dismiss', async () => {
+  it('tapping the Freedom row navigates to /freedom instead of presenting a modal', () => {
+    const router = TestBed.inject(Router) as any;
+    const modal = TestBed.inject(ModalController) as any;
+
+    const row = harness.fixture.nativeElement.querySelector('[data-tour="freedom-row"]') as HTMLElement;
+    row.click();
+
+    expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/freedom');
+    expect(modal.create).not.toHaveBeenCalled();
+  });
+
+  it('coming back from /freedom completes the tour handoff once, on enter', async () => {
     const page = harness.fixture.componentInstance;
     const tour = TestBed.inject(FirstTimeTourService) as any;
 
-    await page.openFreedomSheet();
+    page.ionViewWillEnter();                      // an ordinary enter: not back from /freedom
+    expect(tour.freedomPlanLeft).not.toHaveBeenCalled();
 
-    expect(tour.suspend).toHaveBeenCalledTimes(1);
-    expect(tour.freedomSheetClosed).toHaveBeenCalledTimes(1);
-    expect(tour.suspend).toHaveBeenCalledBefore(tour.freedomSheetClosed);
+    await page.openFreedom();
+    expect(tour.freedomPlanLeft).not.toHaveBeenCalled();   // nothing fires on the way out
+
+    page.ionViewWillEnter();                      // back from the Freedom page
+    expect(tour.freedomPlanLeft).toHaveBeenCalledTimes(1);
+
+    page.ionViewWillEnter();                      // a later enter (back from a goal page)
+    expect(tour.freedomPlanLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed navigation to /freedom does not arm the handoff', async () => {
+    const page = harness.fixture.componentInstance;
+    const tour = TestBed.inject(FirstTimeTourService) as any;
+    (TestBed.inject(Router) as any).navigateByUrl.and.returnValue(Promise.resolve(false));
+
+    await page.openFreedom();
+    page.ionViewWillEnter();
+
+    expect(tour.freedomPlanLeft).not.toHaveBeenCalled();
   });
 });
 
@@ -476,7 +504,7 @@ describe('MyProfilePage: goals card', () => {
         { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
         { provide: AlertController, useValue: {} },
         { provide: ModalController, useValue: { create: modalCreate } },
-        { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy(), freedomSheetClosed: jasmine.createSpy() } },
+        { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy() } },
         { provide: GoalsService, useValue: {
             goals: signal<Goal[]>(opts.goals ?? []),
             load: () => of(opts.goals ?? []),

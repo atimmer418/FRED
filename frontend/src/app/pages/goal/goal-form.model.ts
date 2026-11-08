@@ -64,7 +64,7 @@ export const CUSTOM_ICON_OPTIONS: ReadonlyArray<{ icon: GoalIcon; label: string 
 ];
 
 export const MAX_AMOUNT = 100_000_000;
-export const MAX_KIDS = 5;
+export const MAX_KIDS = 6;
 
 const TYPE_ICON: Record<GoalType, GoalIcon> = {
   KIDS: 'child_care',

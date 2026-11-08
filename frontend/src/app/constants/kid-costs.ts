@@ -27,11 +27,12 @@ export const USDA_2015_TOTAL = 233610;
 export const USDA_FAMILY_SIZE_FACTORS = { one: 1.27, two: 1, threeOrMore: 0.76 };
 
 /**
- * FRED estimate, not a USDA figure: per-kid factors for four and five kids. USDA stops at "three or
- * more", so FRED applies the third child's marginal cost (0.76 x 3 - 1.00 x 2 = 0.28) to the fourth
- * and fifth: (2.28 + 0.28) / 4 = 0.64 and (2.56 + 0.28) / 5 = 0.568. See FREDdocs/kid-cost-figures.md.
+ * FRED estimate, not a USDA figure: per-kid factors for four, five and six kids. USDA stops at
+ * "three or more", so FRED applies the third child's marginal cost (0.76 x 3 - 1.00 x 2 = 0.28) to
+ * the fourth, fifth and sixth: (2.28 + 0.28) / 4 = 0.64, (2.56 + 0.28) / 5 = 0.568 and
+ * (2.84 + 0.28) / 6 = 0.52. See FREDdocs/kid-cost-figures.md.
  */
-export const FRED_ESTIMATE_FAMILY_SIZE_FACTORS = { four: 0.64, five: 0.568 };
+export const FRED_ESTIMATE_FAMILY_SIZE_FACTORS = { four: 0.64, five: 0.568, six: 0.52 };
 
 /** BLS CPI-U, all items, not seasonally adjusted, series CUUR0000SA0: 2015 annual average. */
 export const CPI_U_2015_AVERAGE = 237.017;

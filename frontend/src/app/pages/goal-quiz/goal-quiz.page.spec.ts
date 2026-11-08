@@ -237,16 +237,16 @@ describe('GoalQuizPage', () => {
     expect(onScreen(fixture).querySelectorAll('.kid-when')[0].textContent?.trim()).toBe('Not sure');
   });
 
-  it('the count step caps at five kids and says so', async () => {
+  it('the count step caps at six kids and says so', async () => {
     const fixture = await create({ type: 'KIDS' });
     const page = fixture.componentInstance;
-    page.setKidCount(5);
-    fixture.detectChanges();
-    expect(page.form().kids.kids.length).toBe(5);
-    expect(onScreen(fixture).querySelectorAll('.kid-icons .material-symbols-outlined').length).toBe(5);
-    expect(text(fixture, '.fscreen.on .kids-cap')).toBe('Five is the most FRED plans for at once');
     page.setKidCount(6);
-    expect(page.form().kids.kids.length).toBe(5);
+    fixture.detectChanges();
+    expect(page.form().kids.kids.length).toBe(6);
+    expect(onScreen(fixture).querySelectorAll('.kid-icons .material-symbols-outlined').length).toBe(6);
+    expect(text(fixture, '.fscreen.on .kids-cap')).toBe('Six is the most FRED plans for at once');
+    page.setKidCount(7);
+    expect(page.form().kids.kids.length).toBe(6);
     page.setKidCount(2);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.fscreen.on .kids-cap')).toBeNull();

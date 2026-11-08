@@ -25,7 +25,7 @@ export interface KidCostStage {
   total: number;
 }
 
-export type FamilySizeWording = 'only' | 'two' | 'three_plus' | 'four' | 'five';
+export type FamilySizeWording = 'only' | 'two' | 'three_plus' | 'four' | 'five' | 'six';
 
 export interface KidCostFigures {
   kidsCount: number;
@@ -51,18 +51,20 @@ export function inflationFactor(): number {
 
 /**
  * Per-kid family-size factor: USDA Table 1 for 1 to 3 kids (1.27 / 1.00 / 0.76), the FRED estimate
- * for 4 and 5 (0.64 / 0.568, see kid-costs.ts). Five is the cap, so anything higher reads as five.
+ * for 4, 5 and 6 (0.64 / 0.568 / 0.52, see kid-costs.ts). Six is the cap, so anything higher reads
+ * as six.
  */
 export function familySizeFactor(kidsCount: number): number {
   if (kidsCount <= 2) return firstYearFactor(kidsCount);
   if (kidsCount === 3) return USDA_FAMILY_SIZE_FACTORS.threeOrMore;
   if (kidsCount === 4) return FRED_ESTIMATE_FAMILY_SIZE_FACTORS.four;
-  return FRED_ESTIMATE_FAMILY_SIZE_FACTORS.five;
+  if (kidsCount === 5) return FRED_ESTIMATE_FAMILY_SIZE_FACTORS.five;
+  return FRED_ESTIMATE_FAMILY_SIZE_FACTORS.six;
 }
 
 /**
  * The factor for a first-year fund at this birth rank: 1.27, 1.00, then 0.76 for every later
- * rank (USDA only). The 4 and 5 kid estimates never apply to a fund.
+ * rank (USDA only). The 4, 5 and 6 kid estimates never apply to a fund.
  */
 export function firstYearFactor(rank: number): number {
   if (rank <= 1) return USDA_FAMILY_SIZE_FACTORS.one;
@@ -75,7 +77,8 @@ function sizeWordingFor(kidsCount: number): FamilySizeWording {
   if (kidsCount === 2) return 'two';
   if (kidsCount === 3) return 'three_plus';
   if (kidsCount === 4) return 'four';
-  return 'five';
+  if (kidsCount === 5) return 'five';
+  return 'six';
 }
 
 const MONTHS_TO_18 = 216;

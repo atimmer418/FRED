@@ -331,8 +331,8 @@ public class GoalService {
     private KidsConfig validateKids(KidsConfig config, KidsConfig storedOrNull, int year) {
         requireTarget(config.brokerageTarget());
         requireTarget(config.plan529Target());
-        if (config.kids() == null || config.kids().isEmpty() || config.kids().size() > 5) {
-            throw new GoalValidationException("Add between 1 and 5 kids.");
+        if (config.kids() == null || config.kids().isEmpty() || config.kids().size() > 6) {
+            throw new GoalValidationException("Add between 1 and 6 kids.");
         }
         boolean fundOn = Boolean.TRUE.equals(config.firstYearFund());
         int funded = 0;

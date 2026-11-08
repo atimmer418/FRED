@@ -45,7 +45,7 @@
               </div>
               <app-quiz-stepper [value]="kidCount()" [min]="1" [max]="maxKids" (valueChange)="setKidCount($event)" />
               @if (kidCount() >= maxKids) {
-                <div class="kids-cap">Five is the most FRED plans for at once</div>
+                <div class="kids-cap">Six is the most FRED plans for at once</div>
               }
               @for (line of droppedKidLines(); track line) {
                 <div class="kids-cap kids-warn" role="alert">{{ line }}</div>

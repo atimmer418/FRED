@@ -202,18 +202,18 @@ class GoalServiceTest {
     }
 
     @Test
-    void sixKidsAreRejected() {
-        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(6), null, null);
+    void sevenKidsAreRejected() {
+        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(7), null, null);
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
                 () -> service.create(user, kidsRequest(config, "0", "0")));
-        assertEquals("Add between 1 and 5 kids.", e.getMessage());
+        assertEquals("Add between 1 and 6 kids.", e.getMessage());
     }
 
     @Test
-    void fiveKidsAreAccepted() {
+    void sixKidsAreAccepted() {
         stubSave();
-        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(5), null, null);
+        KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(6), null, null);
 
         assertNotNull(service.create(user, kidsRequest(config, "0", "0")));
     }

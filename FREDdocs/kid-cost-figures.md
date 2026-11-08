@@ -45,27 +45,28 @@ computed from unrounded inputs and rounded once, at the end.
 | Derived value | Formula |
 |---|---|
 | Inflation factor | CPI-U latest / CPI-U 2015 average = 336.940 / 237.017 = 1.421586 |
-| Family-size factor | 1 kid or fewer: 1.27. 2 kids: 1.00. 3 kids: 0.76 (USDA). 4 kids: 0.64. 5 kids: 0.568 (FRED estimate, see below). Five is the cap. |
+| Family-size factor | 1 kid or fewer: 1.27. 2 kids: 1.00. 3 kids: 0.76 (USDA). 4 kids: 0.64. 5 kids: 0.568. 6 kids: 0.52 (FRED estimate, see below). Six is the cap. |
 | Per child to 18 | round(233,610 x inflation x size factor) |
 | Family total | round(233,610 x inflation x size factor x kids). Never per-child total x kids: the rounded per-child number gives a different answer. |
 | Stage total | sum over the stage's bands of 3 x band annual x inflation x size factor |
 | Stage annual and monthly | annual = stage total / years in the stage; monthly = annual / 12 |
-| First-year target for a kid of birth rank r | (0-2 annual x inflation x first-year factor for r + $2,743), rounded to cents, then rounded UP to the next $100. The first-year factor is 1.27 / 1.00 / 0.76 for rank 1 / 2 / 3 and later; the 4 and 5 kid estimates never apply here. |
+| First-year target for a kid of birth rank r | (0-2 annual x inflation x first-year factor for r + $2,743), rounded to cents, then rounded UP to the next $100. The first-year factor is 1.27 / 1.00 / 0.76 for rank 1 / 2 / 3 and later; the 4, 5 and 6 kid estimates never apply here. |
 | Monthly cost, per kid | per child to 18 / 216 months, nearest $10 |
 | Monthly cost, family | per child to 18 x kids / 216 months, nearest $10 |
 
-### Four and five kids (FRED estimate)
+### Four, five and six kids (FRED estimate)
 
 USDA publishes the family-size adjustment only for one child, two children and "three or more". FRED
-extends it for four and five kids with USDA's own marginal cost of a third child, and these two
-factors must be labeled "FRED estimate" wherever they are shown (they are not government numbers).
+extends it for four, five and six kids with USDA's own marginal cost of a third child, and these
+three factors must be labeled "FRED estimate" wherever they are shown (they are not government numbers).
 
 In family-size units (per-kid factor x kids), USDA gives 2 x 1.00 = 2.00 for two kids and
 3 x 0.76 = 2.28 for three, so the third child adds 0.76 x 3 - 1.00 x 2 = 0.28. FRED applies the
-same 0.28 to the fourth and fifth child:
+same 0.28 to the fourth, fifth and sixth child:
 
 - Four kids: (2.28 + 0.28) / 4 = 2.56 / 4 = **0.64** per kid
 - Five kids: (2.56 + 0.28) / 5 = 2.84 / 5 = **0.568** per kid
+- Six kids: (2.84 + 0.28) / 6 = 3.12 / 6 = **0.52** per kid
 
 Constants: `USDA_FAMILY_SIZE_FACTORS` and `FRED_ESTIMATE_FAMILY_SIZE_FACTORS` in
 `frontend/src/app/constants/kid-costs.ts`.
@@ -83,9 +84,10 @@ Pinned results (Nov 2026 constants):
 | Three children | $252,393 | $757,180 |
 | Four children (FRED estimate) | $212,542 | $850,167 |
 | Five children (FRED estimate) | $188,631 | $943,155 |
+| Six children (FRED estimate) | $172,690 | $1,036,142 |
 
 Monthly, per kid / family: 1 kid $1,950 / $1,950; 2 kids $1,540 / $3,070; 3 kids $1,170 / $3,510;
-4 kids $980 / $3,940; 5 kids $870 / $4,370.
+4 kids $980 / $3,940; 5 kids $870 / $4,370; 6 kids $800 / $4,800.
 
 First-year targets by birth rank: rank 1 $25,700; rank 2 $20,800; rank 3 and later $16,500.
 

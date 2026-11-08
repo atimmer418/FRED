@@ -83,8 +83,8 @@ describe('goal-form.model', () => {
     expect(validateForm(f, NOW)).toEqual({});
   });
 
-  it('MAX_KIDS is 5 and defaultFirstYearFund is true whenever a kid is unborn', () => {
-    expect(MAX_KIDS).toBe(5);
+  it('MAX_KIDS is 6 and defaultFirstYearFund is true whenever a kid is unborn', () => {
+    expect(MAX_KIDS).toBe(6);
     // NOW is June 2026. The old under-12-months rule is gone: one month out still defaults on.
     const row = (birthYear: number | null, birthMonth: number | null) =>
       ({ label: 'K', birthYear, birthMonth, undecided: birthYear == null });

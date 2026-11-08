@@ -40,10 +40,11 @@ describe('KidCostSourcesSheetComponent', () => {
     expect(text(fixture)).not.toContain('FRED estimate');
   });
 
-  it('labels the four and five kid figures as a FRED estimate', () => {
+  it('labels the four, five and six kid figures as a FRED estimate', () => {
     expect(text(create(4))).toContain('FRED estimate');
     expect(text(create(4))).toContain('four kids');
     expect(text(create(5))).toContain('five kids');
+    expect(text(create(6))).toContain('six kids');
     expect(text(create(2))).not.toContain('FRED estimate');
   });
 

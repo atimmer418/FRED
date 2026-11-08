@@ -25,12 +25,14 @@ describe('familySizeFactor', () => {
     expect(familySizeFactor(3)).toBe(0.76);
     expect(familySizeFactor(4)).toBe(0.64);
     expect(familySizeFactor(5)).toBe(0.568);
-    expect(familySizeFactor(7)).toBe(0.568);
+    expect(familySizeFactor(6)).toBe(0.52);
+    expect(familySizeFactor(7)).toBe(0.52);
     expect(familySizeFactor(0)).toBe(1.27);
   });
   it('extends by the third-child marginal of 0.28', () => {
     expect(4 * familySizeFactor(4) - 3 * familySizeFactor(3)).toBeCloseTo(0.28, 10);
     expect(5 * familySizeFactor(5) - 4 * familySizeFactor(4)).toBeCloseTo(0.28, 10);
+    expect(6 * familySizeFactor(6) - 5 * familySizeFactor(5)).toBeCloseTo(0.28, 10);
   });
 });
 
@@ -59,14 +61,14 @@ describe('kidCostFigures', () => {
     expect(kidCostFigures(3).perChildTotal).toBe(252393);
     expect(kidCostFigures(3).familyTotal).toBe(757180);
   });
-  it('per-kid totals for 1..5 kids are 421763, 332097, 252393, 212542, 188631 within $1', () => {
-    const pins = [421763, 332097, 252393, 212542, 188631];
-    [1, 2, 3, 4, 5].forEach((n, i) =>
+  it('per-kid totals for 1..6 kids are 421763, 332097, 252393, 212542, 188631, 172690 within $1', () => {
+    const pins = [421763, 332097, 252393, 212542, 188631, 172690];
+    [1, 2, 3, 4, 5, 6].forEach((n, i) =>
       expect(Math.abs(kidCostFigures(n).perChildTotal - pins[i])).withContext(`${n} kids`).toBeLessThanOrEqual(1));
   });
   it('names the family size', () =>
     expect([1, 2, 3, 4, 5, 6].map(n => kidCostFigures(n).sizeWording))
-      .toEqual(['only', 'two', 'three_plus', 'four', 'five', 'five']));
+      .toEqual(['only', 'two', 'three_plus', 'four', 'five', 'six']));
   it('pins the four stages for two kids', () => {
     const s = kidCostFigures(2).stages;
     expect(s.map(x => x.key)).toEqual(['0-2', '3-5', '6-11', '12-17']);

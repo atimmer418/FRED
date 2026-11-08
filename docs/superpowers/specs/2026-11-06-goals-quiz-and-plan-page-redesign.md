@@ -129,16 +129,16 @@ The sample family's figures assume a $250,000 nest egg per kid, as the mockup ca
 Eyebrow "Your family". Title "How many kids are you planning for?" (this one is allowed two lines;
 it breaks after "you", before a clause, and Andy approved it). Subtitle "Count the ones already
 here too." Body: a row of `child_care` icons in glass circles, one per kid, centered; under it a
-stepper (minus, big number, plus). **Five is the cap**; at five the plus button dims and a line
-under the stepper reads "Five is the most FRED plans for at once". Default 1.
+stepper (minus, big number, plus). **Six is the cap**; at six the plus button dims and a line
+under the stepper reads "Six is the most FRED plans for at once". Default 1.
 
-Backend: `validateKids` cap goes from 10 to 5. No stored goal exceeds 5 (no production backend
+Backend: `validateKids` cap goes from 10 to 6. No stored goal exceeds 6 (no production backend
 exists yet; the dev database can be checked with one query).
 
 ### Step 2, when
 
 Eyebrow "Timing". Title "When do you think they'll arrive?" (two lines, breaks after "think",
-approved). Subtitle "A rough guess is fine." Body: one compact glass row per kid, all five fit:
+approved). Subtitle "A rough guess is fine." Body: one compact glass row per kid, all six fit:
 `child_care` icon, "Kid N", an inline slider, and the value right-aligned in a fixed-width column
 ("Born 2024", "This year", "2028", "Not sure"). Under the rows, three labels across: "Already
 here", "Soon", "Not sure".
@@ -155,7 +155,7 @@ No pen, no names here. Names are given on the plan page.
 Eyebrow "The real number". Title "What one kid costs". Subtitle "The U.S. average, adjusted to
 today's prices." Body, centered: the big number with no
 tilde, "$422K" for one kid, "$332K" for two, "$252K" for three, **"$213K" for four, "$189K" for
-five**; hint line "From birth to 18". That is the general statistic. It holds for about 2.2
+five, "$173K" for six**; hint line "From birth to 18". That is the general statistic. It holds for about 2.2
 seconds, then **crossfades (500ms, opacity only, WAAPI) into the one that matters, in exactly the
 same styling**: the big number becomes "$3,510" with a smaller "/mo" unit after it and the hint
 line becomes "For all 3 kids" ("For your kid", "For both kids"). Nothing else is on the screen;
@@ -164,10 +164,10 @@ motion on, the swap is instant after the same hold. Nothing else on the screen: 
 monthly line, no family card. The info button in the top bar (in the close button's place on this
 step, as the mockup shows) opens the sources sheet, `KidCostSourcesSheetComponent`.
 
-The four- and five-kid figures are FRED's own extension of the USDA table, which stops at "three or
+The four-, five- and six-kid figures are FRED's own extension of the USDA table, which stops at "three or
 more". The USDA marginal cost of a third child is 0.28 of a two-child-average child (2.28 − 2.00 in
-family-size units); FRED applies that same marginal factor to the fourth and fifth, giving family
-factors 2.56 and 2.84 and per-kid factors 0.64 and 0.568. Record this in `FREDdocs/kid-cost-
+family-size units); FRED applies that same marginal factor to the fourth, fifth and sixth, giving family
+factors 2.56, 2.84 and 3.12 and per-kid factors 0.64, 0.568 and 0.52. Record this in `FREDdocs/kid-cost-
 figures.md` next to the 1.27 / 1.00 / 0.76 factors and label the two new figures "FRED estimate" in
 the sources sheet. The monthly line is the per-kid figure over 216 months, rounded to the nearest
 $10; the family line is per-kid × count over 216 months.
@@ -443,7 +443,7 @@ inline balances), `goal-plan.view-model.ts` (audience phrase, timeline model, gi
 subtitle and Freedom row navigation, routes.
 Frontend, deleted: `components/freedom-detail-sheet/`, the quiz cards inside `goal.page.html`, the
 ritual math and its specs.
-Backend: `KidsConfig.giftDays` (record + codec + tests), kids cap 5 (validator + test), nothing
+Backend: `KidsConfig.giftDays` (record + codec + tests), kids cap 6 (validator + test), nothing
 else. No migration.
 Docs: `FREDdocs/kid-cost-figures.md` (4/5 factors), `FREDdocs/analytics-events.md` only if a
 comment references the sheet, the backlog (the redesign story; a new story for the portfolio
@@ -451,7 +451,7 @@ split), and the v3 design's amendment section gets a pointer to this document.
 
 ## Verification
 
-- Specs: cost figures for 1 to 5 kids and the family monthly; "saves you" totals; the January lump
+- Specs: cost figures for 1 to 6 kids and the family monthly; "saves you" totals; the January lump
   schedule and the solved monthly with the offer on and off; the timeline model (positions, dashed
   dots, name labels); the audience phrase; the draft service round trip; quiz step visibility as
   switches flip; the prefilled edit quiz; in-place rename PUT body; Freedom page parity with the
@@ -470,7 +470,7 @@ A reviewer read this as a builder and asked five things. Settled here; the ones 
 were put to Andy.
 
 1. **Baby-fund targets stay by birth rank** ($25,700 / $20,800 / $16,500 for the first, second,
-   third-and-later kid), exactly as the addendum pins them. The new four- and five-kid cost factors
+   third-and-later kid), exactly as the addendum pins them. The new four-, five- and six-kid cost factors
    apply to the cost headline only and never to the fund; `firstYearTargetForRank` keeps its rank-3
    floor. On step 4 the Baby fund helper line reads "$20,800 ready on day one." when one kid is
    unborn and "Ready on day one, for each one." when several are; the "saves you" figure is the sum
@@ -504,7 +504,7 @@ were put to Andy.
 
 - The quiz is a pushed route, not a modal.
 - Default nest egg $100,000 (Andy's examples said $250,000).
-- Four- and five-kid cost figures extend the USDA table by its own third-child marginal factor.
+- Four-, five- and six-kid cost figures extend the USDA table by its own third-child marginal factor.
 - The January lump goes to the nest egg when the kid has one, else the 529.
 - The gift-days offer appears from a 24-month horizon.
 - Status chip placement (end of the "PER KID" label; end of the band for other types).

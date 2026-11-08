@@ -66,7 +66,9 @@
     display: block;
     color: #fff;
     font-weight: 800;
-    max-width: 72px;
+    // 12% of a ~318px bar is 38px between neighbours and 76px between same-row neighbours,
+    // so a 66px name centered on its dot cannot touch the next one on its row.
+    max-width: 66px;
     overflow: hidden;
     text-overflow: ellipsis;
   }

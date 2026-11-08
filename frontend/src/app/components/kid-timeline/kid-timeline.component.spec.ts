@@ -26,12 +26,13 @@ describe('KidTimelineComponent', () => {
     expect(dots.length).toBe(5);
     expect(dots[0].classList).toContain('past');
     expect(dots[1].classList).toContain('now');
-    expect(dots[2].classList).toContain('unsure');
+    // The undated kid is parked just before the end.
+    expect(dots[3].classList).toContain('unsure');
     expect(dots[4].style.left).toBe('100%');
     const fill = fixture.nativeElement.querySelector('.ktl-done') as HTMLElement;
     expect(fill.style.width).toBe(`${fixture.componentInstance.timeline!.passedPct}%`);
 
-    expect(labels(fixture)).toEqual(['Ellie 2024', 'Now 2026', 'Kid 3 not yet', 'Theo 2028', 'All 18 2046']);
+    expect(labels(fixture)).toEqual(['Ellie 2024', 'Now 2026', 'Theo 2028', 'Kid 3 not yet', 'All 18 2046']);
     const lbs = Array.from(fixture.nativeElement.querySelectorAll('.ktl-lb')) as HTMLElement[];
     expect(lbs.map(l => l.classList.contains('up'))).toEqual([true, false, true, false, true]);
     expect(lbs[0].classList).toContain('l');

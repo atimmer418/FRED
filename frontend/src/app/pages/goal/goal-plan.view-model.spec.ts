@@ -745,7 +745,8 @@ describe('buildGoalPlanView one-screen page', () => {
     const goal = sample();
     const view = buildGoalPlanView(goal, ctx());
     expect(view.timeline).toEqual(buildKidTimeline((goal.config as KidsConfig).kids, NOW));
-    expect(view.timeline!.dots.map(d => d.label)).toEqual(['Ellie', 'Now', 'Kid 3', 'Theo', 'All 18']);
+    // The undated kid is parked just before the end.
+    expect(view.timeline!.dots.map(d => d.label)).toEqual(['Ellie', 'Now', 'Theo', 'Kid 3', 'All 18']);
   });
 
   it('treats a kid expected this year with no month as not yet born: a dated dot, a December baby fund', () => {

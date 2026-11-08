@@ -227,7 +227,9 @@
 
         <button type="button" class="fs-cta" [disabled]="ctaDisabled()" (click)="next()"
                 [class.cost-cta]="step.id === 'kids_cost'"
-                [class.cta-hidden]="step.id === 'kids_cost' && !ctaRevealed()">
+                [class.cta-hidden]="step.id === 'kids_cost' && !ctaRevealed()"
+                [attr.aria-hidden]="step.id === 'kids_cost' && !ctaRevealed() ? 'true' : null"
+                [attr.tabindex]="step.id === 'kids_cost' && !ctaRevealed() ? -1 : null">
           @if (isLast()) {
             <span class="material-symbols-outlined">auto_awesome</span>
           }

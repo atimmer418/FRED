@@ -33,6 +33,11 @@
   margin-top: 4px;
 }
 
+// The Freedom page gives its zone labels 8px above the list gap; same here.
+.gp-zone-gap {
+  margin-top: 8px;
+}
+
 .gp-zone-right {
   display: flex;
   align-items: center;

@@ -155,7 +155,7 @@
 
         <!-- Assumptions: the same card as the Freedom Plan page -->
         @if (v.rateKind === 'market') {
-          <p class="fd-zone">
+          <p class="fd-zone gp-zone-gap">
             Assumptions
             @if (selectedRate() !== defaultRate) {
               <button type="button" class="fd-reset" (click)="selectRate(defaultRate)">Reset to standard</button>
@@ -173,7 +173,7 @@
             </div>
           </div>
         } @else {
-          <p class="fd-zone">Assumptions</p>
+          <p class="fd-zone gp-zone-gap">Assumptions</p>
           <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
         }
 

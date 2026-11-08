@@ -183,6 +183,18 @@
             <span class="material-symbols-outlined">account_balance_wallet</span>
             <p><b>How FRED helps.</b> {{ v.howFredHelps }}</p>
           </div>
+          @if (v.coversLine) {
+            <div class="fd-how">
+              <span class="material-symbols-outlined">checklist</span>
+              <p><b>What the monthly covers.</b> {{ v.coversLine }}</p>
+            </div>
+          }
+          @if (v.whyInvestLine) {
+            <div class="fd-how">
+              <span class="material-symbols-outlined">trending_up</span>
+              <p><b>Why invest it.</b> {{ v.whyInvestLine }}</p>
+            </div>
+          }
         }
 
         <!-- CTA, preview modes only -->

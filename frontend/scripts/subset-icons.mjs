@@ -40,6 +40,8 @@ const DYNAMIC_ICONS = [
   'child_care', 'flight', 'favorite',
   // goals v3.1: gift-days switch-row icon input, college pick-grid options, calc screen tick
   'cake', 'travel_explore', 'do_not_disturb_on', 'check_circle',
+  // goals v3.1 polish: plan page "What the monthly covers" card
+  'checklist',
 ];
 
 // Material Symbols renamed some legacy icon glyphs. The ligature text (used in templates)

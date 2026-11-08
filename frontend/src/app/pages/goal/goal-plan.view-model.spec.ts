@@ -4,6 +4,7 @@ import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
 import { GIFT_DAY_LUMP, futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
+import { familyMonthly } from '../../utils/kid-cost.utils';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
 const Y = NOW.getFullYear();
@@ -772,5 +773,124 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(row.plan.due).toEqual({ year: Y, month: 12 });
     expect(row.plan.n).toBe(1);
     expect(row.plan.finished).toBeFalse();
+  });
+
+  // ── What the monthly covers, and Why invest it ──
+
+  const MONEY = String.raw`\$[\d,]+`;
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const KIDS_WHY = new RegExp('^' + escape(
+    'You will not spend the funds for years: college and the nest egg come due at 18, and those years are '
+    + 'what make invested money grow. Of the ',
+  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you; growth adds the other ')
+    + `(${MONEY})` + escape(
+    '. Take it out early and growth stops, and the monthly from you goes up. Anything you need within three '
+    + 'years is planned as cash instead.',
+  ) + '$');
+  const SIMPLE_WHY = new RegExp('^' + escape(
+    'You will not spend this for years, and those years are what make invested money grow. Of the ',
+  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you; growth adds the other ')
+    + `(${MONEY})` + escape('. Take it out early and growth stops, and the monthly from you goes up.') + '$');
+  const dollars = (s: string) => Number(s.replace(/[$,]/g, ''));
+  const covers = (list: string, kidsCount: number) =>
+    `Only the funds: ${list}. Everyday costs like food, clothes and childcare are separate; FRED's estimate `
+    + `for a family your size is ~${fmtMoney(familyMonthly(kidsCount))} a month on top.`;
+
+  it('coversLine names the units the monthly pays for and the family everyday cost on top', () => {
+    expect(buildGoalPlanView(sample(), ctx()).coversLine)
+      .toBe(covers('the baby fund, college and the nest egg', 3));
+
+    const two = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
+    expect(two.coversLine).toBe(covers('college and the nest egg', 2));
+
+    const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
+    expect(collegeOnly.coversLine).toBe(covers('college', 1));
+
+    const fundOnly = buildGoalPlanView(
+      family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })], { plan529Target: 0, brokerageTarget: 0 }),
+      ctx(),
+    );
+    expect(fundOnly.coversLine).toBe(covers('the baby fund', 1));
+  });
+
+  it('whyInvestLine for the sample family: from you plus growth plus balances is what the invested units reach', () => {
+    const view = buildGoalPlanView(sample(), ctx());
+    expect(view.whyInvestLine).not.toBeNull();
+    const m = view.whyInvestLine!.match(KIDS_WHY);
+    expect(m).withContext(view.whyInvestLine!).not.toBeNull();
+    const [reaches, fromYou, fromGrowth] = [m![1], m![2], m![3]].map(dollars);
+    expect(fromYou % 1_000).toBe(0);
+    expect(fromGrowth % 1_000).toBe(0);
+    expect(fromGrowth).toBeGreaterThan(0);
+
+    // The invested units: every 529 and brokerage plan here, plus the undated kid's market baby fund.
+    const targetOf = { plan529: 47_800, brokerage: 100_000 };
+    const invested: Array<{ target: number; balance: number }> = [
+      ...view.kids!.reduce<Array<{ target: number; balance: number }>>((all, a) => all.concat(a.perKid
+        .filter(k => k.plan.rateKind === 'market')
+        .map(k => ({ target: targetOf[a.account], balance: k.balance }))), []),
+      ...view.firstYear!.rows
+        .filter(r => r.plan.rateKind === 'market' && !r.plan.finished)
+        .map(r => ({ target: r.plan.target, balance: r.balance })),
+    ];
+    // Three kids' college and nest egg, plus the undated kid's $16,500 fund (Theo's is cash).
+    expect(invested.length).toBe(7);
+    expect(reaches).toBe(invested.reduce((sum, u) => sum + u.target, 0));
+    expect(reaches).toBe(3 * (47_800 + 100_000) + 16_500);
+    const balances = invested.reduce((sum, u) => sum + u.balance, 0);
+    expect(Math.abs(fromYou + fromGrowth + balances - reaches)).toBeLessThanOrEqual(1_000);
+  });
+
+  it('a kids plan whose only unit is a cash baby fund has no whyInvestLine but still a coversLine', () => {
+    const view = buildGoalPlanView(
+      family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })], { plan529Target: 0, brokerageTarget: 0 }),
+      ctx(),
+    );
+    expect(view.firstYear!.rows[0].pill).toBe('Cash');
+    expect(view.whyInvestLine).toBeNull();
+    expect(view.coversLine).not.toBeNull();
+  });
+
+  it('a due-now plan has neither line', () => {
+    const kids = base({
+      type: 'KIDS',
+      config: {
+        plan529Target: 50_000, brokerageTarget: 0,
+        kids: [{ label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000), brokerage: account(0) } }],
+      } as KidsConfig,
+    });
+    const k = buildGoalPlanView(kids, ctx({ now: new Date(2026, 11, 5) }));
+    expect(k.heroLabel).toBe('Due now');
+    expect(k.coversLine).toBeNull();
+    expect(k.whyInvestLine).toBeNull();
+
+    const simple = buildGoalPlanView(
+      base({ config: { targetAmount: 30_000, targetYear: 2026 }, currentBalance: 24_000 }),
+      ctx({ now: new Date(2026, 11, 5) }),
+    );
+    expect(simple.heroLabel).toBe('Due now');
+    expect(simple.coversLine).toBeNull();
+    expect(simple.whyInvestLine).toBeNull();
+  });
+
+  it('a HOUSE plan at the market rate reads the simple-plan first sentence and has no coversLine', () => {
+    const view = buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx());
+    expect(view.coversLine).toBeNull();
+    const m = view.whyInvestLine!.match(SIMPLE_WHY);
+    expect(m).withContext(view.whyInvestLine!).not.toBeNull();
+    const [reaches, fromYou, fromGrowth] = [m![1], m![2], m![3]].map(dollars);
+    expect(reaches).toBe(100_000);
+    expect(fromYou).toBe(Math.round(view.simple!.fromYou / 1_000) * 1_000);
+    expect(fromGrowth).toBe(Math.round(view.simple!.fromGrowth / 1_000) * 1_000);
+  });
+
+  it('cash plans have neither line: emergency fund, vacation, a short-dated car', () => {
+    const lines = (partial: Partial<GoalPlanInput>) => {
+      const v = buildGoalPlanView(base(partial), ctx());
+      return [v.coversLine, v.whyInvestLine];
+    };
+    expect(lines({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 5 } })).toEqual([null, null]);
+    expect(lines({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } })).toEqual([null, null]);
+    expect(lines({ type: 'CAR', config: { price: 40_000, downPaymentPct: null, targetYear: Y + 1 } })).toEqual([null, null]);
   });
 });

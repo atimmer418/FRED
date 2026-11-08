@@ -43,6 +43,7 @@ import {
 import { audienceLabel } from '../../utils/goal-quiz.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
+import { familyMonthly } from '../../utils/kid-cost.utils';
 import { buildKidTimeline } from './kid-timeline.model';
 
 export type GoalPlanInput = Pick<
@@ -123,6 +124,10 @@ export interface GoalPlanView {
   audience: string;
   /** The How FRED helps note, without its bold "How FRED helps." lead. */
   howFredHelps: string;
+  /** KIDS only: what the hero monthly pays for, and what it leaves out. */
+  coversLine: string | null;
+  /** Market plans: the contributions-vs-growth case for leaving the money invested. */
+  whyInvestLine: string | null;
   monthlyTotal: number;
   /**
    * What is due now in a deadline month or after it: the shortfall the plan can no longer spread
@@ -244,6 +249,47 @@ function howFredHelpsLine(monthly: number, units: ReadonlyArray<{ kind: RateKind
   return `${lead}, keeps ${name} in cash, and handles where it goes.`;
 }
 
+/** "a", "a and b", "a, b and c". */
+function englishList(items: string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
+ * KIDS only: the units the hero monthly pays for, in card order, and the family's everyday cost
+ * (the quiz cost step's figure) that sits on top of it. Null when no unit is left to pay for.
+ */
+function coversLineFor(units: { babyFund: boolean; college: boolean; nestEgg: boolean }, kidsCount: number): string | null {
+  const names = [
+    ...(units.babyFund ? ['the baby fund'] : []),
+    ...(units.college ? ['college'] : []),
+    ...(units.nestEgg ? ['the nest egg'] : []),
+  ];
+  if (names.length === 0) return null;
+  return `Only the funds: ${englishList(names)}. Everyday costs like food, clothes and childcare are separate; `
+    + `FRED's estimate for a family your size is ~${fmtMoney(familyMonthly(kidsCount))} a month on top.`;
+}
+
+const roundToThousand = (n: number) => Math.round(n / 1_000) * 1_000;
+
+/**
+ * The case for leaving invested money alone: of what the invested units reach, how much comes
+ * from the user's contributions and how much from growth. Null when growth adds nothing, or when
+ * either share rounds to $0.
+ */
+function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: number, kids: boolean): string | null {
+  if (!(fromGrowthRaw > 0)) return null;
+  const fromYou = roundToThousand(fromYouRaw);
+  const fromGrowth = roundToThousand(fromGrowthRaw);
+  if (fromYou <= 0 || fromGrowth <= 0) return null;
+  const lead = kids
+    ? 'You will not spend the funds for years: college and the nest egg come due at 18, and those years are what make invested money grow.'
+    : 'You will not spend this for years, and those years are what make invested money grow.';
+  const split = `Of the ${fmtMoney(reaches)} this plan reaches, ~${fmtMoney(fromYou)} comes from you; `
+    + `growth adds the other ${fmtMoney(fromGrowth)}. Take it out early and growth stops, and the monthly from you goes up.`;
+  return kids ? `${lead} ${split} Anything you need within three years is planned as cash instead.` : `${lead} ${split}`;
+}
+
 // ── Builder ──────────────────────────────────────────────────────────────────
 
 export function buildGoalPlanView(goal: GoalPlanInput, ctx: GoalPlanContext): GoalPlanView {
@@ -260,9 +306,13 @@ export function buildGoalPlanView(goal: GoalPlanInput, ctx: GoalPlanContext): Go
     view = simpleView(goal, ctx, imported, statusRate);
   }
 
+  const dueNowOnly = isDueNowOnly(view.monthlyTotal, view.dueNow);
   return {
     ...view,
-    heroLabel: isDueNowOnly(view.monthlyTotal, view.dueNow) ? 'Due now' : 'Save this month',
+    heroLabel: dueNowOnly ? 'Due now' : 'Save this month',
+    // Nothing is left to spread over months, so there is no monthly to explain.
+    coversLine: dueNowOnly ? null : view.coversLine,
+    whyInvestLine: dueNowOnly ? null : view.whyInvestLine,
     subtitle: imported ? IMPORTED_SUBTITLE : view.subtitle,
     perPaycheck: InvestmentFrequencyUtils.toPerPaycheckEquivalent(view.monthlyTotal, ctx.frequency),
   };
@@ -458,7 +508,38 @@ function kidsView(
   ];
   const monthlyIfOn = monthlyTotal - giftSaving;
 
+  // Why invest it: only the invested units with months left. From you is each unit's monthly over
+  // its horizon plus every lump inside it; growth is what the target needs beyond that and the balance.
+  const investedAccounts = accounts.reduce<Array<{ target: number; balance: number; fromYou: number }>>(
+    (all, a) => all.concat(a.perKid
+      .filter(k => k.plan.rateKind === 'market' && k.plan.n > 0)
+      .map(k => ({
+        target: a.account === 'plan529' ? cfg.plan529Target : cfg.brokerageTarget,
+        balance: k.balance,
+        fromYou: k.plan.monthly * k.plan.n
+          + k.plan.lumps.filter(l => l.monthIndex <= k.plan.n).reduce((sum, l) => sum + l.amount, 0),
+      }))),
+    [],
+  );
+  const investedFunds = unfinishedFunds
+    .filter(f => f.row.plan.rateKind === 'market')
+    .map(f => ({ target: f.row.plan.target, balance: f.row.balance, fromYou: f.row.plan.monthly * f.row.plan.n }));
+  const invested = [...investedAccounts, ...investedFunds];
+  const investedTotal = (key: 'target' | 'balance' | 'fromYou') => invested.reduce((total, u) => total + u[key], 0);
+  const reaches = investedTotal('target');
+  const fromYou = investedTotal('fromYou');
+
   return {
+    coversLine: kids.length > 0
+      ? coversLineFor({
+          babyFund: unfinishedFunds.length > 0,
+          college: accounts.some(a => a.account === 'plan529'),
+          nestEgg: accounts.some(a => a.account === 'brokerage'),
+        }, kids.length)
+      : null,
+    whyInvestLine: invested.length > 0
+      ? whyInvestLineFor(reaches, fromYou, Math.max(0, reaches - investedTotal('balance') - fromYou), true)
+      : null,
     monthlyTotal,
     dueNow,
     rateKind,
@@ -558,6 +639,8 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): SubView {
     subtitle: `${amountLead(plan.monthly, 0)} ${audience}`,
     audience,
     howFredHelps: CASH_HELP,
+    coversLine: null,
+    whyInvestLine: null,
     pill: 'Cash',
     status: vacationStatus(plan, ctx.now),
     progressPct: clampPct(plan.savedThisYear, plan.annual),
@@ -622,6 +705,10 @@ function simpleView(
     subtitle: `${amountLead(plan.monthly, plan.dueNow)} ${audience}`,
     audience,
     howFredHelps: howFredHelpsLine(plan.monthly, [{ kind: plan.rateKind, babyFund: false }]),
+    coversLine: null,
+    whyInvestLine: plan.rateKind === 'market' && plan.n > 0
+      ? whyInvestLineFor(target, plan.fromYou, plan.fromGrowth, false)
+      : null,
     pill: pillOf(plan.rateKind),
     status,
     progressPct: clampPct(goal.currentBalance, target),

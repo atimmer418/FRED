@@ -43,7 +43,7 @@ import {
 import { audienceLabel } from '../../utils/goal-quiz.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
-import { familyMonthly } from '../../utils/kid-cost.utils';
+import { everydayMonthlyToday, kidAgeToday } from '../../utils/kid-cost.utils';
 import { buildKidTimeline } from './kid-timeline.model';
 
 export type GoalPlanInput = Pick<
@@ -255,19 +255,51 @@ function englishList(items: string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
+interface CoveredUnits { babyFund: boolean; college: boolean; nestEgg: boolean }
+
+/** "college and the nest egg" / "college" / "the nest egg", the units that sit on top of everyday costs. */
+function onTopNames(units: CoveredUnits): string[] {
+  return [...(units.college ? ['college'] : []), ...(units.nestEgg ? ['the nest egg'] : [])];
+}
+
+/** Capitalise the first letter of a phrase that starts a sentence. */
+const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /**
- * KIDS only: the units the hero monthly pays for, in card order, and the family's everyday cost
- * (the quiz cost step's figure) that sits on top of it. Null when no unit is left to pay for.
+ * KIDS only: what the hero monthly pays for and how that relates to the everyday cost of the kids.
+ * College and the nest egg come on top of everyday costs (the USDA figure stops at 17 and leaves
+ * college out); the baby fund IS the first year of those costs, saved ahead. The last sentence is
+ * what the kids at home cost this month by their ages. Null when no unit is left to pay for.
  */
-function coversLineFor(units: { babyFund: boolean; college: boolean; nestEgg: boolean }, kidsCount: number): string | null {
-  const names = [
-    ...(units.babyFund ? ['the baby fund'] : []),
-    ...(units.college ? ['college'] : []),
-    ...(units.nestEgg ? ['the nest egg'] : []),
-  ];
+function coversLineFor(
+  units: CoveredUnits,
+  kids: ReadonlyArray<{ label: string; birthYear: number | null; birthMonth: number | null }>,
+  now: Date,
+): string | null {
+  const names = [...(units.babyFund ? ['the baby fund'] : []), ...onTopNames(units)];
   if (names.length === 0) return null;
-  return `Only the funds: ${englishList(names)}. Everyday costs like food, clothes and childcare are separate; `
-    + `FRED's estimate for a family your size is ~${fmtMoney(familyMonthly(kidsCount))} a month on top.`;
+  const onTop = onTopNames(units);
+  let relation: string;
+  if (onTop.length > 0) {
+    relation = `${sentenceCase(englishList(onTop))} ${onTop.length === 1 ? 'is' : 'are'} on top of everyday costs`
+      + (units.babyFund ? '; the baby fund is the first year of them, saved ahead.' : '.');
+  } else {
+    relation = 'The baby fund is the first year of everyday costs, saved ahead.';
+  }
+
+  const atHome = kids
+    .map((kid, i) => ({ label: kid.label.trim() || `Kid ${i + 1}`, age: kidAgeToday(kid.birthYear, kid.birthMonth, now) }))
+    .filter((k): k is { label: string; age: number } => k.age !== null && k.age <= 17);
+  const notYet = kids.some(kid => kidAgeToday(kid.birthYear, kid.birthMonth, now) === null);
+  let today: string;
+  if (atHome.length > 0) {
+    const who = englishList(atHome.map(k => `${k.label} (${k.age === 0 ? 'under 1' : k.age})`));
+    today = `Everyday costs for ${who} run ~${fmtMoney(everydayMonthlyToday(kids, now))} a month by FRED's estimate`
+      + (notYet ? '; a kid who has not arrived yet costs nothing until they do.' : '.');
+  } else {
+    today = notYet ? 'No everyday costs yet; they start when the first kid arrives.' : '';
+  }
+  return `Only the funds: ${englishList(names)}. ${relation}${today ? ' ' + today : ''}`;
 }
 
 const roundToThousand = (n: number) => Math.round(n / 1_000) * 1_000;
@@ -277,14 +309,22 @@ const roundToThousand = (n: number) => Math.round(n / 1_000) * 1_000;
  * from the user's contributions and how much from growth. Null when growth adds nothing, or when
  * either share rounds to $0.
  */
-function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: number, kids: boolean): string | null {
+function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: number, kids: CoveredUnits | null): string | null {
   if (!(fromGrowthRaw > 0)) return null;
   const fromYou = roundToThousand(fromYouRaw);
   const fromGrowth = roundToThousand(fromGrowthRaw);
   if (fromYou <= 0 || fromGrowth <= 0) return null;
-  const lead = kids
-    ? 'You will not spend the funds for years: college and the nest egg come due at 18, and those years are what make invested money grow.'
-    : 'You will not spend this for years, and those years are what make invested money grow.';
+  let lead = 'You will not spend this for years, and those years are what make invested money grow.';
+  if (kids) {
+    // Name only the invested units this family has: "college and the nest egg come due at 18",
+    // "college comes due at 18", or, for a family whose only invested unit is the baby fund,
+    // "the baby fund comes due when they arrive".
+    const onTop = onTopNames(kids);
+    const due = onTop.length === 2 ? 'college and the nest egg come due at 18'
+      : onTop.length === 1 ? `${onTop[0]} comes due at 18`
+      : 'the baby fund comes due when they arrive';
+    lead = `You will not spend the funds for years: ${due}, and those years are what make invested money grow.`;
+  }
   const split = `Of the ${fmtMoney(reaches)} this plan reaches, ~${fmtMoney(fromYou)} comes from you; `
     + `growth adds the other ${fmtMoney(fromGrowth)}. Take it out early and growth stops, and the monthly from you goes up.`;
   return kids ? `${lead} ${split} Anything you need within three years is planned as cash instead.` : `${lead} ${split}`;
@@ -510,10 +550,11 @@ function kidsView(
 
   // Why invest it: only the invested units with months left. From you is each unit's monthly over
   // its horizon plus every lump inside it; growth is what the target needs beyond that and the balance.
-  const investedAccounts = accounts.reduce<Array<{ target: number; balance: number; fromYou: number }>>(
+  const investedAccounts = accounts.reduce<Array<{ account: KidAccountKey; target: number; balance: number; fromYou: number }>>(
     (all, a) => all.concat(a.perKid
       .filter(k => k.plan.rateKind === 'market' && k.plan.n > 0)
       .map(k => ({
+        account: a.account,
         target: a.account === 'plan529' ? cfg.plan529Target : cfg.brokerageTarget,
         balance: k.balance,
         fromYou: k.plan.monthly * k.plan.n
@@ -522,12 +563,17 @@ function kidsView(
     [],
   );
   const investedFunds = unfinishedFunds
-    .filter(f => f.row.plan.rateKind === 'market')
+    .filter(f => f.row.plan.rateKind === 'market' && f.row.plan.n > 0)
     .map(f => ({ target: f.row.plan.target, balance: f.row.balance, fromYou: f.row.plan.monthly * f.row.plan.n }));
   const invested = [...investedAccounts, ...investedFunds];
   const investedTotal = (key: 'target' | 'balance' | 'fromYou') => invested.reduce((total, u) => total + u[key], 0);
   const reaches = investedTotal('target');
   const fromYou = investedTotal('fromYou');
+  const investedUnits: CoveredUnits = {
+    babyFund: investedFunds.length > 0,
+    college: investedAccounts.some(u => u.account === 'plan529'),
+    nestEgg: investedAccounts.some(u => u.account === 'brokerage'),
+  };
 
   return {
     coversLine: kids.length > 0
@@ -535,10 +581,10 @@ function kidsView(
           babyFund: unfinishedFunds.length > 0,
           college: accounts.some(a => a.account === 'plan529'),
           nestEgg: accounts.some(a => a.account === 'brokerage'),
-        }, kids.length)
+        }, kids, ctx.now)
       : null,
     whyInvestLine: invested.length > 0
-      ? whyInvestLineFor(reaches, fromYou, Math.max(0, reaches - investedTotal('balance') - fromYou), true)
+      ? whyInvestLineFor(reaches, fromYou, Math.max(0, reaches - investedTotal('balance') - fromYou), investedUnits)
       : null,
     monthlyTotal,
     dueNow,
@@ -707,7 +753,7 @@ function simpleView(
     howFredHelps: howFredHelpsLine(plan.monthly, [{ kind: plan.rateKind, babyFund: false }]),
     coversLine: null,
     whyInvestLine: plan.rateKind === 'market' && plan.n > 0
-      ? whyInvestLineFor(target, plan.fromYou, plan.fromGrowth, false)
+      ? whyInvestLineFor(target, plan.fromYou, plan.fromGrowth, null)
       : null,
     pill: pillOf(plan.rateKind),
     status,

@@ -2,15 +2,43 @@ import { KID_COST_SOURCES, USDA_2015_ANNUAL_BY_BAND, USDA_2015_TOTAL } from '../
 import {
   collegePresets,
   costCardSources,
+  everydayMonthlyToday,
   familyMonthly,
   familySizeFactor,
   firstYearFactor,
   firstYearTargetForRank,
   inflationFactor,
+  kidAgeToday,
   kidCostFigures,
   kidRanks,
   perKidMonthly,
 } from './kid-cost.utils';
+
+describe('kidAgeToday and everydayMonthlyToday', () => {
+  const NOW = new Date(2026, 10, 7); // 2026-11-07
+
+  it('ages kids by whole years, counting a kid dated this year with no month as not yet born (Ruling R4)', () => {
+    expect(kidAgeToday(2025, 3, NOW)).toBe(1);
+    expect(kidAgeToday(2025, 12, NOW)).toBe(0);
+    expect(kidAgeToday(2026, 11, NOW)).toBe(0);
+    expect(kidAgeToday(2026, 12, NOW)).toBeNull();
+    expect(kidAgeToday(2026, null, NOW)).toBeNull();
+    expect(kidAgeToday(2024, null, NOW)).toBe(2);
+    expect(kidAgeToday(2030, null, NOW)).toBeNull();
+    expect(kidAgeToday(null, null, NOW)).toBeNull();
+  });
+
+  it('sums the USDA band for each kid at home, family-size adjusted, to the nearest $10; unborn and 18+ kids add nothing', () => {
+    // Two-kid family (factor 1.00): a one-year-old is the 0-2 band, 12,680 x inflation / 12 = ~1,502.
+    expect(everydayMonthlyToday([{ birthYear: 2025, birthMonth: 3 }, { birthYear: 2030, birthMonth: null }], NOW)).toBe(1500);
+    // Three kids (factor 0.76): ages 10 (9-11 band) and 17 (15-17 band); the 18-year-old is past the study.
+    expect(everydayMonthlyToday([
+      { birthYear: 2016, birthMonth: 1 }, { birthYear: 2009, birthMonth: 6 }, { birthYear: 2008, birthMonth: 1 },
+    ], NOW)).toBe(2440);
+    expect(everydayMonthlyToday([{ birthYear: null, birthMonth: null }], NOW)).toBe(0);
+    expect(everydayMonthlyToday([], NOW)).toBe(0);
+  });
+});
 
 describe('kid cost constants', () => {
   it('six bands of three years sum to the USDA total', () =>

@@ -4,7 +4,7 @@ import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
 import { GIFT_DAY_LUMP, futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
-import { familyMonthly } from '../../utils/kid-cost.utils';
+import { everydayMonthlyToday } from '../../utils/kid-cost.utils';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
 const Y = NOW.getFullYear();
@@ -792,25 +792,53 @@ describe('buildGoalPlanView one-screen page', () => {
   ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you; growth adds the other ')
     + `(${MONEY})` + escape('. Take it out early and growth stops, and the monthly from you goes up.') + '$');
   const dollars = (s: string) => Number(s.replace(/[$,]/g, ''));
-  const covers = (list: string, kidsCount: number) =>
-    `Only the funds: ${list}. Everyday costs like food, clothes and childcare are separate; FRED's estimate `
-    + `for a family your size is ~${fmtMoney(familyMonthly(kidsCount))} a month on top.`;
+  const todayCost = (kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>) =>
+    fmtMoney(everydayMonthlyToday(kids, NOW));
 
-  it('coversLine names the units the monthly pays for and the family everyday cost on top', () => {
-    expect(buildGoalPlanView(sample(), ctx()).coversLine)
-      .toBe(covers('the baby fund, college and the nest egg', 3));
+  it('coversLine names the funds, says which sit on top of everyday costs, and prices the kids at home by age', () => {
+    // Ellie is 2, Theo arrives in 2028, the third kid is undated: one kid at home, two not yet.
+    const sampleKids = [{ birthYear: 2024, birthMonth: null }, { birthYear: 2028, birthMonth: 6 }, { birthYear: null, birthMonth: null }];
+    expect(everydayMonthlyToday(sampleKids, NOW)).toBe(1140);
+    expect(buildGoalPlanView(sample(), ctx()).coversLine).toBe(
+      'Only the funds: the baby fund, college and the nest egg. College and the nest egg are on top of everyday '
+      + 'costs; the baby fund is the first year of them, saved ahead. Everyday costs for Ellie (2) run ~$1,140 a month '
+      + "by FRED's estimate; a kid who has not arrived yet costs nothing until they do.",
+    );
 
+    const twoKids = [{ birthYear: 2020, birthMonth: 3 }, { birthYear: 2023, birthMonth: 8 }];
     const two = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
-    expect(two.coversLine).toBe(covers('college and the nest egg', 2));
+    expect(two.coversLine).toBe(
+      'Only the funds: college and the nest egg. College and the nest egg are on top of everyday costs. '
+      + `Everyday costs for A (6) and B (3) run ~${todayCost(twoKids)} a month by FRED's estimate.`,
+    );
 
     const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
-    expect(collegeOnly.coversLine).toBe(covers('college', 1));
+    expect(collegeOnly.coversLine).toBe(
+      'Only the funds: college. College is on top of everyday costs. '
+      + `Everyday costs for A (6) run ~${todayCost([twoKids[0]])} a month by FRED's estimate.`,
+    );
+
+    const newborn = buildGoalPlanView(family([kid('Mae', 2026, 10)], { plan529Target: 0 }), ctx());
+    expect(newborn.coversLine).toBe(
+      'Only the funds: the nest egg. The nest egg is on top of everyday costs. '
+      + `Everyday costs for Mae (under 1) run ~${todayCost([{ birthYear: 2026, birthMonth: 10 }])} a month by FRED's estimate.`,
+    );
 
     const fundOnly = buildGoalPlanView(
       family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })], { plan529Target: 0, brokerageTarget: 0 }),
       ctx(),
     );
-    expect(fundOnly.coversLine).toBe(covers('the baby fund', 1));
+    expect(fundOnly.coversLine).toBe(
+      'Only the funds: the baby fund. The baby fund is the first year of everyday costs, saved ahead. '
+      + 'No everyday costs yet; they start when the first kid arrives.',
+    );
+  });
+
+  it('whyInvestLine names only the invested units the family has', () => {
+    const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
+    expect(collegeOnly.whyInvestLine).toMatch(/^You will not spend the funds for years: college comes due at 18, and/);
+    const nestOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { plan529Target: 0 }), ctx());
+    expect(nestOnly.whyInvestLine).toMatch(/^You will not spend the funds for years: the nest egg comes due at 18, and/);
   });
 
   it('whyInvestLine for the sample family: from you plus growth plus balances is what the invested units reach', () => {

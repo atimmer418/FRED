@@ -98,6 +98,40 @@ export function familyMonthly(kidsCount: number): number {
   return Math.round((perKidTotal(count) * count) / MONTHS_TO_18 / 10) * 10;
 }
 
+/**
+ * A kid's age in whole years today, or null when they have not arrived: no birth year, a later year,
+ * or this year with no month (Ruling R4: "This year" with no month means not yet born) or a later month.
+ */
+export function kidAgeToday(birthYear: number | null, birthMonth: number | null, now: Date): number | null {
+  if (birthYear === null) return null;
+  const thisYear = now.getFullYear();
+  const thisMonth = now.getMonth() + 1;
+  if (birthYear > thisYear) return null;
+  if (birthYear === thisYear) return birthMonth !== null && birthMonth <= thisMonth ? 0 : null;
+  const birthdayStillAhead = birthMonth !== null && birthMonth > thisMonth;
+  return thisYear - birthYear - (birthdayStillAhead ? 1 : 0);
+}
+
+/**
+ * What the kids at home cost this month by FRED's estimate: each kid aged 0 to 17 takes the USDA
+ * band for their age, inflation and family-size adjusted (the whole family's count sets the
+ * factor), summed and rounded to the nearest $10. Unborn kids and kids 18 or older add nothing;
+ * the USDA study stops at 17.
+ */
+export function everydayMonthlyToday(
+  kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>,
+  now: Date,
+): number {
+  const factor = familySizeFactor(kids.length) * inflationFactor();
+  const annual = kids.reduce((sum, kid) => {
+    const age = kidAgeToday(kid.birthYear, kid.birthMonth, now);
+    if (age === null) return sum;
+    const band = USDA_2015_ANNUAL_BY_BAND.find(b => age >= b.fromAge && age <= b.toAge);
+    return band ? sum + band.annual * factor : sum;
+  }, 0);
+  return Math.round(annual / 12 / 10) * 10;
+}
+
 const STAGE_DEFS: ReadonlyArray<{ key: KidCostStageKey; label: string; fromAges: ReadonlyArray<number> }> = [
   { key: '0-2', label: 'Baby and toddler, 0 to 2', fromAges: [0] },
   { key: '3-5', label: 'Preschool, 3 to 5', fromAges: [3] },

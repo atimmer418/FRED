@@ -238,6 +238,19 @@
   }
 }
 
+// ─── Continue on the cost step ───────────────────────────────────────────────
+
+// Waits for the family monthly, then fades in by animate(). No CSS opacity transition here,
+// so the hide on a re-entry is instant and the fade is the only motion.
+.fs-cta.cost-cta {
+  transition: transform 0.15s;
+
+  &.cta-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 // ─── The calc screen ─────────────────────────────────────────────────────────
 
 .calc-screen {

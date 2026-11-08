@@ -273,13 +273,15 @@ describe('GoalQuizPage', () => {
     tick(1);
     fixture.detectChanges();
     expect(page.costStat()).toBe('B');
-    expect(animate).toHaveBeenCalledTimes(2);
+    // The two stats crossfade and Continue fades in.
+    expect(animate).toHaveBeenCalledTimes(3);
     expect(statB.classList).toContain('on');
 
+    // The flip back crossfades the stats only; Continue stays.
     (onScreen(fixture).querySelector('.xfade') as HTMLElement).click();
     fixture.detectChanges();
     expect(page.costStat()).toBe('A');
-    expect(animate).toHaveBeenCalledTimes(4);
+    expect(animate).toHaveBeenCalledTimes(5);
     discardPeriodicTasks();
   }));
 
@@ -322,6 +324,77 @@ describe('GoalQuizPage', () => {
     xfade.click();
     expect(statA.getAnimations().length).toBe(1);
     expect(statB.getAnimations().length).toBe(1);
+    discardPeriodicTasks();
+  }));
+
+  it('the cost step hides Continue until the family monthly shows, and hides it again on a re-entry', fakeAsync(async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    const cta = () => onScreen(fixture).querySelector('.fs-cta') as HTMLButtonElement;
+    expect(cta().classList).not.toContain('cta-hidden');
+
+    goTo(fixture, 2);
+    expect(cta().classList).toContain('cta-hidden');
+    expect(getComputedStyle(cta()).opacity).toBe('0');
+    expect(getComputedStyle(cta()).pointerEvents).toBe('none');
+    tick(2199);
+    fixture.detectChanges();
+    expect(cta().classList).toContain('cta-hidden');
+    tick(1);
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    expect(cta().classList).not.toContain('cta-hidden');
+    expect(cta().getAnimations().length).toBe(1);
+    cta().getAnimations().forEach(a => a.finish());
+    expect(getComputedStyle(cta()).opacity).toBe('1');
+
+    // A tap back to the general stat keeps it.
+    (onScreen(fixture).querySelector('.xfade') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('A');
+    expect(cta().classList).not.toContain('cta-hidden');
+
+    // The next step shows it as always; back onto the cost step hides it until the next reveal.
+    goTo(fixture, 3);
+    expect(cta().classList).not.toContain('cta-hidden');
+    goTo(fixture, 2);
+    expect(cta().classList).toContain('cta-hidden');
+    expect(getComputedStyle(cta()).opacity).toBe('0');
+    tick(2200);
+    fixture.detectChanges();
+    expect(cta().classList).not.toContain('cta-hidden');
+    discardPeriodicTasks();
+  }));
+
+  it('a tap on the cost stat before the hold ends reveals Continue at once', fakeAsync(async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 2);
+    const cta = onScreen(fixture).querySelector('.fs-cta') as HTMLButtonElement;
+    tick(500);
+    expect(cta.classList).toContain('cta-hidden');
+    (onScreen(fixture).querySelector('.xfade') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    expect(cta.classList).not.toContain('cta-hidden');
+    tick(5000);
+    fixture.detectChanges();
+    expect(page.costStat()).toBe('B');
+    discardPeriodicTasks();
+  }));
+
+  it('under reduced motion Continue appears on the reveal without animate()', fakeAsync(async () => {
+    spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    const fixture = await create({ type: 'KIDS' });
+    const animate = spyOn(HTMLElement.prototype, 'animate').and.callThrough();
+    goTo(fixture, 2);
+    const cta = onScreen(fixture).querySelector('.fs-cta') as HTMLButtonElement;
+    expect(cta.classList).toContain('cta-hidden');
+    tick(2200);
+    fixture.detectChanges();
+    expect(cta.classList).not.toContain('cta-hidden');
+    expect(getComputedStyle(cta).opacity).toBe('1');
+    expect(animate).not.toHaveBeenCalled();
     discardPeriodicTasks();
   }));
 

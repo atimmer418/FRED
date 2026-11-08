@@ -133,6 +133,8 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
   readonly showInfo = computed(() => this.currentStep()?.id === 'kids_cost' && !this.calcShowing());
   /** 'A' is the general statistic, 'B' the family monthly. */
   readonly costStat = signal<'A' | 'B'>('A');
+  /** Continue waits on the cost step until the family monthly has shown once per visit. */
+  readonly ctaRevealed = signal(false);
   readonly costBig = computed(() => `$${Math.round(kidCostFigures(this.kidCount()).perChildTotal / 1000)}K`);
   readonly costMonthly = computed(() => fmtMoney(familyMonthly(this.kidCount())));
   readonly costHint = computed(() => {
@@ -439,6 +441,25 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
       this.fadeTo(into, 1);
     }
     this.costStat.set(next);
+    if (next === 'B') this.revealCta();
+  }
+
+  /** Fades Continue in on the cost step; a flip back to the general stat leaves it showing. */
+  private revealCta(): void {
+    if (this.ctaRevealed()) return;
+    this.ctaRevealed.set(true);
+    const cta = this.costCta();
+    if (!cta || this.reducedMotion() || typeof cta.animate !== 'function') return;
+    const fade = cta.animate(
+      [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 400, easing: 'ease-out', fill: 'both' },
+    );
+    // Same as fadeTo: a held fill would outrank .cta-hidden on the next visit.
+    fade.onfinish = () => fade.cancel();
+  }
+
+  private costCta(): HTMLElement | null {
+    return this.el.nativeElement.querySelector<HTMLElement>('.fs-cta.cost-cta');
   }
 
   /**
@@ -666,8 +687,9 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
   private startCostHold(): void {
     this.clearCostTimer();
     // A re-entry drops whatever fade the last visit left running or held, so the .on class paints.
-    this.costStatElements().forEach(el => el?.getAnimations().forEach(anim => anim.cancel()));
+    [...this.costStatElements(), this.costCta()].forEach(el => el?.getAnimations().forEach(anim => anim.cancel()));
     this.costStat.set('A');
+    this.ctaRevealed.set(false);
     this.costTimer = setTimeout(() => {
       this.costTimer = null;
       this.flipCostStat();

@@ -930,6 +930,30 @@ describe('GoalPage', () => {
     expect(updateSpy).not.toHaveBeenCalled();
   });
 
+  it('shows the shared Assumptions card on a market plan, with Reset to standard only off 10%', async () => {
+    const fixture = await create({ id: '7' }, { goals: [{ ...houseGoal(7), planRate: 0.10 }] });
+    const page = fixture.componentInstance;
+    finishCountUp(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(page.selectedRate()).toBe(0.10);
+    expect(el.querySelector('.fd-assume')).toBeTruthy();
+    expect(el.querySelectorAll('.fd-assume .fd-assume-chips button').length).toBe(3);
+    expect(el.querySelector('.fd-reset')).toBeFalsy();
+
+    page.selectRate(0.12);
+    fixture.detectChanges();
+    const reset = el.querySelector('.fd-reset') as HTMLButtonElement;
+    expect(reset).toBeTruthy();
+    expect(reset.textContent!.trim()).toBe('Reset to standard');
+
+    reset.click();
+    fixture.detectChanges();
+    expect(page.selectedRate()).toBe(0.10);
+    expect(el.querySelector('.fd-reset')).toBeFalsy();
+    const on = el.querySelector('.fd-assume-chips button.on') as HTMLElement;
+    expect(on.textContent!.trim()).toContain('10%');
+  });
+
   it('re-reads the goal and the shared rate when revealed beneath a popped edit preview', async () => {
     const goal = { ...houseGoal(7), planRate: 0.10 };
     const fixture = await create({ id: '7' }, { goals: [goal] });

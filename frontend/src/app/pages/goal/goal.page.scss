@@ -107,8 +107,8 @@
 .gp-kcard {
   background: #f8fafc;
   border: 1px solid #eef1f6;
-  border-radius: 15px;
-  padding: 11px 12px 6px;
+  border-radius: 13px;
+  padding: 12px 13px 4px;
   font-family: 'Manrope', sans-serif;
   min-height: 100%;
   box-sizing: border-box;
@@ -117,14 +117,15 @@
 .gp-kh {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding-bottom: 8px;
+  gap: 10px;
+  padding-bottom: 10px;
   border-bottom: 1px solid #eef1f6;
 }
 
+// 34px with an 18px icon, the same as the Freedom page's .fd-insight-icon.
 .gp-av {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: #eef4ff;
   color: #2563eb;
@@ -133,7 +134,7 @@
   justify-content: center;
   flex-shrink: 0;
 
-  .material-symbols-outlined { font-size: 17px; }
+  .material-symbols-outlined { font-size: 18px; }
 }
 
 .gp-kname {
@@ -226,22 +227,27 @@
 .gp-krow {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 0;
+  gap: 11px;
+  padding: 11px 0;
 
   em {
     font-style: normal;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 800;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
 }
 
+// A hairline between rows, so Baby Fund, College and Nest Egg read as three separate lines.
+.gp-krow + .gp-krow {
+  border-top: 1px solid #eef1f6;
+}
+
 .gp-kic {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   background: #fff;
   border: 1px solid #eef1f6;
   color: #2563eb;
@@ -276,7 +282,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   color: #111827;
 
@@ -284,7 +290,8 @@
 }
 
 .gp-ktarget {
-  font-size: 10.5px;
+  margin-top: 3px;
+  font-size: 11px;
   font-weight: 600;
   color: #8a94a6;
   text-decoration: underline dotted rgba(138, 148, 166, 0.6);
@@ -305,7 +312,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 6px 37px;
+  // Lines up with the row text: the 32px icon plus the 11px row gap.
+  margin: 0 0 6px 43px;
   padding: 7px 10px;
   background: #fff;
   border: 1px solid #eef1f6;
@@ -350,10 +358,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-// ── Cash note ────────────────────────────────────────────────────────────────
+// ── Cash note: the Assumptions card look for a cash plan ─────────────────────
 .gp-cash-note {
   margin: 0;
-  padding: 9px 11px;
+  padding: 11px 13px;
   border-radius: 13px;
   background: #f8fafc;
   border: 1px solid #eef1f6;

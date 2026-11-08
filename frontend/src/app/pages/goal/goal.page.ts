@@ -21,7 +21,7 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../services/analytics/analytics-bands';
 import { GoalAction, Tier } from '../../services/analytics/analytics-events';
-import { RETURN_SCENARIOS, RateAssumptionsService } from '../../services/rate-assumptions.service';
+import { DEFAULT_ANNUAL_RETURN, RETURN_SCENARIOS, RateAssumptionsService } from '../../services/rate-assumptions.service';
 import {
   AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, VacationConfig,
 } from '../../models/goal.model';
@@ -115,6 +115,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
   private readonly now = inject(GOAL_PAGE_NOW)();
 
   readonly returnScenarios = RETURN_SCENARIOS;
+  /** The standard return; "Reset to standard" shows whenever the selected chip is off it. */
+  readonly defaultRate = DEFAULT_ANNUAL_RETURN;
   readonly fmtMoney = fmtMoney;
   readonly fmtCompact = fmtCompact;
 
@@ -707,7 +709,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
   /** Same setup as the tabs pager; the element is inert in unit tests (not upgraded). */
   private initPager(el: SwiperContainer | undefined): void {
     if (!el || typeof el.initialize !== 'function' || el.swiper) return;
-    const params: SwiperOptions = { slidesPerView: 'auto', spaceBetween: 10 };
+    // slidesOffsetAfter gives the last kid card the same 20px gutter as the page edge.
+    const params: SwiperOptions = { slidesPerView: 'auto', spaceBetween: 10, slidesOffsetAfter: 20 };
     Object.assign(el, params);
     el.initialize();
   }

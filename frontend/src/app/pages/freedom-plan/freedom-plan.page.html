@@ -100,12 +100,12 @@
         Reset to standard
       </button>
     </p>
-    <div class="fp-assume">
-      <div class="fp-assume-name">
+    <div class="fd-assume">
+      <div class="fd-assume-name">
         Avg annual return
-        <span class="fp-assume-sub">what your portfolio grows by</span>
+        <span class="fd-assume-sub">what your portfolio grows by</span>
       </div>
-      <div class="fd-scenario-chips fp-chips">
+      <div class="fd-scenario-chips fd-assume-chips">
         <button
           *ngFor="let s of RETURN_SCENARIOS"
           [class.on]="annualReturn() === s.rate"

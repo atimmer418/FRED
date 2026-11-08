@@ -1,6 +1,6 @@
 // The Freedom Plan page. The header and white sheet come from settings-shell; the hero, tiles,
 // insight rows, return chips, note and CTA from plan-page (shared with the goal plan page). Only
-// the spacing and the "Avg annual return" card below are this page's own.
+// the spacing below is this page's own.
 @use '../../../theme/settings-shell';
 @use '../../../theme/plan-page';
 
@@ -22,35 +22,6 @@
 
 .fp-zone {
   margin-top: 8px;
-}
-
-// ── Avg annual return: the name, its helper line, then the chips ─────────────
-.fp-assume {
-  background: #f8fafc;
-  border: 1px solid #eef1f6;
-  border-radius: 13px;
-  padding: 11px 13px 13px;
-  font-family: 'Manrope', sans-serif;
-}
-
-.fp-assume-name {
-  font-size: 13px;
-  font-weight: 800;
-  color: #0f172a;
-  margin-bottom: 8px;
-}
-
-.fp-assume-sub {
-  display: block;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #9aa6ba;
-  margin-top: 1px;
-}
-
-// Three "Conservative (8%)"-length labels share one row at 390px.
-.fp-chips button {
-  font-size: 10.5px;
 }
 
 // An insight is one sentence over two lines; keep each bold figure ("~10 months closer") whole.

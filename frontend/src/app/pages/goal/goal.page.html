@@ -153,17 +153,27 @@
                                (onChange)="toggleGiftDays($event)"></app-quiz-switch-row>
         }
 
-        <!-- Return assumption -->
+        <!-- Assumptions: the same card as the Freedom Plan page -->
         @if (v.rateKind === 'market') {
-          <div class="fd-seg">
-            <span class="fd-seg-label">Return</span>
-            <div class="fd-scenario-chips">
+          <p class="fd-zone">
+            Assumptions
+            @if (selectedRate() !== defaultRate) {
+              <button type="button" class="fd-reset" (click)="selectRate(defaultRate)">Reset to standard</button>
+            }
+          </p>
+          <div class="fd-assume">
+            <div class="fd-assume-name">
+              Avg annual return
+              <span class="fd-assume-sub">what this plan grows by</span>
+            </div>
+            <div class="fd-scenario-chips fd-assume-chips">
               @for (s of returnScenarios; track s.rate) {
                 <button type="button" [class.on]="selectedRate() === s.rate" [attr.aria-pressed]="selectedRate() === s.rate" (click)="selectRate(s.rate)">{{ s.label }}</button>
               }
             </div>
           </div>
         } @else {
+          <p class="fd-zone">Assumptions</p>
           <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
         }
 

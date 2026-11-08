@@ -65,6 +65,14 @@ describe('buildKidTimeline', () => {
     expect(dots.filter(d => d.kind === 'kid').map(d => d.label)).toEqual(['Ava', 'Ben']);
   });
 
+  it('a kid born earlier this year is passed and drawn before Now; one due next month is not', () => {
+    const t = buildKidTimeline([k('Born', 2026, 3), k('Due', 2026, 12)], NOW);
+    expect(t.dots.map(d => d.label)).toEqual(['Born', 'Now', 'Due', 'All 18']);
+    expect(t.dots.map(d => d.passed)).toEqual([true, false, false, false]);
+    expect(t.dots.map(d => Math.round(d.position))).toEqual([0, 12, 24, 100]);
+    expect(t.passedPct).toBeCloseTo(12, 0);
+  });
+
   it('places a kid expected this year as a dated dot just after Now, not passed, and one kid ends at "18"', () => {
     const { dots } = buildKidTimeline([k('Ellie', 2026)], NOW);
     expect(dots.map(d => d.label)).toEqual(['Now', 'Ellie', '18']);

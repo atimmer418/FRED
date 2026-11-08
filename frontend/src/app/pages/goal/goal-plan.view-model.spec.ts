@@ -4,7 +4,6 @@ import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
 import { GIFT_DAY_LUMP, futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
-import { everydayMonthlyToday } from '../../utils/kid-cost.utils';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
 const Y = NOW.getFullYear();
@@ -782,46 +781,41 @@ describe('buildGoalPlanView one-screen page', () => {
   const KIDS_WHY = new RegExp('^' + escape(
     'You will not spend the funds for years: college and the nest egg come due at 18, and those years are '
     + 'what make invested money grow. Of the ',
-  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you; growth adds the other ')
+  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you and growth adds ~')
     + `(${MONEY})` + escape(
     '. Take it out early and growth stops, and the monthly from you goes up. Anything you need within three '
     + 'years is planned as cash instead.',
   ) + '$');
   const SIMPLE_WHY = new RegExp('^' + escape(
     'You will not spend this for years, and those years are what make invested money grow. Of the ',
-  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you; growth adds the other ')
+  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you and growth adds ~')
     + `(${MONEY})` + escape('. Take it out early and growth stops, and the monthly from you goes up.') + '$');
   const dollars = (s: string) => Number(s.replace(/[$,]/g, ''));
-  const todayCost = (kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>) =>
-    fmtMoney(everydayMonthlyToday(kids, NOW));
-
   it('coversLine names the funds, says which sit on top of everyday costs, and prices the kids at home by age', () => {
-    // Ellie is 2, Theo arrives in 2028, the third kid is undated: one kid at home, two not yet.
-    const sampleKids = [{ birthYear: 2024, birthMonth: null }, { birthYear: 2028, birthMonth: 6 }, { birthYear: null, birthMonth: null }];
-    expect(everydayMonthlyToday(sampleKids, NOW)).toBe(1140);
+    // Ellie is 2, Theo arrives in 2028, the third kid is undated: one kid at home (only-child factor), two funds.
     expect(buildGoalPlanView(sample(), ctx()).coversLine).toBe(
-      'Only the funds: the baby fund, college and the nest egg. College and the nest egg are on top of everyday '
-      + 'costs; the baby fund is the first year of them, saved ahead. Everyday costs for Ellie (2) run ~$1,140 a month '
+      'Only the funds: the baby funds, college and the nest egg. College and the nest egg are on top of everyday '
+      + 'costs; the baby funds are the first year of them, saved ahead. Everyday costs for Ellie (2) run ~$1,910 a month '
       + "by FRED's estimate; a kid who has not arrived yet costs nothing until they do.",
     );
 
-    const twoKids = [{ birthYear: 2020, birthMonth: 3 }, { birthYear: 2023, birthMonth: 8 }];
+    // Two at home, ages 6 (6-8 band) and 3 (3-5 band), two-kid factor 1.00: (12,350 + 12,730) x inflation / 12.
     const two = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
     expect(two.coversLine).toBe(
       'Only the funds: college and the nest egg. College and the nest egg are on top of everyday costs. '
-      + `Everyday costs for A (6) and B (3) run ~${todayCost(twoKids)} a month by FRED's estimate.`,
+      + "Everyday costs for A (6) and B (3) run ~$2,970 a month by FRED's estimate.",
     );
 
     const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
     expect(collegeOnly.coversLine).toBe(
       'Only the funds: college. College is on top of everyday costs. '
-      + `Everyday costs for A (6) run ~${todayCost([twoKids[0]])} a month by FRED's estimate.`,
+      + "Everyday costs for A (6) run ~$1,860 a month by FRED's estimate.",
     );
 
     const newborn = buildGoalPlanView(family([kid('Mae', 2026, 10)], { plan529Target: 0 }), ctx());
     expect(newborn.coversLine).toBe(
       'Only the funds: the nest egg. The nest egg is on top of everyday costs. '
-      + `Everyday costs for Mae (under 1) run ~${todayCost([{ birthYear: 2026, birthMonth: 10 }])} a month by FRED's estimate.`,
+      + "Everyday costs for Mae (under 1) run ~$1,910 a month by FRED's estimate.",
     );
 
     const fundOnly = buildGoalPlanView(
@@ -865,8 +859,21 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(invested.length).toBe(7);
     expect(reaches).toBe(invested.reduce((sum, u) => sum + u.target, 0));
     expect(reaches).toBe(3 * (47_800 + 100_000) + 16_500);
-    const balances = invested.reduce((sum, u) => sum + u.balance, 0);
-    expect(Math.abs(fromYou + fromGrowth + balances - reaches)).toBeLessThanOrEqual(1_000);
+    // The two shares add up to what the plan reaches (what is already saved counts as "from you").
+    expect(Math.abs(fromYou + fromGrowth - reaches)).toBeLessThanOrEqual(1_000);
+  });
+
+  it('whyInvestLine counts a saved balance as from you, so the shares still add up', () => {
+    const one = kid('A', 2020, 3);
+    one.accounts.brokerage = account(25_000);
+    const saved = buildGoalPlanView(family([one]), ctx());
+    expect(saved.whyInvestLine).not.toBeNull();
+    const m = saved.whyInvestLine!.match(KIDS_WHY);
+    expect(m).withContext(saved.whyInvestLine!).not.toBeNull();
+    const [reaches, fromYou, fromGrowth] = [m![1], m![2], m![3]].map(dollars);
+    expect(reaches).toBe(47_800 + 100_000);
+    expect(fromYou).toBeGreaterThanOrEqual(25_000);
+    expect(Math.abs(fromYou + fromGrowth - reaches)).toBeLessThanOrEqual(1_000);
   });
 
   it('a kids plan whose only unit is a cash baby fund has no whyInvestLine but still a coversLine', () => {
@@ -902,13 +909,17 @@ describe('buildGoalPlanView one-screen page', () => {
   });
 
   it('a HOUSE plan at the market rate reads the simple-plan first sentence and has no coversLine', () => {
-    const view = buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx());
+    const view = buildGoalPlanView(
+      base({ type: 'HOUSE', currentBalance: 12_000, config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }),
+      ctx(),
+    );
     expect(view.coversLine).toBeNull();
     const m = view.whyInvestLine!.match(SIMPLE_WHY);
     expect(m).withContext(view.whyInvestLine!).not.toBeNull();
     const [reaches, fromYou, fromGrowth] = [m![1], m![2], m![3]].map(dollars);
     expect(reaches).toBe(100_000);
-    expect(fromYou).toBe(Math.round(view.simple!.fromYou / 1_000) * 1_000);
+    // The $12,000 already saved is "from you" too.
+    expect(fromYou).toBe(Math.round((view.simple!.fromYou + 12_000) / 1_000) * 1_000);
     expect(fromGrowth).toBe(Math.round(view.simple!.fromGrowth / 1_000) * 1_000);
   });
 

@@ -168,7 +168,7 @@ The four-, five- and six-kid figures are FRED's own extension of the USDA table,
 more". The USDA marginal cost of a third child is 0.28 of a two-child-average child (2.28 − 2.00 in
 family-size units); FRED applies that same marginal factor to the fourth, fifth and sixth, giving family
 factors 2.56, 2.84 and 3.12 and per-kid factors 0.64, 0.568 and 0.52. Record this in `FREDdocs/kid-cost-
-figures.md` next to the 1.27 / 1.00 / 0.76 factors and label the two new figures "FRED estimate" in
+figures.md` next to the 1.27 / 1.00 / 0.76 factors and label the three new figures "FRED estimate" in
 the sources sheet. The monthly line is the per-kid figure over 216 months, rounded to the nearest
 $10; the family line is per-kid × count over 216 months.
 
@@ -439,13 +439,13 @@ page becomes the plan view with preview mode, the header menu, per-kid pager, in
 inline balances), `goal-plan.view-model.ts` (audience phrase, timeline model, gift-days payoff,
 "saves you" totals), `goal-form.model.ts` (draft shape and validation, now driven by the quiz),
 `utils/goal-plan.utils.ts` (lump schedule = January $1,000; ritual code removed),
-`utils/kid-cost.utils.ts` + `constants/kid-costs.ts` (4 and 5 kid factors), my-profile row
+`utils/kid-cost.utils.ts` + `constants/kid-costs.ts` (4, 5 and 6 kid factors), my-profile row
 subtitle and Freedom row navigation, routes.
 Frontend, deleted: `components/freedom-detail-sheet/`, the quiz cards inside `goal.page.html`, the
 ritual math and its specs.
 Backend: `KidsConfig.giftDays` (record + codec + tests), kids cap 6 (validator + test), nothing
 else. No migration.
-Docs: `FREDdocs/kid-cost-figures.md` (4/5 factors), `FREDdocs/analytics-events.md` only if a
+Docs: `FREDdocs/kid-cost-figures.md` (4/5/6 factors), `FREDdocs/analytics-events.md` only if a
 comment references the sheet, the backlog (the redesign story; a new story for the portfolio
 split), and the v3 design's amendment section gets a pointer to this document.
 

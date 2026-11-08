@@ -47,9 +47,9 @@ describe('KidTimelineComponent', () => {
     expect(dots[1].classList).not.toContain('unsure');
   });
 
-  it('reads the year, not This year, for a kid born earlier this year with a known month (Ruling R4, as the card does)', () => {
+  it('reads the year, not This year, for a kid born earlier this year with a known month, drawn before Now (Ruling R4)', () => {
     const fixture = create([{ label: 'Bea', birthYear: 2026, birthMonth: 3 }]);
-    expect(labels(fixture)).toEqual(['Now 2026', 'Bea 2026', '18 2044']);
+    expect(labels(fixture)).toEqual(['Bea 2026', 'Now 2026', '18 2044']);
   });
 
   it('renders nothing without a timeline', () => {

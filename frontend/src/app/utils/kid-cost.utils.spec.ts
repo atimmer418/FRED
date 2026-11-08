@@ -28,13 +28,13 @@ describe('kidAgeToday and everydayMonthlyToday', () => {
     expect(kidAgeToday(null, null, NOW)).toBeNull();
   });
 
-  it('sums the USDA band for each kid at home, family-size adjusted, to the nearest $10; unborn and 18+ kids add nothing', () => {
-    // Two-kid family (factor 1.00): a one-year-old is the 0-2 band, 12,680 x inflation / 12 = ~1,502.
-    expect(everydayMonthlyToday([{ birthYear: 2025, birthMonth: 3 }, { birthYear: 2030, birthMonth: null }], NOW)).toBe(1500);
-    // Three kids (factor 0.76): ages 10 (9-11 band) and 17 (15-17 band); the 18-year-old is past the study.
+  it('sums the USDA band for each kid at home, sized by the kids at home, to the nearest $10; unborn and 18+ kids add nothing', () => {
+    // One kid at home (the other arrives in 2030), so the only-child factor 1.27: 12,680 x 1.27 x inflation / 12 = ~1,908.
+    expect(everydayMonthlyToday([{ birthYear: 2025, birthMonth: 3 }, { birthYear: 2030, birthMonth: null }], NOW)).toBe(1910);
+    // Two at home (factor 1.00): ages 10 (9-11 band) and 17 (15-17 band); the 18-year-old is past the study.
     expect(everydayMonthlyToday([
       { birthYear: 2016, birthMonth: 1 }, { birthYear: 2009, birthMonth: 6 }, { birthYear: 2008, birthMonth: 1 },
-    ], NOW)).toBe(2440);
+    ], NOW)).toBe(3210);
     expect(everydayMonthlyToday([{ birthYear: null, birthMonth: null }], NOW)).toBe(0);
     expect(everydayMonthlyToday([], NOW)).toBe(0);
   });
@@ -47,7 +47,7 @@ describe('kid cost constants', () => {
 });
 
 describe('familySizeFactor', () => {
-  it('follows the USDA table for 1 to 3 and the FRED estimate for 4 and 5', () => {
+  it('follows the USDA table for 1 to 3 and the FRED estimate for 4, 5 and 6', () => {
     expect(familySizeFactor(1)).toBe(1.27);
     expect(familySizeFactor(2)).toBe(1);
     expect(familySizeFactor(3)).toBe(0.76);

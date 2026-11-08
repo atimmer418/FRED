@@ -114,18 +114,19 @@ export function kidAgeToday(birthYear: number | null, birthMonth: number | null,
 
 /**
  * What the kids at home cost this month by FRED's estimate: each kid aged 0 to 17 takes the USDA
- * band for their age, inflation and family-size adjusted (the whole family's count sets the
- * factor), summed and rounded to the nearest $10. Unborn kids and kids 18 or older add nothing;
- * the USDA study stops at 17.
+ * band for their age, inflation adjusted and family-size adjusted by the number of kids at home
+ * today (an only child at home is priced as an only child, however many are planned), summed and
+ * rounded to the nearest $10. Unborn kids and kids 18 or older add nothing; the USDA study stops at 17.
  */
 export function everydayMonthlyToday(
   kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>,
   now: Date,
 ): number {
-  const factor = familySizeFactor(kids.length) * inflationFactor();
-  const annual = kids.reduce((sum, kid) => {
-    const age = kidAgeToday(kid.birthYear, kid.birthMonth, now);
-    if (age === null) return sum;
+  const ages = kids
+    .map(kid => kidAgeToday(kid.birthYear, kid.birthMonth, now))
+    .filter((age): age is number => age !== null && age <= 17);
+  const factor = familySizeFactor(ages.length) * inflationFactor();
+  const annual = ages.reduce((sum, age) => {
     const band = USDA_2015_ANNUAL_BY_BAND.find(b => age >= b.fromAge && age <= b.toAge);
     return band ? sum + band.annual * factor : sum;
   }, 0);

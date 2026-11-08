@@ -3,6 +3,8 @@
  * "Now" and the last 18th birthday on a 0..100 bar.
  */
 
+import { kidAgeToday } from '../../utils/kid-cost.utils';
+
 export interface TimelineDot {
   kind: 'kid' | 'now' | 'end';
   label: string;
@@ -40,8 +42,9 @@ const MIN_GAP = 12;
  * MIN_GAP before the one after it. So a few kids born in the last couple of years get real room
  * on the bar, and the green fill (passedPct) runs to wherever the Now dot lands.
  *
- * Years are whole calendar years: a dated kid is passed when born before this year, so a kid
- * expected this year sits just after Now and is not passed. The month only decides the label: a
+ * Years are whole calendar years on the scale. A kid is passed when already born (kidAgeToday):
+ * born before this year, or this year in a month that has come; a passed kid at the same scale
+ * position as Now sorts before it, an expected kid after it. The month also decides the label: a
  * kid dated this year with no month reads "This year"; with a month, the year (born or arriving).
  */
 export function buildKidTimeline(
@@ -74,7 +77,7 @@ export function buildKidTimeline(
     year: kid.birthYear,
     undated: kid.birthYear === null,
     expectedThisYear: kid.birthYear === thisYear && (kid.birthMonth ?? null) === null,
-    passed: kid.birthYear !== null && kid.birthYear < thisYear,
+    passed: kidAgeToday(kid.birthYear, kid.birthMonth ?? null, now) !== null,
     position: kid.birthYear === null ? 100 : position(kid.birthYear),
   }));
   const endDot: TimelineDot = {
@@ -87,9 +90,9 @@ export function buildKidTimeline(
     position: 100,
   };
 
-  // Stable sort by scale position; at a tie Now, then dated kids, then undated kids, then the end.
+  // Stable sort by scale position; at a tie: born kids, Now, expected kids, undated kids, the end.
   const rank = (d: TimelineDot): number =>
-    d.kind === 'now' ? 0 : d.kind === 'end' ? 3 : d.undated ? 2 : 1;
+    d.kind === 'now' ? 1 : d.kind === 'end' ? 4 : d.undated ? 3 : d.passed ? 0 : 2;
   const dots = [nowDot, ...kidDots, endDot]
     .map((d, i) => ({ d, i }))
     .sort((a, b) => a.d.position - b.d.position || rank(a.d) - rank(b.d) || a.i - b.i)

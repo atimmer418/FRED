@@ -255,7 +255,8 @@ function englishList(items: string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
-interface CoveredUnits { babyFund: boolean; college: boolean; nestEgg: boolean }
+/** Which units a kids plan has; babyFunds counts the unborn kids with a fund (0 = none). */
+interface CoveredUnits { babyFunds: number; college: boolean; nestEgg: boolean }
 
 /** "college and the nest egg" / "college" / "the nest egg", the units that sit on top of everyday costs. */
 function onTopNames(units: CoveredUnits): string[] {
@@ -276,15 +277,16 @@ function coversLineFor(
   kids: ReadonlyArray<{ label: string; birthYear: number | null; birthMonth: number | null }>,
   now: Date,
 ): string | null {
-  const names = [...(units.babyFund ? ['the baby fund'] : []), ...onTopNames(units)];
+  const funds = units.babyFunds > 1 ? 'the baby funds are' : 'the baby fund is';
+  const names = [...(units.babyFunds > 0 ? [units.babyFunds > 1 ? 'the baby funds' : 'the baby fund'] : []), ...onTopNames(units)];
   if (names.length === 0) return null;
   const onTop = onTopNames(units);
   let relation: string;
   if (onTop.length > 0) {
     relation = `${sentenceCase(englishList(onTop))} ${onTop.length === 1 ? 'is' : 'are'} on top of everyday costs`
-      + (units.babyFund ? '; the baby fund is the first year of them, saved ahead.' : '.');
+      + (units.babyFunds > 0 ? `; ${funds} the first year of them, saved ahead.` : '.');
   } else {
-    relation = 'The baby fund is the first year of everyday costs, saved ahead.';
+    relation = `${sentenceCase(funds)} the first year of everyday costs, saved ahead.`;
   }
 
   const atHome = kids
@@ -306,7 +308,8 @@ const roundToThousand = (n: number) => Math.round(n / 1_000) * 1_000;
 
 /**
  * The case for leaving invested money alone: of what the invested units reach, how much comes
- * from the user's contributions and how much from growth. Null when growth adds nothing, or when
+ * from the user (what they have saved so far plus every contribution still to come) and how much
+ * from growth, so the two shares add up to the target. Null when growth adds nothing, or when
  * either share rounds to $0.
  */
 function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: number, kids: CoveredUnits | null): string | null {
@@ -322,11 +325,11 @@ function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: nu
     const onTop = onTopNames(kids);
     const due = onTop.length === 2 ? 'college and the nest egg come due at 18'
       : onTop.length === 1 ? `${onTop[0]} comes due at 18`
-      : 'the baby fund comes due when they arrive';
+      : kids.babyFunds > 1 ? 'the baby funds come due when they arrive' : 'the baby fund comes due when they arrive';
     lead = `You will not spend the funds for years: ${due}, and those years are what make invested money grow.`;
   }
-  const split = `Of the ${fmtMoney(reaches)} this plan reaches, ~${fmtMoney(fromYou)} comes from you; `
-    + `growth adds the other ${fmtMoney(fromGrowth)}. Take it out early and growth stops, and the monthly from you goes up.`;
+  const split = `Of the ${fmtMoney(reaches)} this plan reaches, ~${fmtMoney(fromYou)} comes from you and growth adds `
+    + `~${fmtMoney(fromGrowth)}. Take it out early and growth stops, and the monthly from you goes up.`;
   return kids ? `${lead} ${split} Anything you need within three years is planned as cash instead.` : `${lead} ${split}`;
 }
 
@@ -570,7 +573,7 @@ function kidsView(
   const reaches = investedTotal('target');
   const fromYou = investedTotal('fromYou');
   const investedUnits: CoveredUnits = {
-    babyFund: investedFunds.length > 0,
+    babyFunds: investedFunds.length,
     college: investedAccounts.some(u => u.account === 'plan529'),
     nestEgg: investedAccounts.some(u => u.account === 'brokerage'),
   };
@@ -578,13 +581,14 @@ function kidsView(
   return {
     coversLine: kids.length > 0
       ? coversLineFor({
-          babyFund: unfinishedFunds.length > 0,
+          babyFunds: unfinishedFunds.length,
           college: accounts.some(a => a.account === 'plan529'),
           nestEgg: accounts.some(a => a.account === 'brokerage'),
         }, kids, ctx.now)
       : null,
     whyInvestLine: invested.length > 0
-      ? whyInvestLineFor(reaches, fromYou, Math.max(0, reaches - investedTotal('balance') - fromYou), investedUnits)
+      // From you = what is already saved plus every contribution still to come; growth is the rest.
+      ? whyInvestLineFor(reaches, fromYou + investedTotal('balance'), Math.max(0, reaches - investedTotal('balance') - fromYou), investedUnits)
       : null,
     monthlyTotal,
     dueNow,
@@ -753,7 +757,7 @@ function simpleView(
     howFredHelps: howFredHelpsLine(plan.monthly, [{ kind: plan.rateKind, babyFund: false }]),
     coversLine: null,
     whyInvestLine: plan.rateKind === 'market' && plan.n > 0
-      ? whyInvestLineFor(target, plan.fromYou, plan.fromGrowth, null)
+      ? whyInvestLineFor(target, plan.fromYou + goal.currentBalance, plan.fromGrowth, null)
       : null,
     pill: pillOf(plan.rateKind),
     status,

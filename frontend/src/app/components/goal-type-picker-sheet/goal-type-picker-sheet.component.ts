@@ -12,7 +12,7 @@ export interface GoalTypeTile {
 }
 
 export const GOAL_TYPE_TILES: ReadonlyArray<GoalTypeTile> = [
-  { type: 'KIDS', icon: 'child_care', title: 'Kids', line: 'A monthly amount per kid, plus a New Year gift if you want one.' },
+  { type: 'KIDS', icon: 'child_care', title: 'Kids', line: 'A monthly amount per kid for college, a nest egg and the first year.' },
   { type: 'HOUSE', icon: 'home', title: 'House', line: 'The down payment, planned to the month.' },
   { type: 'EMERGENCY_FUND', icon: 'health_and_safety', title: 'Emergency fund', line: 'Three or six months of expenses, kept in cash.' },
   { type: 'CAR', icon: 'directions_car', title: 'Car', line: 'Down payment or the full price.' },

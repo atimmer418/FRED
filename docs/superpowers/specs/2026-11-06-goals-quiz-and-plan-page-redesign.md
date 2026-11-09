@@ -337,6 +337,10 @@ the page.
 
 ### Gift days (KIDS only; shown when any kid has a college fund or nest egg)
 
+> **Removed 2026-11-08 (Andy).** The gift-days row is gone from the plan page in both states and
+> kids plans are monthly only: no New Year lump posts, live or at the anchor. `giftDays` stays on
+> `KidsConfig` so stored rows still load; the view model ignores it. The section below is history.
+
 One insight row with a `cake` icon and a switch, off by default:
 "**Lighten the monthly.** Put in $1,000 per kid every New Year, and this drops to ~$2,580."
 When on, the hero shows the lower monthly, its per-paycheck figure follows ("~$1,191 a paycheck"
@@ -356,6 +360,14 @@ Persistence: `giftDays: boolean` on `KidsConfig` (both the Java record and the T
 false, missing in old rows reads as false, and flipping it is a plan-input change (re-anchors).
 
 ### Return chips
+
+> **Changed 2026-11-08 (Andy).** One return assumption runs the whole app and it is set only on the
+> Freedom Plan page. The plan page shows the Freedom page's Assumptions card read-only: "Avg
+> annual return / what this plan grows by" with the figure ("10%") where the chips were, and a
+> note under it: "Set on your Freedom Plan page, where it runs every FRED projection." No chips, no
+> Reset to standard, and Start / Update never write the shared rate. The page reads the shared
+> signal live, so a change saved on the Freedom page shows here on the next open with no reload.
+> Cash-planned goals keep the cash note.
 
 The existing row: "Return" label and the 8% / 10% / 12% segmented chips (cash-planned goals show
 the cash note instead, as today). Written on Start / Update / and, for a saved goal, immediately,

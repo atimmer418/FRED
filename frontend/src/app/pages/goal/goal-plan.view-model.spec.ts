@@ -1,8 +1,7 @@
 import { buildGoalPlanView, fmtCompact, fmtMoney, GoalPlanContext, GoalPlanInput } from './goal-plan.view-model';
 import { buildKidTimeline } from './kid-timeline.model';
 import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
-import { GIFT_DAY_LUMP, futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
-import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
+import { futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
@@ -171,16 +170,15 @@ describe('buildGoalPlanView', () => {
     expect(at12.status).toEqual(at8.status);
   });
 
-  it('reads on_plan when a kid account matches the anchor-time plan, January gift lump included', () => {
+  it('reads on_plan when a kid account matches the anchor-time plan; a stored giftDays flag adds no lump to the expected balance', () => {
     const anchoredAt = '2025-11-01T00:00:00';
-    const loggedAt = '2026-02-01T00:00:00'; // 3 months after the anchor
+    const loggedAt = '2026-02-01T00:00:00'; // 3 months after the anchor, one January inside the window
     const anchorPlan = proposeKidAccountPlan({
       target: 100_000, balance: 0, birthYear: Y - 3, birthMonth: 3,
-      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt), giftDays: true,
+      marketRate: 0.10, rateKindOverride: 'market', now: new Date(anchoredAt), giftDays: false,
     });
-    const lumpsSoFar = anchorPlan.lumps.filter(l => l.monthIndex <= 3);
-    expect(lumpsSoFar).withContext('one January gift lump inside the window').toEqual([{ monthIndex: 2, amount: 1000 }]);
-    const expected = futureValue(0, anchorPlan.monthly, 3, 0.10, lumpsSoFar);
+    expect(anchorPlan.lumps).toEqual([]);
+    const expected = futureValue(0, anchorPlan.monthly, 3, 0.10, []);
 
     const config: KidsConfig = {
       plan529Target: 100_000,
@@ -333,14 +331,16 @@ describe('buildGoalPlanView first-year fund', () => {
     expect(row.plan.lumps).toEqual([]);
   });
 
-  it('posts gift days to the brokerage when it has a target, else to the 529', () => {
+  it('kids plans are monthly only: a stored giftDays flag posts no New Year lump to any account', () => {
     const kid = (): KidInput => ({ label: 'A', birthYear: null, birthMonth: null, accounts: { plan529: account(), brokerage: account() } });
-    const both = buildGoalPlanView(base({ type: 'KIDS', config: { plan529Target: 47_800, brokerageTarget: 100_000, giftDays: true, kids: [kid()] } }), ctx());
-    expect(both.kids!.find(k => k.account === 'brokerage')!.perKid[0].plan.newYearLump).toBe(1000);
-    expect(both.kids!.find(k => k.account === 'plan529')!.perKid[0].plan.newYearLump).toBe(0);
-    // $1,000 every January for 212 months grows past $47,800 on its own, so this one uses $123,960.
-    const only529 = buildGoalPlanView(base({ type: 'KIDS', config: { plan529Target: 123_960, brokerageTarget: 0, giftDays: true, kids: [kid()] } }), ctx());
-    expect(only529.kids![0].perKid[0].plan.newYearLump).toBe(1000);
+    const flagged = buildGoalPlanView(base({ type: 'KIDS', config: { plan529Target: 47_800, brokerageTarget: 100_000, giftDays: true, kids: [kid()] } }), ctx());
+    const plain = buildGoalPlanView(base({ type: 'KIDS', config: { plan529Target: 47_800, brokerageTarget: 100_000, kids: [kid()] } }), ctx());
+    for (const a of flagged.kids!) {
+      expect(a.perKid[0].plan.newYearLump).withContext(a.account).toBe(0);
+      expect(a.perKid[0].plan.lumps).withContext(a.account).toEqual([]);
+    }
+    expect(flagged.monthlyTotal).toBe(plain.monthlyTotal);
+    expect((flagged as any).giftDays).toBeUndefined();
   });
 
   it('grades a cash fund beside a market 529 at the cash rate', () => {
@@ -608,78 +608,14 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(audience({ name: '  ' })).toBe('My goal');
   });
 
-  it('giftDays payoff: monthlyIfOn is lower by about $1,000 × kids ÷ 12 and perPaycheckIfOn follows', () => {
-    const off = buildGoalPlanView(sample(), ctx());
-    expect(off.giftDays).toBeDefined();
-    const g = off.giftDays!;
-    expect(g.on).toBeFalse();
-    expect(g.available).toBeTrue();
-    expect(g.lump).toBe(GIFT_DAY_LUMP);
-    const drop = off.monthlyTotal - g.monthlyIfOn;
-    const even = (GIFT_DAY_LUMP * 3) / 12;
-    expect(drop).toBeGreaterThan(even * 0.9);
-    expect(drop).toBeLessThan(even * 1.25);
-    expect(g.perPaycheckIfOn).toBe(InvestmentFrequencyUtils.toPerPaycheckEquivalent(g.monthlyIfOn, 'biweekly'));
-    expect(off.howFredHelps).toContain(fmtMoney(off.monthlyTotal));
-
-    // Stored on: the hero shows the lower monthly, and the payoff equals it.
-    const on = buildGoalPlanView(sample({ giftDays: true }), ctx());
-    expect(on.monthlyTotal).toBe(g.monthlyIfOn);
-    expect(on.giftDays!.on).toBeTrue();
-    expect(on.giftDays!.monthlyIfOn).toBe(on.monthlyTotal);
-    expect(on.perPaycheck).toBe(g.perPaycheckIfOn);
-    expect(on.howFredHelps).toContain(fmtMoney(g.monthlyIfOn));
-
-    // No schedule: no per paycheck figure.
-    expect(buildGoalPlanView(sample(), ctx({ frequency: '' })).giftDays!.perPaycheckIfOn).toBeNull();
-  });
-
-  it('giftDays is absent when no kid unit has giftDaysAvailable', () => {
-    // $1,000 every January from now to 18 grows past a $20,000 nest egg on its own.
-    const small = family([kid('A', null, null), kid('B', Y - 1, 4)], { plan529Target: 0, brokerageTarget: 20_000 });
-    expect(buildGoalPlanView(small, ctx()).giftDays).toBeUndefined();
-    // A kid within 24 months of 18 is never offered.
-    const teen = family([kid('Teen', Y - 17, 3)]);
-    expect(buildGoalPlanView(teen, ctx()).giftDays).toBeUndefined();
-  });
-
-  it('gift days go to the nest egg only: a nest egg the lumps would outgrow hides the offer even beside a large 529', () => {
-    const goal = family([kid('A', null, null)], { plan529Target: 123_960, brokerageTarget: 20_000, giftDays: true });
-    const view = buildGoalPlanView(goal, ctx());
-    expect(view.giftDays).toBeUndefined();
-    const lumps = view.kids!.map(a => a.perKid[0].plan.newYearLump);
-    expect(lumps).toEqual([0, 0]);
-    // The 529 alone would have taken it.
-    expect(view.kids!.find(a => a.account === 'plan529')!.perKid[0].plan.giftDaysAvailable).toBeTrue();
-  });
-
-  it('the offer needs EVERY receiving unit to take the lump: one nest egg the lumps outgrow hides it for the family (R7)', () => {
-    // Kid A has 18 Januaries ahead: $1,000 each grows past a $20,000 nest egg on its own.
-    // Kid B is four years from 18: three or four lumps, well under the target, so B alone could take it.
-    const goal = family([kid('A', null, null), kid('B', Y - 14, 3)], { plan529Target: 47_800, brokerageTarget: 20_000 });
-    const view = buildGoalPlanView(goal, ctx());
-    const nest = view.kids!.find(a => a.account === 'brokerage')!;
-    expect(nest.perKid.map(k => k.plan.giftDaysAvailable)).toEqual([false, true]);
-    expect(view.giftDays).toBeUndefined();
-
-    // With gift days stored on, no unit posts a lump either: the family either all takes it or none does.
-    const on = buildGoalPlanView(family([kid('A', null, null), kid('B', Y - 14, 3)], { plan529Target: 47_800, brokerageTarget: 20_000, giftDays: true }), ctx());
-    expect(on.kids!.find(a => a.account === 'brokerage')!.perKid.map(k => k.plan.newYearLump)).toEqual([0, 0]);
-    expect(on.giftDays).toBeUndefined();
-  });
-
   it('pins the sample family hero figures: $47,800 college and $100,000 nest egg per kid, baby funds for the two unborn, 10%, biweekly', () => {
     const off = buildGoalPlanView(sample(), ctx());
     expect(off.heroLabel).toBe('Save this month');
     expect(off.audience).toBe('for all 3 kids');
-    // The spec copy says $2,830/mo and ~$1,306 a paycheck, dropping to ~$2,580 and ~$1,191 with gift
-    // days on; those figures were drawn with a $250,000 nest egg. At the spec's $100,000 default the
-    // real numbers are pinned here (reported to the controller in the Task 6 report).
+    // The spec copy says $2,830/mo and ~$1,306 a paycheck; those figures were drawn with a $250,000
+    // nest egg. At the spec's $100,000 default the real numbers are pinned here.
     expect(Math.round(off.monthlyTotal)).toBe(2_249);
     expect(Math.round(off.perPaycheck!)).toBe(1_036);
-    expect(off.giftDays).toBeDefined();
-    expect(Math.round(off.giftDays!.monthlyIfOn)).toBe(1_988);
-    expect(Math.round(off.giftDays!.perPaycheckIfOn!)).toBe(916);
     expect(off.subtitle).toBe('$2,249/mo for all 3 kids');
   });
 

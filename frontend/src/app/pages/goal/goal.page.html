@@ -147,31 +147,17 @@
           </div>
         }
 
-        <!-- Gift days (KIDS, when every receiving unit can take the January lump) -->
-        @if (giftRow(); as g) {
-          <app-quiz-switch-row tone="light" icon="cake" [title]="g.title" [line]="g.line" [on]="v.giftDays!.on"
-                               (onChange)="toggleGiftDays($event)"></app-quiz-switch-row>
-        }
-
-        <!-- Assumptions: the same card as the Freedom Plan page -->
+        <!-- Assumptions: the Freedom Plan page's card, read-only here. One return runs the whole app. -->
         @if (v.rateKind === 'market') {
-          <p class="fd-zone gp-zone-gap">
-            Assumptions
-            @if (selectedRate() !== defaultRate) {
-              <button type="button" class="fd-reset" (click)="selectRate(defaultRate)">Reset to standard</button>
-            }
-          </p>
-          <div class="fd-assume">
+          <p class="fd-zone gp-zone-gap">Assumptions</p>
+          <div class="fd-assume gp-assume-ro">
             <div class="fd-assume-name">
               Avg annual return
               <span class="fd-assume-sub">what this plan grows by</span>
             </div>
-            <div class="fd-scenario-chips fd-assume-chips">
-              @for (s of returnScenarios; track s.rate) {
-                <button type="button" [class.on]="selectedRate() === s.rate" [attr.aria-pressed]="selectedRate() === s.rate" (click)="selectRate(s.rate)">{{ s.label }}</button>
-              }
-            </div>
+            <span class="fd-assume-value">{{ pct(annualReturn()) }}%</span>
           </div>
+          <p class="gp-assume-note">Set on your Freedom Plan page, where it runs every FRED projection.</p>
         } @else {
           <p class="fd-zone gp-zone-gap">Assumptions</p>
           <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>

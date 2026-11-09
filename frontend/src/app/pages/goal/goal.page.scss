@@ -363,6 +363,33 @@
   font-variant-numeric: tabular-nums;
 }
 
+// ── Assumptions, read-only: the Freedom Plan card with the figure where the chips were ─────
+.gp-assume-ro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+
+  .fd-assume-name { margin-bottom: 0; }
+}
+
+.fd-assume-value {
+  flex: none;
+  font-size: 17px;
+  font-weight: 800;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-assume-note {
+  margin: 6px 2px 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #9aa6ba;
+  line-height: 1.4;
+}
+
 // ── Cash note: the Assumptions card look for a cash plan ─────────────────────
 .gp-cash-note {
   margin: 0;

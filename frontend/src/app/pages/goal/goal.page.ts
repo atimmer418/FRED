@@ -21,7 +21,7 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../services/analytics/analytics-bands';
 import { GoalAction, Tier } from '../../services/analytics/analytics-events';
-import { DEFAULT_ANNUAL_RETURN, RETURN_SCENARIOS, RateAssumptionsService } from '../../services/rate-assumptions.service';
+import { RateAssumptionsService } from '../../services/rate-assumptions.service';
 import {
   AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, VacationConfig,
 } from '../../models/goal.model';
@@ -33,7 +33,6 @@ import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-she
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { GoalUnitDetailSheetComponent, UnitDetail, UnitTitle } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
-import { QuizSwitchRowComponent } from '../../components/quiz-controls/quiz-switch-row.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GoalForm, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso } from './goal-form.model';
 import {
@@ -94,7 +93,7 @@ const UNIT_ICON: Record<KidBalanceKey, KidUnitRow['icon']> = { firstYear: 'child
 @Component({
   selector: 'app-goal',
   standalone: true,
-  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent, QuizSwitchRowComponent],
+  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './goal.page.html',
   styleUrls: ['./goal.page.scss'],
@@ -114,9 +113,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
   private readonly rates = inject(RateAssumptionsService);
   private readonly now = inject(GOAL_PAGE_NOW)();
 
-  readonly returnScenarios = RETURN_SCENARIOS;
-  /** The standard return; "Reset to standard" shows whenever the selected chip is off it. */
-  readonly defaultRate = DEFAULT_ANNUAL_RETURN;
   readonly fmtMoney = fmtMoney;
   readonly fmtCompact = fmtCompact;
 
@@ -129,8 +125,11 @@ export class GoalPage implements OnInit, ViewWillEnter {
   /** True once the route resolved to a goal or a draft. */
   readonly ready = signal(false);
   readonly saving = signal(false);
-  /** The chip the user is looking at. Written to the shared rate on Start / Update, or at once on a saved goal. */
-  readonly selectedRate = signal(this.initialRate());
+  /**
+   * The one return assumption, shared app-wide and set only on the Freedom Plan page. Read live,
+   * so a plan opened after a change there already shows it.
+   */
+  readonly annualReturn = this.sharedRate();
   /** Pay frequency of the user's FRED schedule, '' when none (hides the per-paycheck figures). */
   readonly frequency = signal('');
   /** The kid card whose name is an input right now. */
@@ -193,7 +192,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
     // line does not flip to cash with no action from the user. An unplanned import has no kind yet.
     const keepKind = !!goal && !this.isImported() && (mode === 'saved' || !this.planChanged());
     return buildGoalPlanView(this.planInput(), {
-      marketRate: this.selectedRate(),
+      marketRate: this.annualReturn(),
       frequency: this.frequency(),
       now: this.now,
       rateKindOverride: keepKind && goal ? goal.planRateKind : null,
@@ -253,17 +252,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
   readonly simpleBalance = computed(() => {
     const v = this.view();
     return v.vacation ? v.vacation.savedThisYear : this.planInput().currentBalance;
-  });
-
-  /** The gift-days row copy, by the stored switch. The light row wraps the line as text. */
-  readonly giftRow = computed<{ title: string; line: string } | null>(() => {
-    const g = this.view().giftDays;
-    if (!g) return null;
-    if (g.on) return { title: 'Next up:', line: `New Year, ${fmtMoney(g.lump)} for each kid.` };
-    return {
-      title: 'Lighten the monthly.',
-      line: `Put in ${fmtMoney(g.lump)} per kid every New Year, and this drops to ~${fmtMoney(g.monthlyIfOn)}.`,
-    };
   });
 
   readonly kidCards = computed<KidCard[]>(() => {
@@ -357,15 +345,14 @@ export class GoalPage implements OnInit, ViewWillEnter {
   }
 
   /**
-   * Back from an edit preview lands here: pick up the goal the Update wrote and the shared rate it
-   * committed, so the hero and the chip row match what was just saved.
+   * Back from an edit preview lands here: pick up the goal the Update wrote, so the hero matches
+   * what was just saved.
    */
   ionViewWillEnter(): void {
     const goal = this.existing();
     if (this.mode() !== 'saved' || !goal) return;
     const latest = this.goalsService.goals().find(g => g.id === goal.id);
     if (latest && latest !== goal) this.existing.set(latest);
-    this.selectedRate.set(this.rates.annualReturn());
   }
 
   /**
@@ -427,14 +414,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
     await this.queueWrite(g => (g.name === name ? null : { name }));
   }
 
-  // ── Rate chips ──────────────────────────────────────────────────────────────
-
-  /** A saved goal writes the shared rate at once; a preview commits it on Start / Update. */
-  selectRate(rate: number): void {
-    this.selectedRate.set(rate);
-    if (this.mode() === 'saved') this.commitRate();
-  }
-
   // ── CTA (preview modes) ─────────────────────────────────────────────────────
 
   /** POSTs the draft, then replaces this preview with the saved page. */
@@ -448,7 +427,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
       await this.pendingWrite;
       const body = this.draftBody(draft.form, null);
       const created = await firstValueFrom(this.goalsService.create(body));
-      this.commitRate();
       this.trackGoalChange('created', draft.form.type, draft.form.icon);
       this.toastService.showToast('Plan started', 'success');
       await this.router.navigate(['/goals', created.id], { replaceUrl: true });
@@ -476,7 +454,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
       const wasImported = this.isImported();
       const body = this.draftBody(draft.form, goal);
       await firstValueFrom(this.goalsService.update(goal.id, body));
-      this.commitRate();
       this.trackGoalChange('updated', draft.form.type, draft.form.icon);
       this.toastService.showToast(wasImported ? 'Plan started' : 'Plan updated', 'success');
       await this.navCtrl.navigateBack(['/goals', goal.id]);
@@ -524,22 +501,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
       const kid = c.kids[kidIndex];
       if (!kid || kid.label === trimmed) return null;
       return { config: { ...c, kids: c.kids.map((k, i) => (i === kidIndex ? { ...k, label: trimmed } : k)) } };
-    });
-  }
-
-  /**
-   * Gift days are a plan input: a saved goal PUTs the flag with the re-solved monthly and account
-   * anchors, and the server re-anchors from today. A preview patches the draft.
-   */
-  async toggleGiftDays(on: boolean): Promise<void> {
-    if (this.mode() !== 'saved') {
-      this.patchDraftKids(kids => ({ ...kids, giftDays: on }));
-      return;
-    }
-    return this.queueWrite(goal => {
-      const c = goal.config as KidsConfig;
-      if (!!c.giftDays === on) return null;
-      return this.planInputPatch(goal, { ...c, giftDays: on });
     });
   }
 
@@ -744,7 +705,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
           ? 'No date yet: this runway ends within 3 years.'
           : 'No date yet, so this one is invested at your return assumption. Markets can be down when the day comes, so treat it as a head start.');
       }
-      if (!row.finished) notes.push('Monthly only: the fund ends before a New Year gift would help.');
       sourcesLine = `FRED estimate: first-year average (USDA, adjusted to ${kidCostFigures(kidsCount).asOfLabel} dollars) plus birth costs (Peterson-KFF, ${CHILDBIRTH_DOLLAR_YEAR_LABEL}), rounded up.`;
     } else {
       const account = v.kids?.find(a => a.account === unit)?.perKid[kidIndex];
@@ -761,12 +721,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
       }
       if (account.plan.assumedBirthYear) {
         notes.push('No date yet, so this kid is planned as if born this year. You save a little more than you may need.');
-      }
-      if (account.plan.newYearLump === 0) {
-        const c = this.planInput().config as KidsConfig;
-        const giftAccount: KidAccountKey = c.brokerageTarget > 0 ? 'brokerage' : 'plan529';
-        if (unit !== giftAccount) notes.push('Monthly only: New Year gifts go to the nest egg.');
-        else if (!account.plan.giftDaysAvailable) notes.push('Monthly only: New Year gifts alone would pass this target.');
       }
       sourcesLine = unit === 'plan529'
         ? `Four years at ${COLLEGE_PRICE_YEAR_LABEL} College Board prices, which tend to rise. Raise the amount any time from Edit plan.`
@@ -861,7 +815,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
       clientId: null,
       anchorBalance: 0,
       anchorMonthly: 0,
-      planRate: this.selectedRate(),
+      planRate: this.annualReturn(),
       planRateKind: 'market',
       planAnchoredAt: toLocalIso(this.now),
       balanceUpdatedAt: null,
@@ -936,26 +890,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
       anchorMonthly: view.monthlyTotal,
       planRate: view.rate,
       planRateKind: view.rateKind,
-    };
-  }
-
-  /**
-   * A saved goal's plan-input change (gift days): the body carries the re-solved monthly and per
-   * account anchors at today's balances, which the server anchors from today.
-   */
-  private planInputPatch(goal: Goal, config: GoalConfig): Partial<GoalWrite> {
-    const next = buildGoalPlanView({ ...goal, config }, {
-      marketRate: this.selectedRate(),
-      frequency: this.frequency(),
-      now: this.now,
-      rateKindOverride: null,
-      reanchorPending: true,
-    });
-    return {
-      config: this.withAccountAnchors(config, next),
-      anchorMonthly: next.monthlyTotal,
-      planRate: next.rate,
-      planRateKind: next.rateKind,
     };
   }
 
@@ -1038,13 +972,14 @@ export class GoalPage implements OnInit, ViewWillEnter {
     return digits ? parseInt(digits, 10) : null;
   }
 
-  private commitRate(): void {
-    this.rates.setRates(this.selectedRate(), this.rates.withdrawalRate());
+  /** Whole percent, decimals trimmed (0.10 to "10", 0.085 to "8.5"). */
+  pct(fraction: number): string {
+    return (fraction * 100).toFixed(2).replace(/\.?0+$/, '');
   }
 
-  private initialRate(): number {
+  private sharedRate(): typeof this.rates.annualReturn {
     this.rates.ensureUser();
-    return this.rates.annualReturn();
+    return this.rates.annualReturn;
   }
 
   private loadFrequency(): void {

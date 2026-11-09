@@ -21,7 +21,6 @@ import {
 import {
   AccountPlan,
   FirstYearPlan,
-  GIFT_DAY_LUMP,
   LumpOccurrence,
   PlanStatus,
   SimplePlan,
@@ -69,17 +68,6 @@ export type UnitPill = 'Invested' | 'Cash';
 
 export type HeroLabel = 'Save this month' | 'Due now';
 
-export interface GiftDaysPayoff {
-  /** The stored giftDays flag. */
-  on: boolean;
-  available: boolean;
-  lump: number;
-  /** The family monthly with gift days on for every unit that can take them. */
-  monthlyIfOn: number;
-  /** Null when the user has no schedule. */
-  perPaycheckIfOn: number | null;
-}
-
 export interface GoalPlanContext {
   marketRate: number;
   frequency: string;
@@ -103,7 +91,7 @@ export interface KidPlanRow {
 export interface KidAccountView {
   account: KidAccountKey;
   label: '529 plans' | 'Brokerage';
-  totals: { monthly: number; newYear: number };
+  totals: { monthly: number };
   perKid: KidPlanRow[];
 }
 
@@ -145,8 +133,6 @@ export interface GoalPlanView {
   kids?: KidAccountView[];
   /** KIDS only: the family timeline under the hero. */
   timeline?: ReturnType<typeof buildKidTimeline>;
-  /** KIDS only, and only when a unit that would take the January lump can take it. */
-  giftDays?: GiftDaysPayoff;
   /** Set when at least one kid has a first-year fund account. */
   firstYear?: { totalMonthly: number; endsLabel: string | null; rows: FirstYearRow[] };
   /** Every type but KIDS: the one pill at the end of the band (KIDS carry one per row). */
@@ -398,38 +384,18 @@ function kidsView(
   // like planStatus does, and the chip can never move them.
   const anchorLumps: LumpOccurrence[] = [];
 
-  // Gift days post to the brokerage (the nest egg) when it has a target, else to the 529. Only
-  // those units decide the offer, and EVERY one of them has to take the lump (Ruling R7): one
-  // nest egg the lumps alone would outgrow hides the offer for the family, even when the 529
-  // beside it, or another kid's nest egg, could have taken it.
-  const giftAccount: KidAccountKey = cfg.brokerageTarget > 0 ? 'brokerage' : 'plan529';
-  const giftDays = !!cfg.giftDays;
-  const giftTarget = giftAccount === 'brokerage' ? cfg.brokerageTarget : cfg.plan529Target;
-  const giftDaysAvailable = giftTarget > 0 && kids.length > 0 && kids.every(kid => proposeKidAccountPlan({
-    target: giftTarget,
-    balance: kid.accounts[giftAccount].balance,
-    birthYear: kid.birthYear,
-    birthMonth: kid.birthMonth,
-    marketRate: ctx.marketRate,
-    rateKindOverride: accountKind(kid.birthYear, kid.birthMonth),
-    now: ctx.now,
-    giftDays: false,
-  }).giftDaysAvailable);
-  // The lumps post only when the whole family can take them, whatever the stored flag says.
-  const giftsPost = giftDays && giftDaysAvailable;
-  // How much lower the live family monthly would be with gift days on (0 once they are on).
-  let giftSaving = 0;
+  // Kids plans are monthly only. The New Year gift lump (gift days) left the plan page on
+  // 2026-11-08; a stored giftDays flag is ignored, so an old goal re-solves as monthly only.
 
   // An account with no target has nothing to plan (a 529-only family is valid).
   const accounts: KidAccountView[] = accountDefs
     .filter(def => def.target > 0)
     .map(def => {
-      const takesGifts = def.account === giftAccount;
       const perKid = kids.map(kid => {
         const account = kid.accounts[def.account];
         const balance = account.balance;
         const kind = accountKind(kid.birthYear, kid.birthMonth);
-        const live = (gifts: boolean) => proposeKidAccountPlan({
+        const plan = proposeKidAccountPlan({
           target: def.target,
           balance,
           birthYear: kid.birthYear,
@@ -437,10 +403,8 @@ function kidsView(
           marketRate: ctx.marketRate,
           rateKindOverride: kind,
           now: ctx.now,
-          giftDays: gifts,
+          giftDays: false,
         });
-        const plan = live(giftsPost && takesGifts);
-        if (takesGifts && giftDaysAvailable && !giftDays) giftSaving += plan.monthly - live(true).monthly;
         const anchorPlan = proposeKidAccountPlan({
           target: def.target,
           balance: account.anchorBalance,
@@ -449,19 +413,13 @@ function kidsView(
           marketRate: goal.planRate,
           rateKindOverride: kind,
           now: anchorDate,
-          giftDays: giftsPost && takesGifts,
+          giftDays: false,
         });
         anchorLumps.push(...anchorPlan.lumps);
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);
         return { label: kid.label, plan, balance, relative, pill: pillOf(plan.rateKind) };
       });
-      const totals = perKid.reduce(
-        (t, k) => ({
-          monthly: t.monthly + k.plan.monthly,
-          newYear: t.newYear + k.plan.newYearLump,
-        }),
-        { monthly: 0, newYear: 0 },
-      );
+      const totals = perKid.reduce((t, k) => ({ monthly: t.monthly + k.plan.monthly }), { monthly: 0 });
       return { account: def.account, label: def.label, totals, perKid };
     });
 
@@ -549,8 +507,6 @@ function kidsView(
     ...plans.map(p => ({ kind: p.rateKind, babyFund: false })),
     ...unfinishedFunds.map(f => ({ kind: f.row.plan.rateKind, babyFund: true })),
   ];
-  const monthlyIfOn = monthlyTotal - giftSaving;
-
   // Why invest it: only the invested units with months left. From you is each unit's monthly over
   // its horizon plus every lump inside it; growth is what the target needs beyond that and the balance.
   const investedAccounts = accounts.reduce<Array<{ account: KidAccountKey; target: number; balance: number; fromYou: number }>>(
@@ -605,17 +561,6 @@ function kidsView(
     relative: perKidRelative.some(Boolean),
     kids: accounts,
     timeline: buildKidTimeline(kids, ctx.now),
-    ...(giftDaysAvailable
-      ? {
-          giftDays: {
-            on: giftDays,
-            available: true,
-            lump: GIFT_DAY_LUMP,
-            monthlyIfOn,
-            perPaycheckIfOn: InvestmentFrequencyUtils.toPerPaycheckEquivalent(monthlyIfOn, ctx.frequency),
-          },
-        }
-      : {}),
     ...(fundRows.length > 0
       ? {
           firstYear: {

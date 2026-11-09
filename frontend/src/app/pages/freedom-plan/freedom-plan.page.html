@@ -20,11 +20,11 @@
 
     <!-- Hero: the date, front and center -->
     <section class="fd-hero">
-      <div class="fd-hero-year" *ngIf="freedomYear() as year; else fdHeroEmpty">{{ year }}</div>
+      <div class="fd-hero-year" *ngIf="heroYear() as year; else fdHeroEmpty">{{ year }}</div>
       <ng-template #fdHeroEmpty><div class="fd-hero-year fd-hero-year--empty">—</div></ng-template>
       <div class="fd-hero-meta">
-        <span *ngIf="freedomAge() as age">Age {{ age }}</span>
-        <span class="fd-dot" *ngIf="freedomAge() !== null && timeAwayLabel() !== null">·</span>
+        <span *ngIf="heroAge() as age">Age {{ age }}</span>
+        <span class="fd-dot" *ngIf="heroAge() !== null && timeAwayLabel() !== null">·</span>
         <span *ngIf="timeAwayLabel() as away">{{ away }}</span>
         <span *ngIf="freedomYear() === null">Set your plan below to see your freedom date</span>
       </div>

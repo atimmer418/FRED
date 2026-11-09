@@ -18,11 +18,10 @@ import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-she
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { GoalUnitDetailSheetComponent } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
-import { QuizSwitchRowComponent } from '../../components/quiz-controls/quiz-switch-row.component';
 import { toCountBand } from '../../services/analytics/analytics-bands';
 import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.model';
 import { GoalForm, defaultForm, formFromGoal } from './goal-form.model';
-import { fmtMoney } from './goal-plan.view-model';
+import { buildGoalPlanView, fmtMoney } from './goal-plan.view-model';
 
 /** The page's clock in every spec: fixtures and horizons count from the same instant. */
 const NOW = new Date();
@@ -195,7 +194,7 @@ describe('GoalPage', () => {
     })
       // Ionic standalone components need their own providers; render their children as plain DOM.
       .overrideComponent(GoalPage, {
-        set: { imports: [CommonModule, KidTimelineComponent, QuizSwitchRowComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+        set: { imports: [CommonModule, KidTimelineComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
       })
       .compileComponents();
 
@@ -256,7 +255,6 @@ describe('GoalPage', () => {
     const fixture = await create({ type: 'WEDDING', preview: '1' }, { draft: { form, existing: null } });
     const page = fixture.componentInstance;
     finishCountUp(fixture);
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
 
     expect(page.mode()).toBe('preview-new');
     expect(text(fixture, '.header-title')).toBe('Wedding');
@@ -287,7 +285,6 @@ describe('GoalPage', () => {
     const fixture = await create({ id: '4', preview: '1' }, { goals: [goal], draft: { form, existing: goal } });
     const page = fixture.componentInstance;
     finishCountUp(fixture);
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
 
     expect(page.mode()).toBe('preview-edit');
     expect(text(fixture, '.fd-cta')).toBe('Update my plan');
@@ -617,57 +614,35 @@ describe('GoalPage', () => {
     expect(third.kids[0].accounts.brokerage.balance).toBe(900);
   });
 
-  it('toggling gift days PUTs giftDays and the hero monthly and per paycheck drop', async () => {
-    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+  it('kids plans are monthly only: no gift-days row, and a stored giftDays flag changes nothing', async () => {
+    const stored = sampleFamily(5);
+    const flagged: Goal = { ...stored, config: { ...(stored.config as KidsConfig), giftDays: true } };
+    const fixture = await create({ id: '5' }, { goals: [flagged] });
     const page = fixture.componentInstance;
     finishCountUp(fixture);
-    echoUpdates();
-    const before = page.view();
-    expect(before.giftDays).toBeDefined();
-    expect(before.giftDays!.on).toBeFalse();
-    const row = fixture.nativeElement.querySelector('app-quiz-switch-row') as HTMLElement;
-    expect(row).not.toBeNull();
-    expect(row.getAttribute('ng-reflect-tone') ?? 'light').toBe('light');
-    expect(text(fixture, 'app-quiz-switch-row')).toContain('Lighten the monthly.');
-    expect(text(fixture, 'app-quiz-switch-row')).toContain(`Put in $1,000 per kid every New Year, and this drops to ~${fmtMoney(before.giftDays!.monthlyIfOn)}.`);
-
-    (row.querySelector('button') as HTMLButtonElement).click();
-    await fixture.whenStable();
-    fixture.detectChanges();
-
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    const body = updateSpy.calls.mostRecent().args[1] as GoalWrite;
-    expect((body.config as KidsConfig).giftDays).toBeTrue();
-    // A plan input: the body carries the re-solved monthly for the server to anchor.
-    expect(body.anchorMonthly).toBeLessThan(before.monthlyTotal);
-    const after = page.view();
-    expect(after.monthlyTotal).toBeLessThan(before.monthlyTotal);
-    expect(after.perPaycheck!).toBeLessThan(before.perPaycheck!);
-    expect(text(fixture, '.fd-hero-big')).toBe(`${fmtMoney(after.monthlyTotal)}/mo`);
-    expect(text(fixture, 'app-quiz-switch-row')).toContain('Next up:');
-    expect(text(fixture, 'app-quiz-switch-row')).toContain('New Year, $1,000 for each kid.');
-    expect(text(fixture, 'app-quiz-switch-row')).not.toContain('reminds you');
+    expect(fixture.nativeElement.querySelector('app-quiz-switch-row')).toBeNull();
+    expect(text(fixture)).not.toContain('New Year');
+    const plain = buildGoalPlanView(stored, { marketRate: 0.10, frequency: 'biweekly', now: NOW, rateKindOverride: null, reanchorPending: false });
+    expect(page.view().monthlyTotal).toBe(plain.monthlyTotal);
+    for (const account of page.view().kids!) {
+      expect(account.perKid.map(k => k.plan.newYearLump)).toEqual(account.perKid.map(() => 0));
+    }
   });
 
-  it('in preview, gift days and renames patch the draft instead of writing', async () => {
+  it('in preview, a rename patches the draft instead of writing', async () => {
     const goal = sampleFamily(5);
     const form = formFromGoal(goal);
     const fixture = await create({ type: 'KIDS', preview: '1' }, { draft: { form, existing: null } });
     const page = fixture.componentInstance;
     finishCountUp(fixture);
-    const before = page.view().monthlyTotal;
-    page.toggleGiftDays(true);
     page.commitRename(0, 'Ellie Mae');
     fixture.detectChanges();
     expect(updateSpy).not.toHaveBeenCalled();
     expect(createSpy).not.toHaveBeenCalled();
-    expect(page.view().monthlyTotal).toBeLessThan(before);
     expect(text(fixture, '.gp-kcard .gp-kname b')).toBe('Ellie Mae');
 
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
     await page.startPlan();
     const body = createSpy.calls.mostRecent().args[0] as GoalWrite;
-    expect((body.config as KidsConfig).giftDays).toBeTrue();
     expect((body.config as KidsConfig).kids[0].label).toBe('Ellie Mae');
   });
 
@@ -694,7 +669,6 @@ describe('GoalPage', () => {
     const form = { ...formFromGoal(goal), price: 450_000 };
     const fixture = await create({ id: '8', preview: '1' }, { goals: [goal], draft: { form, existing: goal } });
     const page = fixture.componentInstance;
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
     const pending = new Subject<Goal>();
     let calls = 0;
     updateSpy.and.callFake((id: number, body: GoalWrite) => {
@@ -780,7 +754,6 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     const preview = await create({ type: 'WEDDING', preview: '1' }, { draft: { form: newDraft('WEDDING'), existing: null } });
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
     blurWith(preview, '#gp-bal-current', '5000');
     expect(updateSpy).not.toHaveBeenCalled();
     await preview.componentInstance.startPlan();
@@ -861,8 +834,7 @@ describe('GoalPage', () => {
   it('tracks goal_changed with goal_type and plan_rate and no raw amounts', async () => {
     const fixture = await create({ type: 'HOUSE', preview: '1' }, { draft: { form: newDraft('HOUSE'), existing: null } });
     const page = fixture.componentInstance;
-    page.selectRate(0.1);
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
+    const setRates = spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
     // The real service appends the created goal to the signal; the mock does not.
     createSpy.and.callFake((body: GoalWrite) => {
       const created = { ...houseGoal(99), ...body } as Goal;
@@ -878,12 +850,12 @@ describe('GoalPage', () => {
         target_band: '50k_249k', years_to_target: '3_5', progress: '0_9', goal_count: '1',
       },
     }]);
-    expect(TestBed.inject(RateAssumptionsService).setRates).toHaveBeenCalled();
+    // The return is set only on the Freedom Plan page; Start never writes it.
+    expect(setRates).not.toHaveBeenCalled();
   });
 
   it('reports cash as the plan rate for an emergency fund and tracks completed, reopened and removed', async () => {
     const fixture = await create({ type: 'EMERGENCY_FUND', preview: '1' }, { draft: { form: newDraft('EMERGENCY_FUND'), existing: null } });
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
     await fixture.componentInstance.startPlan();
     const ev = track.calls.allArgs().map(a => a[0]).find(e => e.name === 'goal_changed');
     expect(ev.props.plan_rate).toBe('cash');
@@ -908,7 +880,6 @@ describe('GoalPage', () => {
 
   it('still navigates and toasts when analytics throws', async () => {
     const fixture = await create({ type: 'WEDDING', preview: '1' }, { draft: { form: newDraft('WEDDING'), existing: null } });
-    spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
     track.and.throwError('boom');
     await fixture.componentInstance.startPlan();
     expect(showToast).toHaveBeenCalledWith('Plan started', 'success');
@@ -916,67 +887,50 @@ describe('GoalPage', () => {
     expect(trackErrorShown).not.toHaveBeenCalled();
   });
 
-  it('a chip tap on a saved goal writes the shared rate at once and re-solves the hero', async () => {
-    const fixture = await create({ id: '7' }, { goals: [houseGoal(7)] });
-    const page = fixture.componentInstance;
-    finishCountUp(fixture);
-    const setRates = spyOn(TestBed.inject(RateAssumptionsService), 'setRates');
-    const before = page.view().monthlyTotal;
-    page.selectRate(0.12);
-    fixture.detectChanges();
-    expect(setRates).toHaveBeenCalledWith(0.12, jasmine.any(Number));
-    expect(page.view().monthlyTotal).toBeLessThan(before);
-    expect(text(fixture, '.fd-hero-big')).toBe(`${fmtMoney(page.view().monthlyTotal)}/mo`);
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-
-  it('shows the shared Assumptions card on a market plan, with Reset to standard only off 10%', async () => {
+  it('shows the shared return read-only on a market plan: the figure, no chips, no reset, and where to change it', async () => {
     const fixture = await create({ id: '7' }, { goals: [{ ...houseGoal(7), planRate: 0.10 }] });
     const page = fixture.componentInstance;
     finishCountUp(fixture);
     const el = fixture.nativeElement as HTMLElement;
-    expect(page.selectedRate()).toBe(0.10);
+    expect(page.annualReturn()).toBe(0.10);
     expect(el.querySelector('.fd-assume')).toBeTruthy();
-    expect(el.querySelectorAll('.fd-assume .fd-assume-chips button').length).toBe(3);
+    expect(text(fixture, '.fd-assume .fd-assume-name')).toContain('Avg annual return');
+    expect(text(fixture, '.fd-assume .fd-assume-value')).toBe('10%');
+    expect(el.querySelectorAll('.fd-assume button').length).toBe(0);
     expect(el.querySelector('.fd-reset')).toBeFalsy();
-
-    page.selectRate(0.12);
-    fixture.detectChanges();
-    const reset = el.querySelector('.fd-reset') as HTMLButtonElement;
-    expect(reset).toBeTruthy();
-    expect(reset.textContent!.trim()).toBe('Reset to standard');
-
-    reset.click();
-    fixture.detectChanges();
-    expect(page.selectedRate()).toBe(0.10);
-    expect(el.querySelector('.fd-reset')).toBeFalsy();
-    const on = el.querySelector('.fd-assume-chips button.on') as HTMLElement;
-    expect(on.textContent!.trim()).toContain('10%');
+    expect(text(fixture, '.gp-assume-note')).toBe('Set on your Freedom Plan page, where it runs every FRED projection.');
+    expect((page as any).selectRate).toBeUndefined();
   });
 
-  it('re-reads the goal and the shared rate when revealed beneath a popped edit preview', async () => {
+  it('follows the shared return live: a change made on the Freedom Plan page re-solves the hero here', async () => {
     const goal = { ...houseGoal(7), planRate: 0.10 };
     const fixture = await create({ id: '7' }, { goals: [goal] });
     const page = fixture.componentInstance;
     finishCountUp(fixture);
     const rates = TestBed.inject(RateAssumptionsService);
-    expect(page.selectedRate()).toBe(rates.annualReturn());
+    expect(page.annualReturn()).toBe(rates.annualReturn());
     const before = page.view().monthlyTotal;
 
-    // The edit preview PUT the goal at 12% and committed 12% to the shared rate, then popped back here.
-    const updated: Goal = { ...goal, planRate: 0.12, anchorMonthly: 777 };
-    goals.set([updated]);
-    rates.annualReturn.set(0.12);
-    page.ionViewWillEnter();
+    rates.setRates(0.12, rates.withdrawalRate());
     fixture.detectChanges();
 
-    expect(page.existing()).toBe(updated);
-    expect(page.selectedRate()).toBe(0.12);
-    expect(page.selectedRate()).toBe(rates.annualReturn());
+    expect(page.annualReturn()).toBe(0.12);
     expect(page.view().monthlyTotal).toBeLessThan(before);
     expect(text(fixture, '.fd-hero-big')).toBe(`${fmtMoney(page.view().monthlyTotal)}/mo`);
-    const on = fixture.nativeElement.querySelector('.fd-scenario-chips button.on') as HTMLElement;
-    expect(on.textContent!.trim()).toContain('12%');
+    expect(text(fixture, '.fd-assume .fd-assume-value')).toBe('12%');
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the goal when revealed beneath a popped edit preview', async () => {
+    const goal = { ...houseGoal(7), planRate: 0.10 };
+    const fixture = await create({ id: '7' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    finishCountUp(fixture);
+    const updated: Goal = { ...goal, anchorMonthly: 777 };
+    goals.set([updated]);
+    page.ionViewWillEnter();
+    fixture.detectChanges();
+    expect(page.existing()).toBe(updated);
   });
 
   it('has no em dash in rendered text', async () => {

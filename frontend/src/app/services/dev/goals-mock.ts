@@ -96,8 +96,7 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
     type: 'KIDS',
     name: 'Kids',
     icon: 'child_care',
-    // Gift days on (the quiz's $100,000 nest egg leaves room for them), so the plan page shows
-    // the "Next up" New Year row.
+    // giftDays stays true here on purpose: the plan page ignores the stored flag (monthly only).
     config: { brokerageTarget: 100000, plan529Target: 80000, kids, firstYearFund: true, giftDays: true },
     currentBalance: 5500,
     balanceUpdatedAt: updatedAt,

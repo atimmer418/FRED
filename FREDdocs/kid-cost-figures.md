@@ -93,6 +93,11 @@ First-year targets by birth rank: rank 1 $25,700; rank 2 $20,800; rank 3 and lat
 
 ## The January gift lump (gift days)
 
+**Removed from the plan page 2026-11-08.** Kids plans are monthly only. `giftDays` is still a field
+on the kids config (old rows load) but nothing reads it: no lump posts, live or at the anchor. The
+`proposeKidAccountPlan` option is still there and spec'd; every caller passes `giftDays: false`.
+The rest of this section describes the feature as it was.
+
 Kids plans no longer have birthday or New Year rituals (the old sized birthday and New Year lumps,
 the friendly rounding and the shrink loop are gone). In their place is one opt-in switch, gift
 days, stored as `giftDays` on the kids config (missing reads as off; flipping it re-anchors the

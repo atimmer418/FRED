@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { IonContent, IonHeader, NavController, ViewWillLeave } from '@ionic/angular/standalone';
@@ -16,6 +16,9 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { ErrorCategory, ReturnPreset } from '../../services/analytics/analytics-events';
 import { toAmountBand, toYearsBand } from '../../services/analytics/analytics-bands';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
+
+/** The hero roll-up's length (the goal page's hero count-up uses the same). */
+const HERO_ROLL_MS = 600;
 
 /**
  * The Freedom Plan page (/freedom): the full story behind the freedom date.
@@ -211,6 +214,59 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
 
   readonly isDefaultRates = computed(() =>
     this.annualReturn() === 0.10 && this.withdrawalRate() === 0.04);
+
+  // ── Hero roll-up ───────────────────────────────────────────────────────────
+  // The first time a date is there, the year rolls from this year up to it over 600ms (the age
+  // alongside), the way the goal page's hero counts up. Afterwards the hero tracks the live
+  // projection. Skipped under reduced motion. The same rAF shape as the goal page.
+
+  /** The year and age the hero shows mid roll; null once it tracks the live projection. */
+  private readonly heroRolling = signal<{ year: number; age: number | null } | null>(null);
+  /** The roll runs once per page, on the first date. */
+  private heroRolled = false;
+
+  readonly heroYear = computed(() => this.heroRolling()?.year ?? this.freedomYear());
+  readonly heroAge = computed(() => {
+    const rolling = this.heroRolling();
+    return rolling ? rolling.age : this.freedomAge();
+  });
+
+  private _rollFx = effect(() => {
+    if (this.freedomYear() === null || this.heroRolled) return;
+    this.heroRolled = true;
+    untracked(() => this.startRollUp());
+  });
+
+  private startRollUp(): void {
+    if (this.reducedMotion()) return;
+    const fromYear = new Date().getFullYear();
+    const birthYear = this.freedomStats.birthYear() ?? 0;
+    const fromAge = birthYear > 0 && fromYear > birthYear ? fromYear - birthYear : null;
+    const start = performance.now();
+    const step = (t: number) => {
+      const year = this.freedomYear();
+      const p = Math.min(1, (t - start) / HERO_ROLL_MS);
+      // Done, or the projection went away mid-roll: follow the live value again.
+      if (year === null || p >= 1) { this.heroRolling.set(null); return; }
+      const eased = 1 - (1 - p) ** 3;
+      const age = this.freedomAge();
+      this.heroRolling.set({
+        year: Math.round(fromYear + (year - fromYear) * eased),
+        age: age !== null && fromAge !== null ? Math.round(fromAge + (age - fromAge) * eased) : age,
+      });
+      requestAnimationFrame(step);
+    };
+    this.heroRolling.set({ year: fromYear, age: fromAge });
+    requestAnimationFrame(step);
+  }
+
+  private reducedMotion(): boolean {
+    try {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return false;
+    }
+  }
 
   // Micro-feedback: pulse the hero whenever the projection moves so every
   // chip tap and keystroke visibly registers. WAAPI (element.animate), not

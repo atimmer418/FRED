@@ -63,7 +63,7 @@ describe('goals-mock (dev)', () => {
     }
   });
 
-  it('turns gift days on for the kids goal, and the family can take them, so the Next up row shows', () => {
+  it('keeps giftDays on in the kids mock, which the monthly-only plan ignores', () => {
     const kids = buildMockGoals('kids_only', now)[0];
     const cfg = kids.config as KidsConfig;
     expect(cfg.giftDays).toBeTrue();
@@ -72,8 +72,8 @@ describe('goals-mock (dev)', () => {
     const view = buildGoalPlanView(kids, {
       marketRate: 0.10, frequency: 'biweekly', now, rateKindOverride: null,
     });
-    expect(view.giftDays?.available).toBeTrue();
-    expect(view.giftDays?.on).toBeTrue();
+    // The plan page ignores the stored flag: monthly only, no New Year lump anywhere.
+    for (const a of view.kids!) expect(a.perKid.map(k => k.plan.newYearLump)).toEqual(a.perKid.map(() => 0));
   });
 
   it('keeps vacation trips within the quiz range', () => {

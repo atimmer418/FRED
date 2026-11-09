@@ -64,7 +64,7 @@ describe('GoalUnitDetailSheetComponent', () => {
   it('a baby fund shows its notes, no milestones, a Done state, and opens the sources sheet for the family size', async () => {
     const fixture = create(detail({
       title: 'Baby fund', pill: 'Cash', monthly: 0, perPaycheck: null, finished: true, milestones: [],
-      notes: ['Planned as cash at ~4%, since you need it within 3 years.', 'Monthly only: the fund ends before a New Year gift would help.'],
+      notes: ['Planned as cash at ~4%, since you need it within 3 years.', 'No date yet: this runway ends within 3 years.'],
       sourcesLine: 'FRED estimate: first-year average (USDA) plus birth costs (Peterson-KFF), rounded up.',
       sourcesSheetKids: 4,
     }));
@@ -75,7 +75,7 @@ describe('GoalUnitDetailSheetComponent', () => {
     expect(t).not.toContain('a paycheck');
     expect(fixture.nativeElement.querySelectorAll('.ud-ms-tile').length).toBe(0);
     expect(fixture.nativeElement.querySelectorAll('.ud-note').length).toBe(2);
-    expect(t).toContain('Monthly only: the fund ends before a New Year gift would help.');
+    expect(t).toContain('No date yet: this runway ends within 3 years.');
 
     (fixture.nativeElement.querySelector('.ud-link') as HTMLButtonElement).click();
     await fixture.whenStable();

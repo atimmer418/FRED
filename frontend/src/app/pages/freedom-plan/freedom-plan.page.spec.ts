@@ -33,6 +33,12 @@ interface SetupOptions {
   saveResult?: Observable<unknown>;
   /** Replaces the userProgress$ emission built from income/invest. */
   progress?: Record<string, unknown>;
+  /** Leave the hero roll-up's frames queued instead of running them in setup. */
+  keepRolling?: boolean;
+  /** The OS reduce-motion setting is on. */
+  reducedMotion?: boolean;
+  /** The user's birth year the stats service reports (0 = unknown). */
+  birthYear?: number;
 }
 
 describe('FreedomPlanPage', () => {
@@ -44,8 +50,18 @@ describe('FreedomPlanPage', () => {
   let showToast: jasmine.Spy;
   let freedomPlanLeft: jasmine.Spy;
   let equity$: BehaviorSubject<{ summary: { equity: number } }>;
+  /** rAF callbacks the hero roll-up queued; finishRollUp() runs them to the end. */
+  let rafCallbacks: FrameRequestCallback[];
 
   function setup(income = 5000, invest = 2500, equity = 0, storedReturn?: number, opts: SetupOptions = {}): void {
+    rafCallbacks = [];
+    spyOn(window, 'requestAnimationFrame').and.callFake((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    });
+    if (opts.reducedMotion) {
+      spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    }
     // The real service with a spied track(): the payload assertions then cover the exact event
     // object the service is handed, with no vendor and no second implementation of the helpers.
     const analytics = new AnalyticsService({} as unknown as AnalyticsAdapter);
@@ -74,7 +90,7 @@ describe('FreedomPlanPage', () => {
         { provide: PortfolioService, useValue: { getPortfolioDashboard: () => equity$.asObservable() } },
         { provide: NavController, useValue: { navigateBack } },
         { provide: ToastService, useValue: { showToast } },
-        { provide: FreedomStatsService, useValue: { birthYear: () => 0 } },
+        { provide: FreedomStatsService, useValue: { birthYear: () => opts.birthYear ?? 0 } },
         { provide: FirstTimeTourService, useValue: { freedomPlanLeft } },
         { provide: AnalyticsService, useValue: analytics },
         RateAssumptionsService,
@@ -88,6 +104,14 @@ describe('FreedomPlanPage', () => {
       TestBed.inject(RateAssumptionsService).annualReturn.set(storedReturn);
     }
     fixture = TestBed.createComponent(FreedomPlanPage);
+    fixture.detectChanges();
+    if (!opts.keepRolling) finishRollUp();
+  }
+
+  /** Runs the queued roll-up frames to the end, so the hero shows the live projection. */
+  function finishRollUp(): void {
+    const far = performance.now() + 10_000;
+    while (rafCallbacks.length) rafCallbacks.shift()!(far);
     fixture.detectChanges();
   }
 
@@ -109,6 +133,56 @@ describe('FreedomPlanPage', () => {
 
   it('renders the hero freedom year from the seeded plan', () => {
     setup();
+    expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
+  });
+
+  it('rolls the hero from this year up to the freedom date on first render, the age alongside, then tracks the live date', () => {
+    setup(5000, 2500, 0, undefined, { keepRolling: true, birthYear: CURRENT_YEAR - 30 });
+    const page = fixture.componentInstance;
+    const target = page.freedomYear()!;
+    expect(target).toBe(CURRENT_YEAR + 18);
+    // First frame: this year, this age.
+    expect(heroYear()).toBe(String(CURRENT_YEAR));
+    expect(page.heroAge()).toBe(30);
+    expect(rafCallbacks.length).toBe(1);
+
+    // Mid-roll: strictly between the two, year and age moving together.
+    const start = performance.now();
+    rafCallbacks.splice(0).forEach(cb => cb(start + 300));
+    fixture.detectChanges();
+    const mid = Number(heroYear());
+    expect(mid).toBeGreaterThan(CURRENT_YEAR);
+    expect(mid).toBeLessThan(target);
+    expect(page.heroAge()!).toBeGreaterThan(30);
+    expect(page.heroAge()!).toBeLessThan(48);
+
+    finishRollUp();
+    expect(heroYear()).toBe(String(target));
+    expect(page.heroAge()).toBe(48);
+    expect(fixture.nativeElement.querySelector('.fd-hero-meta')?.textContent).toContain('Age 48');
+
+    // Rolled once: a later edit moves the hero at once, no new frames queued.
+    typeInto(INVEST_TILE, '5000');
+    expect(rafCallbacks.length).toBe(0);
+    expect(heroYear()).toBe(String(page.freedomYear()));
+  });
+
+  it('skips the roll-up under reduced motion: the hero shows the date at once', () => {
+    setup(5000, 2500, 0, undefined, { keepRolling: true, reducedMotion: true });
+    expect(rafCallbacks.length).toBe(0);
+    expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
+  });
+
+  it('rolls when the date first arrives later, not before: an empty plan shows the dash until the tiles are filled', () => {
+    setup(0, 0, 0, undefined, { keepRolling: true });
+    expect(heroYear()).toBe('—');
+    expect(rafCallbacks.length).toBe(0);
+    typeInto(INCOME_TILE, '5000');
+    typeInto(INVEST_TILE, '2500');
+    // The roll starts from this year the moment a date exists.
+    expect(heroYear()).toBe(String(CURRENT_YEAR));
+    expect(rafCallbacks.length).toBe(1);
+    finishRollUp();
     expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
   });
 

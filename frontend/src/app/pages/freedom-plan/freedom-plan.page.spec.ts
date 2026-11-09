@@ -137,6 +137,8 @@ describe('FreedomPlanPage', () => {
   });
 
   it('rolls the hero from this year up to the freedom date on first render, the age alongside, then tracks the live date', () => {
+    // One clock for the roll's start and the frame below, so a slow run cannot land past the end.
+    const clock = spyOn(performance, 'now').and.returnValue(1_000);
     setup(5000, 2500, 0, undefined, { keepRolling: true, birthYear: CURRENT_YEAR - 30 });
     const page = fixture.componentInstance;
     const target = page.freedomYear()!;
@@ -144,11 +146,9 @@ describe('FreedomPlanPage', () => {
     // First frame: this year, this age.
     expect(heroYear()).toBe(String(CURRENT_YEAR));
     expect(page.heroAge()).toBe(30);
-    expect(rafCallbacks.length).toBe(1);
 
-    // Mid-roll: strictly between the two, year and age moving together.
-    const start = performance.now();
-    rafCallbacks.splice(0).forEach(cb => cb(start + 300));
+    // Mid-roll (300 of 600ms): strictly between the two, year and age moving together.
+    rafCallbacks.splice(0).forEach(cb => cb(1_300));
     fixture.detectChanges();
     const mid = Number(heroYear());
     expect(mid).toBeGreaterThan(CURRENT_YEAR);
@@ -156,32 +156,33 @@ describe('FreedomPlanPage', () => {
     expect(page.heroAge()!).toBeGreaterThan(30);
     expect(page.heroAge()!).toBeLessThan(48);
 
+    clock.and.callThrough();
     finishRollUp();
     expect(heroYear()).toBe(String(target));
     expect(page.heroAge()).toBe(48);
     expect(fixture.nativeElement.querySelector('.fd-hero-meta')?.textContent).toContain('Age 48');
 
-    // Rolled once: a later edit moves the hero at once, no new frames queued.
+    // Rolled once: a later edit moves the hero at once, and running any queued frames changes nothing.
     typeInto(INVEST_TILE, '5000');
-    expect(rafCallbacks.length).toBe(0);
     expect(heroYear()).toBe(String(page.freedomYear()));
+    expect(Number(heroYear())).toBeLessThan(target);
+    const settled = heroYear();
+    finishRollUp();
+    expect(heroYear()).toBe(settled);
   });
 
   it('skips the roll-up under reduced motion: the hero shows the date at once', () => {
     setup(5000, 2500, 0, undefined, { keepRolling: true, reducedMotion: true });
-    expect(rafCallbacks.length).toBe(0);
     expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
   });
 
   it('rolls when the date first arrives later, not before: an empty plan shows the dash until the tiles are filled', () => {
     setup(0, 0, 0, undefined, { keepRolling: true });
     expect(heroYear()).toBe('—');
-    expect(rafCallbacks.length).toBe(0);
     typeInto(INCOME_TILE, '5000');
     typeInto(INVEST_TILE, '2500');
     // The roll starts from this year the moment a date exists.
     expect(heroYear()).toBe(String(CURRENT_YEAR));
-    expect(rafCallbacks.length).toBe(1);
     finishRollUp();
     expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
   });

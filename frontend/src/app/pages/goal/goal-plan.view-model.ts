@@ -21,7 +21,6 @@ import {
 import {
   AccountPlan,
   FirstYearPlan,
-  LumpOccurrence,
   PlanStatus,
   SimplePlan,
   VacationPlan,
@@ -380,12 +379,10 @@ function kidsView(
   const fundRows = firstYearRows(kids, goal, ctx, anchorDate);
   const unfinishedFunds = fundRows.filter(r => !r.row.plan.finished);
 
-  // Status lumps come from the ANCHOR-time plan, so their month indices count from planAnchoredAt
-  // like planStatus does, and the chip can never move them.
-  const anchorLumps: LumpOccurrence[] = [];
-
   // Kids plans are monthly only. The New Year gift lump (gift days) left the plan page on
-  // 2026-11-08; a stored giftDays flag is ignored, so an old goal re-solves as monthly only.
+  // 2026-11-08; a stored giftDays flag is ignored, so an old goal re-solves as monthly only. A goal
+  // saved while gift days were on keeps its lower stored anchorMonthly until its next re-anchor, so
+  // its status reads a little ahead of the truth in the meantime (dev data only; nothing throws).
 
   // An account with no target has nothing to plan (a 529-only family is valid).
   const accounts: KidAccountView[] = accountDefs
@@ -405,17 +402,6 @@ function kidsView(
           now: ctx.now,
           giftDays: false,
         });
-        const anchorPlan = proposeKidAccountPlan({
-          target: def.target,
-          balance: account.anchorBalance,
-          birthYear: kid.birthYear,
-          birthMonth: kid.birthMonth,
-          marketRate: goal.planRate,
-          rateKindOverride: kind,
-          now: anchorDate,
-          giftDays: false,
-        });
-        anchorLumps.push(...anchorPlan.lumps);
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);
         return { label: kid.label, plan, balance, relative, pill: pillOf(plan.rateKind) };
       });
@@ -483,7 +469,7 @@ function kidsView(
         planAnchoredAt: goal.planAnchoredAt,
         balanceUpdatedAt: latest,
         rate: statusRate,
-        lumps: anchorLumps,
+        lumps: [],
         extraExpected,
         maxMonths,
         now: ctx.now,

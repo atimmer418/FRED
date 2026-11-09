@@ -240,8 +240,11 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
   private startRollUp(): void {
     if (this.reducedMotion()) return;
     const fromYear = new Date().getFullYear();
-    const birthYear = this.freedomStats.birthYear() ?? 0;
-    const fromAge = birthYear > 0 && fromYear > birthYear ? fromYear - birthYear : null;
+    // The age today, from the live birth year (it can land during the roll).
+    const fromAge = (): number | null => {
+      const birthYear = this.freedomStats.birthYear() ?? 0;
+      return birthYear > 0 && fromYear > birthYear ? fromYear - birthYear : null;
+    };
     const start = performance.now();
     const step = (t: number) => {
       const year = this.freedomYear();
@@ -250,13 +253,14 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
       if (year === null || p >= 1) { this.heroRolling.set(null); return; }
       const eased = 1 - (1 - p) ** 3;
       const age = this.freedomAge();
+      const from = fromAge();
       this.heroRolling.set({
         year: Math.round(fromYear + (year - fromYear) * eased),
-        age: age !== null && fromAge !== null ? Math.round(fromAge + (age - fromAge) * eased) : age,
+        age: age !== null && from !== null ? Math.round(from + (age - from) * eased) : age,
       });
       requestAnimationFrame(step);
     };
-    this.heroRolling.set({ year: fromYear, age: fromAge });
+    this.heroRolling.set({ year: fromYear, age: fromAge() });
     requestAnimationFrame(step);
   }
 

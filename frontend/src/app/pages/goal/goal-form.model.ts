@@ -349,7 +349,6 @@ export function planInputsChanged(form: GoalForm, existing: Goal, now: Date): bo
       if (next.brokerageTarget !== c.brokerageTarget) return true;
       if (next.plan529Target !== c.plan529Target) return true;
       if ((next.firstYearFund ?? false) !== (c.firstYearFund ?? false)) return true;
-      if ((next.giftDays ?? false) !== (c.giftDays ?? false)) return true;
       if (next.kids.length !== c.kids.length) return true;
       return next.kids.some((kid, i) => {
         const was = c.kids[i];

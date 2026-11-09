@@ -115,12 +115,12 @@ describe('goal-form.model', () => {
     expect(formFromGoal(on).kids.giftDays).toBeTrue();
   });
 
-  it('flags a giftDays flip as a plan input change', () => {
+  it('a giftDays flip is no plan input change: the plan page ignores the flag (monthly only since 2026-11-08)', () => {
     const existing = kidsGoal();
     const form = formFromGoal(existing);
     expect(planInputsChanged(form, existing, NOW)).toBeFalse();
     form.kids.giftDays = true;
-    expect(planInputsChanged(form, existing, NOW)).toBeTrue();
+    expect(planInputsChanged(form, existing, NOW)).toBeFalse();
   });
 
   it('carries any trip count from 1 to 10', () => {

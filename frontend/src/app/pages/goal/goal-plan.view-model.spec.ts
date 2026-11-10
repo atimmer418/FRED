@@ -3,6 +3,8 @@ import { buildKidTimeline } from './kid-timeline.model';
 import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
 import { futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
+import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
+import { everydayMonthlyForKid } from '../../utils/kid-cost.utils';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
 const Y = NOW.getFullYear();
@@ -43,7 +45,7 @@ function kidsGoal(kids: KidsConfig['kids'], extra: Partial<GoalPlanInput> = {}):
 }
 
 describe('buildGoalPlanView', () => {
-  it('aggregates kids accounts into one status and progress', () => {
+  it('aggregates kids accounts into one status and progress; the accounts sum to investMonthly, not the hero', () => {
     const goal = kidsGoal([
       {
         label: 'Ada', birthYear: Y - 2, birthMonth: 3,
@@ -66,7 +68,7 @@ describe('buildGoalPlanView', () => {
     expect(p529.perKid[0].balance).toBe(10_000);
     expect(p529.totals.monthly).toBe(p529.perKid[0].plan.monthly + p529.perKid[1].plan.monthly);
     const brokerage = view.kids!.find(k => k.account === 'brokerage')!;
-    expect(view.monthlyTotal).toBe(p529.totals.monthly + brokerage.totals.monthly);
+    expect(view.investMonthly).toBe(p529.totals.monthly + brokerage.totals.monthly);
 
     // balance 35K of a 2 × 350K family target
     expect(view.progressPct).toBeCloseTo((35_000 / 700_000) * 100, 6);
@@ -276,7 +278,7 @@ describe('buildGoalPlanView first-year fund', () => {
     expect(view.firstYear).toBeUndefined();
   });
 
-  it('adds unfinished first-year plans to the monthly total, one row per kid with a fund', () => {
+  it('adds unfinished first-year plans to investMonthly (the invested units), one row per kid with a fund', () => {
     const goal = fundGoal([
       fundKid('A', null, null, [2029, 11], 20800),
       fundKid('B', Y + 1, 5, [2027, 5], 25700),
@@ -286,35 +288,36 @@ describe('buildGoalPlanView first-year fund', () => {
     const accountsTotal = view.kids!.reduce((sum, a) => sum + a.totals.monthly, 0);
     expect(view.firstYear!.rows.length).toBe(2);
     expect(view.firstYear!.rows.map(r => r.kidIndex)).toEqual([0, 1]);
-    expect(view.firstYear!.rows[0].plan.monthly).toBe(498);
+    // Every baby fund is cash now: $20,800 over 36 months at the cash rate.
+    expect(view.firstYear!.rows[0].plan.monthly).toBe(545);
     expect(view.firstYear!.rows[1].plan.rateKind).toBe('cash');
     expect(view.firstYear!.totalMonthly).toBe(view.firstYear!.rows[0].plan.monthly + view.firstYear!.rows[1].plan.monthly);
-    expect(view.monthlyTotal).toBe(accountsTotal + view.firstYear!.totalMonthly);
+    expect(view.investMonthly).toBe(accountsTotal + view.firstYear!.totalMonthly);
   });
 
   it('counts a fund down from its stored due date when viewed six months later', () => {
     const goal = fundGoal([fundKid('A', null, null, [2029, 5], 25700)], noTargets, { planAnchoredAt: '2026-05-15T10:00:00' });
     const view = buildGoalPlanView(goal, ctx());
     expect(view.firstYear!.rows[0].plan.n).toBe(30);
-    expect(view.firstYear!.rows[0].plan.rateKind).toBe('market');
+    expect(view.firstYear!.rows[0].plan.rateKind).toBe('cash');
   });
 
-  it('keeps a fresh undecided fund invested and a 24-month fund in cash', () => {
+  it('plans every baby fund as cash: a fresh undecided fund and a 24-month fund alike', () => {
     const goal = fundGoal([
       fundKid('A', null, null, [2029, 11], 20800),
       fundKid('B', 2028, 11, [2028, 11], 20800),
     ], noTargets);
     const rows = buildGoalPlanView(goal, ctx()).firstYear!.rows;
-    expect(rows[0].plan.rateKind).toBe('market');
-    expect(rows[0].plan.rate).toBe(0.10);
+    expect(rows[0].plan.rateKind).toBe('cash');
+    expect(rows[0].plan.rate).toBe(CASH_RATE);
     expect(rows[1].plan.rateKind).toBe('cash');
     expect(rows[1].plan.rate).toBe(CASH_RATE);
   });
 
-  it('re-evaluates kinds at now when a re-anchor is pending', () => {
-    // Anchored May 2026 the 2029-05 fund was 36 months out (market); from now it is 30 (cash).
+  it('keeps a baby fund in cash whether or not a re-anchor is pending (it no longer reads its distance at the anchor)', () => {
+    // Anchored May 2026 the 2029-05 fund was 36 months out; from now it is 30. Cash both ways.
     const goal = fundGoal([fundKid('A', null, null, [2029, 5], 25700)], noTargets, { planAnchoredAt: '2026-05-15T10:00:00' });
-    expect(buildGoalPlanView(goal, ctx()).firstYear!.rows[0].plan.rateKind).toBe('market');
+    expect(buildGoalPlanView(goal, ctx()).firstYear!.rows[0].plan.rateKind).toBe('cash');
     expect(buildGoalPlanView(goal, ctx({ reanchorPending: true })).firstYear!.rows[0].plan.rateKind).toBe('cash');
   });
 
@@ -402,17 +405,17 @@ describe('buildGoalPlanView first-year fund', () => {
     expect(withFund.firstYear!.rows[0].plan.monthly).toBe(0);
   });
 
-  it('says Ready for the first year and never 18th birthday for a fund-only goal', () => {
+  it('says Ready for the first year and never 18th birthday for a fund-only goal (a cash plan: baby funds are cash)', () => {
     const goal = fundGoal([fundKid('A', null, null, [2029, 11], 20800)], noTargets);
     const view = buildGoalPlanView(goal, ctx());
     expect(view.headline).toBe('Ready for the first year');
-    expect(view.subtitle).toBe('$498/mo for A');
+    expect(view.subtitle).toBe('$545/mo for A');
     expect(view.kids).toEqual([]);
-    expect(view.rateKind).toBe('market');
+    expect(view.rateKind).toBe('cash');
     expect(view.status.kind).toBe('started');
 
     const two = fundGoal([fundKid('A', null, null, [2029, 11], 20800), fundKid('B', null, null, [2029, 11], 20800)], noTargets);
-    expect(buildGoalPlanView(two, ctx()).subtitle).toBe('$996/mo for both kids');
+    expect(buildGoalPlanView(two, ctx()).subtitle).toBe('$1,090/mo for both kids');
   });
 
   it('keeps the usual headline when a 529 target exists beside the fund', () => {
@@ -583,11 +586,11 @@ describe('buildGoalPlanView one-screen page', () => {
     kid('', null, null, { due: [2029, 11], target: 16_500 }),
   ], extra);
 
-  it('KIDS subtitle reads "$X/mo for all 3 kids" and audience uses a single kid label', () => {
+  it('KIDS subtitle reads "$X/mo for all 3 kids" (the whole month), the hero reads Family plan, and audience uses a single kid label', () => {
     const view = buildGoalPlanView(sample(), ctx());
     expect(view.audience).toBe('for all 3 kids');
     expect(view.subtitle).toBe(`${fmtMoney(view.monthlyTotal)}/mo for all 3 kids`);
-    expect(view.heroLabel).toBe('Save this month');
+    expect(view.heroLabel).toBe('Family plan');
 
     const one = buildGoalPlanView(family([kid('Ellie', 2024, null)]), ctx());
     expect(one.audience).toBe('for Ellie');
@@ -608,25 +611,28 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(audience({ name: '  ' })).toBe('My goal');
   });
 
-  it('pins the sample family hero figures: $47,800 college and $100,000 nest egg per kid, baby funds for the two unborn, 10%, biweekly', () => {
+  it('pins the sample family figures: the old $2,249 hero is now investMonthly ($2,287 with cash baby funds), the hero is the whole month with Ellie\'s $1,910', () => {
     const off = buildGoalPlanView(sample(), ctx());
-    expect(off.heroLabel).toBe('Save this month');
+    expect(off.heroLabel).toBe('Family plan');
     expect(off.audience).toBe('for all 3 kids');
-    // The spec copy says $2,830/mo and ~$1,306 a paycheck; those figures were drawn with a $250,000
-    // nest egg. At the spec's $100,000 default the real numbers are pinned here.
-    expect(Math.round(off.monthlyTotal)).toBe(2_249);
-    expect(Math.round(off.perPaycheck!)).toBe(1_036);
-    expect(off.subtitle).toBe('$2,249/mo for all 3 kids');
+    // $47,800 college and $100,000 nest egg per kid, baby funds for the two unborn, 10%, biweekly.
+    // The invested units were $2,249 with the undated kid's fund invested; every baby fund is cash
+    // now, so they ask $2,287. The hero adds Ellie (2, the only kid at home) at ~$1,910.
+    expect(Math.round(off.investMonthly)).toBe(2_287);
+    expect(off.everyday!.map(e => e.monthly)).toEqual([1_910, 0, 0]);
+    expect(Math.round(off.monthlyTotal)).toBe(4_197);
+    expect(Math.round(off.perPaycheck!)).toBe(1_934);
+    expect(off.subtitle).toBe('$4,197/mo for all 3 kids');
   });
 
-  it('pills: college and nest egg are Invested at 18 years out, a baby fund due in 19 months is Cash', () => {
+  it('pills: college and nest egg are Invested at 18 years out, a baby fund is always Cash', () => {
     const view = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
     for (const acct of view.kids!) expect(acct.perKid[0].pill).withContext(acct.account).toBe('Invested');
     expect(view.firstYear!.rows[0].plan.n).toBe(19);
     expect(view.firstYear!.rows[0].pill).toBe('Cash');
     expect(view.pill).toBeUndefined();
 
-    // A kid within 36 months of 18 is Cash; an undated kid's fund (36-month runway) is Invested.
+    // A kid within 36 months of 18 is Cash; an undated kid's fund (36-month runway) is Cash too.
     const mixed = buildGoalPlanView(family([
       kid('Teen', Y - 16, 6),
       kid('', null, null, { due: [2029, 11], target: 20_800 }),
@@ -635,7 +641,7 @@ describe('buildGoalPlanView one-screen page', () => {
       expect(acct.perKid[0].pill).toBe('Cash');
       expect(acct.perKid[1].pill).toBe('Invested');
     }
-    expect(mixed.firstYear!.rows[0].pill).toBe('Invested');
+    expect(mixed.firstYear!.rows[0].pill).toBe('Cash');
 
     // Simple goals: one pill on the view.
     expect(buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx()).pill).toBe('Invested');
@@ -644,22 +650,22 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).pill).toBe('Cash');
   });
 
-  it('howFredHelps: all invested, mixed (names the baby funds), all cash (vacation)', () => {
+  it('howFredHelps quotes investMonthly: all invested, mixed (names the baby funds), all cash (vacation)', () => {
     const invested = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
-    expect(invested.howFredHelps).toBe(`${INVEST_LEAD(invested.monthlyTotal)} and handles where it goes.`);
+    expect(invested.howFredHelps).toBe(`${INVEST_LEAD(invested.investMonthly)} and handles where it goes.`);
 
     const oneFund = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
-    expect(oneFund.howFredHelps).toBe(`${INVEST_LEAD(oneFund.monthlyTotal)}, keeps the baby fund in cash, and handles where it goes.`);
+    expect(oneFund.howFredHelps).toBe(`${INVEST_LEAD(oneFund.investMonthly)}, keeps the baby fund in cash, and handles where it goes.`);
 
     const twoFunds = buildGoalPlanView(family([
       kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 }),
       kid('Mia', 2028, 9, { due: [2028, 9], target: 16_500 }),
     ]), ctx());
-    expect(twoFunds.howFredHelps).toBe(`${INVEST_LEAD(twoFunds.monthlyTotal)}, keeps the baby funds in cash, and handles where it goes.`);
+    expect(twoFunds.howFredHelps).toBe(`${INVEST_LEAD(twoFunds.investMonthly)}, keeps the baby funds in cash, and handles where it goes.`);
 
     // A cash unit that is not a baby fund: a kid within 36 months of 18.
     const teen = buildGoalPlanView(family([kid('Teen', Y - 16, 6), kid('B', 2023, 8)]), ctx());
-    expect(teen.howFredHelps).toBe(`${INVEST_LEAD(teen.monthlyTotal)}, keeps the short-dated money in cash, and handles where it goes.`);
+    expect(teen.howFredHelps).toBe(`${INVEST_LEAD(teen.investMonthly)}, keeps the short-dated money in cash, and handles where it goes.`);
 
     const cash = 'FRED keeps this in cash, ready the day you need it.';
     expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).howFredHelps).toBe(cash);
@@ -727,7 +733,7 @@ describe('buildGoalPlanView one-screen page', () => {
   ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you and growth adds ~')
     + `(${MONEY})` + escape('. Take it out early and growth stops, and the monthly from you goes up.') + '$');
   const dollars = (s: string) => Number(s.replace(/[$,]/g, ''));
-  it('coversLine names the funds, says which sit on top of everyday costs, and prices the kids at home by age', () => {
+  it('coversLine names the funds, says which sit on top of everyday costs, and prices the kids at home aged 1 to 17 (a kid under one is the baby fund\'s year one)', () => {
     // Ellie is 2, Theo arrives in 2028, the third kid is undated: one kid at home (only-child factor), two funds.
     expect(buildGoalPlanView(sample(), ctx()).coversLine).toBe(
       'Only the funds: the baby funds, college and the nest egg. College and the nest egg are on top of everyday '
@@ -748,10 +754,18 @@ describe('buildGoalPlanView one-screen page', () => {
       + "Everyday costs for A (6) run ~$1,860 a month by FRED's estimate.",
     );
 
+    // Mae is under one: at home but not priced, so the line says the baby fund covers year one.
     const newborn = buildGoalPlanView(family([kid('Mae', 2026, 10)], { plan529Target: 0 }), ctx());
     expect(newborn.coversLine).toBe(
       'Only the funds: the nest egg. The nest egg is on top of everyday costs. '
-      + "Everyday costs for Mae (under 1) run ~$1,910 a month by FRED's estimate.",
+      + 'No everyday costs yet: the baby fund covers year one.',
+    );
+
+    // A kid under one beside a priced kid: only the priced kid is named, sized as one of two at home.
+    const withBaby = buildGoalPlanView(family([kid('Mae', 2026, 10), kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
+    expect(withBaby.coversLine).toBe(
+      'Only the funds: college. College is on top of everyday costs. '
+      + `Everyday costs for A (6) run ~${fmtMoney(everydayMonthlyForKid(6, 2))} a month by FRED's estimate.`,
     );
 
     const fundOnly = buildGoalPlanView(
@@ -771,7 +785,7 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(nestOnly.whyInvestLine).toMatch(/^You will not spend the funds for years: the nest egg comes due at 18, and/);
   });
 
-  it('whyInvestLine for the sample family: from you plus growth plus balances is what the invested units reach', () => {
+  it('whyInvestLine for the sample family: from you plus growth plus balances is what the invested units reach (no baby fund: they are cash)', () => {
     const view = buildGoalPlanView(sample(), ctx());
     expect(view.whyInvestLine).not.toBeNull();
     const m = view.whyInvestLine!.match(KIDS_WHY);
@@ -781,7 +795,7 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(fromGrowth % 1_000).toBe(0);
     expect(fromGrowth).toBeGreaterThan(0);
 
-    // The invested units: every 529 and brokerage plan here, plus the undated kid's market baby fund.
+    // The invested units: every 529 and brokerage plan here. Both baby funds are cash.
     const targetOf = { plan529: 47_800, brokerage: 100_000 };
     const invested: Array<{ target: number; balance: number }> = [
       ...view.kids!.reduce<Array<{ target: number; balance: number }>>((all, a) => all.concat(a.perKid
@@ -791,10 +805,10 @@ describe('buildGoalPlanView one-screen page', () => {
         .filter(r => r.plan.rateKind === 'market' && !r.plan.finished)
         .map(r => ({ target: r.plan.target, balance: r.balance })),
     ];
-    // Three kids' college and nest egg, plus the undated kid's $16,500 fund (Theo's is cash).
-    expect(invested.length).toBe(7);
+    // Three kids' college and nest egg.
+    expect(invested.length).toBe(6);
     expect(reaches).toBe(invested.reduce((sum, u) => sum + u.target, 0));
-    expect(reaches).toBe(3 * (47_800 + 100_000) + 16_500);
+    expect(reaches).toBe(3 * (47_800 + 100_000));
     // The two shares add up to what the plan reaches (what is already saved counts as "from you").
     expect(Math.abs(fromYou + fromGrowth - reaches)).toBeLessThanOrEqual(1_000);
   });
@@ -867,5 +881,96 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(lines({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 5 } })).toEqual([null, null]);
     expect(lines({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } })).toEqual([null, null]);
     expect(lines({ type: 'CAR', config: { price: 40_000, downPaymentPct: null, targetYear: Y + 1 } })).toEqual([null, null]);
+  });
+
+  // ── The kids' whole month: invested units plus what each kid at home costs ──
+
+  describe('everyday line', () => {
+    it('prices each kid at home and leaves the rest at 0: unborn, year one, priced, grown', () => {
+      // Expected Mar 2027 (unborn); born this month (year one); born Mar 2024 (priced, 2); born Jan 2008 (grown, 18).
+      const view = buildGoalPlanView(family([
+        kid('Ivy', Y + 1, 3),
+        kid('Mae', Y, 11),
+        kid('Ellie', 2024, 3),
+        kid('Sam', 2008, 1),
+      ]), ctx());
+      expect(view.everyday!.map(e => e.state)).toEqual(['unborn', 'year_one', 'priced', 'grown']);
+      // Two kids at home (Mae and Ellie) size Ellie's figure.
+      expect(view.everyday!.map(e => e.monthly)).toEqual([0, 0, everydayMonthlyForKid(2, 2), 0]);
+      expect(view.everyday![2].monthly).toBeGreaterThan(0);
+      expect(view.everyday![0]).toEqual(jasmine.objectContaining({
+        label: 'Everyday', subLine: '', fromLine: 'From Mar 2027: the baby fund is year one',
+      }));
+      expect(view.everyday![1]).toEqual(jasmine.objectContaining({
+        label: 'Everyday', subLine: '', fromLine: 'The baby fund covers year one',
+      }));
+      expect(view.everyday![2]).toEqual(jasmine.objectContaining({
+        label: 'Age 2 costs', subLine: 'Food, clothes, diapers and childcare', fromLine: null,
+      }));
+      expect(view.everyday![3]).toEqual(jasmine.objectContaining({ label: 'Everyday', subLine: '', fromLine: null }));
+    });
+
+    it('an unborn kid with no month, an undated kid, and one expected this year with no month read "From the day they arrive"', () => {
+      const view = buildGoalPlanView(family([kid('A', Y + 1, null), kid('B', null, null), kid('C', Y, null)]), ctx());
+      expect(view.everyday!.map(e => e.state)).toEqual(['unborn', 'unborn', 'unborn']);
+      for (const e of view.everyday!) {
+        expect(e.fromLine).toBe('From the day they arrive: the baby fund is year one');
+        expect(e.monthly).toBe(0);
+      }
+    });
+
+    it('the hero is the whole month: investMonthly plus the everyday sum, labeled Family plan', () => {
+      const view = buildGoalPlanView(sample(), ctx());
+      const everyday = view.everyday!.reduce((s, e) => s + e.monthly, 0);
+      expect(everyday).toBeGreaterThan(0);
+      expect(view.monthlyTotal).toBe(view.investMonthly + everyday);
+      expect(view.heroLabel).toBe('Family plan');
+      expect(view.perPaycheck).toBe(InvestmentFrequencyUtils.toPerPaycheckEquivalent(view.monthlyTotal, 'biweekly'));
+      expect(view.subtitle).toContain(`${fmtMoney(view.monthlyTotal)}/mo`);
+    });
+
+    it('How FRED helps quotes the invested monthly, never the everyday figure (status, progress and anchors are pinned elsewhere)', () => {
+      const view = buildGoalPlanView(sample(), ctx());
+      expect(view.investMonthly).toBeLessThan(view.monthlyTotal);
+      expect(view.howFredHelps).toContain(fmtMoney(view.investMonthly));
+      expect(view.howFredHelps).not.toContain(fmtMoney(view.monthlyTotal));
+    });
+
+    it('invested units due now still read "$X due now" with a kid at home', () => {
+      // Teen turns 18 this month with $20,000 to go; B (6) already has a full 529, so nothing is left to spread.
+      const config: KidsConfig = {
+        plan529Target: 50_000, brokerageTarget: 0,
+        kids: [
+          { label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000), brokerage: account(0) } },
+          { label: 'B', birthYear: 2020, birthMonth: 3, accounts: { plan529: account(50_000), brokerage: account(0) } },
+        ],
+      };
+      const view = buildGoalPlanView(base({ type: 'KIDS', config }), ctx({ now: new Date(2026, 11, 5) }));
+      expect(view.investMonthly).toBe(0);
+      expect(view.everyday![1].monthly).toBeGreaterThan(0);
+      expect(view.heroLabel).toBe('Due now');
+      expect(view.subtitle).toBe('$20,000 due now for both kids');
+    });
+
+    it('the baby fund is always cash, even five years out', () => {
+      const view = buildGoalPlanView(family([kid('Theo', Y + 5, 6, { due: [Y + 5, 6], target: 20_800 })]), ctx());
+      expect(view.firstYear!.rows[0].plan.rateKind).toBe('cash');
+      expect(view.firstYear!.rows[0].plan.rate).toBe(CASH_RATE);
+      expect(view.firstYear!.rows[0].pill).toBe('Cash');
+    });
+
+    it('simple goals: investMonthly equals monthlyTotal and heroLabel stays Save this month', () => {
+      const view = buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx());
+      expect(view.investMonthly).toBe(view.monthlyTotal);
+      expect(view.heroLabel).toBe('Save this month');
+      expect(view.everyday).toBeUndefined();
+
+      const vacation = buildGoalPlanView(base({
+        type: 'VACATION',
+        config: { tripsPerYear: 4, budgetPerTrip: 2_500, savedThisYear: 0, savedYear: Y },
+      }), ctx());
+      expect(vacation.investMonthly).toBe(vacation.monthlyTotal);
+      expect(vacation.everyday).toBeUndefined();
+    });
   });
 });

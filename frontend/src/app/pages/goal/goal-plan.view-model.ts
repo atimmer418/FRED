@@ -41,7 +41,13 @@ import {
 import { audienceLabel } from '../../utils/goal-quiz.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
-import { everydayMonthlyToday, kidAgeToday } from '../../utils/kid-cost.utils';
+import {
+  everydayMonthlyForKid,
+  everydayRowLabel,
+  everydaySubLine,
+  kidAgeToday,
+  kidsAtHome,
+} from '../../utils/kid-cost.utils';
 import { buildKidTimeline } from './kid-timeline.model';
 
 export type GoalPlanInput = Pick<
@@ -65,7 +71,7 @@ export type GoalPlanInput = Pick<
 /** Whether a unit's money is planned in the market or in cash, from its rate kind. */
 export type UnitPill = 'Invested' | 'Cash';
 
-export type HeroLabel = 'Save this month' | 'Due now';
+export type HeroLabel = 'Save this month' | 'Due now' | 'Family plan';
 
 export interface GoalPlanContext {
   marketRate: number;
@@ -104,8 +110,28 @@ export interface FirstYearRow {
   pill: UnitPill;
 }
 
+/**
+ * KIDS only: what one kid costs this month by FRED's estimate (built on USDA numbers). A kid who has
+ * not arrived and a kid in their first year cost 0 here (the baby fund is year one), and so does a
+ * kid of 18 or older (the USDA study stops at 17).
+ */
+export interface EverydayView {
+  /** The kid's everyday cost this month, nearest $10; 0 unless priced. */
+  monthly: number;
+  /** "Age 2 costs" when priced, else "Everyday". */
+  label: string;
+  /** What the cost covers at this age when priced, else ''. */
+  subLine: string;
+  /** Why an unpriced kid costs nothing yet: unborn and year one only; null when priced or grown. */
+  fromLine: string | null;
+  state: 'unborn' | 'year_one' | 'priced' | 'grown';
+}
+
 export interface GoalPlanView {
-  /** "Due now" when the deadline month has come with a shortfall, else "Save this month". */
+  /**
+   * "Due now" when the deadline month has come with a shortfall, else "Family plan" for KIDS and
+   * "Save this month" for every other type.
+   */
   heroLabel: HeroLabel;
   /** Who the plan is for: "for all 3 kids", "for your home", or a custom goal's name. */
   audience: string;
@@ -115,7 +141,18 @@ export interface GoalPlanView {
   coversLine: string | null;
   /** Market plans: the contributions-vs-growth case for leaving the money invested. */
   whyInvestLine: string | null;
+  /**
+   * What the hero shows. KIDS: the whole month, investMonthly plus every kid's everyday figure.
+   * Every other type: the same as investMonthly.
+   */
   monthlyTotal: number;
+  /**
+   * What the plan's units (529s, brokerage, baby funds, or a simple plan) ask for a month. Everything
+   * that grades, anchors or reasons about the plan reads this, never the everyday figure.
+   */
+  investMonthly: number;
+  /** KIDS only: one per kid in config order, what that kid costs this month. */
+  everyday?: EverydayView[];
   /**
    * What is due now in a deadline month or after it: the shortfall the plan can no longer spread
    * over months. Simple goals: the plan's dueNow. KIDS: the 529 and brokerage accounts' dueNow.
@@ -188,9 +225,12 @@ function isDueNowOnly(monthly: number, dueNow: number): boolean {
   return monthly === 0 && dueNow > 0;
 }
 
-/** The subtitle's lead: "$X/mo", or "$X due now" when nothing is left to spread over months. */
-function amountLead(monthly: number, dueNow: number): string {
-  return isDueNowOnly(monthly, dueNow) ? `${fmtMoney(dueNow)} due now` : `${fmtMoney(monthly)}/mo`;
+/**
+ * The subtitle's lead: "$X due now" when the invested units have nothing left to spread over months,
+ * else "$X/mo" of what the hero shows (KIDS: the whole month, everyday costs included).
+ */
+function amountLead(investMonthly: number, dueNow: number, shown: number = investMonthly): string {
+  return isDueNowOnly(investMonthly, dueNow) ? `${fmtMoney(dueNow)} due now` : `${fmtMoney(shown)}/mo`;
 }
 
 function pillOf(kind: RateKind): UnitPill {
@@ -274,15 +314,21 @@ function coversLineFor(
     relation = `${sentenceCase(funds)} the first year of everyday costs, saved ahead.`;
   }
 
-  const atHome = kids
+  // Only kids aged 1 to 17 are priced: year one is the baby fund (the sentence before says so) and
+  // the USDA study stops at 17. The family-size factor still counts every kid at home.
+  const home = kidsAtHome(kids, now);
+  const priced = kids
     .map((kid, i) => ({ label: kid.label.trim() || `Kid ${i + 1}`, age: kidAgeToday(kid.birthYear, kid.birthMonth, now) }))
-    .filter((k): k is { label: string; age: number } => k.age !== null && k.age <= 17);
+    .filter((k): k is { label: string; age: number } => k.age !== null && k.age >= 1 && k.age <= 17);
   const notYet = kids.some(kid => kidAgeToday(kid.birthYear, kid.birthMonth, now) === null);
   let today: string;
-  if (atHome.length > 0) {
-    const who = englishList(atHome.map(k => `${k.label} (${k.age === 0 ? 'under 1' : k.age})`));
-    today = `Everyday costs for ${who} run ~${fmtMoney(everydayMonthlyToday(kids, now))} a month by FRED's estimate`
+  if (priced.length > 0) {
+    const who = englishList(priced.map(k => `${k.label} (${k.age})`));
+    const cost = priced.reduce((sum, k) => sum + everydayMonthlyForKid(k.age, home), 0);
+    today = `Everyday costs for ${who} run ~${fmtMoney(cost)} a month by FRED's estimate`
       + (notYet ? '; a kid who has not arrived yet costs nothing until they do.' : '.');
+  } else if (home > 0) {
+    today = 'No everyday costs yet: the baby fund covers year one.';
   } else {
     today = notYet ? 'No everyday costs yet; they start when the first kid arrives.' : '';
   }
@@ -334,10 +380,11 @@ export function buildGoalPlanView(goal: GoalPlanInput, ctx: GoalPlanContext): Go
     view = simpleView(goal, ctx, imported, statusRate);
   }
 
-  const dueNowOnly = isDueNowOnly(view.monthlyTotal, view.dueNow);
+  // Due now reads the invested units only: a kid's everyday cost never makes a plan due.
+  const dueNowOnly = isDueNowOnly(view.investMonthly, view.dueNow);
   return {
     ...view,
-    heroLabel: dueNowOnly ? 'Due now' : 'Save this month',
+    heroLabel: dueNowOnly ? 'Due now' : view.kids ? 'Family plan' : 'Save this month',
     // Nothing is left to spread over months, so there is no monthly to explain.
     coversLine: dueNowOnly ? null : view.coversLine,
     whyInvestLine: dueNowOnly ? null : view.whyInvestLine,
@@ -412,7 +459,10 @@ function kidsView(
   const plans: AccountPlan[] = accounts.reduce<AccountPlan[]>(
     (all, a) => all.concat(a.perKid.map(k => k.plan)), []);
   const fundMonthly = unfinishedFunds.reduce((sum, f) => sum + f.row.plan.monthly, 0);
-  const monthlyTotal = accounts.reduce((sum, a) => sum + a.totals.monthly, 0) + fundMonthly;
+  const investMonthly = accounts.reduce((sum, a) => sum + a.totals.monthly, 0) + fundMonthly;
+  // The kids' whole month: the invested units plus what each kid at home costs today.
+  const everyday = everydayViews(kids, ctx.now);
+  const monthlyTotal = investMonthly + everyday.reduce((sum, e) => sum + e.monthly, 0);
   // Cash only when every unfinished account plan is cash; no unfinished plan reads as market.
   const unfinishedKinds = [...plans.map(p => p.rateKind), ...unfinishedFunds.map(f => f.row.plan.rateKind)];
   const rateKind: RateKind = unfinishedKinds.length > 0 && unfinishedKinds.every(k => k === 'cash') ? 'cash' : 'market';
@@ -533,15 +583,17 @@ function kidsView(
       ? whyInvestLineFor(reaches, fromYou + investedTotal('balance'), Math.max(0, reaches - investedTotal('balance') - fromYou), investedUnits)
       : null,
     monthlyTotal,
+    investMonthly,
+    everyday,
     dueNow,
     rateKind,
     rate,
     headline: fundOnly
       ? 'Ready for the first year'
       : kids.length === 1 ? 'Ready by their 18th birthday' : 'Ready by each 18th birthday',
-    subtitle: `${amountLead(monthlyTotal, dueNow)} ${audience}`,
+    subtitle: `${amountLead(investMonthly, dueNow, monthlyTotal)} ${audience}`,
     audience,
-    howFredHelps: howFredHelpsLine(monthlyTotal, units),
+    howFredHelps: howFredHelpsLine(investMonthly, units),
     status,
     progressPct: clampPct(balance, target),
     relative: perKidRelative.some(Boolean),
@@ -560,9 +612,38 @@ function kidsView(
 }
 
 /**
+ * One everyday entry per kid, in config order. Priced kids (1 to 17) carry their age band's figure,
+ * sized by how many kids are at home today; the rest read 0, with a line saying why for a kid who
+ * has not arrived or is in their first year.
+ */
+function everydayViews(kids: ReadonlyArray<KidInput>, now: Date): EverydayView[] {
+  const home = kidsAtHome(kids, now);
+  return kids.map((kid): EverydayView => {
+    const age = kidAgeToday(kid.birthYear, kid.birthMonth, now);
+    if (age === null) {
+      // "This year" with no month is not yet born, and has no month to name.
+      const when = kid.birthYear !== null && kid.birthMonth !== null
+        ? `From ${MONTH_ABBR[kid.birthMonth - 1]} ${kid.birthYear}`
+        : 'From the day they arrive';
+      return { monthly: 0, label: 'Everyday', subLine: '', fromLine: `${when}: the baby fund is year one`, state: 'unborn' };
+    }
+    if (age === 0) {
+      return { monthly: 0, label: 'Everyday', subLine: '', fromLine: 'The baby fund covers year one', state: 'year_one' };
+    }
+    if (age > 17) return { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };
+    return {
+      monthly: everydayMonthlyForKid(age, home),
+      label: everydayRowLabel(age),
+      subLine: everydaySubLine(age),
+      fromLine: null,
+      state: 'priced',
+    };
+  });
+}
+
+/**
  * One row per kid with a first-year fund account. The end month is the stored one; a kid saved
- * without it falls back to the firstYearDue rule. Every fund resolves its own rate kind from
- * the anchor date to its end month.
+ * without it falls back to the firstYearDue rule. Every baby fund is planned as cash.
  */
 function firstYearRows(
   kids: KidInput[],
@@ -587,7 +668,9 @@ function firstYearRows(
       due,
       undecided: kid.birthYear == null,
       marketRate: ctx.marketRate,
-      rateKind: kidAccountRateKind(anchorDate, due.year, due.month),
+      // Andy, 2026-11-10: money with a date on it stays out of the market, so a baby fund is cash
+      // however far out its end month is. kidAccountRateKind still decides the 529 and nest egg.
+      rateKind: 'cash',
       now: ctx.now,
     });
     const monthsSinceDue = (ctx.now.getFullYear() - due.year) * 12 + (ctx.now.getMonth() + 1 - due.month);
@@ -612,6 +695,7 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): SubView {
   const audience = goalAudience(goal);
   return {
     monthlyTotal: plan.monthly,
+    investMonthly: plan.monthly,
     dueNow: 0,
     // Trip money is short-term cash with no growth assumed.
     rateKind: 'cash',
@@ -677,6 +761,7 @@ function simpleView(
 
   return {
     monthlyTotal: plan.monthly,
+    investMonthly: plan.monthly,
     dueNow: plan.dueNow,
     rateKind: plan.rateKind,
     rate: plan.rate,

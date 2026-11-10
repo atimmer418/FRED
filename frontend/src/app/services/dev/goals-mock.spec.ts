@@ -76,6 +76,19 @@ describe('goals-mock (dev)', () => {
     for (const a of view.kids!) expect(a.perKid.map(k => k.plan.newYearLump)).toEqual(a.perKid.map(() => 0));
   });
 
+  it('the kids mock hero is the whole month: investMonthly plus each kid\'s everyday figure, baby fund in cash', () => {
+    const kids = buildMockGoals('kids_only', now)[0];
+    const view = buildGoalPlanView(kids, {
+      marketRate: 0.10, frequency: 'biweekly', now, rateKindOverride: null,
+    });
+    const everyday = view.everyday!.reduce((sum, e) => sum + e.monthly, 0);
+    expect(view.everyday!.length).toBe((kids.config as KidsConfig).kids.length);
+    expect(view.investMonthly).toBeGreaterThan(0);
+    expect(view.monthlyTotal).toBe(view.investMonthly + everyday);
+    expect(view.heroLabel).toBe('Family plan');
+    for (const row of view.firstYear!.rows) expect(row.plan.rateKind).toBe('cash');
+  });
+
   it('keeps vacation trips within the quiz range', () => {
     const vacation = buildMockGoals('one_of_each', now).find(g => g.type === 'VACATION')!;
     const trips = (vacation.config as VacationConfig).tripsPerYear;

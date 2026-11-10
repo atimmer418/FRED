@@ -136,12 +136,12 @@ export function kidsAtHome(
   }).length;
 }
 
-/** The row label for a kid's everyday cost, e.g. "Age 2 costs". */
+/** The row label for a kid's everyday cost, e.g. "Age 2 costs". Callers pass a priced age, 1 to 17; there is no range guard. */
 export function everydayRowLabel(age: number): string {
   return `Age ${age} costs`;
 }
 
-/** What the everyday cost covers at this age, by USDA band. */
+/** What the everyday cost covers at this age, by USDA band. Callers pass a priced age, 1 to 17; there is no range guard. */
 export function everydaySubLine(age: number): string {
   if (age <= 2) return 'Food, clothes, diapers and childcare';
   if (age <= 5) return 'Food, clothes, preschool and toys';
@@ -155,7 +155,8 @@ export function everydaySubLine(age: number): string {
  * What the kids at home cost this month by FRED's estimate: the sum of each kid's own figure
  * (everydayMonthlyForKid, rounded to the nearest $10 per kid), sized by the number of kids at home
  * today (an only child at home is priced as an only child, however many are planned). Unborn kids
- * and kids 18 or older add nothing; the USDA study stops at 17.
+ * and kids 18 or older add nothing; the USDA study stops at 17. This is the documented family-sum
+ * helper the docs and specs use; the plan view sums its own everyday[] entries instead.
  */
 export function everydayMonthlyToday(
   kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>,

@@ -147,6 +147,16 @@ describe('GoalUnitDetailSheetComponent', () => {
     expect(onBalance).toHaveBeenCalledWith(5000);
   }));
 
+  it('a save that leaves the balance unchanged (it failed) puts the old balance back in the field', fakeAsync(() => {
+    const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance });
+    blur(fixture, '.ud-bal input', '9,999');
+    flushMicrotasks();
+    fixture.detectChanges();
+    expect(onBalance).toHaveBeenCalledWith(9999);
+    expect(input(fixture, '.ud-bal input').value).toBe('4200');
+  }));
+
   it('an emptied Saved so far field saves 0', fakeAsync(() => {
     const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
     const fixture = mount(signal(nestEgg), { onBalance });

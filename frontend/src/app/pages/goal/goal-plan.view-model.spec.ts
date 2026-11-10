@@ -754,12 +754,20 @@ describe('buildGoalPlanView one-screen page', () => {
       + "Everyday costs for A (6) run ~$1,860 a month by FRED's estimate.",
     );
 
-    // Mae is under one: at home but not priced, so the line says the baby fund covers year one.
+    // Mae is under one with no baby fund: at home but not priced, so the line says when costs start.
     const newborn = buildGoalPlanView(family([kid('Mae', 2026, 10)], { plan529Target: 0 }), ctx());
     expect(newborn.coversLine).toBe(
       'The monthly is the nest egg plus everyday costs. The nest egg is on top of everyday costs. '
-      + 'No everyday costs yet: the baby fund covers year one.',
+      + 'No everyday costs yet: they start at the first birthday.',
     );
+
+    // Mae under one WITH a baby fund: the fund covers year one.
+    const funded = buildGoalPlanView(
+      family([kid('Mae', 2026, 10, { due: [2027, 10], target: 16_500 })], { plan529Target: 0 }),
+      ctx(),
+    );
+    expect(funded.coversLine).toContain('No everyday costs yet: the baby fund covers year one.');
+    expect(funded.coversLine).not.toContain('they start at the first birthday');
 
     // A kid under one beside a priced kid: only the priced kid is named, sized as one of two at home.
     const withBaby = buildGoalPlanView(family([kid('Mae', 2026, 10), kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
@@ -898,7 +906,7 @@ describe('buildGoalPlanView one-screen page', () => {
     it('prices each kid at home and leaves the rest at 0: unborn, year one, priced, grown', () => {
       // Expected Mar 2027 (unborn); born this month (year one); born Mar 2024 (priced, 2); born Jan 2008 (grown, 18).
       const view = buildGoalPlanView(family([
-        kid('Ivy', Y + 1, 3),
+        kid('Ivy', Y + 1, 3, { due: [Y + 2, 3], target: 16_500 }),
         kid('Mae', Y, 11),
         kid('Ellie', 2024, 3),
         kid('Sam', 2008, 1),
@@ -912,7 +920,7 @@ describe('buildGoalPlanView one-screen page', () => {
       }));
       // Mae has no baby fund, so her everyday costs simply start at one.
       expect(view.everyday![1]).toEqual(jasmine.objectContaining({
-        label: 'Everyday', subLine: '', fromLine: 'Everyday costs start at the first birthday.',
+        label: 'Everyday', subLine: '', fromLine: 'Everyday costs start at the first birthday',
       }));
       expect(view.everyday![2]).toEqual(jasmine.objectContaining({
         label: 'Age 2 costs', subLine: 'Food, clothes, diapers and childcare', fromLine: null,
@@ -920,22 +928,57 @@ describe('buildGoalPlanView one-screen page', () => {
       expect(view.everyday![3]).toEqual(jasmine.objectContaining({ label: 'Everyday', subLine: '', fromLine: null }));
     });
 
-    it('a kid under one with a baby fund reads "The baby fund covers year one"; without one, "Everyday costs start at the first birthday."', () => {
+    it('a kid under one with a baby fund reads "The baby fund covers year one"; without one, "Everyday costs start at the first birthday" (no trailing period)', () => {
       const view = buildGoalPlanView(family([
         kid('Mae', Y, 11, { due: [Y + 1, 11], target: 16_500 }),
         kid('Bo', Y, 11),
       ]), ctx());
       expect(view.everyday!.map(e => e.state)).toEqual(['year_one', 'year_one']);
       expect(view.everyday![0].fromLine).toBe('The baby fund covers year one');
-      expect(view.everyday![1].fromLine).toBe('Everyday costs start at the first birthday.');
+      expect(view.everyday![1].fromLine).toBe('Everyday costs start at the first birthday');
     });
 
     it('an unborn kid with no month, an undated kid, and one expected this year with no month read "From the day they arrive"', () => {
-      const view = buildGoalPlanView(family([kid('A', Y + 1, null), kid('B', null, null), kid('C', Y, null)]), ctx());
+      const view = buildGoalPlanView(family([
+        kid('A', Y + 1, null, { due: [Y + 2, 12], target: 16_500 }),
+        kid('B', null, null, { due: [Y + 3, 11], target: 16_500 }),
+        kid('C', Y, null, { due: [Y + 1, 12], target: 16_500 }),
+      ]), ctx());
       expect(view.everyday!.map(e => e.state)).toEqual(['unborn', 'unborn', 'unborn']);
       for (const e of view.everyday!) {
         expect(e.fromLine).toBe('From the day they arrive: the baby fund is year one');
         expect(e.monthly).toBe(0);
+      }
+    });
+
+    it('an unborn kid whose baby fund is off promises no fund: "everyday costs start at the first birthday"', () => {
+      const view = buildGoalPlanView(family([
+        kid('Ivy', Y + 1, 3),
+        kid('A', Y + 1, null),
+        kid('B', null, null),
+        kid('C', Y, null),
+      ]), ctx());
+      expect(view.everyday!.map(e => e.state)).toEqual(['unborn', 'unborn', 'unborn', 'unborn']);
+      expect(view.everyday!.map(e => e.fromLine)).toEqual([
+        'From Mar 2027: everyday costs start at the first birthday',
+        'From the day they arrive: everyday costs start at the first birthday',
+        'From the day they arrive: everyday costs start at the first birthday',
+        'From the day they arrive: everyday costs start at the first birthday',
+      ]);
+      for (const e of view.everyday!) expect(e.fromLine).not.toContain('baby fund');
+    });
+
+    it('no from line ends with a period, in any state', () => {
+      const view = buildGoalPlanView(family([
+        kid('Ivy', Y + 1, 3, { due: [Y + 2, 3], target: 16_500 }),
+        kid('Jo', Y + 1, 3),
+        kid('Mae', Y, 11, { due: [Y + 1, 11], target: 16_500 }),
+        kid('Bo', Y, 11),
+        kid('Ellie', 2024, 3),
+        kid('Sam', 2008, 1),
+      ]), ctx());
+      for (const e of view.everyday!) {
+        if (e.fromLine !== null) expect(e.fromLine).not.toMatch(/\.$/);
       }
     });
 

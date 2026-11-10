@@ -81,7 +81,10 @@ const HERO_COUNT_MS = 600;
 const NO_EVERYDAY: EverydayView = { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const STATUS_CHIP: Record<GoalPlanView['status']['kind'], string> = {
+/** Every word the status chip can read. A new chip word must be added here and given a tone. */
+type ChipText = 'Plan started' | 'Plan updated' | 'On plan' | 'Ahead' | 'Behind' | 'Done' | 'Update balance';
+
+const STATUS_CHIP: Record<GoalPlanView['status']['kind'], Exclude<ChipText, 'Update balance'>> = {
   started: 'Plan started',
   imported: 'Plan updated',
   on_plan: 'On plan',
@@ -90,8 +93,8 @@ const STATUS_CHIP: Record<GoalPlanView['status']['kind'], string> = {
   done: 'Done',
 };
 
-/** The unit sheet's Status tone for each chip word. */
-const STATUS_TONE: Record<string, NonNullable<UnitDetail['status']>['tone']> = {
+/** The unit sheet's Status tone for each chip word. Keyed by ChipText, so a missing word fails to compile. */
+const STATUS_TONE: Record<ChipText, NonNullable<UnitDetail['status']>['tone']> = {
   'Ahead': 'good',
   'On plan': 'good',
   'Done': 'good',
@@ -238,7 +241,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
   readonly heroAmount = computed(() => this.heroCounting() ?? this.view().monthlyTotal);
 
   /** Plan started / On plan / Ahead / Behind / Done, or Update balance once a graded log is over 60 days old. */
-  readonly statusChip = computed(() => {
+  readonly statusChip = computed<ChipText>(() => {
     const s = this.view().status;
     const graded = s.kind === 'ahead' || s.kind === 'on_plan' || s.kind === 'behind';
     if (this.mode() === 'saved' && s.stale && graded) return 'Update balance';
@@ -564,13 +567,17 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   /**
    * The status chip: "Update balance" opens the balance. A kids goal opens the sheet for the first
-   * unfinished unit of the kid card in view and focuses its Saved so far field; every other type
-   * scrolls to its inline tile and focuses it.
+   * unfinished unit of the kid card in view (or, when that card is all finished, of the first other
+   * card in order with one) and focuses its Saved so far field; every other type scrolls to its
+   * inline tile and focuses it.
    */
   async onChipTap(): Promise<void> {
     if (this.statusChip() !== 'Update balance') return;
     if (this.view().kids) {
-      const card = this.kidCards()[this.activeKid()];
+      const cards = this.kidCards();
+      const active = cards[this.activeKid()];
+      const ordered = active ? [active, ...cards.filter(c => c !== active)] : cards;
+      const card = ordered.find(c => c.units.some(u => !u.finished));
       const unit = card?.units.find(u => !u.finished);
       if (!card || !unit) return;
       const modal = await this.openUnitDetail(card.index, unit.key);
@@ -739,8 +746,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
   }
 
   /** The unit sheet's Status tone for a chip word: Ahead / On plan / Done good, Behind warn, and so on. */
-  private statusTone(chip: string): NonNullable<UnitDetail['status']>['tone'] {
-    return STATUS_TONE[chip] ?? 'muted';
+  private statusTone(chip: ChipText): NonNullable<UnitDetail['status']>['tone'] {
+    return STATUS_TONE[chip];
   }
 
   /** The everyday line's sheet: a FRED estimate, no balance and no status. Null unless priced. */

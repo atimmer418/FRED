@@ -110,6 +110,7 @@ of how much they should save this month and how much they should invest this mon
   "On plan", "Ahead", "Behind", "Done", or "Update balance" when the last log is over 60 days
   old. Colors follow the chip: green for Ahead / On plan / Done, amber for Behind, blue for
   Update balance, gray for Plan started / Plan updated.
+- 2026-11-10, final review: an unborn kid whose baby fund is off reads 'everyday costs start at the first birthday'; no trailing periods on from lines.
 
 ## What the user sees
 
@@ -144,8 +145,11 @@ EVERYDAY                                          $1,910
   sheet. The rename pen in the header is unchanged.
 - Everyday group for a kid not yet born: no amount; one line in place of the row, "From Mar 2027:
   the baby fund is year one" (month and year from the kid's expected date; "From the day they
-  arrive" when undated or expected this year with no month, the "This year" sub-line case). For
-  a kid under one: "The baby fund covers year one". For 18 and up: no group.
+  arrive" when undated or expected this year with no month, the "This year" sub-line case). An
+  unborn kid whose baby fund is off reads "From Mar 2027: everyday costs start at the first
+  birthday" (same date rule). For a kid under one: "The baby fund covers year one", or
+  "Everyday costs start at the first birthday" with no fund. For 18 and up: no group. No from
+  line ends with a period.
 - Zone label: "PER KID  Tap for details" on the left, the status chip and dots on the right.
 
 Everyday sub line by USDA band (the figure's age band, not the stage grouping the quiz uses):

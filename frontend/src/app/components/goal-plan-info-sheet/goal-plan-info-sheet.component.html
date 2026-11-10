@@ -4,7 +4,7 @@
   <p class="pi-sub">The same three notes for every unit of the family plan.</p>
 
   <div class="pi-notes">
-    @for (n of notes; track n.lead) {
+    @for (n of notes; track $index) {
       <div class="fd-how">
         <span class="material-symbols-outlined">{{ n.icon }}</span>
         <p><b>{{ n.lead }}</b> {{ n.text }}</p>

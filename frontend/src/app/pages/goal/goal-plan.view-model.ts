@@ -300,7 +300,7 @@ const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  */
 function coversLineFor(
   units: CoveredUnits,
-  kids: ReadonlyArray<{ label: string; birthYear: number | null; birthMonth: number | null }>,
+  kids: ReadonlyArray<{ label: string; birthYear: number | null; birthMonth: number | null; accounts: KidInput['accounts'] }>,
   everyday: ReadonlyArray<EverydayView>,
   now: Date,
 ): string | null {
@@ -334,7 +334,11 @@ function coversLineFor(
     today = `Everyday costs for ${who} run ~${fmtMoney(cost)} a month by FRED's estimate`
       + (notYet ? '; a kid who has not arrived yet costs nothing until they do.' : '.');
   } else if (everyday.some(e => e.state === 'year_one')) {
-    today = 'No everyday costs yet: the baby fund covers year one.';
+    // Only a kid under one with a baby fund has year one paid for; otherwise costs start at one.
+    const funded = kids.some((kid, i) => everyday[i]?.state === 'year_one' && !!kid.accounts.firstYear);
+    today = funded
+      ? 'No everyday costs yet: the baby fund covers year one.'
+      : 'No everyday costs yet: they start at the first birthday.';
   } else {
     today = notYet ? 'No everyday costs yet; they start when the first kid arrives.' : '';
   }
@@ -627,15 +631,17 @@ function everydayViews(kids: ReadonlyArray<KidInput>, now: Date): EverydayView[]
   return kids.map((kid): EverydayView => {
     const age = kidAgeToday(kid.birthYear, kid.birthMonth, now);
     if (age === null) {
-      // "This year" with no month is not yet born, and has no month to name.
+      // "This year" with no month is not yet born, and has no month to name. With the baby fund
+      // switched off nothing pays for year one, so the line promises no fund.
       const when = kid.birthYear !== null && kid.birthMonth !== null
         ? `From ${MONTH_ABBR[kid.birthMonth - 1]} ${kid.birthYear}`
         : 'From the day they arrive';
-      return { monthly: 0, label: 'Everyday', subLine: '', fromLine: `${when}: the baby fund is year one`, state: 'unborn' };
+      const what = kid.accounts.firstYear ? 'the baby fund is year one' : 'everyday costs start at the first birthday';
+      return { monthly: 0, label: 'Everyday', subLine: '', fromLine: `${when}: ${what}`, state: 'unborn' };
     }
     if (age === 0) {
       // No baby fund: nothing in the plan pays for year one, so the line just says when costs start.
-      const fromLine = kid.accounts.firstYear ? 'The baby fund covers year one' : 'Everyday costs start at the first birthday.';
+      const fromLine = kid.accounts.firstYear ? 'The baby fund covers year one' : 'Everyday costs start at the first birthday';
       return { monthly: 0, label: 'Everyday', subLine: '', fromLine, state: 'year_one' };
     }
     if (age > 17) return { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };

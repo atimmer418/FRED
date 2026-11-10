@@ -38,8 +38,8 @@ export interface UnitDetail {
 
 /**
  * One kid unit, in detail: the 22 and 30 milestones, the cash explanation, the per-paycheck
- * figure, the Saved so far balance, the Status word and the sources, opened by tapping a unit
- * row's label on the plan page. The detail is live (a signal), so a saved balance re-renders in
+ * figure, the Saved so far balance, the Status word and the sources, opened by tapping anywhere
+ * on a unit row on the plan page. The detail is live (a signal), so a saved balance re-renders in
  * place; the sheet closes itself when the unit goes away. Presented with BOTTOM_SHEET_MODAL_OPTS.
  */
 @Component({
@@ -79,7 +79,12 @@ export class GoalUnitDetailSheetComponent {
     const digits = field.value.split('.')[0].replace(/[^0-9]/g, '');
     const value = Math.max(0, Math.round(Number(digits || '0')));
     field.value = String(value);
-    void this.onBalance(value);
+    // Re-sync to the live balance once the save settles: a failed save (the page toasts and the
+    // balance stays) must not leave the rejected number in the field.
+    void this.onBalance(value).then(() => {
+      const d = this.detail();
+      if (d && d.balance !== null) field.value = this.wholeDollars(d.balance);
+    });
   }
 
   async openInfo(): Promise<void> {

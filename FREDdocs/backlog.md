@@ -435,7 +435,6 @@ One portfolio, split across long-term goals by share: each long-term goal (Freed
 ## FRED-233 — Family plan everyday line
 Family plan everyday line: each kid card on the family plan page shows an Invest group and an Everyday group (FRED's age-band estimate of what a kid costs this month, USDA 2015 figures inflated to today and adjusted for kids at home); the card header and the "Family plan" hero are the kids' whole month; the baby fund is always cash; the page's info cards and inline balance field move into each row's detail sheet. Built on feature/goals-v3-polish, awaiting merge. Spec: docs/superpowers/specs/2026-11-10-family-everyday-plan-design.md.
 
-
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._
 

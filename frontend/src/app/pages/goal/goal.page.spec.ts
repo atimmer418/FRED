@@ -553,6 +553,42 @@ describe('GoalPage', () => {
     expect(text(fixture, '.fd-hero-label')).toBe('Family plan');
   });
 
+  it('each kid card header is the kid\'s whole month and the cards add up to the hero, across three cards (priced, unborn, undated)', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    finishCountUp(fixture);
+    const page = fixture.componentInstance;
+    const cards = page.kidCards();
+    expect(cards.length).toBe(3);
+    expect(cards.map(c => c.everyday.state)).toEqual(['priced', 'unborn', 'unborn']);
+    expect(cards[0].everyday.monthly).toBeGreaterThan(0);
+    cards.forEach((c, i) => expect(c.everyday).toBe(page.view().everyday![i]));
+    cards.forEach(c => expect(c.monthly).toBe(c.investMonthly + c.everyday.monthly));
+    expect(cards.reduce((s, c) => s + c.investMonthly, 0)).toBe(page.view().investMonthly);
+    expect(cards.reduce((s, c) => s + c.monthly, 0)).toBe(page.view().monthlyTotal);
+    expect(text(fixture, '.fd-hero-label')).toBe('Family plan');
+  });
+
+  it('a card whose kid is 18 or older has no Everyday group and no everyday row, but keeps its Invest group', async () => {
+    const base = kidsGoalFixture(6);
+    const config: KidsConfig = {
+      ...(base.config as KidsConfig),
+      kids: [
+        { label: 'Ellie', birthYear: YEAR - 2, birthMonth: 5, accounts: { plan529: fresh(), brokerage: fresh() } },
+        { label: 'Sam', birthYear: YEAR - 19, birthMonth: 1, accounts: { plan529: fresh(), brokerage: fresh() } },
+      ],
+    };
+    const fixture = await create({ id: '6' }, { goals: [{ ...base, config }] });
+    const page = fixture.componentInstance;
+    expect(page.kidCards()[1].everyday.state).toBe('grown');
+    const card = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[1];
+    expect(card.querySelector('.gp-group.second')).toBeNull();
+    expect(card.querySelector('.gp-krow.everyday')).toBeNull();
+    expect(card.querySelector('.gp-from')).toBeNull();
+    const groups = Array.from(card.querySelectorAll('.gp-group')) as HTMLElement[];
+    expect(groups.length).toBe(1);
+    expect(groups[0].textContent).toContain('Invest');
+  });
+
   it('the sub line carries the age: born kids "Born 2024 · age 2", under a year "under 1", unborn unchanged', async () => {
     const kid = (label: string, birthYear: number | null, birthMonth: number | null) =>
       ({ label, birthYear, birthMonth, accounts: { plan529: fresh(), brokerage: fresh() } });
@@ -829,6 +865,54 @@ describe('GoalPage', () => {
     expect(detail.kidLabel).toBe('Theo');
     expect(detail.title).toBe('College');
     // Focus lands only once present() resolved.
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('the Update balance chip falls through to the next kid card with an unfinished unit when the active card is all finished', async () => {
+    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
+    const born = new Date(NOW.getFullYear(), NOW.getMonth() - 8, 1);
+    const pastDue = new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1);
+    const due = new Date(NOW.getFullYear(), NOW.getMonth() + 10, 1);
+    const config: KidsConfig = {
+      // A baby-fund-only family: Theo's fund ran its course, Ivy's is still saving.
+      plan529Target: 0,
+      brokerageTarget: 0,
+      firstYearFund: true,
+      kids: [
+        {
+          label: 'Theo', birthYear: born.getFullYear(), birthMonth: born.getMonth() + 1,
+          firstYearTarget: 20_800, firstYearDueYear: pastDue.getFullYear(), firstYearDueMonth: pastDue.getMonth() + 1,
+          accounts: { plan529: fresh(), brokerage: fresh(), firstYear: fresh(20_800, logged) },
+        },
+        {
+          label: 'Ivy', birthYear: due.getFullYear(), birthMonth: due.getMonth() + 1,
+          firstYearTarget: 16_500, firstYearDueYear: due.getFullYear() + 1, firstYearDueMonth: due.getMonth() + 1,
+          accounts: {
+            plan529: fresh(), brokerage: fresh(),
+            firstYear: { balance: 2_000, balanceUpdatedAt: logged, anchorBalance: 2_000, anchorMonthly: 700 },
+          },
+        },
+      ],
+    };
+    const goal: Goal = { ...kidsGoalFixture(5), config, planAnchoredAt: logged, anchorMonthly: 700 };
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    expect(page.statusChip()).toBe('Update balance');
+    expect(page.kidCards()[0].units.map(u => [u.key, u.finished])).toEqual([['firstYear', true]]);
+    expect(page.kidCards()[1].units.map(u => [u.key, u.finished])).toEqual([['firstYear', false]]);
+
+    const modalEl = document.createElement('div');
+    modalEl.innerHTML = '<div class="ud-bal"><input type="text" /></div>';
+    const focus = spyOn(modalEl.querySelector('input')!, 'focus');
+    Object.assign(modalEl, { present: async () => {}, onDidDismiss: async () => ({}) });
+    modalCtrl.create.and.resolveTo(modalEl as unknown as HTMLIonModalElement);
+
+    page.activeKid.set(0);
+    await page.onChipTap();
+    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
+    const detail = sheetProps().detail()!;
+    expect(detail.kidLabel).toBe('Ivy');
+    expect(detail.title).toBe('Baby fund');
     expect(focus).toHaveBeenCalledTimes(1);
   });
 

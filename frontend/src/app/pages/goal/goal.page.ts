@@ -518,8 +518,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   /** Opens the detail sheet for one kid unit: milestones, cash note, sources, per paycheck. */
   async openUnitDetail(kidIndex: number, unit: KidBalanceKey): Promise<void> {
-    const detail = this.unitDetail(kidIndex, unit);
-    if (!detail) return;
+    if (!this.unitDetail(kidIndex, unit)) return;
+    const detail = computed(() => this.unitDetail(kidIndex, unit));
     const modal = await this.modalCtrl.create({
       component: GoalUnitDetailSheetComponent,
       componentProps: { detail },
@@ -748,11 +748,14 @@ export class GoalPage implements OnInit, ViewWillEnter {
     return {
       kidLabel: card.label,
       title: row.title,
+      kind: unit === 'firstYear' ? 'fund' : 'account',
       targetLine: row.targetLine,
       pill: row.pill,
       monthly: row.monthly,
       perPaycheck,
       finished: row.finished,
+      balance: row.balance,
+      status: null,
       milestones,
       notes,
       sourcesLine,

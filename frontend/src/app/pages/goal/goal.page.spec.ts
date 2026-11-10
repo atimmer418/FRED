@@ -527,7 +527,7 @@ describe('GoalPage', () => {
     expect(modalCtrl.create).toHaveBeenCalledTimes(1);
     const args = modalCtrl.create.calls.mostRecent().args[0];
     expect(args.component).toBe(GoalUnitDetailSheetComponent);
-    const detail = (args.componentProps as { detail: { title: string; kidLabel: string; milestones: unknown[]; pill: string; perPaycheck: number | null } }).detail;
+    const detail = (args.componentProps as { detail: () => { title: string; kidLabel: string; milestones: unknown[]; pill: string; perPaycheck: number | null } }).detail();
     expect(detail.title).toBe('College');
     expect(detail.kidLabel).toBe('Ellie');
     expect(detail.pill).toBe('Invested');

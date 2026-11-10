@@ -29,6 +29,36 @@
   color: #9aa6ba;
 }
 
+.ud-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 4px;
+
+  h3 { margin: 0; }
+}
+
+.ud-info {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: #f1f5f9;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .material-symbols-outlined { font-size: 19px; }
+
+  &:active { opacity: 0.8; }
+}
+
 h3 {
   display: flex;
   align-items: center;
@@ -47,10 +77,43 @@ h3 {
   margin: 0 0 14px;
 }
 
+// Condensed tiles: two rows fit above the milestones.
+.ud-tiles .fd-tile {
+  padding: 9px 11px;
+}
+
+.ud-tiles-2 {
+  margin-top: 9px;
+}
+
+.ud-bal {
+  .fd-tile-edit { margin-top: 4px; }
+  .fd-tile-input { font-size: 16px; }
+}
+
+.ud-status {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &.good { color: #059669; background: #ecfdf5; }
+  &.warn { color: #b45309; background: #fffbeb; }
+  &.info { color: #2563eb; background: #eef4ff; }
+  &.muted { color: #6b7280; background: #f1f5f9; }
+}
+
 .ud-tile-val {
   display: block;
   margin-top: 4px;
-  font-size: 19px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;

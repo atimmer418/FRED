@@ -76,9 +76,9 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
     },
     {
       label: 'Second kid',
-      birthYear: null,
-      birthMonth: null,
-      // Not yet born: an invested first-year fund, due 36 months after the plan was anchored.
+      birthYear: year + 1,
+      birthMonth: 3,
+      // Not yet born (expected next March): a first-year fund, due 36 months after the plan was anchored.
       firstYearTarget: 20800,
       firstYearDueYear: fundDue.year,
       firstYearDueMonth: fundDue.month,

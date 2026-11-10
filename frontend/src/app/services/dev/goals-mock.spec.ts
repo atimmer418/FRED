@@ -34,11 +34,12 @@ describe('goals-mock (dev)', () => {
     expect(ef.planRate).toBe(0.04);
   });
 
-  it('gives the undecided kid an invested first-year fund due 36 months after the anchor', () => {
+  it('gives the expected kid (next March) a first-year fund due 36 months after the anchor', () => {
     const kids = buildMockGoals('kids_only', now)[0];
     const cfg = kids.config as KidsConfig;
     expect(cfg.firstYearFund).toBeTrue();
-    const kid = cfg.kids.find(k => k.birthYear === null)!;
+    const kid = cfg.kids.find(k => k.birthYear === now.getFullYear() + 1)!;
+    expect(kid.birthMonth).toBe(3);
     expect(kid.firstYearTarget).toBe(20800);
     expect(kid.accounts.firstYear).toBeTruthy();
     // anchored 4 months before now (Jul 2026), so due Jul 2029: 32 months after Nov 2026
@@ -76,7 +77,7 @@ describe('goals-mock (dev)', () => {
     for (const a of view.kids!) expect(a.perKid.map(k => k.plan.newYearLump)).toEqual(a.perKid.map(() => 0));
   });
 
-  it('the kids mock hero is the whole month: investMonthly plus each kid\'s everyday figure, baby fund in cash', () => {
+  it('the kids mock hero is the whole month, now that the second kid is expected next March: one priced kid, one year-one line', () => {
     const kids = buildMockGoals('kids_only', now)[0];
     const view = buildGoalPlanView(kids, {
       marketRate: 0.10, frequency: 'biweekly', now, rateKindOverride: null,
@@ -85,6 +86,9 @@ describe('goals-mock (dev)', () => {
     expect(view.everyday!.length).toBe((kids.config as KidsConfig).kids.length);
     expect(view.investMonthly).toBeGreaterThan(0);
     expect(view.monthlyTotal).toBe(view.investMonthly + everyday);
+    expect(view.everyday!.map(e => e.state)).toEqual(['priced', 'unborn']);
+    expect(view.everyday![1].monthly).toBe(0);
+    expect(view.everyday![1].fromLine).toBe('From Mar 2027: the baby fund is year one');
     expect(view.heroLabel).toBe('Family plan');
     for (const row of view.firstYear!.rows) expect(row.plan.rateKind).toBe('cash');
   });

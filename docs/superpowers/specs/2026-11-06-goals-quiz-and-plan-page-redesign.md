@@ -290,6 +290,8 @@ car", "for N trips a year", "for your safety net", "for the wedding", or the goa
 When the plan is at its deadline with a shortfall, the hero keeps the existing "due now" treatment
 (amendment in the v3 design).
 
+> **Changed 2026-11-10 (Andy).** For KIDS the hero is the kids' whole month (invest plus everyday), labeled "Family plan". See `2026-11-10-family-everyday-plan-design.md`.
+
 ### The band under the hero
 
 - **KIDS: the family timeline** (Andy's pick, "Band A"). A thin bar from the earliest event to the
@@ -310,6 +312,8 @@ right edge.
 
 > **Changed 2026-11-10 (Andy).** No peek: each kid card is the full width of the hero card above
 > it, and the dots alone say there are more.
+
+> **Changed 2026-11-10 (Andy).** Each kid card now has an Invest group and an Everyday group, and its header figure is that kid's whole month. See `2026-11-10-family-everyday-plan-design.md`.
 
 Each card: header row with a `child_care` avatar, the name (with a small `edit` pen
 after it), a sub-line ("Born 2024", "This year", "Arrives 2028", "Not dated yet"; no "18 in

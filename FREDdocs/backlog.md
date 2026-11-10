@@ -432,6 +432,9 @@ Goals v3.1: quiz and plan page redesign. Every goal type is set up through one f
 ## FRED-232 — One portfolio, split across long-term goals by share
 One portfolio, split across long-term goals by share: each long-term goal (Freedom Date, Kids nest eggs and 529 targets, a house years out) owns a share of the single FRED portfolio, every paycheck splits by those shares, each slice shows its own growth and progress, and the kids' nest eggs move to custodial accounts (Alpaca Broker API lists custodial accounts; verify before writing copy). Short goals (under three years, vacations, emergency funds) stay in cash outside it. Andy: "that is the goal of FRED." Starts after FRED-231 (Goals v3.1) ships; the "How FRED helps" copy is live before it. Source: Follow-ups in docs/superpowers/specs/2026-11-06-goals-quiz-and-plan-page-redesign.md.
 
+## FRED-233 — Family plan everyday line
+Family plan everyday line: each kid card on the family plan page shows an Invest group and an Everyday group (FRED's age-band estimate of what a kid costs this month, USDA 2015 figures inflated to today and adjusted for kids at home); the card header and the "Family plan" hero are the kids' whole month; the baby fund is always cash; the page's info cards and inline balance field move into each row's detail sheet. Built on feature/goals-v3-polish, awaiting merge. Spec: docs/superpowers/specs/2026-11-10-family-everyday-plan-design.md.
+
 
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._

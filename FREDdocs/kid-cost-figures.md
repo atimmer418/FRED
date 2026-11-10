@@ -91,6 +91,37 @@ Monthly, per kid / family: 1 kid $1,950 / $1,950; 2 kids $1,540 / $3,070; 3 kids
 
 First-year targets by birth rank: rank 1 $25,700; rank 2 $20,800; rank 3 and later $16,500.
 
+## Everyday figure per kid
+
+The kid card on the family plan page shows what a kid costs this month, as FRED's own estimate (the
+inflation math and the family-size extension are never government numbers).
+
+Formula, per kid: USDA band annual for the kid's age x inflation factor x family-size factor for the
+kids at home / 12, rounded to the nearest $10 per kid. The family figure is the sum of the per-kid
+rounded figures. Kids at home are the kids aged 0 to 17 today. The figure is $0 under one (the baby
+fund is year one) and at 18 and up.
+
+Sub line under the Everyday row, by USDA band:
+
+| Age | Sub line |
+|---|---|
+| under 1 | (no row amount) The baby fund covers year one |
+| 1 to 2 | Food, clothes, diapers and childcare |
+| 3 to 5 | Food, clothes, preschool and toys |
+| 6 to 8 | Food, clothes, school and activities |
+| 9 to 11 | Food, clothes, sports and school trips |
+| 12 to 14 | Food, clothes, a phone and activities |
+| 15 to 17 | Food, clothes, driving and activities |
+
+Row label: "Age N costs" (whole years). Example, one kid aged 2: 12,680 x 1.421586 x 1.27 / 12 = 1,907.6,
+so ~$1,910.
+
+Where it is shown: the kid card's Everyday group, the Everyday row's detail sheet, and the "What the
+monthly covers" note. The card header and the "Family plan" hero add it to the invested units.
+
+As of 2026-11-10 the baby fund is always cash-planned (the Cash pill, cash rate), never invested.
+Design: `docs/superpowers/specs/2026-11-10-family-everyday-plan-design.md`.
+
 ## The January gift lump (gift days)
 
 **Removed from the plan page 2026-11-08.** Kids plans are monthly only. `giftDays` is still a field

@@ -27,7 +27,7 @@ import {
 } from '../../models/goal.model';
 import { isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
-import { kidCostFigures } from '../../utils/kid-cost.utils';
+import { kidAgeToday, kidCostFigures } from '../../utils/kid-cost.utils';
 import { CHILDBIRTH_DOLLAR_YEAR_LABEL, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
@@ -36,7 +36,7 @@ import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GoalForm, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso } from './goal-form.model';
 import {
-  GoalPlanInput, GoalPlanView, KidAccountKey, UnitPill, buildGoalPlanView, fmtCompact, fmtMoney,
+  EverydayView, GoalPlanInput, GoalPlanView, KidAccountKey, UnitPill, buildGoalPlanView, fmtCompact, fmtMoney,
 } from './goal-plan.view-model';
 
 /** A kid's balance: the 529, the brokerage, or the baby fund. */
@@ -63,13 +63,21 @@ export interface KidUnitRow {
 export interface KidCard {
   index: number;
   label: string;
-  /** "Born 2024", "This year", "Arrives 2028", "Not dated yet". */
+  /** "Born 2024 · age 2", "Born 2026 · under 1", "This year", "Arrives 2028", "Not dated yet". */
   subLine: string;
+  /** The card's header figure: the kid's whole month, investMonthly plus the everyday figure. */
   monthly: number;
+  /** What this kid's unfinished units invest a month. */
+  investMonthly: number;
+  /** This kid's everyday cost line, from the view in config order. */
+  everyday: EverydayView;
   units: KidUnitRow[];
 }
 
 const HERO_COUNT_MS = 600;
+
+/** A kid card's everyday line when the view carries none: nothing a month. */
+const NO_EVERYDAY: EverydayView = { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const STATUS_CHIP: Record<GoalPlanView['status']['kind'], string> = {
@@ -278,11 +286,15 @@ export class GoalPage implements OnInit, ViewWillEnter {
           pill: row.pill, monthly: row.plan.monthly, finished: false, balance: row.balance,
         });
       }
+      const investMonthly = units.reduce((sum, u) => sum + (u.finished ? 0 : u.monthly), 0);
+      const everyday = v.everyday?.[i] ?? NO_EVERYDAY;
       return {
         index: i,
         label: kid.label.trim() || `Kid ${i + 1}`,
         subLine: this.kidSubLine(kid),
-        monthly: units.reduce((sum, u) => sum + (u.finished ? 0 : u.monthly), 0),
+        monthly: investMonthly + everyday.monthly,
+        investMonthly,
+        everyday,
         units,
       };
     });
@@ -678,11 +690,17 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   // ── Internals: kid copy ─────────────────────────────────────────────────────
 
-  /** "Born 2024", "This year", "Arrives 2028", "Not dated yet" (Ruling R4). */
+  /**
+   * "Born 2024 · age 2", "Born 2026 · under 1", "This year", "Arrives 2028", "Not dated yet"
+   * (Ruling R4). Only a born kid carries the age.
+   */
   private kidSubLine(kid: KidInput): string {
     if (kid.birthYear === null) return 'Not dated yet';
     if (kid.birthYear === this.now.getFullYear() && kid.birthMonth === null) return 'This year';
-    return isKidNotYetBorn(kid.birthYear, kid.birthMonth, this.now) ? `Arrives ${kid.birthYear}` : `Born ${kid.birthYear}`;
+    if (isKidNotYetBorn(kid.birthYear, kid.birthMonth, this.now)) return `Arrives ${kid.birthYear}`;
+    const age = kidAgeToday(kid.birthYear, kid.birthMonth, this.now);
+    if (age === null) return `Born ${kid.birthYear}`;
+    return `Born ${kid.birthYear} · ${age === 0 ? 'under 1' : `age ${age}`}`;
   }
 
   /** The detail sheet's content for one unit, or null when the kid does not hold it. */
@@ -887,7 +905,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
       // KIDS balances live per account in config.
       currentBalance: form.type === 'KIDS' ? 0 : draft.currentBalance,
       completed: goal?.completed ?? false,
-      anchorMonthly: view.monthlyTotal,
+      // Invest-only: a KIDS whole month also carries everyday cash, which nothing grades.
+      anchorMonthly: view.investMonthly,
       planRate: view.rate,
       planRateKind: view.rateKind,
     };

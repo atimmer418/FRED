@@ -502,7 +502,7 @@ describe('GoalPage', () => {
     const cards = Array.from(fixture.nativeElement.querySelectorAll('.gp-kcard')) as HTMLElement[];
     expect(cards.length).toBe(3);
     const sub = (i: number) => cards[i].querySelector('.gp-ksub')!.textContent!.trim();
-    expect(sub(0)).toBe(`Born ${YEAR - 2}`);
+    expect(sub(0)).toBe(`Born ${YEAR - 2} · age 2`);
     expect(sub(1)).toMatch(/^Arrives \d{4}$/);
     expect(sub(2)).toBe('Not dated yet');
 
@@ -534,6 +534,61 @@ describe('GoalPage', () => {
     expect(detail.milestones.length).toBe(3);
     expect(detail.perPaycheck).not.toBeNull();
     expect(page.renaming()).toBeNull();
+  });
+
+  it('each kid card header is the kid\'s whole month and the cards add up to the hero', async () => {
+    const fixture = await create({ id: '3' }, { goals: [kidsGoalFixture(3)] });
+    finishCountUp(fixture);
+    const page = fixture.componentInstance;
+    const cards = page.kidCards();
+    expect(cards.length).toBe(1);
+    // One kid at home, so the everyday figure is real money, not a zero that hides a bug.
+    expect(cards[0].everyday.monthly).toBeGreaterThan(0);
+    expect(cards[0].everyday).toBe(page.view().everyday![0]);
+    expect(cards[0].investMonthly).toBe(page.view().investMonthly);
+    cards.forEach(c => expect(c.monthly).toBe(c.investMonthly + c.everyday.monthly));
+    expect(cards.reduce((s, c) => s + c.monthly, 0)).toBe(page.view().monthlyTotal);
+    expect(text(fixture, '.fd-hero-label')).toBe('Family plan');
+  });
+
+  it('the sub line carries the age: born kids "Born 2024 · age 2", under a year "under 1", unborn unchanged', async () => {
+    const kid = (label: string, birthYear: number | null, birthMonth: number | null) =>
+      ({ label, birthYear, birthMonth, accounts: { plan529: fresh(), brokerage: fresh() } });
+    const base = kidsGoalFixture(6);
+    const config: KidsConfig = {
+      ...(base.config as KidsConfig),
+      kids: [
+        kid('Ellie', YEAR - 2, null),
+        kid('Baby', YEAR, NOW.getMonth() + 1),
+        kid('Soon', YEAR, null),
+        kid('Later', YEAR + 2, 3),
+        kid('Someday', null, null),
+      ],
+    };
+    const fixture = await create({ id: '6' }, { goals: [{ ...base, config }] });
+    expect(fixture.componentInstance.kidCards().map(c => c.subLine)).toEqual([
+      `Born ${YEAR - 2} · age 2`,
+      `Born ${YEAR} · under 1`,
+      'This year',
+      `Arrives ${YEAR + 2}`,
+      'Not dated yet',
+    ]);
+  });
+
+  it('a new family plan posts anchorMonthly as the invest figure, not the whole month', async () => {
+    const form = formFromGoal(sampleFamily(5));
+    const fixture = await create({ type: 'KIDS', preview: '1' }, { draft: { form, existing: null } });
+    const page = fixture.componentInstance;
+    finishCountUp(fixture);
+    expect(page.mode()).toBe('preview-new');
+    const { investMonthly, monthlyTotal } = page.view();
+
+    await page.startPlan();
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    const body = createSpy.calls.mostRecent().args[0] as GoalWrite;
+    expect(body.anchorMonthly).toBe(investMonthly);
+    // Ellie is two and at home, so the whole month carries everyday cash on top of the invest figure.
+    expect(body.anchorMonthly).toBeLessThan(monthlyTotal);
   });
 
   it('tapping a unit target reveals a Saved so far field that saves on blur through updateBalance', async () => {

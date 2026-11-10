@@ -2,7 +2,10 @@ import { KID_COST_SOURCES, USDA_2015_ANNUAL_BY_BAND, USDA_2015_TOTAL } from '../
 import {
   collegePresets,
   costCardSources,
+  everydayMonthlyForKid,
   everydayMonthlyToday,
+  everydayRowLabel,
+  everydaySubLine,
   familyMonthly,
   familySizeFactor,
   firstYearFactor,
@@ -11,6 +14,7 @@ import {
   kidAgeToday,
   kidCostFigures,
   kidRanks,
+  kidsAtHome,
   perKidMonthly,
 } from './kid-cost.utils';
 
@@ -37,6 +41,42 @@ describe('kidAgeToday and everydayMonthlyToday', () => {
     ], NOW)).toBe(3210);
     expect(everydayMonthlyToday([{ birthYear: null, birthMonth: null }], NOW)).toBe(0);
     expect(everydayMonthlyToday([], NOW)).toBe(0);
+  });
+});
+
+describe('everyday per kid', () => {
+  const NOW = new Date(2026, 10, 10); // 10 Nov 2026
+
+  it('prices a 2-year-old only child at $1,910 (12,680 x 1.421586 x 1.27 / 12, nearest $10)', () => {
+    expect(everydayMonthlyForKid(2, 1)).toBe(1910);
+  });
+  it('prices two kids at home at $1,500 each for the 0-2 band', () => {
+    expect(everydayMonthlyForKid(2, 2)).toBe(1500);
+  });
+  it('returns 0 for age null, age 0 (the baby fund is year one) and age 18 and up', () => {
+    expect(everydayMonthlyForKid(null, 1)).toBe(0);
+    expect(everydayMonthlyForKid(0, 1)).toBe(0);
+    expect(everydayMonthlyForKid(18, 1)).toBe(0);
+  });
+  it('uses each USDA band: 1, 3, 6, 9, 12 and 15 price differently from their neighbours below', () => {
+    const bands = [1, 3, 6, 9, 12, 15].map(age => everydayMonthlyForKid(age, 2));
+    expect(bands).toEqual([1500, 1510, 1460, 1560, 1540, 1650]);
+  });
+  it('counts kids at home as those aged 0 to 17 today', () => {
+    expect(kidsAtHome([{ birthYear: 2024, birthMonth: 3 }, { birthYear: 2027, birthMonth: 3 }, { birthYear: 2008, birthMonth: 1 }, { birthYear: 2026, birthMonth: 11 }], NOW)).toBe(2);
+  });
+  it('everydayMonthlyToday is the sum of the per-kid figures', () => {
+    const kids = [{ birthYear: 2024, birthMonth: 3 }, { birthYear: 2020, birthMonth: 6 }];
+    expect(everydayMonthlyToday(kids, NOW)).toBe(everydayMonthlyForKid(2, 2) + everydayMonthlyForKid(6, 2));
+  });
+  it('labels and sub lines follow the band', () => {
+    expect(everydayRowLabel(2)).toBe('Age 2 costs');
+    expect(everydaySubLine(1)).toBe('Food, clothes, diapers and childcare');
+    expect(everydaySubLine(5)).toBe('Food, clothes, preschool and toys');
+    expect(everydaySubLine(8)).toBe('Food, clothes, school and activities');
+    expect(everydaySubLine(11)).toBe('Food, clothes, sports and school trips');
+    expect(everydaySubLine(14)).toBe('Food, clothes, a phone and activities');
+    expect(everydaySubLine(17)).toBe('Food, clothes, driving and activities');
   });
 });
 

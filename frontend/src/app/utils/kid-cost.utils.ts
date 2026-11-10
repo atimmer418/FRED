@@ -113,24 +113,59 @@ export function kidAgeToday(birthYear: number | null, birthMonth: number | null,
 }
 
 /**
- * What the kids at home cost this month by FRED's estimate: each kid aged 0 to 17 takes the USDA
- * band for their age, inflation adjusted and family-size adjusted by the number of kids at home
- * today (an only child at home is priced as an only child, however many are planned), summed and
- * rounded to the nearest $10. Unborn kids and kids 18 or older add nothing; the USDA study stops at 17.
+ * What one kid of this age costs a month by FRED's estimate: the USDA band for the age, inflation
+ * adjusted and family-size adjusted by the number of kids at home, nearest $10. Age 0 is the baby
+ * fund's year one, and the USDA study stops at 17, so null, 0 and 18 or older return 0.
+ */
+export function everydayMonthlyForKid(age: number | null, kidsAtHome: number): number {
+  if (age === null || age < 1 || age > 17) return 0;
+  const band = USDA_2015_ANNUAL_BY_BAND.find(b => age >= b.fromAge && age <= b.toAge);
+  if (!band) return 0;
+  const annual = band.annual * inflationFactor() * familySizeFactor(kidsAtHome);
+  return Math.round(annual / 12 / 10) * 10;
+}
+
+/** How many of these kids are at home today: aged 0 to 17 inclusive. */
+export function kidsAtHome(
+  kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>,
+  now: Date,
+): number {
+  return kids.filter(kid => {
+    const age = kidAgeToday(kid.birthYear, kid.birthMonth, now);
+    return age !== null && age <= 17;
+  }).length;
+}
+
+/** The row label for a kid's everyday cost, e.g. "Age 2 costs". */
+export function everydayRowLabel(age: number): string {
+  return `Age ${age} costs`;
+}
+
+/** What the everyday cost covers at this age, by USDA band. */
+export function everydaySubLine(age: number): string {
+  if (age <= 2) return 'Food, clothes, diapers and childcare';
+  if (age <= 5) return 'Food, clothes, preschool and toys';
+  if (age <= 8) return 'Food, clothes, school and activities';
+  if (age <= 11) return 'Food, clothes, sports and school trips';
+  if (age <= 14) return 'Food, clothes, a phone and activities';
+  return 'Food, clothes, driving and activities';
+}
+
+/**
+ * What the kids at home cost this month by FRED's estimate: the sum of each kid's own figure
+ * (everydayMonthlyForKid, rounded to the nearest $10 per kid), sized by the number of kids at home
+ * today (an only child at home is priced as an only child, however many are planned). Unborn kids
+ * and kids 18 or older add nothing; the USDA study stops at 17.
  */
 export function everydayMonthlyToday(
   kids: ReadonlyArray<{ birthYear: number | null; birthMonth: number | null }>,
   now: Date,
 ): number {
-  const ages = kids
-    .map(kid => kidAgeToday(kid.birthYear, kid.birthMonth, now))
-    .filter((age): age is number => age !== null && age <= 17);
-  const factor = familySizeFactor(ages.length) * inflationFactor();
-  const annual = ages.reduce((sum, age) => {
-    const band = USDA_2015_ANNUAL_BY_BAND.find(b => age >= b.fromAge && age <= b.toAge);
-    return band ? sum + band.annual * factor : sum;
-  }, 0);
-  return Math.round(annual / 12 / 10) * 10;
+  const atHome = kidsAtHome(kids, now);
+  return kids.reduce(
+    (sum, kid) => sum + everydayMonthlyForKid(kidAgeToday(kid.birthYear, kid.birthMonth, now), atHome),
+    0,
+  );
 }
 
 const STAGE_DEFS: ReadonlyArray<{ key: KidCostStageKey; label: string; fromAges: ReadonlyArray<number> }> = [

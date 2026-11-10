@@ -306,7 +306,12 @@ When the plan is at its deadline with a shortfall, the hero keeps the existing "
 
 Zone label "PER KID" with swipe dots on the right. A horizontal pager of one card per kid (Swiper,
 the same setup as the tabs pager, `swiper-no-swiping` not needed), the next card peeking at the
-right edge. Each card: header row with a `child_care` avatar, the name (with a small `edit` pen
+right edge.
+
+> **Changed 2026-11-10 (Andy).** No peek: each kid card is the full width of the hero card above
+> it, and the dots alone say there are more.
+
+Each card: header row with a `child_care` avatar, the name (with a small `edit` pen
 after it), a sub-line ("Born 2024", "This year", "Arrives 2028", "Not dated yet"; no "18 in
 2042", the user knows), and the kid's monthly in blue on the right; then one row per funded unit with an icon tile, label, target and
 date, and the monthly on the right: `child_care` "Baby fund · $16,500 by Jun 2028",
@@ -368,6 +373,9 @@ false, missing in old rows reads as false, and flipping it is a plan-input chang
 > Reset to standard, and Start / Update never write the shared rate. The page reads the shared
 > signal live, so a change saved on the Freedom page shows here on the next open with no reload.
 > Cash-planned goals keep the cash note.
+>
+> **2026-11-10 (Andy):** the note moved into the card as its sub line, shortened: "Avg annual
+> return / Set on your Freedom Plan page" with the figure on the right. Nothing under the card.
 
 The existing row: "Return" label and the 8% / 10% / 12% segmented chips (cash-planned goals show
 the cash note instead, as today). Written on Start / Update / and, for a saved goal, immediately,

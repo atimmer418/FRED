@@ -898,7 +898,9 @@ describe('GoalPage', () => {
     expect(text(fixture, '.fd-assume .fd-assume-value')).toBe('10%');
     expect(el.querySelectorAll('.fd-assume button').length).toBe(0);
     expect(el.querySelector('.fd-reset')).toBeFalsy();
-    expect(text(fixture, '.gp-assume-note')).toBe('Set on your Freedom Plan page, where it runs every FRED projection.');
+    // The "where to change it" line lives inside the card, as its sub line (Andy, 2026-11-10).
+    expect(text(fixture, '.fd-assume .fd-assume-sub')).toBe('Set on your Freedom Plan page');
+    expect(el.querySelector('.gp-assume-note')).toBeFalsy();
     expect((page as any).selectRate).toBeUndefined();
   });
 

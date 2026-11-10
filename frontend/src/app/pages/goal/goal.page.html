@@ -67,7 +67,7 @@
             </span>
           </div>
 
-          <swiper-container #pager class="gp-pager" [class.single]="kidCards().length === 1" init="false" (swiperslidechange)="onKidSlide($event)">
+          <swiper-container #pager class="gp-pager" init="false" (swiperslidechange)="onKidSlide($event)">
             @for (card of kidCards(); track card.index) {
               <swiper-slide class="gp-slide">
                 <div class="gp-kcard">
@@ -153,11 +153,10 @@
           <div class="fd-assume gp-assume-ro">
             <div class="fd-assume-name">
               Avg annual return
-              <span class="fd-assume-sub">what this plan grows by</span>
+              <span class="fd-assume-sub">Set on your Freedom Plan page</span>
             </div>
             <span class="fd-assume-value">{{ pct(annualReturn()) }}%</span>
           </div>
-          <p class="gp-assume-note">Set on your Freedom Plan page, where it runs every FRED projection.</p>
         } @else {
           <p class="fd-zone gp-zone-gap">Assumptions</p>
           <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>

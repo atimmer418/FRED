@@ -670,8 +670,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
   /** Same setup as the tabs pager; the element is inert in unit tests (not upgraded). */
   private initPager(el: SwiperContainer | undefined): void {
     if (!el || typeof el.initialize !== 'function' || el.swiper) return;
-    // slidesOffsetAfter gives the last kid card the same 20px gutter as the page edge.
-    const params: SwiperOptions = { slidesPerView: 'auto', spaceBetween: 10, slidesOffsetAfter: 20 };
+    // One full-width card per view (the slide width comes from .gp-slide), 10px between cards.
+    const params: SwiperOptions = { slidesPerView: 'auto', spaceBetween: 10 };
     Object.assign(el, params);
     el.initialize();
   }

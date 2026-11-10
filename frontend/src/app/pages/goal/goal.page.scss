@@ -90,23 +90,18 @@
   }
 }
 
-// ── The pager: one card per kid, the next card peeking 20px ──────────────────
+// ── The pager: one card per kid, each the full width of the hero card above ──
+// (Andy, 2026-11-10: no peek of the next card; the dots say there are more.)
 .gp-pager {
   display: block;
-  width: calc(100% + 20px);
-  margin-right: -20px;
+  width: 100%;
   overflow: hidden;
 }
 
 .gp-slide {
-  // 10px between cards plus a 20px peek of the next one, inside the 20px gutter the pager extends into.
-  width: calc(100% - 50px);
+  width: 100%;
   height: auto;
   display: block;
-}
-
-.gp-pager.single .gp-slide {
-  width: calc(100% - 20px);
 }
 
 .gp-kcard {
@@ -380,14 +375,6 @@
   font-weight: 800;
   color: #111827;
   font-variant-numeric: tabular-nums;
-}
-
-.gp-assume-note {
-  margin: 6px 2px 0;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #9aa6ba;
-  line-height: 1.4;
 }
 
 // ── Cash note: the Assumptions card look for a cash plan ─────────────────────

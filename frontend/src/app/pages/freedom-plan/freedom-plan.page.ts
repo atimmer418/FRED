@@ -19,6 +19,8 @@ import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analyti
 
 /** The hero roll-up's length (the goal page's hero count-up uses the same). */
 const HERO_ROLL_MS = 600;
+/** With no birth year on file, the hero roll starts this many years below the date. */
+const HERO_ROLL_FALLBACK_YEARS = 30;
 
 /**
  * The Freedom Plan page (/freedom): the full story behind the freedom date.
@@ -216,9 +218,10 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
     this.annualReturn() === 0.10 && this.withdrawalRate() === 0.04);
 
   // ── Hero roll-up ───────────────────────────────────────────────────────────
-  // The first time a date is there, the year rolls from this year up to it over 600ms (the age
-  // alongside), the way the goal page's hero counts up. Afterwards the hero tracks the live
-  // projection. Skipped under reduced motion. The same rAF shape as the goal page.
+  // The first time a date is there, the year rolls from the user's birth year up to it over 600ms,
+  // the age from 0 alongside: the whole life sweeps up to the date, so even a date one year out
+  // rolls (Andy, 2026-11-10; from this year it showed one tick). Afterwards the hero tracks the
+  // live projection. Skipped under reduced motion. The same rAF shape as the goal page.
 
   /** The year and age the hero shows mid roll; null once it tracks the live projection. */
   private readonly heroRolling = signal<{ year: number; age: number | null } | null>(null);
@@ -239,11 +242,13 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
 
   private startRollUp(): void {
     if (this.reducedMotion()) return;
-    const fromYear = new Date().getFullYear();
-    // The age today, from the live birth year (it can land during the roll).
-    const fromAge = (): number | null => {
+    const first = this.freedomYear();
+    if (first === null) return;
+    // Where the year starts: the birth year, read live each frame (it can land during the roll),
+    // else a fixed span below the date. The age starts at 0 whenever there is one.
+    const fromYear = (year: number): number => {
       const birthYear = this.freedomStats.birthYear() ?? 0;
-      return birthYear > 0 && fromYear > birthYear ? fromYear - birthYear : null;
+      return birthYear > 0 && birthYear < year ? birthYear : year - HERO_ROLL_FALLBACK_YEARS;
     };
     const start = performance.now();
     const step = (t: number) => {
@@ -253,14 +258,14 @@ export class FreedomPlanPage implements OnInit, ViewWillLeave {
       if (year === null || p >= 1) { this.heroRolling.set(null); return; }
       const eased = 1 - (1 - p) ** 3;
       const age = this.freedomAge();
-      const from = fromAge();
+      const from = fromYear(year);
       this.heroRolling.set({
-        year: Math.round(fromYear + (year - fromYear) * eased),
-        age: age !== null && from !== null ? Math.round(from + (age - from) * eased) : age,
+        year: Math.round(from + (year - from) * eased),
+        age: age !== null ? Math.round(age * eased) : null,
       });
       requestAnimationFrame(step);
     };
-    this.heroRolling.set({ year: fromYear, age: fromAge() });
+    this.heroRolling.set({ year: fromYear(first), age: this.freedomAge() !== null ? 0 : null });
     requestAnimationFrame(step);
   }
 

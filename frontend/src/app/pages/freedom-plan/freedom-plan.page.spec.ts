@@ -136,25 +136,29 @@ describe('FreedomPlanPage', () => {
     expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
   });
 
-  it('rolls the hero from this year up to the freedom date on first render, the age alongside, then tracks the live date', () => {
+  it('rolls the hero from the birth year up to the freedom date on first render, the age from 0 alongside, then tracks the live date', () => {
     // One clock for the roll's start and the frame below, so a slow run cannot land past the end.
     const clock = spyOn(performance, 'now').and.returnValue(1_000);
-    setup(5000, 2500, 0, undefined, { keepRolling: true, birthYear: CURRENT_YEAR - 30 });
+    const birthYear = CURRENT_YEAR - 30;
+    setup(5000, 2500, 0, undefined, { keepRolling: true, birthYear });
     const page = fixture.componentInstance;
     const target = page.freedomYear()!;
     expect(target).toBe(CURRENT_YEAR + 18);
-    // First frame: this year, this age.
-    expect(heroYear()).toBe(String(CURRENT_YEAR));
-    expect(page.heroAge()).toBe(30);
+    // First frame: born, age 0 (shown, not hidden as a falsy value).
+    expect(heroYear()).toBe(String(birthYear));
+    expect(page.heroAge()).toBe(0);
+    expect(fixture.nativeElement.querySelector('.fd-hero-meta')?.textContent).toContain('Age 0');
 
     // Mid-roll (300 of 600ms): strictly between the two, year and age moving together.
     rafCallbacks.splice(0).forEach(cb => cb(1_300));
     fixture.detectChanges();
     const mid = Number(heroYear());
-    expect(mid).toBeGreaterThan(CURRENT_YEAR);
+    expect(mid).toBeGreaterThan(birthYear);
     expect(mid).toBeLessThan(target);
-    expect(page.heroAge()!).toBeGreaterThan(30);
+    expect(page.heroAge()!).toBeGreaterThan(0);
     expect(page.heroAge()!).toBeLessThan(48);
+    // Year and age keep step: the year shown is the birth year plus the age shown.
+    expect(mid - birthYear).toBe(page.heroAge()!);
 
     clock.and.callThrough();
     finishRollUp();
@@ -181,10 +185,28 @@ describe('FreedomPlanPage', () => {
     expect(heroYear()).toBe('—');
     typeInto(INCOME_TILE, '5000');
     typeInto(INVEST_TILE, '2500');
-    // The roll starts from this year the moment a date exists.
-    expect(heroYear()).toBe(String(CURRENT_YEAR));
+    // No birth year on file: the roll starts 30 years below the date the moment a date exists,
+    // and there is no age line to roll.
+    expect(heroYear()).toBe(String(CURRENT_YEAR + 18 - 30));
+    expect(fixture.componentInstance.heroAge()).toBeNull();
+    expect(fixture.nativeElement.querySelector('.fd-hero-meta')?.textContent).not.toContain('Age');
     finishRollUp();
     expect(heroYear()).toBe(String(CURRENT_YEAR + 18));
+  });
+
+  it('rolls a date one year out all the same: from the birth year, not from this year', () => {
+    // A near date (big invest against a small income) used to roll one tick from this year.
+    const birthYear = CURRENT_YEAR - 40;
+    setup(1000, 20000, 0, undefined, { keepRolling: true, birthYear });
+    const page = fixture.componentInstance;
+    const target = page.freedomYear()!;
+    expect(target).toBeGreaterThan(CURRENT_YEAR);
+    expect(target).toBeLessThanOrEqual(CURRENT_YEAR + 3);
+    expect(heroYear()).toBe(String(birthYear));
+    expect(page.heroAge()).toBe(0);
+    finishRollUp();
+    expect(heroYear()).toBe(String(target));
+    expect(page.heroAge()).toBe(target - birthYear);
   });
 
   it('renders as a page: the Freedom Plan header and a back button, no sheet handle or Cancel', () => {

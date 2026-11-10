@@ -73,10 +73,10 @@ export class GoalUnitDetailSheetComponent {
     return String(Math.round(value));
   }
 
-  /** Digits only (empty is 0), saved as whole non-negative dollars. */
+  /** Whole dollars (cents after a "." dropped), digits only (empty is 0), saved as a non-negative amount. */
   saveBalance(field: HTMLInputElement): void {
     if (!this.onBalance) return;
-    const digits = field.value.replace(/[^0-9]/g, '');
+    const digits = field.value.split('.')[0].replace(/[^0-9]/g, '');
     const value = Math.max(0, Math.round(Number(digits || '0')));
     field.value = String(value);
     void this.onBalance(value);

@@ -733,10 +733,10 @@ describe('buildGoalPlanView one-screen page', () => {
   ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you and growth adds ~')
     + `(${MONEY})` + escape('. Take it out early and growth stops, and the monthly from you goes up.') + '$');
   const dollars = (s: string) => Number(s.replace(/[$,]/g, ''));
-  it('coversLine names the funds, says which sit on top of everyday costs, and prices the kids at home aged 1 to 17 (a kid under one is the baby fund\'s year one)', () => {
+  it('coversLine leads with "The monthly is {funds} plus everyday costs" (was "Only the funds"), says which sit on top of everyday costs, and prices the kids at home aged 1 to 17 from the everyday entries (a kid under one is the baby fund\'s year one)', () => {
     // Ellie is 2, Theo arrives in 2028, the third kid is undated: one kid at home (only-child factor), two funds.
     expect(buildGoalPlanView(sample(), ctx()).coversLine).toBe(
-      'Only the funds: the baby funds, college and the nest egg. College and the nest egg are on top of everyday '
+      'The monthly is the baby funds, college and the nest egg plus everyday costs. College and the nest egg are on top of everyday '
       + 'costs; the baby funds are the first year of them, saved ahead. Everyday costs for Ellie (2) run ~$1,910 a month '
       + "by FRED's estimate; a kid who has not arrived yet costs nothing until they do.",
     );
@@ -744,27 +744,27 @@ describe('buildGoalPlanView one-screen page', () => {
     // Two at home, ages 6 (6-8 band) and 3 (3-5 band), two-kid factor 1.00: (12,350 + 12,730) x inflation / 12.
     const two = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
     expect(two.coversLine).toBe(
-      'Only the funds: college and the nest egg. College and the nest egg are on top of everyday costs. '
+      'The monthly is college and the nest egg plus everyday costs. College and the nest egg are on top of everyday costs. '
       + "Everyday costs for A (6) and B (3) run ~$2,970 a month by FRED's estimate.",
     );
 
     const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
     expect(collegeOnly.coversLine).toBe(
-      'Only the funds: college. College is on top of everyday costs. '
+      'The monthly is college plus everyday costs. College is on top of everyday costs. '
       + "Everyday costs for A (6) run ~$1,860 a month by FRED's estimate.",
     );
 
     // Mae is under one: at home but not priced, so the line says the baby fund covers year one.
     const newborn = buildGoalPlanView(family([kid('Mae', 2026, 10)], { plan529Target: 0 }), ctx());
     expect(newborn.coversLine).toBe(
-      'Only the funds: the nest egg. The nest egg is on top of everyday costs. '
+      'The monthly is the nest egg plus everyday costs. The nest egg is on top of everyday costs. '
       + 'No everyday costs yet: the baby fund covers year one.',
     );
 
     // A kid under one beside a priced kid: only the priced kid is named, sized as one of two at home.
     const withBaby = buildGoalPlanView(family([kid('Mae', 2026, 10), kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
     expect(withBaby.coversLine).toBe(
-      'Only the funds: college. College is on top of everyday costs. '
+      'The monthly is college plus everyday costs. College is on top of everyday costs. '
       + `Everyday costs for A (6) run ~${fmtMoney(everydayMonthlyForKid(6, 2))} a month by FRED's estimate.`,
     );
 
@@ -773,9 +773,18 @@ describe('buildGoalPlanView one-screen page', () => {
       ctx(),
     );
     expect(fundOnly.coversLine).toBe(
-      'Only the funds: the baby fund. The baby fund is the first year of everyday costs, saved ahead. '
+      'The monthly is the baby fund plus everyday costs. The baby fund is the first year of everyday costs, saved ahead. '
       + 'No everyday costs yet; they start when the first kid arrives.',
     );
+  });
+
+  it('coversLine reads its everyday figure from the everyday entries, so it always matches the hero (moved off its own age and price math)', () => {
+    const view = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8), kid('Mae', 2026, 10)]), ctx());
+    const priced = view.everyday!.filter(e => e.state === 'priced');
+    expect(priced.length).toBe(2);
+    const sum = priced.reduce((s, e) => s + e.monthly, 0);
+    expect(sum).toBe(view.monthlyTotal - view.investMonthly);
+    expect(view.coversLine).toContain(`Everyday costs for A (6) and B (3) run ~${fmtMoney(sum)} a month by FRED's estimate.`);
   });
 
   it('whyInvestLine names only the invested units the family has', () => {
@@ -901,13 +910,24 @@ describe('buildGoalPlanView one-screen page', () => {
       expect(view.everyday![0]).toEqual(jasmine.objectContaining({
         label: 'Everyday', subLine: '', fromLine: 'From Mar 2027: the baby fund is year one',
       }));
+      // Mae has no baby fund, so her everyday costs simply start at one.
       expect(view.everyday![1]).toEqual(jasmine.objectContaining({
-        label: 'Everyday', subLine: '', fromLine: 'The baby fund covers year one',
+        label: 'Everyday', subLine: '', fromLine: 'Everyday costs start at the first birthday.',
       }));
       expect(view.everyday![2]).toEqual(jasmine.objectContaining({
         label: 'Age 2 costs', subLine: 'Food, clothes, diapers and childcare', fromLine: null,
       }));
       expect(view.everyday![3]).toEqual(jasmine.objectContaining({ label: 'Everyday', subLine: '', fromLine: null }));
+    });
+
+    it('a kid under one with a baby fund reads "The baby fund covers year one"; without one, "Everyday costs start at the first birthday."', () => {
+      const view = buildGoalPlanView(family([
+        kid('Mae', Y, 11, { due: [Y + 1, 11], target: 16_500 }),
+        kid('Bo', Y, 11),
+      ]), ctx());
+      expect(view.everyday!.map(e => e.state)).toEqual(['year_one', 'year_one']);
+      expect(view.everyday![0].fromLine).toBe('The baby fund covers year one');
+      expect(view.everyday![1].fromLine).toBe('Everyday costs start at the first birthday.');
     });
 
     it('an unborn kid with no month, an undated kid, and one expected this year with no month read "From the day they arrive"', () => {

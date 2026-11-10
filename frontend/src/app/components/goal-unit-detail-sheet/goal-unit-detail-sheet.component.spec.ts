@@ -155,6 +155,14 @@ describe('GoalUnitDetailSheetComponent', () => {
     expect(onBalance).toHaveBeenCalledWith(0);
   }));
 
+  it('a pasted amount with cents saves the whole dollars: "1,200.50" saves 1200, not 120050', fakeAsync(() => {
+    const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
+    const fixture = mount(signal(nestEgg), { onBalance });
+    blur(fixture, '.ud-bal input', '1,200.50');
+    flushMicrotasks();
+    expect(onBalance).toHaveBeenCalledWith(1200);
+  }));
+
   it('each status tone sets its class', () => {
     const d = signal<UnitDetail | null>({ ...nestEgg, status: { text: 'Behind', tone: 'warn' } });
     const fixture = mount(d);

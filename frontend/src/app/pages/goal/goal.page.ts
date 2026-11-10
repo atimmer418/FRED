@@ -27,11 +27,12 @@ import {
 } from '../../models/goal.model';
 import { isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
-import { kidAgeToday, kidCostFigures } from '../../utils/kid-cost.utils';
+import { kidAgeToday, kidCostFigures, kidsAtHome } from '../../utils/kid-cost.utils';
 import { CHILDBIRTH_DOLLAR_YEAR_LABEL, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
 import { GoalUnitDetailSheetComponent, UnitDetail, UnitTitle } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
+import { InfoNote } from '../../components/goal-plan-info-sheet/info-note';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GoalForm, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso } from './goal-form.model';
@@ -89,6 +90,17 @@ const STATUS_CHIP: Record<GoalPlanView['status']['kind'], string> = {
   done: 'Done',
 };
 
+/** The unit sheet's Status tone for each chip word. */
+const STATUS_TONE: Record<string, NonNullable<UnitDetail['status']>['tone']> = {
+  'Ahead': 'good',
+  'On plan': 'good',
+  'Done': 'good',
+  'Behind': 'warn',
+  'Update balance': 'info',
+  'Plan started': 'muted',
+  'Plan updated': 'muted',
+};
+
 const UNIT_TITLE: Record<KidBalanceKey, UnitTitle> = { firstYear: 'Baby fund', plan529: 'College', brokerage: 'Nest egg' };
 const UNIT_ICON: Record<KidBalanceKey, KidUnitRow['icon']> = { firstYear: 'child_care', plan529: 'school', brokerage: 'savings' };
 
@@ -142,8 +154,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
   readonly frequency = signal('');
   /** The kid card whose name is an input right now. */
   readonly renaming = signal<number | null>(null);
-  /** The unit whose inline "Saved so far" field is open, as "kid-unit". */
-  readonly balanceOpen = signal<string | null>(null);
   /** The kid card the pager is on. */
   readonly activeKid = signal(0);
   /** The hero figure mid count-up; null once it tracks the view. */
@@ -233,6 +243,19 @@ export class GoalPage implements OnInit, ViewWillEnter {
     const graded = s.kind === 'ahead' || s.kind === 'on_plan' || s.kind === 'behind';
     if (this.mode() === 'saved' && s.stale && graded) return 'Update balance';
     return STATUS_CHIP[s.kind];
+  });
+
+  /** The "How FRED plans this" notes a unit sheet's info button opens, skipping the lines a plan lacks. */
+  readonly infoNotes = computed<InfoNote[]>(() => {
+    const v = this.view();
+    const notes: Array<[string, string, string | null]> = [
+      ['account_balance_wallet', 'How FRED helps.', v.howFredHelps],
+      ['checklist', 'What the monthly covers.', v.coversLine],
+      ['trending_up', 'Why invest it.', v.whyInvestLine],
+    ];
+    return notes
+      .filter((n): n is [string, string, string] => !!n[2])
+      .map(([icon, lead, text]) => ({ icon, lead, text }));
   });
 
   /** Every type but KIDS: "Saved $X · Y% there · Target $T by Mon YYYY". */
@@ -516,35 +539,46 @@ export class GoalPage implements OnInit, ViewWillEnter {
     });
   }
 
-  /** Opens the detail sheet for one kid unit: milestones, cash note, sources, per paycheck. */
-  async openUnitDetail(kidIndex: number, unit: KidBalanceKey): Promise<void> {
-    if (!this.unitDetail(kidIndex, unit)) return;
+  /**
+   * Opens the detail sheet for one kid unit or the kid's everyday line: milestones, notes, sources,
+   * per paycheck, the Saved so far balance (units only) and the info button. Resolves with the
+   * presented modal, or null when there is nothing to open (an unpriced everyday line).
+   */
+  async openUnitDetail(kidIndex: number, unit: KidBalanceKey | 'everyday'): Promise<HTMLIonModalElement | null> {
+    if (!this.unitDetail(kidIndex, unit)) return null;
     const detail = computed(() => this.unitDetail(kidIndex, unit));
     const modal = await this.modalCtrl.create({
       component: GoalUnitDetailSheetComponent,
-      componentProps: { detail },
+      componentProps: {
+        detail,
+        onBalance: unit === 'everyday'
+          ? null
+          : (value: number) => this.updateBalance({ kid: kidIndex, account: unit }, value),
+        notes: this.infoNotes(),
+      },
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
     await modal.present();
+    return modal;
   }
 
-  balanceKey(kidIndex: number, unit: KidBalanceKey): string {
-    return `${kidIndex}-${unit}`;
-  }
-
-  /** Tapping a unit's target text reveals its "Saved so far" field (tapping again hides it). */
-  toggleBalance(kidIndex: number, unit: KidBalanceKey): void {
-    const key = this.balanceKey(kidIndex, unit);
-    this.balanceOpen.update(open => (open === key ? null : key));
-  }
-
-  /** The status chip: "Update balance" scrolls to a balance field and opens it. */
-  onChipTap(): void {
+  /**
+   * The status chip: "Update balance" opens the balance. A kids goal opens the sheet for the first
+   * unfinished unit of the kid card in view and focuses its Saved so far field; every other type
+   * scrolls to its inline tile and focuses it.
+   */
+  async onChipTap(): Promise<void> {
     if (this.statusChip() !== 'Update balance') return;
-    const card = this.kidCards()[this.activeKid()];
-    if (card?.units.length) this.balanceOpen.set(this.balanceKey(card.index, card.units[0].key));
+    if (this.view().kids) {
+      const card = this.kidCards()[this.activeKid()];
+      const unit = card?.units.find(u => !u.finished);
+      if (!card || !unit) return;
+      const modal = await this.openUnitDetail(card.index, unit.key);
+      modal?.querySelector<HTMLInputElement>('.ud-bal input')?.focus();
+      return;
+    }
     setTimeout(() => {
-      const field = document.querySelector<HTMLInputElement>('.gp-bal-input, #gp-bal-current, #gp-bal-vacation');
+      const field = document.querySelector<HTMLInputElement>('#gp-bal-current, #gp-bal-vacation');
       field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       field?.focus();
     });
@@ -552,7 +586,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   // ── Balances ────────────────────────────────────────────────────────────────
 
-  onBalanceBlur(path: BalancePath, event: Event): void {
+  /** The simple or vacation goal's Saved so far tile. Kid balances are saved from the unit sheet. */
+  onBalanceBlur(path: 'current' | 'vacation', event: Event): void {
     void this.updateBalance(path, this.sanitize(event, 9) ?? 0);
   }
 
@@ -703,12 +738,45 @@ export class GoalPage implements OnInit, ViewWillEnter {
     return `Born ${kid.birthYear} · ${age === 0 ? 'under 1' : `age ${age}`}`;
   }
 
-  /** The detail sheet's content for one unit, or null when the kid does not hold it. */
-  private unitDetail(kidIndex: number, unit: KidBalanceKey): UnitDetail | null {
+  /** The unit sheet's Status tone for a chip word: Ahead / On plan / Done good, Behind warn, and so on. */
+  private statusTone(chip: string): NonNullable<UnitDetail['status']>['tone'] {
+    return STATUS_TONE[chip] ?? 'muted';
+  }
+
+  /** The everyday line's sheet: a FRED estimate, no balance and no status. Null unless priced. */
+  private everydayDetail(card: KidCard, kidIndex: number): UnitDetail | null {
+    const e = card.everyday;
+    if (e.state !== 'priced') return null;
+    const kids = (this.planInput().config as KidsConfig).kids;
+    const kid = kids[kidIndex];
+    const age = kid ? kidAgeToday(kid.birthYear, kid.birthMonth, this.now) : null;
+    const atHome = kidsAtHome(kids, this.now);
+    return {
+      kidLabel: card.label,
+      title: 'Everyday',
+      kind: 'everyday',
+      targetLine: `Age ${age} · FRED estimate`,
+      pill: 'Cash',
+      monthly: e.monthly,
+      perPaycheck: InvestmentFrequencyUtils.toPerPaycheckEquivalent(e.monthly, this.frequency()),
+      finished: false,
+      balance: null,
+      status: null,
+      milestones: [],
+      notes: [`${e.subLine}.`, 'Steps up on its own at 3, 6, 9, 12 and 15, the ages where the USDA figures change.'],
+      sourcesLine: `FRED estimate: USDA 2015 figures for a middle-income family, adjusted to ${kidCostFigures(atHome).asOfLabel} dollars and to ${atHome} kid${atHome === 1 ? '' : 's'} at home.`,
+      sourcesSheetKids: atHome,
+    };
+  }
+
+  /** The detail sheet's content for one unit or the everyday line, or null when there is none. */
+  private unitDetail(kidIndex: number, unit: KidBalanceKey | 'everyday'): UnitDetail | null {
     const v = this.view();
     const card = this.kidCards()[kidIndex];
-    const row = card?.units.find(u => u.key === unit);
-    if (!card || !row) return null;
+    if (!card) return null;
+    if (unit === 'everyday') return this.everydayDetail(card, kidIndex);
+    const row = card.units.find(u => u.key === unit);
+    if (!row) return null;
     const kidsCount = (this.planInput().config as KidsConfig).kids.length;
     const perPaycheck = row.finished ? null : InvestmentFrequencyUtils.toPerPaycheckEquivalent(row.monthly, this.frequency());
     const notes: string[] = [];
@@ -717,7 +785,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
     if (unit === 'firstYear') {
       const fund = v.firstYear?.rows.find(r => r.kidIndex === kidIndex);
-      if (fund?.plan.rateKind === 'cash') notes.push('Planned as cash at ~4%, since you need it within 3 years.');
+      if (fund?.plan.rateKind === 'cash') notes.push('Planned as cash at ~4%: money with a date on it stays out of the market.');
       if (fund?.plan.undecided) {
         notes.push(fund.plan.rateKind === 'cash'
           ? 'No date yet: this runway ends within 3 years.'
@@ -755,7 +823,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
       perPaycheck,
       finished: row.finished,
       balance: row.balance,
-      status: null,
+      status: { text: this.statusChip(), tone: this.statusTone(this.statusChip()) },
       milestones,
       notes,
       sourcesLine,

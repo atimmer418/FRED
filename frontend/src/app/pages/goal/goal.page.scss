@@ -223,17 +223,63 @@
   font-variant-numeric: tabular-nums;
 }
 
-// ── Unit rows ────────────────────────────────────────────────────────────────
+// ── Zone hint: "TAP FOR DETAILS" beside "PER KID" ───────────────────────────
+.gp-hint {
+  margin-left: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b3bccb;
+}
+
+// ── Groups: "INVEST" and "EVERYDAY", each with its monthly total ────────────
+.gp-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+
+  &.second {
+    border-top: 1px solid #eef1f6;
+    padding-top: 10px;
+  }
+}
+
+.gp-group-total {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: normal;
+  color: #2563eb;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Unit rows: the whole row opens the unit's sheet ──────────────────────────
 .gp-krow {
   display: flex;
   align-items: center;
   gap: 11px;
+  width: 100%;
   padding: 11px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-family: 'Manrope', sans-serif;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 
   em {
     font-style: normal;
     font-size: 13px;
     font-weight: 800;
+    color: #111827;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
@@ -267,17 +313,6 @@
   align-items: flex-start;
 }
 
-.gp-klabel,
-.gp-ktarget {
-  border: none;
-  background: none;
-  padding: 0;
-  font-family: 'Manrope', sans-serif;
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
 .gp-klabel {
   display: flex;
   align-items: center;
@@ -294,11 +329,10 @@
   font-size: 11px;
   font-weight: 600;
   color: #8a94a6;
-  text-decoration: underline dotted rgba(138, 148, 166, 0.6);
-  text-underline-offset: 2px;
 }
 
-.gp-kdone {
+// Beats the row's black amount color.
+.gp-krow .gp-kdone {
   display: flex;
   align-items: center;
   gap: 3px;
@@ -307,55 +341,12 @@
   .material-symbols-outlined { font-size: 15px; }
 }
 
-// ── Inline "Saved so far" under a unit row ───────────────────────────────────
-.gp-bal {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  // Lines up with the row text: the 32px icon plus the 11px row gap.
-  margin: 0 0 6px 43px;
-  padding: 7px 10px;
-  background: #fff;
-  border: 1px solid #eef1f6;
-  border-radius: 10px;
-}
-
-.gp-bal-label {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #9aa6ba;
-  flex-shrink: 0;
-}
-
-.gp-bal-field {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  min-width: 0;
-}
-
-.gp-bal-pre {
-  font-size: 12px;
-  font-weight: 700;
-  color: #9aa6ba;
-}
-
-.gp-bal-input {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-  border: none;
-  outline: none;
-  background: transparent;
-  padding: 0;
-  font-family: 'Manrope', sans-serif;
-  font-size: 15px;
-  font-weight: 800;
-  color: #111827;
-  font-variant-numeric: tabular-nums;
+// An unborn kid or a kid in year one: when everyday costs start, in place of a row.
+.gp-from {
+  margin: 8px 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a94a6;
 }
 
 // ── Assumptions, read-only: the Freedom Plan card with the figure where the chips were ─────

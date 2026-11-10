@@ -54,7 +54,7 @@
         <!-- KIDS: one card per kid -->
         @if (v.kids) {
           <div class="fd-zone gp-zone">
-            <span>Per kid</span>
+            <span>Per kid <span class="gp-hint">Tap for details</span></span>
             <span class="gp-zone-right">
               <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
               @if (kidCards().length > 1) {
@@ -96,30 +96,47 @@
                     <em class="gp-kmonthly">{{ fmtMoney(card.monthly) }}/mo</em>
                   </div>
 
+                  <div class="gp-group">
+                    <span>Invest</span>
+                    <span class="gp-group-total">{{ fmtMoney(card.investMonthly) }}</span>
+                  </div>
                   @for (unit of card.units; track unit.key) {
-                    <div class="gp-krow">
-                      <div class="gp-kic"><span class="material-symbols-outlined">{{ unit.icon }}</span></div>
-                      <div class="gp-ktx">
-                        <button type="button" class="gp-klabel" (click)="openUnitDetail(card.index, unit.key)">
+                    <button type="button" class="gp-krow" (click)="openUnitDetail(card.index, unit.key)">
+                      <span class="gp-kic"><span class="material-symbols-outlined">{{ unit.icon }}</span></span>
+                      <span class="gp-ktx">
+                        <span class="gp-klabel">
                           <b>{{ unit.title }}</b><span class="fd-pill" [class.cash]="unit.pill === 'Cash'">{{ unit.pill }}</span>
-                        </button>
-                        <button type="button" class="gp-ktarget" (click)="toggleBalance(card.index, unit.key)">{{ unit.targetLine }}</button>
-                      </div>
+                        </span>
+                        <span class="gp-ktarget">{{ unit.targetLine }}</span>
+                      </span>
                       @if (unit.finished) {
                         <em class="gp-kdone"><span class="material-symbols-outlined">check</span>Done</em>
                       } @else {
                         <em>{{ fmtMoney(unit.monthly) }}</em>
                       }
+                    </button>
+                  }
+
+                  @if (card.everyday.state !== 'grown') {
+                    <div class="gp-group second">
+                      <span>Everyday</span>
+                      @if (card.everyday.state === 'priced') {
+                        <span class="gp-group-total">{{ fmtMoney(card.everyday.monthly) }}</span>
+                      }
                     </div>
-                    @if (balanceOpen() === balanceKey(card.index, unit.key)) {
-                      <div class="gp-bal">
-                        <label class="gp-bal-label" [attr.for]="'gp-bal-' + unit.key + '-' + card.index">Saved so far</label>
-                        <div class="gp-bal-field">
-                          <span class="gp-bal-pre">$</span>
-                          <input class="gp-bal-input" type="text" inputmode="numeric" [id]="'gp-bal-' + unit.key + '-' + card.index"
-                                 [value]="fmtNumber(unit.balance)" (blur)="onBalanceBlur({ kid: card.index, account: unit.key }, $event)" />
-                        </div>
-                      </div>
+                    @if (card.everyday.state === 'priced') {
+                      <button type="button" class="gp-krow everyday" (click)="openUnitDetail(card.index, 'everyday')">
+                        <span class="gp-kic"><span class="material-symbols-outlined">shopping_basket</span></span>
+                        <span class="gp-ktx">
+                          <span class="gp-klabel">
+                            <b>{{ card.everyday.label }}</b><span class="fd-pill cash">Cash</span>
+                          </span>
+                          <span class="gp-ktarget">{{ card.everyday.subLine }}</span>
+                        </span>
+                        <em>{{ fmtMoney(card.everyday.monthly) }}</em>
+                      </button>
+                    } @else {
+                      <p class="gp-from">{{ card.everyday.fromLine }}</p>
                     }
                   }
                 </div>
@@ -162,8 +179,8 @@
           <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
         }
 
-        <!-- How FRED helps -->
-        @if (!isDueNow()) {
+        <!-- How FRED helps. A kids plan carries these notes in its unit sheets' info button instead. -->
+        @if (!isDueNow() && !v.kids) {
           <div class="fd-how">
             <span class="material-symbols-outlined">account_balance_wallet</span>
             <p><b>How FRED helps.</b> {{ v.howFredHelps }}</p>

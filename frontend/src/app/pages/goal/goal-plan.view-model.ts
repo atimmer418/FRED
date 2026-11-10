@@ -137,7 +137,7 @@ export interface GoalPlanView {
   audience: string;
   /** The How FRED helps note, without its bold "How FRED helps." lead. */
   howFredHelps: string;
-  /** KIDS only: what the hero monthly pays for, and what it leaves out. */
+  /** KIDS only: what the monthly covers (the whole month: the funds plus everyday costs), shown in the info sheet. */
   coversLine: string | null;
   /** Market plans: the contributions-vs-growth case for leaving the money invested. */
   whyInvestLine: string | null;
@@ -292,14 +292,16 @@ function onTopNames(units: CoveredUnits): string[] {
 const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
- * KIDS only: what the hero monthly pays for and how that relates to the everyday cost of the kids.
+ * KIDS only: what the monthly covers. The monthly is the whole month: the funds plus everyday costs.
  * College and the nest egg come on top of everyday costs (the USDA figure stops at 17 and leaves
  * college out); the baby fund IS the first year of those costs, saved ahead. The last sentence is
- * what the kids at home cost this month by their ages. Null when no unit is left to pay for.
+ * what the kids at home cost this month, read from the everyday entries the hero adds up, so the
+ * two can never disagree. Null when no unit is left to pay for.
  */
 function coversLineFor(
   units: CoveredUnits,
   kids: ReadonlyArray<{ label: string; birthYear: number | null; birthMonth: number | null }>,
+  everyday: ReadonlyArray<EverydayView>,
   now: Date,
 ): string | null {
   const funds = units.babyFunds > 1 ? 'the baby funds are' : 'the baby fund is';
@@ -314,25 +316,29 @@ function coversLineFor(
     relation = `${sentenceCase(funds)} the first year of everyday costs, saved ahead.`;
   }
 
-  // Only kids aged 1 to 17 are priced: year one is the baby fund (the sentence before says so) and
-  // the USDA study stops at 17. The family-size factor still counts every kid at home.
-  const home = kidsAtHome(kids, now);
+  // Only priced kids (1 to 17) are named: year one is the baby fund (the sentence before says so)
+  // and the USDA study stops at 17. The figure is the sum the hero adds, never a second calculation.
   const priced = kids
-    .map((kid, i) => ({ label: kid.label.trim() || `Kid ${i + 1}`, age: kidAgeToday(kid.birthYear, kid.birthMonth, now) }))
-    .filter((k): k is { label: string; age: number } => k.age !== null && k.age >= 1 && k.age <= 17);
-  const notYet = kids.some(kid => kidAgeToday(kid.birthYear, kid.birthMonth, now) === null);
+    .map((kid, i) => ({ kid, i, entry: everyday[i] }))
+    .filter(k => k.entry?.state === 'priced')
+    .map(({ kid, i, entry }) => ({
+      label: kid.label.trim() || `Kid ${i + 1}`,
+      age: kidAgeToday(kid.birthYear, kid.birthMonth, now),
+      monthly: entry.monthly,
+    }));
+  const notYet = everyday.some(e => e.state === 'unborn');
   let today: string;
   if (priced.length > 0) {
     const who = englishList(priced.map(k => `${k.label} (${k.age})`));
-    const cost = priced.reduce((sum, k) => sum + everydayMonthlyForKid(k.age, home), 0);
+    const cost = priced.reduce((sum, k) => sum + k.monthly, 0);
     today = `Everyday costs for ${who} run ~${fmtMoney(cost)} a month by FRED's estimate`
       + (notYet ? '; a kid who has not arrived yet costs nothing until they do.' : '.');
-  } else if (home > 0) {
+  } else if (everyday.some(e => e.state === 'year_one')) {
     today = 'No everyday costs yet: the baby fund covers year one.';
   } else {
     today = notYet ? 'No everyday costs yet; they start when the first kid arrives.' : '';
   }
-  return `Only the funds: ${englishList(names)}. ${relation}${today ? ' ' + today : ''}`;
+  return `The monthly is ${englishList(names)} plus everyday costs. ${relation}${today ? ' ' + today : ''}`;
 }
 
 const roundToThousand = (n: number) => Math.round(n / 1_000) * 1_000;
@@ -576,7 +582,7 @@ function kidsView(
           babyFunds: unfinishedFunds.length,
           college: accounts.some(a => a.account === 'plan529'),
           nestEgg: accounts.some(a => a.account === 'brokerage'),
-        }, kids, ctx.now)
+        }, kids, everyday, ctx.now)
       : null,
     whyInvestLine: invested.length > 0
       // From you = what is already saved plus every contribution still to come; growth is the rest.
@@ -628,7 +634,9 @@ function everydayViews(kids: ReadonlyArray<KidInput>, now: Date): EverydayView[]
       return { monthly: 0, label: 'Everyday', subLine: '', fromLine: `${when}: the baby fund is year one`, state: 'unborn' };
     }
     if (age === 0) {
-      return { monthly: 0, label: 'Everyday', subLine: '', fromLine: 'The baby fund covers year one', state: 'year_one' };
+      // No baby fund: nothing in the plan pays for year one, so the line just says when costs start.
+      const fromLine = kid.accounts.firstYear ? 'The baby fund covers year one' : 'Everyday costs start at the first birthday.';
+      return { monthly: 0, label: 'Everyday', subLine: '', fromLine, state: 'year_one' };
     }
     if (age > 17) return { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };
     return {

@@ -16,7 +16,9 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { RateAssumptionsService } from '../../services/rate-assumptions.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
-import { GoalUnitDetailSheetComponent } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
+import { GoalUnitDetailSheetComponent, UnitDetail } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
+import { InfoNote } from '../../components/goal-plan-info-sheet/info-note';
+import { kidCostFigures } from '../../utils/kid-cost.utils';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
 import { toCountBand } from '../../services/analytics/analytics-bands';
 import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.model';
@@ -492,7 +494,7 @@ describe('GoalPage', () => {
 
   // ── Kids: cards, pills, detail sheet, rename, gift days ────────────────────
 
-  it('each kid unit row shows its Invested or Cash pill and tapping the label opens the detail sheet', async () => {
+  it('each kid unit row shows its Invested or Cash pill and tapping the row opens the detail sheet', async () => {
     const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
     const page = fixture.componentInstance;
     expect(fixture.nativeElement.querySelector('app-kid-timeline')).not.toBeNull();
@@ -506,7 +508,7 @@ describe('GoalPage', () => {
     expect(sub(1)).toMatch(/^Arrives \d{4}$/);
     expect(sub(2)).toBe('Not dated yet');
 
-    const rows = (i: number) => Array.from(cards[i].querySelectorAll('.gp-krow')).map(r => (r as HTMLElement).textContent!.replace(/\s+/g, ' ').trim());
+    const rows = (i: number) => Array.from(cards[i].querySelectorAll('.gp-krow:not(.everyday)')).map(r => (r as HTMLElement).textContent!.replace(/\s+/g, ' ').trim());
     expect(rows(0).length).toBe(2);
     expect(rows(0)[0]).toContain('College');
     expect(rows(0)[0]).toContain('Invested');
@@ -522,7 +524,7 @@ describe('GoalPage', () => {
     expect(pills).toEqual(['Cash', 'Invested', 'Invested']);
     expect(cards.every(c => c.querySelector('.gp-kmonthly')!.textContent!.includes('/mo'))).toBeTrue();
 
-    (cards[0].querySelector('.gp-klabel') as HTMLButtonElement).click();
+    (cards[0].querySelector('button.gp-krow') as HTMLButtonElement).click();
     await fixture.whenStable();
     expect(modalCtrl.create).toHaveBeenCalledTimes(1);
     const args = modalCtrl.create.calls.mostRecent().args[0];
@@ -591,19 +593,6 @@ describe('GoalPage', () => {
     expect(body.anchorMonthly).toBeLessThan(monthlyTotal);
   });
 
-  it('tapping a unit target reveals a Saved so far field that saves on blur through updateBalance', async () => {
-    const goal = kidsGoalFixture(5);
-    const fixture = await create({ id: '5' }, { goals: [goal] });
-    expect(fixture.nativeElement.querySelector('#gp-bal-plan529-0')).toBeNull();
-    click(fixture, '.gp-ktarget');
-    blurWith(fixture, '#gp-bal-plan529-0', '300');
-    await fixture.whenStable();
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    const config = (updateSpy.calls.mostRecent().args[1] as GoalWrite).config as KidsConfig;
-    expect(config.kids[0].accounts.plan529.balance).toBe(300);
-    expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).anchorMonthly).toBe(goal.anchorMonthly);
-  });
-
   it('rename in place: tapping the pen shows an input; check PUTs the label and the kid card and hero audience update', async () => {
     const fixture = await create({ id: '5' }, { goals: [kidsGoalFixture(5)] });
     const page = fixture.componentInstance;
@@ -645,8 +634,7 @@ describe('GoalPage', () => {
       return calls === 1 ? pending.asObservable() : of(updated);
     });
 
-    click(fixture, '.gp-ktarget');
-    blurWith(fixture, '#gp-bal-plan529-0', '300');
+    void page.updateBalance({ kid: 0, account: 'plan529' }, 300);
     const renamed = page.commitRename(0, 'Theo');
     await Promise.resolve();
     expect(updateSpy).toHaveBeenCalledTimes(1); // the rename waits for the balance write
@@ -667,6 +655,226 @@ describe('GoalPage', () => {
     expect(third.kids[0].label).toBe('Theo');
     expect(third.kids[0].accounts.plan529.balance).toBe(300);
     expect(third.kids[0].accounts.brokerage.balance).toBe(900);
+  });
+
+  // ── Kids: groups, rows open the sheet, the hint ────────────────────────────
+
+  /** The sheet's props from the last modalCtrl.create call. */
+  function sheetProps(): { detail: () => UnitDetail | null; onBalance: ((v: number) => Promise<void>) | null; notes: InfoNote[] } {
+    const args = modalCtrl.create.calls.mostRecent().args[0];
+    expect(args.component).toBe(GoalUnitDetailSheetComponent);
+    return args.componentProps as ReturnType<typeof sheetProps>;
+  }
+
+  it('renders Invest and Everyday groups with blue totals, black unit amounts, and the Tap for details hint', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    const card = fixture.componentInstance.kidCards()[0];
+    const el = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[0];
+    const groups = Array.from(el.querySelectorAll('.gp-group')) as HTMLElement[];
+    expect(groups.length).toBe(2);
+    expect(groups[0].textContent).toContain('Invest');
+    expect(groups[1].classList).toContain('second');
+    expect(groups[1].textContent).toContain('Everyday');
+    const totals = Array.from(el.querySelectorAll('.gp-group-total')).map(t => t.textContent!.trim());
+    expect(totals).toEqual([fmtMoney(card.investMonthly), fmtMoney(card.everyday.monthly)]);
+    expect(card.everyday.monthly).toBeGreaterThan(0);
+    // Unit amounts are plain (black): only the two group totals carry the blue class.
+    const amounts = Array.from(el.querySelectorAll('.gp-krow > em')) as HTMLElement[];
+    expect(amounts.length).toBe(3);
+    amounts.forEach(a => expect(a.classList).not.toContain('gp-group-total'));
+    expect(el.querySelectorAll('.gp-group-total').length).toBe(2);
+    expect(text(fixture, '.gp-kcard .gp-kmonthly')).toBe(`${fmtMoney(card.monthly)}/mo`);
+    expect(text(fixture, '.gp-zone .gp-hint')).toBe('Tap for details');
+    expect(text(fixture, '.gp-zone')).toContain('Per kid');
+  });
+
+  it('tapping a unit row opens its sheet with a live detail and a balance hook; no inline Saved so far field exists', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    const page = fixture.componentInstance;
+    const card = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[0];
+    const rows = Array.from(card.querySelectorAll('button.gp-krow')) as HTMLButtonElement[];
+    rows[1].click();
+    await fixture.whenStable();
+    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
+    const props = sheetProps();
+    const detail = props.detail()!;
+    expect(detail.title).toBe('Nest egg');
+    expect(detail.kind).toBe('account');
+    expect(detail.kidLabel).toBe('Ellie');
+    expect(detail.balance).toBe(0);
+    expect(detail.status).toEqual({ text: 'Plan started', tone: 'muted' });
+    expect(props.notes.map(n => [n.icon, n.lead])).toEqual([
+      ['account_balance_wallet', 'How FRED helps.'],
+      ['checklist', 'What the monthly covers.'],
+      ['trending_up', 'Why invest it.'],
+    ]);
+    expect(props.notes[0].text).toBe(page.view().howFredHelps);
+    expect(props.notes[1].text).toBe(page.view().coversLine!);
+
+    // The hook writes the balance through the page's queue, and the live detail follows.
+    echoUpdates();
+    expect(props.onBalance).toEqual(jasmine.any(Function));
+    await props.onBalance!(4_200);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(((updateSpy.calls.mostRecent().args[1] as GoalWrite).config as KidsConfig).kids[0].accounts.brokerage.balance).toBe(4_200);
+    expect(props.detail()!.balance).toBe(4_200);
+
+    expect(fixture.nativeElement.querySelector('.gp-bal-input')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.gp-bal')).toBeNull();
+    expect((page as any).toggleBalance).toBeUndefined();
+    expect((page as any).balanceOpen).toBeUndefined();
+  });
+
+  it('maps the status chip to the sheet\'s tone', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    const page = fixture.componentInstance as any;
+    const tones: Array<[string, string]> = [
+      ['Ahead', 'good'], ['On plan', 'good'], ['Done', 'good'], ['Behind', 'warn'],
+      ['Update balance', 'info'], ['Plan started', 'muted'], ['Plan updated', 'muted'],
+    ];
+    for (const [chip, tone] of tones) expect(page.statusTone(chip)).withContext(chip).toBe(tone);
+  });
+
+  it('the baby fund sheet says why it is cash', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    await fixture.componentInstance.openUnitDetail(1, 'firstYear');
+    const detail = sheetProps().detail()!;
+    expect(detail.kind).toBe('fund');
+    expect(detail.notes).toContain('Planned as cash at ~4%: money with a date on it stays out of the market.');
+  });
+
+  it('tapping the everyday row opens the Everyday sheet with no balance hook', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    const page = fixture.componentInstance;
+    const everyday = page.kidCards()[0].everyday;
+    const row = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[0].querySelector('button.gp-krow.everyday') as HTMLButtonElement;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain(everyday.label);
+    expect(row.textContent).toContain('Cash');
+    expect(row.textContent).toContain(everyday.subLine);
+    expect(row.textContent).toContain(fmtMoney(everyday.monthly));
+    row.click();
+    await fixture.whenStable();
+    const props = sheetProps();
+    const detail = props.detail()!;
+    expect(props.onBalance).toBeNull();
+    expect(props.notes.length).toBe(3);
+    expect(detail.kind).toBe('everyday');
+    expect(detail.title).toBe('Everyday');
+    expect(detail.kidLabel).toBe('Ellie');
+    expect(detail.targetLine).toBe('Age 2 · FRED estimate');
+    expect(detail.monthly).toBe(everyday.monthly);
+    expect(detail.pill).toBe('Cash');
+    expect(detail.balance).toBeNull();
+    expect(detail.status).toBeNull();
+    expect(detail.milestones).toEqual([]);
+    expect(detail.notes).toEqual([
+      `${everyday.subLine}.`,
+      'Steps up on its own at 3, 6, 9, 12 and 15, the ages where the USDA figures change.',
+    ]);
+    // Only Ellie is at home: Theo is due later and the third kid is not dated.
+    expect(detail.sourcesLine).toBe(
+      `FRED estimate: USDA 2015 figures for a middle-income family, adjusted to ${kidCostFigures(1).asOfLabel} dollars and to 1 kid at home.`);
+    expect(detail.sourcesSheetKids).toBe(1);
+  });
+
+  it('the Update balance chip opens the sheet for the first unfinished unit of the active kid', async () => {
+    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
+    const born = new Date(NOW.getFullYear(), NOW.getMonth() - 8, 1);
+    const due = new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1);
+    const config: KidsConfig = {
+      plan529Target: 47_800,
+      brokerageTarget: 100_000,
+      firstYearFund: true,
+      kids: [
+        {
+          label: 'Ellie', birthYear: YEAR - 2, birthMonth: 5,
+          accounts: {
+            plan529: { balance: 5_000, balanceUpdatedAt: logged, anchorBalance: 5_000, anchorMonthly: 150 },
+            brokerage: { balance: 5_000, balanceUpdatedAt: logged, anchorBalance: 5_000, anchorMonthly: 150 },
+          },
+        },
+        {
+          // Theo's baby fund ran its course last month, so his first unfinished unit is College.
+          label: 'Theo', birthYear: born.getFullYear(), birthMonth: born.getMonth() + 1,
+          firstYearTarget: 20_800, firstYearDueYear: due.getFullYear(), firstYearDueMonth: due.getMonth() + 1,
+          accounts: { plan529: fresh(), brokerage: fresh(), firstYear: fresh(20_800) },
+        },
+      ],
+    };
+    const goal: Goal = { ...kidsGoalFixture(5), config, planAnchoredAt: logged, anchorMonthly: 300 };
+    const fixture = await create({ id: '5' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    expect(page.statusChip()).toBe('Update balance');
+    expect(page.kidCards()[1].units.map(u => [u.key, u.finished])).toEqual([['firstYear', true], ['plan529', false], ['brokerage', false]]);
+
+    // The sheet's element, with its Saved so far field.
+    const modalEl = document.createElement('div');
+    modalEl.innerHTML = '<div class="ud-bal"><input type="text" /></div>';
+    const focus = spyOn(modalEl.querySelector('input')!, 'focus');
+    let presented = false;
+    Object.assign(modalEl, {
+      present: async () => {
+        expect(focus).not.toHaveBeenCalled();
+        presented = true;
+      },
+      onDidDismiss: async () => ({}),
+    });
+    modalCtrl.create.and.resolveTo(modalEl as unknown as HTMLIonModalElement);
+    page.activeKid.set(1);
+    fixture.detectChanges();
+    await page.onChipTap();
+    expect(presented).toBeTrue();
+    const detail = sheetProps().detail()!;
+    expect(detail.kidLabel).toBe('Theo');
+    expect(detail.title).toBe('College');
+    // Focus lands only once present() resolved.
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('a house goal\'s chip still scrolls to its inline Saved so far tile', async () => {
+    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
+    const goal: Goal = {
+      ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500,
+      planAnchoredAt: logged, balanceUpdatedAt: logged,
+    };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const input = fixture.nativeElement.querySelector('#gp-bal-current') as HTMLInputElement;
+    const scroll = spyOn(input, 'scrollIntoView');
+    const focus = spyOn(input, 'focus');
+    click(fixture, '.gp-chip');
+    await new Promise(r => setTimeout(r));
+    expect(scroll).toHaveBeenCalled();
+    expect(focus).toHaveBeenCalled();
+    expect(modalCtrl.create).not.toHaveBeenCalled();
+  });
+
+  it('the three info cards are gone from a kids plan and still shown on a house plan', async () => {
+    const kids = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    expect(kids.componentInstance.view().coversLine).not.toBeNull();
+    expect(kids.nativeElement.querySelectorAll('.fd-how').length).toBe(0);
+    TestBed.resetTestingModule();
+
+    const house = await create({ id: '7' }, { goals: [houseGoal(7)] });
+    expect(house.nativeElement.querySelectorAll('.fd-how').length).toBe(2);
+    expect(text(house, '.fd-how')).toContain('How FRED helps.');
+  });
+
+  it('an unborn kid shows the from line in place of an everyday row', async () => {
+    const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    const page = fixture.componentInstance;
+    const theo = page.kidCards()[1];
+    expect(theo.everyday.state).toBe('unborn');
+    const card = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[1];
+    expect(card.querySelector('.gp-krow.everyday')).toBeNull();
+    expect(card.querySelector('.gp-from')!.textContent!.trim()).toBe(theo.everyday.fromLine!);
+    // The Everyday group still heads the line, with no total.
+    const second = card.querySelector('.gp-group.second') as HTMLElement;
+    expect(second.textContent!.trim()).toBe('Everyday');
+    expect(second.querySelector('.gp-group-total')).toBeNull();
+    // The unpriced line opens nothing.
+    await page.openUnitDetail(1, 'everyday');
+    expect(modalCtrl.create).not.toHaveBeenCalled();
   });
 
   it('kids plans are monthly only: no gift-days row, and a stored giftDays flag changes nothing', async () => {
@@ -758,8 +966,7 @@ describe('GoalPage', () => {
       return calls === 1 ? pending.asObservable() : of({ ...goal, ...body } as Goal);
     });
 
-    click(fixture, '.gp-ktarget');
-    blurWith(fixture, '#gp-bal-plan529-0', '300');
+    void page.updateBalance({ kid: 0, account: 'plan529' }, 300);
     const second = page.updateBalance({ kid: 0, account: 'brokerage' }, 900);
     await Promise.resolve();
     expect(updateSpy).toHaveBeenCalledTimes(1);

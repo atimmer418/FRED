@@ -796,11 +796,10 @@ ion-modal.mc-bottom-sheet-modal {
    strips the box-shadow and the backdrop from any default modal that follows a showing one
    (`ion-modal.modal-default.show-modal ~ ion-modal.modal-default`, specificity 0,3,2), which
    took the white skirt off the stacked sheet: dragging it up showed the sheet beneath through
-   the gap. Same selector shape, later in the cascade, so this wins; the sheet beneath is dimmed
-   the way the page is under the first sheet. */
+   the gap. Same selector shape, later in the cascade, so this wins. Ionic's backdrop-opacity 0
+   stays: the page is dimmed once, under the first sheet (Andy, 2026-11-11: no second dim). */
 ion-modal.modal-default.show-modal ~ ion-modal.mc-bottom-sheet-modal {
   --box-shadow: #{$sheet-skirt-shadow};
-  --backdrop-opacity: 0.4;
 }
 
 /* Auto-height recipe: Ionic marks the projected component .ion-page

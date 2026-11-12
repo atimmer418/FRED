@@ -6,6 +6,7 @@ import { Platform, ModalController } from '@ionic/angular/standalone';
 import { Router } from '@angular/router';
 import { PasskeyPromptComponent } from '../components/passkey-prompt/passkey-prompt.component';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { LastScreenUtils } from '../utils/last-screen.utils';
 import { AuthService } from './auth.service';
 
 const LoadingOverlay = registerPlugin<{ hide(): Promise<void> }>('LoadingOverlay');
@@ -177,6 +178,12 @@ export class AppLockService {
       const withinUnlockGrace = Date.now() - this.lastUnlockTime < 5000;
       if (!this.isModalOpen && !withinUnlockGrace) {
         this.showAppCover();
+        // The user is genuinely leaving: start the "reopen where you left off" clock here. The
+        // two guards above matter for it too, since a stamp during the passkey sheet would make
+        // a stale screen look fresh. router.navigated keeps it off until this launch has landed.
+        if (this.router.navigated) {
+          LastScreenUtils.touch();
+        }
       }
       this.isForeground = false;
     } else {

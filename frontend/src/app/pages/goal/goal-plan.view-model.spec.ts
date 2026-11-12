@@ -561,11 +561,10 @@ describe('buildGoalPlanView final review fixes', () => {
 
 describe('buildGoalPlanView one-screen page', () => {
   const ANCHOR = '2026-11-15T00:00:00';
-  // Goal money never lives in FRED (Andy, 2026-11-11): the note says where it lives and that FRED keeps score.
-  const INVEST_LEAD = (m: number) =>
-    `FRED works out the amount (${fmtMoney(m)} a month right now) and keeps score here. `
-    + 'The money lives outside the app, in accounts you open and fund yourself; '
-    + 'FRED\'s own investing stays on your Freedom Plan, paycheck by paycheck.';
+  // Goal money never lives in FRED (Andy, 2026-11-11): the note names the accounts and says FRED keeps score.
+  const FREEDOM = 'FRED\'s own investing is your Freedom Plan, paycheck by paycheck.';
+  const KIDS_HELP = (accounts: string) => `FRED works out the amounts and keeps score. The money lives in accounts you open: ${accounts}. ${FREEDOM}`;
+  const SIMPLE_HELP = `FRED works out the amount and keeps score. The money lives in an account you open. ${FREEDOM}`;
 
   function kid(label: string, birthYear: number | null, birthMonth: number | null, fund?: { due: [number, number]; target: number }): KidInput {
     return {
@@ -653,30 +652,32 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).pill).toBe('Cash');
   });
 
-  it('howFredHelps quotes investMonthly and keeps goal money outside the app: all invested, mixed (names the baby funds), all cash (vacation)', () => {
+  it('howFredHelps names the accounts the money lives in, outside the app: all invested, mixed (names the baby funds), all cash (vacation)', () => {
     const invested = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
-    expect(invested.howFredHelps).toBe(INVEST_LEAD(invested.investMonthly));
+    expect(invested.howFredHelps).toBe(KIDS_HELP('a 529 for college, a brokerage account for the nest egg'));
     expect(invested.howFredHelps).not.toContain('portfolio');
 
     const oneFund = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
-    expect(oneFund.howFredHelps).toBe(`${INVEST_LEAD(oneFund.investMonthly)} The baby fund stays in cash.`);
+    expect(oneFund.howFredHelps).toBe(KIDS_HELP('a 529 for college, a brokerage account for the nest egg, cash for the baby fund'));
 
     const twoFunds = buildGoalPlanView(family([
       kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 }),
       kid('Mia', 2028, 9, { due: [2028, 9], target: 16_500 }),
     ]), ctx());
-    expect(twoFunds.howFredHelps).toBe(`${INVEST_LEAD(twoFunds.investMonthly)} The baby funds stay in cash.`);
+    expect(twoFunds.howFredHelps).toBe(KIDS_HELP('a 529 for college, a brokerage account for the nest egg, cash for the baby funds'));
 
-    // A cash unit that is not a baby fund: a kid within 36 months of 18.
+    // A cash unit that is not a baby fund (a kid within 36 months of 18) still lives in its 529.
     const teen = buildGoalPlanView(family([kid('Teen', Y - 16, 6), kid('B', 2023, 8)]), ctx());
-    expect(teen.howFredHelps).toBe(`${INVEST_LEAD(teen.investMonthly)} The short-dated money stays in cash.`);
+    expect(teen.howFredHelps).toBe(KIDS_HELP('a 529 for college, a brokerage account for the nest egg'));
+    const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
+    expect(collegeOnly.howFredHelps).toBe(KIDS_HELP('a 529 for college'));
 
     const cash = 'Keep this in cash, like a high-yield savings account, ready the day you need it. FRED tracks it here; the money stays outside the app.';
     expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).howFredHelps).toBe(cash);
     expect(buildGoalPlanView(base({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 2 } }), ctx()).howFredHelps).toBe(cash);
     expect(buildGoalPlanView(family([kid('Teen', Y - 16, 6)]), ctx()).howFredHelps).toBe(cash);
     const house = buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx());
-    expect(house.howFredHelps).toBe(INVEST_LEAD(house.monthlyTotal));
+    expect(house.howFredHelps).toBe(SIMPLE_HELP);
   });
 
   it('a plan with no unborn kid has no fund rows and no timeline undated dots', () => {
@@ -724,69 +725,56 @@ describe('buildGoalPlanView one-screen page', () => {
 
   const MONEY = String.raw`\$[\d,]+`;
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Shortened 2026-11-11 (Andy): the card carries the detail, the note carries the reason.
   const KIDS_WHY = new RegExp('^' + escape(
-    'You will not spend the funds for years: college and the nest egg come due at 18, and those years are '
-    + 'what make invested money grow. Of the ',
-  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you and growth adds ~')
+    'College and the nest egg come due at 18, and those years do the work: of the ',
+  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' is from you and ~')
     + `(${MONEY})` + escape(
-    '. Take it out early and growth stops, and the monthly from you goes up. Anything you need within three '
-    + 'years is planned as cash instead.',
+    ' is growth. Pull it out early and growth stops. Money you need within three years is planned as cash.',
   ) + '$');
   const SIMPLE_WHY = new RegExp('^' + escape(
-    'You will not spend this for years, and those years are what make invested money grow. Of the ',
-  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' comes from you and growth adds ~')
-    + `(${MONEY})` + escape('. Take it out early and growth stops, and the monthly from you goes up.') + '$');
+    'You will not spend this for years, and those years do the work: of the ',
+  ) + `(${MONEY})` + escape(' this plan reaches, ~') + `(${MONEY})` + escape(' is from you and ~')
+    + `(${MONEY})` + escape(' is growth. Pull it out early and growth stops.') + '$');
   const dollars = (s: string) => Number(s.replace(/[$,]/g, ''));
-  it('coversLine leads with "The monthly is {funds} plus everyday costs" (was "Only the funds"), says which sit on top of everyday costs, and prices the kids at home aged 1 to 17 from the everyday entries (a kid under one is the baby fund\'s year one)', () => {
+  const EVERYDAY_LEAD = 'Everyday is what each kid costs at their age, by FRED\'s estimate';
+  it('coversLine speaks in the card\'s terms (shortened 2026-11-11): Invest names the units, the baby fund is year one, Everyday prices the kids at home aged 1 to 17 from the everyday entries', () => {
     // Ellie is 2, Theo arrives in 2028, the third kid is undated: one kid at home (only-child factor), two funds.
     expect(buildGoalPlanView(sample(), ctx()).coversLine).toBe(
-      'The monthly is the baby funds, college and the nest egg plus everyday costs. College and the nest egg are on top of everyday '
-      + 'costs; the baby funds are the first year of them, saved ahead. Everyday costs for Ellie (2) run ~$1,910 a month '
-      + "by FRED's estimate; a kid who has not arrived yet costs nothing until they do.",
+      'Invest is college and the nest egg; the baby funds are year one of everyday costs, saved ahead. '
+      + `${EVERYDAY_LEAD}: ~$1,910 a month for Ellie (2). A kid who has not arrived costs nothing yet.`,
     );
 
     // Two at home, ages 6 (6-8 band) and 3 (3-5 band), two-kid factor 1.00: (12,350 + 12,730) x inflation / 12.
     const two = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
-    expect(two.coversLine).toBe(
-      'The monthly is college and the nest egg plus everyday costs. College and the nest egg are on top of everyday costs. '
-      + "Everyday costs for A (6) and B (3) run ~$2,970 a month by FRED's estimate.",
-    );
+    expect(two.coversLine).toBe(`Invest is college and the nest egg. ${EVERYDAY_LEAD}: ~$2,970 a month for A (6) and B (3).`);
 
     const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
-    expect(collegeOnly.coversLine).toBe(
-      'The monthly is college plus everyday costs. College is on top of everyday costs. '
-      + "Everyday costs for A (6) run ~$1,860 a month by FRED's estimate.",
-    );
+    expect(collegeOnly.coversLine).toBe(`Invest is college. ${EVERYDAY_LEAD}: ~$1,860 a month for A (6).`);
 
     // Mae is under one with no baby fund: at home but not priced, so the line says when costs start.
     const newborn = buildGoalPlanView(family([kid('Mae', 2026, 10)], { plan529Target: 0 }), ctx());
-    expect(newborn.coversLine).toBe(
-      'The monthly is the nest egg plus everyday costs. The nest egg is on top of everyday costs. '
-      + 'No everyday costs yet: they start at the first birthday.',
-    );
+    expect(newborn.coversLine).toBe(`Invest is the nest egg. ${EVERYDAY_LEAD}; costs start at the first birthday.`);
 
     // Mae under one WITH a baby fund: the fund covers year one.
     const funded = buildGoalPlanView(
       family([kid('Mae', 2026, 10, { due: [2027, 10], target: 16_500 })], { plan529Target: 0 }),
       ctx(),
     );
-    expect(funded.coversLine).toContain('No everyday costs yet: the baby fund covers year one.');
-    expect(funded.coversLine).not.toContain('they start at the first birthday');
+    expect(funded.coversLine).toBe(
+      `Invest is the nest egg; the baby fund is year one of everyday costs, saved ahead. ${EVERYDAY_LEAD}; the baby fund covers year one.`,
+    );
 
     // A kid under one beside a priced kid: only the priced kid is named, sized as one of two at home.
     const withBaby = buildGoalPlanView(family([kid('Mae', 2026, 10), kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
-    expect(withBaby.coversLine).toBe(
-      'The monthly is college plus everyday costs. College is on top of everyday costs. '
-      + `Everyday costs for A (6) run ~${fmtMoney(everydayMonthlyForKid(6, 2))} a month by FRED's estimate.`,
-    );
+    expect(withBaby.coversLine).toBe(`Invest is college. ${EVERYDAY_LEAD}: ~${fmtMoney(everydayMonthlyForKid(6, 2))} a month for A (6).`);
 
     const fundOnly = buildGoalPlanView(
       family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })], { plan529Target: 0, brokerageTarget: 0 }),
       ctx(),
     );
     expect(fundOnly.coversLine).toBe(
-      'The monthly is the baby fund plus everyday costs. The baby fund is the first year of everyday costs, saved ahead. '
-      + 'No everyday costs yet; they start when the first kid arrives.',
+      `Invest is the baby fund: year one of everyday costs, saved ahead. ${EVERYDAY_LEAD}; nothing yet until the first kid arrives.`,
     );
   });
 
@@ -796,14 +784,14 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(priced.length).toBe(2);
     const sum = priced.reduce((s, e) => s + e.monthly, 0);
     expect(sum).toBe(view.monthlyTotal - view.investMonthly);
-    expect(view.coversLine).toContain(`Everyday costs for A (6) and B (3) run ~${fmtMoney(sum)} a month by FRED's estimate.`);
+    expect(view.coversLine).toContain(`${EVERYDAY_LEAD}: ~${fmtMoney(sum)} a month for A (6) and B (3).`);
   });
 
   it('whyInvestLine names only the invested units the family has', () => {
     const collegeOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { brokerageTarget: 0 }), ctx());
-    expect(collegeOnly.whyInvestLine).toMatch(/^You will not spend the funds for years: college comes due at 18, and/);
+    expect(collegeOnly.whyInvestLine).toMatch(/^College comes due at 18, and those years do the work: of the /);
     const nestOnly = buildGoalPlanView(family([kid('A', 2020, 3)], { plan529Target: 0 }), ctx());
-    expect(nestOnly.whyInvestLine).toMatch(/^You will not spend the funds for years: the nest egg comes due at 18, and/);
+    expect(nestOnly.whyInvestLine).toMatch(/^The nest egg comes due at 18, and those years do the work: of the /);
   });
 
   it('whyInvestLine for the sample family: from you plus growth plus balances is what the invested units reach (no baby fund: they are cash)', () => {
@@ -996,10 +984,10 @@ describe('buildGoalPlanView one-screen page', () => {
       expect(view.subtitle).toContain(`${fmtMoney(view.monthlyTotal)}/mo`);
     });
 
-    it('How FRED helps quotes the invested monthly, never the everyday figure (status, progress and anchors are pinned elsewhere)', () => {
+    it('How FRED helps quotes no figure at all since 2026-11-11 (the hero carries it), so the everyday figure can never leak into it', () => {
       const view = buildGoalPlanView(sample(), ctx());
       expect(view.investMonthly).toBeLessThan(view.monthlyTotal);
-      expect(view.howFredHelps).toContain(fmtMoney(view.investMonthly));
+      expect(view.howFredHelps).not.toMatch(/\$\d/);
       expect(view.howFredHelps).not.toContain(fmtMoney(view.monthlyTotal));
     });
 

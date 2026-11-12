@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs';
 import { AnalyticsService } from './analytics.service';
+import { LastScreenUtils } from '../../utils/last-screen.utils';
 
 /**
  * Reports a screen view for every routed page.
@@ -41,6 +42,9 @@ export class ScreenTrackingService {
         const screen = this.currentScreenName();
         if (screen && !screen.startsWith('/tabs')) {
           this.analytics.screen(screen);
+          // Remember the page so a cold start can reopen on it. This needs the real URL (the
+          // goal id), which stays on the device; tabs are recorded by TabActivationService.
+          LastScreenUtils.record(this.router.url);
         }
       });
   }

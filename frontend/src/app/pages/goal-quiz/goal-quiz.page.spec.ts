@@ -237,6 +237,21 @@ describe('GoalQuizPage', () => {
     expect(onScreen(fixture).querySelectorAll('.kid-when')[0].textContent?.trim()).toBe('Not sure');
   });
 
+  it('hidden screens are inert, so a stat on the cost screen can never take a tap meant for the stepper under it (2026-11-11)', async () => {
+    const fixture = await create({ type: 'KIDS' });
+    const screens = Array.from(fixture.nativeElement.querySelectorAll('.fscreen')) as HTMLElement[];
+    expect(screens.length).toBeGreaterThan(1);
+    expect(screens[0].classList).toContain('on');
+    expect(screens[0].hasAttribute('inert')).toBeFalse();
+    screens.slice(1).forEach(s => expect(s.hasAttribute('inert')).toBeTrue());
+    // The warning lines hang in their own slot under the stepper, so the stepper never moves.
+    expect(onScreen(fixture).querySelector('.kids-stepper .kids-cap-slot')).not.toBeNull();
+    goTo(fixture, 1);
+    const after = Array.from(fixture.nativeElement.querySelectorAll('.fscreen')) as HTMLElement[];
+    expect(after[0].hasAttribute('inert')).toBeTrue();
+    expect(after[1].hasAttribute('inert')).toBeFalse();
+  });
+
   it('the count step caps at six kids without a line saying so: the disabled plus is the cap (Andy, 2026-11-11)', async () => {
     const fixture = await create({ type: 'KIDS' });
     const page = fixture.componentInstance;

@@ -1,5 +1,9 @@
 import {
+<<<<<<< HEAD
   CUSTOM_ELEMENTS_SCHEMA, Component, DestroyRef, ElementRef, OnInit, ViewChild, computed, inject, signal,
+=======
+  CUSTOM_ELEMENTS_SCHEMA, Component, ElementRef, NgZone, OnInit, ViewChild, computed, inject, signal,
+>>>>>>> feature/goals-v3-polish
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -154,6 +158,12 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
   private readonly route = inject(ActivatedRoute);
   private readonly navCtrl = inject(NavController);
   private readonly modalCtrl = inject(ModalController);
+<<<<<<< HEAD
+=======
+  private readonly zone = inject(NgZone);
+  private readonly actionSheetCtrl = inject(ActionSheetController);
+  private readonly alertCtrl = inject(AlertController);
+>>>>>>> feature/goals-v3-polish
   private readonly goalsService = inject(GoalsService);
   private readonly draftService = inject(GoalDraftService);
   private readonly authService = inject(AuthService);
@@ -804,7 +814,10 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
     // One full-width card per view (the slide width comes from .gp-slide), 10px between cards.
     const params: SwiperOptions = { slidesPerView: 'auto', spaceBetween: 10 };
     Object.assign(el, params);
-    el.initialize();
+    // Outside the zone, like the tabs pager: Swiper listens to touch and pointer events on the
+    // document, and inside the zone every one of them ran change detection, on this page and on
+    // the quiz pushed over it (2026-11-11). The (swiperslidechange) binding still runs in Angular.
+    this.zone.runOutsideAngular(() => el.initialize());
   }
 
   // ── Internals: kid copy ─────────────────────────────────────────────────────

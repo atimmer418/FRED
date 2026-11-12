@@ -44,6 +44,11 @@ export class MfuPresenterService {
     await this.mfuStore.ensureFonts();
     await this.waitForUnlock();
 
+    // The tabs stay mounted underneath a pushed page, so this can fire while My Profile or a
+    // goal is on screen (a launch that reopened there). Hold it until a tab is showing again;
+    // the claim below is not taken, so the next trigger on the tabs still presents it.
+    if (!this.router.url.startsWith('/tabs')) return;
+
     const month = session.data?.generatedForMonth || this.currentMonth();
     if (!this.mfuStore.tryClaimAutoPopup(month)) return;
 

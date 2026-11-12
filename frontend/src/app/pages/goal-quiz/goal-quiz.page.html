@@ -25,8 +25,10 @@
 
   @if (ready()) {
     @for (step of steps(); track step.id) {
+      <!-- Hidden screens are inert: no taps, no focus, however their children style pointer-events. -->
       <div class="fscreen"
            [class.on]="!calcShowing() && !evicting() && $index === stepIndex()"
+           [attr.inert]="!calcShowing() && !evicting() && $index === stepIndex() ? null : ''"
            [class.before]="$index < stepIndex()"
            [class.after]="$index > stepIndex()">
         <div class="fs-eyebrow">{{ step.eyebrow }}</div>
@@ -44,10 +46,14 @@
                 }
               </div>
               <!-- The disabled plus is the cap; no line says so (Andy, 2026-11-11). -->
-              <app-quiz-stepper [value]="kidCount()" [min]="1" [max]="maxKids" (valueChange)="setKidCount($event)" />
-              @for (line of droppedKidLines(); track line) {
-                <div class="kids-cap kids-warn" role="alert">{{ line }}</div>
-              }
+              <div class="kids-stepper">
+                <app-quiz-stepper [value]="kidCount()" [min]="1" [max]="maxKids" (valueChange)="setKidCount($event)" />
+                <div class="kids-cap-slot">
+                  @for (line of droppedKidLines(); track line) {
+                    <div class="kids-cap kids-warn" role="alert">{{ line }}</div>
+                  }
+                </div>
+              </div>
             }
 
             <!-- ── Kids 2: when ─────────────────────────────────────────── -->

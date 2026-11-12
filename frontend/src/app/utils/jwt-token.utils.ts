@@ -1,3 +1,5 @@
+import { LastScreenUtils } from './last-screen.utils';
+
 // JWT token utilities for managing authentication tokens
 export class JwtTokenUtils {
   
@@ -104,6 +106,8 @@ export class JwtTokenUtils {
       localStorage.removeItem(`fred.statStrip.v1.${userId}`);
       // FRED-206: clear the portfolio snapshot for the same reason.
       localStorage.removeItem(`fred.portfolioDash.v1.${userId}`);
+      // Forget the last screen so the next sign-in starts on the home tab.
+      LastScreenUtils.clear(userId);
     }
     localStorage.removeItem('jwtToken');
     localStorage.removeItem('jwtExpiration');

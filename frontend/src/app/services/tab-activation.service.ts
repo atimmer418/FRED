@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import { AnalyticsService } from './analytics/analytics.service';
+import { LastScreenUtils } from '../utils/last-screen.utils';
 
 /**
  * Tells each top-level tab when it becomes the active slide in the swipeable
@@ -29,6 +30,9 @@ export class TabActivationService {
     // service drops an unchanged screen name, which is what filters the deliberate re-pulses
     // (returning to a cached tab) from real screen changes. Name only: no ids, no params.
     this.analytics.screen(`/tabs/${tab}`);
+
+    // Same reason, different consumer: remember the tab so a cold start can reopen on it.
+    LastScreenUtils.record(`/tabs/${tab}`);
   }
 
   // Programmatic "move the pager to <tab>" requests (first-time tour). TabsPage

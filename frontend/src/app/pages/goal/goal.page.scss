@@ -233,7 +233,7 @@
   color: #b3bccb;
 }
 
-// ── Groups: "INVEST" and "EVERYDAY", each with its monthly total ────────────
+// ── Groups: "INVEST" and "EVERYDAY" (labels only; the totals left 2026-11-11, Andy) ─────────
 .gp-group {
   display: flex;
   align-items: center;
@@ -249,14 +249,6 @@
     border-top: 1px solid #eef1f6;
     padding-top: 10px;
   }
-}
-
-.gp-group-total {
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: normal;
-  color: #2563eb;
-  font-variant-numeric: tabular-nums;
 }
 
 // ── Unit rows: the whole row opens the unit's sheet ──────────────────────────

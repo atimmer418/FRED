@@ -815,9 +815,10 @@ export class GoalPage implements OnInit, ViewWillEnter {
       if (account.plan.assumedBirthYear) {
         notes.push('No date yet, so this kid is planned as if born this year. You save a little more than you may need.');
       }
+      // Both accounts live outside FRED (Andy, 2026-11-11): FRED keeps score, the parent holds the money.
       sourcesLine = unit === 'plan529'
-        ? `Four years at ${COLLEGE_PRICE_YEAR_LABEL} College Board prices, which tend to rise. Raise the amount any time from Edit plan.`
-        : 'Your target, grown at the return you chose. At 22 and at 30 assume it stays invested.';
+        ? `A 529 plan you open outside FRED. Four years at ${COLLEGE_PRICE_YEAR_LABEL} College Board prices, which tend to rise. Raise the amount any time from Edit plan.`
+        : 'A brokerage account you open outside FRED. Your target, grown at the return you chose; at 22 and at 30 assume it stays invested.';
     }
 
     return {

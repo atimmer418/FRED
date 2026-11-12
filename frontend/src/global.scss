@@ -759,6 +759,9 @@ ion-modal.mc-fullscreen-modal::part(content) {
 /* Monte Carlo landing bottom sheets (assumptions / Pro nudge) — auto-height
    sheet presented via ModalController so it renders at the app root, above
    the header and tab bar, instead of being contained by inner ion-content. */
+/* The skirt plus the soft top shadow, shared by the single and the stacked sheet rules below. */
+$sheet-skirt-shadow: 0 calc(35vh + 24px) 0 35vh #ffffff, 0 -8px 30px rgba(15, 23, 42, 0.12);
+
 ion-modal.mc-bottom-sheet-modal {
   --width: 100%;
   --max-width: 100%;
@@ -784,11 +787,20 @@ ion-modal.mc-bottom-sheet-modal {
      compositor layer and shadow extents grow that layer's backing store.
      Listed first so it paints OVER the soft shadow's below-the-card spill
      (no grey seam at the card bottom while lifted). */
-  --box-shadow:
-    0 calc(35vh + 24px) 0 35vh #ffffff,
-    0 -8px 30px rgba(15, 23, 42, 0.12);
+  --box-shadow: #{$sheet-skirt-shadow};
   --backdrop-opacity: 0.4;
   align-items: flex-end;
+}
+
+/* A sheet opened over another sheet (the unit detail sheet's info button). Ionic's core.css
+   strips the box-shadow and the backdrop from any default modal that follows a showing one
+   (`ion-modal.modal-default.show-modal ~ ion-modal.modal-default`, specificity 0,3,2), which
+   took the white skirt off the stacked sheet: dragging it up showed the sheet beneath through
+   the gap. Same selector shape, later in the cascade, so this wins; the sheet beneath is dimmed
+   the way the page is under the first sheet. */
+ion-modal.modal-default.show-modal ~ ion-modal.mc-bottom-sheet-modal {
+  --box-shadow: #{$sheet-skirt-shadow};
+  --backdrop-opacity: 0.4;
 }
 
 /* Auto-height recipe: Ionic marks the projected component .ion-page

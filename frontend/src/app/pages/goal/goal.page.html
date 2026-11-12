@@ -96,10 +96,7 @@
                     <em class="gp-kmonthly">{{ fmtMoney(card.monthly) }}/mo</em>
                   </div>
 
-                  <div class="gp-group">
-                    <span>Invest</span>
-                    <span class="gp-group-total">{{ fmtMoney(card.investMonthly) }}</span>
-                  </div>
+                  <div class="gp-group"><span>Invest</span></div>
                   @for (unit of card.units; track unit.key) {
                     <button type="button" class="gp-krow" (click)="openUnitDetail(card.index, unit.key)">
                       <span class="gp-kic"><span class="material-symbols-outlined">{{ unit.icon }}</span></span>
@@ -118,12 +115,7 @@
                   }
 
                   @if (card.everyday.state !== 'grown') {
-                    <div class="gp-group second">
-                      <span>Everyday</span>
-                      @if (card.everyday.state === 'priced') {
-                        <span class="gp-group-total">{{ fmtMoney(card.everyday.monthly) }}</span>
-                      }
-                    </div>
+                    <div class="gp-group second"><span>Everyday</span></div>
                     @if (card.everyday.state === 'priced') {
                       <button type="button" class="gp-krow everyday" (click)="openUnitDetail(card.index, 'everyday')">
                         <span class="gp-kic"><span class="material-symbols-outlined">shopping_basket</span></span>

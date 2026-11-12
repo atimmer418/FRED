@@ -702,23 +702,21 @@ describe('GoalPage', () => {
     return args.componentProps as ReturnType<typeof sheetProps>;
   }
 
-  it('renders Invest and Everyday groups with blue totals, black unit amounts, and the Tap for details hint', async () => {
+  it('renders Invest and Everyday group labels with no totals (Andy, 2026-11-11), plain unit amounts, and the Tap for details hint', async () => {
     const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
     const card = fixture.componentInstance.kidCards()[0];
     const el = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[0];
     const groups = Array.from(el.querySelectorAll('.gp-group')) as HTMLElement[];
     expect(groups.length).toBe(2);
-    expect(groups[0].textContent).toContain('Invest');
+    expect(groups[0].textContent!.trim()).toBe('Invest');
     expect(groups[1].classList).toContain('second');
-    expect(groups[1].textContent).toContain('Everyday');
-    const totals = Array.from(el.querySelectorAll('.gp-group-total')).map(t => t.textContent!.trim());
-    expect(totals).toEqual([fmtMoney(card.investMonthly), fmtMoney(card.everyday.monthly)]);
+    expect(groups[1].textContent!.trim()).toBe('Everyday');
     expect(card.everyday.monthly).toBeGreaterThan(0);
-    // Unit amounts are plain (black): only the two group totals carry the blue class.
+    // The group rows carry only their label; the header figure is the one blue number on the card.
+    expect(el.querySelector('.gp-group-total')).toBeNull();
     const amounts = Array.from(el.querySelectorAll('.gp-krow > em')) as HTMLElement[];
     expect(amounts.length).toBe(3);
-    amounts.forEach(a => expect(a.classList).not.toContain('gp-group-total'));
-    expect(el.querySelectorAll('.gp-group-total').length).toBe(2);
+    expect(amounts[2].textContent!.trim()).toBe(fmtMoney(card.everyday.monthly));
     expect(text(fixture, '.gp-kcard .gp-kmonthly')).toBe(`${fmtMoney(card.monthly)}/mo`);
     expect(text(fixture, '.gp-zone .gp-hint')).toBe('Tap for details');
     expect(text(fixture, '.gp-zone')).toContain('Per kid');
@@ -952,10 +950,9 @@ describe('GoalPage', () => {
     const card = (fixture.nativeElement as HTMLElement).querySelectorAll('.gp-kcard')[1];
     expect(card.querySelector('.gp-krow.everyday')).toBeNull();
     expect(card.querySelector('.gp-from')!.textContent!.trim()).toBe(theo.everyday.fromLine!);
-    // The Everyday group still heads the line, with no total.
+    // The Everyday group still heads the line.
     const second = card.querySelector('.gp-group.second') as HTMLElement;
     expect(second.textContent!.trim()).toBe('Everyday');
-    expect(second.querySelector('.gp-group-total')).toBeNull();
     // The unpriced line opens nothing.
     await page.openUnitDetail(1, 'everyday');
     expect(modalCtrl.create).not.toHaveBeenCalled();

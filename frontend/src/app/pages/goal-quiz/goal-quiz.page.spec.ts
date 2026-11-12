@@ -237,14 +237,14 @@ describe('GoalQuizPage', () => {
     expect(onScreen(fixture).querySelectorAll('.kid-when')[0].textContent?.trim()).toBe('Not sure');
   });
 
-  it('the count step caps at six kids and says so', async () => {
+  it('the count step caps at six kids without a line saying so: the disabled plus is the cap (Andy, 2026-11-11)', async () => {
     const fixture = await create({ type: 'KIDS' });
     const page = fixture.componentInstance;
     page.setKidCount(6);
     fixture.detectChanges();
     expect(page.form().kids.kids.length).toBe(6);
     expect(onScreen(fixture).querySelectorAll('.kid-icons .material-symbols-outlined').length).toBe(6);
-    expect(text(fixture, '.fscreen.on .kids-cap')).toBe('Six is the most FRED plans for at once');
+    expect(fixture.nativeElement.querySelector('.fscreen.on .kids-cap')).toBeNull();
     page.setKidCount(7);
     expect(page.form().kids.kids.length).toBe(6);
     page.setKidCount(2);

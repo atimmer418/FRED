@@ -257,21 +257,25 @@ function goalAudience(goal: GoalPlanInput): string {
   }
 }
 
-const CASH_HELP = 'FRED keeps this in cash, ready the day you need it.';
+const CASH_HELP = 'Keep this in cash, like a high-yield savings account, ready the day you need it. FRED tracks it here; the money stays outside the app.';
 
 /**
  * The How FRED helps note, by the plan's unit rate kinds: all invested, mixed (naming the cash
- * part), or all cash. A plan with no unit left reads as invested, like its rate kind.
+ * part), or all cash. A plan with no unit left reads as invested, like its rate kind. Goal money
+ * never lives in FRED (Andy, 2026-11-11: no portfolio split; FRED's investing is the Freedom
+ * Plan alone), so the note says where it does live and that FRED keeps score.
  */
 function howFredHelpsLine(monthly: number, units: ReadonlyArray<{ kind: RateKind; babyFund: boolean }>): string {
   const cash = units.filter(u => u.kind === 'cash');
   if (units.length > 0 && cash.length === units.length) return CASH_HELP;
-  const lead = `Already investing ${fmtMoney(monthly)} or more a month? FRED sets this plan's share aside inside your portfolio`;
-  if (cash.length === 0) return `${lead} and handles where it goes.`;
+  const lead = `FRED works out the amount (${fmtMoney(monthly)} a month right now) and keeps score here. `
+    + 'The money lives outside the app, in accounts you open and fund yourself; '
+    + 'FRED\'s own investing stays on your Freedom Plan, paycheck by paycheck.';
+  if (cash.length === 0) return lead;
   const name = cash.every(u => u.babyFund)
-    ? (cash.length === 1 ? 'the baby fund' : 'the baby funds')
-    : 'the short-dated money';
-  return `${lead}, keeps ${name} in cash, and handles where it goes.`;
+    ? (cash.length === 1 ? 'The baby fund stays' : 'The baby funds stay')
+    : 'The short-dated money stays';
+  return `${lead} ${name} in cash.`;
 }
 
 /** "a", "a and b", "a, b and c". */

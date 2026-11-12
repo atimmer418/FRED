@@ -55,6 +55,8 @@ of how much they should save this month and how much they should invest this mon
 3. The card has two groups, Invest (baby fund, college, nest egg) and Everyday (one row). Group
    totals in blue; every unit amount black; the header figure blue. Nothing under the header
    figure.
+   > **Changed 2026-11-11 (Andy):** the two blue group totals are gone; the group rows carry only
+   > their label, and the header figure is the one blue number on the card.
 4. The sub line under the kid's name carries the age: "Born 2024 · age 2".
 5. The baby fund always carries the Cash pill and is always cash-planned.
 6. The everyday row is $0 until the kid turns one; the baby fund is year one. Its sub line reads

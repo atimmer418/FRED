@@ -387,6 +387,17 @@ as today.
 
 ### How FRED helps
 
+> **Changed 2026-11-11 (Andy).** FRED will not split the user's portfolio across goals; FRED's own
+> investing is the Freedom Plan alone, paycheck by paycheck, and every goal account (529, brokerage
+> nest egg, cash baby fund) lives outside the app. The note now reads: "FRED works out the amount
+> ($2,243 a month right now) and keeps score here. The money lives outside the app, in accounts you
+> open and fund yourself; FRED's own investing stays on your Freedom Plan, paycheck by paycheck."
+> plus "The baby fund stays in cash." / "The baby funds stay in cash." / "The short-dated money
+> stays in cash." for a mixed plan; all cash: "Keep this in cash, like a high-yield savings account,
+> ready the day you need it. FRED tracks it here; the money stays outside the app." The 529 and nest
+> egg sheets open with "A 529 plan you open outside FRED." / "A brokerage account you open outside
+> FRED." No copy promises a future product. The text below is the superseded version.
+
 A light blue note card (`#eef4ff`, `account_balance_wallet` icon) between the chips and the button,
 with the plan's monthly substituted in, word for word:
 

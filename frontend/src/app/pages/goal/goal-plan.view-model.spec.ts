@@ -561,8 +561,11 @@ describe('buildGoalPlanView final review fixes', () => {
 
 describe('buildGoalPlanView one-screen page', () => {
   const ANCHOR = '2026-11-15T00:00:00';
+  // Goal money never lives in FRED (Andy, 2026-11-11): the note says where it lives and that FRED keeps score.
   const INVEST_LEAD = (m: number) =>
-    `Already investing ${fmtMoney(m)} or more a month? FRED sets this plan's share aside inside your portfolio`;
+    `FRED works out the amount (${fmtMoney(m)} a month right now) and keeps score here. `
+    + 'The money lives outside the app, in accounts you open and fund yourself; '
+    + 'FRED\'s own investing stays on your Freedom Plan, paycheck by paycheck.';
 
   function kid(label: string, birthYear: number | null, birthMonth: number | null, fund?: { due: [number, number]; target: number }): KidInput {
     return {
@@ -650,29 +653,30 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).pill).toBe('Cash');
   });
 
-  it('howFredHelps quotes investMonthly: all invested, mixed (names the baby funds), all cash (vacation)', () => {
+  it('howFredHelps quotes investMonthly and keeps goal money outside the app: all invested, mixed (names the baby funds), all cash (vacation)', () => {
     const invested = buildGoalPlanView(family([kid('A', 2020, 3), kid('B', 2023, 8)]), ctx());
-    expect(invested.howFredHelps).toBe(`${INVEST_LEAD(invested.investMonthly)} and handles where it goes.`);
+    expect(invested.howFredHelps).toBe(INVEST_LEAD(invested.investMonthly));
+    expect(invested.howFredHelps).not.toContain('portfolio');
 
     const oneFund = buildGoalPlanView(family([kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 })]), ctx());
-    expect(oneFund.howFredHelps).toBe(`${INVEST_LEAD(oneFund.investMonthly)}, keeps the baby fund in cash, and handles where it goes.`);
+    expect(oneFund.howFredHelps).toBe(`${INVEST_LEAD(oneFund.investMonthly)} The baby fund stays in cash.`);
 
     const twoFunds = buildGoalPlanView(family([
       kid('Theo', 2028, 6, { due: [2028, 6], target: 20_800 }),
       kid('Mia', 2028, 9, { due: [2028, 9], target: 16_500 }),
     ]), ctx());
-    expect(twoFunds.howFredHelps).toBe(`${INVEST_LEAD(twoFunds.investMonthly)}, keeps the baby funds in cash, and handles where it goes.`);
+    expect(twoFunds.howFredHelps).toBe(`${INVEST_LEAD(twoFunds.investMonthly)} The baby funds stay in cash.`);
 
     // A cash unit that is not a baby fund: a kid within 36 months of 18.
     const teen = buildGoalPlanView(family([kid('Teen', Y - 16, 6), kid('B', 2023, 8)]), ctx());
-    expect(teen.howFredHelps).toBe(`${INVEST_LEAD(teen.investMonthly)}, keeps the short-dated money in cash, and handles where it goes.`);
+    expect(teen.howFredHelps).toBe(`${INVEST_LEAD(teen.investMonthly)} The short-dated money stays in cash.`);
 
-    const cash = 'FRED keeps this in cash, ready the day you need it.';
+    const cash = 'Keep this in cash, like a high-yield savings account, ready the day you need it. FRED tracks it here; the money stays outside the app.';
     expect(buildGoalPlanView(base({ type: 'VACATION', config: { tripsPerYear: 2, budgetPerTrip: 2_000, savedThisYear: 0, savedYear: Y } }), ctx()).howFredHelps).toBe(cash);
     expect(buildGoalPlanView(base({ type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 2 } }), ctx()).howFredHelps).toBe(cash);
     expect(buildGoalPlanView(family([kid('Teen', Y - 16, 6)]), ctx()).howFredHelps).toBe(cash);
     const house = buildGoalPlanView(base({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }), ctx());
-    expect(house.howFredHelps).toBe(`${INVEST_LEAD(house.monthlyTotal)} and handles where it goes.`);
+    expect(house.howFredHelps).toBe(INVEST_LEAD(house.monthlyTotal));
   });
 
   it('a plan with no unborn kid has no fund rows and no timeline undated dots', () => {

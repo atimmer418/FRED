@@ -81,6 +81,22 @@
   .material-symbols-outlined { font-size: 22px; }
 }
 
+// The stepper keeps its place when a warning line comes or goes: the lines hang below it in an
+// absolute slot instead of pushing the centred column up and down under the finger.
+.kids-stepper {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+}
+
+.kids-cap-slot {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+}
+
 .kids-cap {
   margin-top: 18px;
   text-align: center;
@@ -171,13 +187,17 @@
   height: 96px;
   cursor: pointer;
 
+  // The stats never take the tap themselves: the flip is on .xfade, which only takes taps while
+  // its screen is on. A `pointer-events: auto` on the showing stat used to punch through the hidden
+  // cost screen (painted over step 1, so it is hit-tested first) and swallow taps on the kids
+  // stepper and the when sliders (2026-11-11).
   .stat {
     position: absolute;
     inset: 0;
     opacity: 0;
     pointer-events: none;
 
-    &.on { opacity: 1; pointer-events: auto; }
+    &.on { opacity: 1; }
   }
 
   .big-readout { cursor: inherit; }

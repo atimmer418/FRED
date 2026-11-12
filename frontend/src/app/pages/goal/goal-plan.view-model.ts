@@ -265,17 +265,19 @@ const CASH_HELP = 'Keep this in cash, like a high-yield savings account, ready t
  * never lives in FRED (Andy, 2026-11-11: no portfolio split; FRED's investing is the Freedom
  * Plan alone), so the note says where it does live and that FRED keeps score.
  */
-function howFredHelpsLine(monthly: number, units: ReadonlyArray<{ kind: RateKind; babyFund: boolean }>): string {
+function howFredHelpsLine(units: ReadonlyArray<{ kind: RateKind; babyFund: boolean }>, covered: CoveredUnits | null): string {
   const cash = units.filter(u => u.kind === 'cash');
   if (units.length > 0 && cash.length === units.length) return CASH_HELP;
-  const lead = `FRED works out the amount (${fmtMoney(monthly)} a month right now) and keeps score here. `
-    + 'The money lives outside the app, in accounts you open and fund yourself; '
-    + 'FRED\'s own investing stays on your Freedom Plan, paycheck by paycheck.';
-  if (cash.length === 0) return lead;
-  const name = cash.every(u => u.babyFund)
-    ? (cash.length === 1 ? 'The baby fund stays' : 'The baby funds stay')
-    : 'The short-dated money stays';
-  return `${lead} ${name} in cash.`;
+  const freedom = 'FRED\'s own investing is your Freedom Plan, paycheck by paycheck.';
+  if (!covered) return `FRED works out the amount and keeps score. The money lives in an account you open. ${freedom}`;
+  // Kids: name the account each unit lives in, in card order.
+  const accounts = [
+    ...(covered.college ? ['a 529 for college'] : []),
+    ...(covered.nestEgg ? ['a brokerage account for the nest egg'] : []),
+    ...(covered.babyFunds > 0 ? [`cash for the baby fund${covered.babyFunds > 1 ? 's' : ''}`] : []),
+  ];
+  const where = accounts.length > 0 ? `The money lives in accounts you open: ${accounts.join(', ')}.` : 'The money lives in accounts you open.';
+  return `FRED works out the amounts and keeps score. ${where} ${freedom}`;
 }
 
 /** "a", "a and b", "a, b and c". */
@@ -296,11 +298,11 @@ function onTopNames(units: CoveredUnits): string[] {
 const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
- * KIDS only: what the monthly covers. The monthly is the whole month: the funds plus everyday costs.
- * College and the nest egg come on top of everyday costs (the USDA figure stops at 17 and leaves
- * college out); the baby fund IS the first year of those costs, saved ahead. The last sentence is
- * what the kids at home cost this month, read from the everyday entries the hero adds up, so the
- * two can never disagree. Null when no unit is left to pay for.
+ * KIDS only: what the monthly covers, in the card's own terms (Andy, 2026-11-11: short, since the
+ * card shows the two groups). Invest is college and the nest egg; the baby fund is year one of
+ * everyday costs, saved ahead. Everyday is what each kid costs at their age, with the figure read
+ * from the everyday entries the hero adds up, so the two can never disagree. Null when no unit is
+ * left to pay for.
  */
 function coversLineFor(
   units: CoveredUnits,
@@ -308,17 +310,12 @@ function coversLineFor(
   everyday: ReadonlyArray<EverydayView>,
   now: Date,
 ): string | null {
-  const funds = units.babyFunds > 1 ? 'the baby funds are' : 'the baby fund is';
-  const names = [...(units.babyFunds > 0 ? [units.babyFunds > 1 ? 'the baby funds' : 'the baby fund'] : []), ...onTopNames(units)];
-  if (names.length === 0) return null;
   const onTop = onTopNames(units);
-  let relation: string;
-  if (onTop.length > 0) {
-    relation = `${sentenceCase(englishList(onTop))} ${onTop.length === 1 ? 'is' : 'are'} on top of everyday costs`
-      + (units.babyFunds > 0 ? `; ${funds} the first year of them, saved ahead.` : '.');
-  } else {
-    relation = `${sentenceCase(funds)} the first year of everyday costs, saved ahead.`;
-  }
+  if (onTop.length === 0 && units.babyFunds === 0) return null;
+  const fundsAre = units.babyFunds > 1 ? 'the baby funds are' : 'the baby fund is';
+  const invest = onTop.length > 0
+    ? `Invest is ${englishList(onTop)}` + (units.babyFunds > 0 ? `; ${fundsAre} year one of everyday costs, saved ahead.` : '.')
+    : `Invest is ${units.babyFunds > 1 ? 'the baby funds' : 'the baby fund'}: year one of everyday costs, saved ahead.`;
 
   // Only priced kids (1 to 17) are named: year one is the baby fund (the sentence before says so)
   // and the USDA study stops at 17. The figure is the sum the hero adds, never a second calculation.
@@ -331,22 +328,20 @@ function coversLineFor(
       monthly: entry.monthly,
     }));
   const notYet = everyday.some(e => e.state === 'unborn');
+  const lead = 'Everyday is what each kid costs at their age, by FRED\'s estimate';
   let today: string;
   if (priced.length > 0) {
     const who = englishList(priced.map(k => `${k.label} (${k.age})`));
     const cost = priced.reduce((sum, k) => sum + k.monthly, 0);
-    today = `Everyday costs for ${who} run ~${fmtMoney(cost)} a month by FRED's estimate`
-      + (notYet ? '; a kid who has not arrived yet costs nothing until they do.' : '.');
+    today = `${lead}: ~${fmtMoney(cost)} a month for ${who}.` + (notYet ? ' A kid who has not arrived costs nothing yet.' : '');
   } else if (everyday.some(e => e.state === 'year_one')) {
     // Only a kid under one with a baby fund has year one paid for; otherwise costs start at one.
     const funded = kids.some((kid, i) => everyday[i]?.state === 'year_one' && !!kid.accounts.firstYear);
-    today = funded
-      ? 'No everyday costs yet: the baby fund covers year one.'
-      : 'No everyday costs yet: they start at the first birthday.';
+    today = funded ? `${lead}; the baby fund covers year one.` : `${lead}; costs start at the first birthday.`;
   } else {
-    today = notYet ? 'No everyday costs yet; they start when the first kid arrives.' : '';
+    today = notYet ? `${lead}; nothing yet until the first kid arrives.` : '';
   }
-  return `The monthly is ${englishList(names)} plus everyday costs. ${relation}${today ? ' ' + today : ''}`;
+  return `${invest}${today ? ' ' + today : ''}`;
 }
 
 const roundToThousand = (n: number) => Math.round(n / 1_000) * 1_000;
@@ -362,20 +357,20 @@ function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: nu
   const fromYou = roundToThousand(fromYouRaw);
   const fromGrowth = roundToThousand(fromGrowthRaw);
   if (fromYou <= 0 || fromGrowth <= 0) return null;
-  let lead = 'You will not spend this for years, and those years are what make invested money grow.';
+  let lead = 'You will not spend this for years, and those years do the work';
   if (kids) {
-    // Name only the invested units this family has: "college and the nest egg come due at 18",
-    // "college comes due at 18", or, for a family whose only invested unit is the baby fund,
-    // "the baby fund comes due when they arrive".
+    // Name only the invested units this family has: "College and the nest egg come due at 18",
+    // "College comes due at 18", or, for a family whose only invested unit is the baby fund,
+    // "The baby fund comes due when they arrive".
     const onTop = onTopNames(kids);
     const due = onTop.length === 2 ? 'college and the nest egg come due at 18'
       : onTop.length === 1 ? `${onTop[0]} comes due at 18`
       : kids.babyFunds > 1 ? 'the baby funds come due when they arrive' : 'the baby fund comes due when they arrive';
-    lead = `You will not spend the funds for years: ${due}, and those years are what make invested money grow.`;
+    lead = `${sentenceCase(due)}, and those years do the work`;
   }
-  const split = `Of the ${fmtMoney(reaches)} this plan reaches, ~${fmtMoney(fromYou)} comes from you and growth adds `
-    + `~${fmtMoney(fromGrowth)}. Take it out early and growth stops, and the monthly from you goes up.`;
-  return kids ? `${lead} ${split} Anything you need within three years is planned as cash instead.` : `${lead} ${split}`;
+  const split = `: of the ${fmtMoney(reaches)} this plan reaches, ~${fmtMoney(fromYou)} is from you and ~${fmtMoney(fromGrowth)} is growth. `
+    + 'Pull it out early and growth stops.';
+  return kids ? `${lead}${split} Money you need within three years is planned as cash.` : `${lead}${split}`;
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────────
@@ -584,14 +579,14 @@ function kidsView(
     nestEgg: investedAccounts.some(u => u.account === 'brokerage'),
   };
 
+  const coveredUnits: CoveredUnits = {
+    babyFunds: unfinishedFunds.length,
+    college: accounts.some(a => a.account === 'plan529'),
+    nestEgg: accounts.some(a => a.account === 'brokerage'),
+  };
+
   return {
-    coversLine: kids.length > 0
-      ? coversLineFor({
-          babyFunds: unfinishedFunds.length,
-          college: accounts.some(a => a.account === 'plan529'),
-          nestEgg: accounts.some(a => a.account === 'brokerage'),
-        }, kids, everyday, ctx.now)
-      : null,
+    coversLine: kids.length > 0 ? coversLineFor(coveredUnits, kids, everyday, ctx.now) : null,
     whyInvestLine: invested.length > 0
       // From you = what is already saved plus every contribution still to come; growth is the rest.
       ? whyInvestLineFor(reaches, fromYou + investedTotal('balance'), Math.max(0, reaches - investedTotal('balance') - fromYou), investedUnits)
@@ -607,7 +602,7 @@ function kidsView(
       : kids.length === 1 ? 'Ready by their 18th birthday' : 'Ready by each 18th birthday',
     subtitle: `${amountLead(investMonthly, dueNow, monthlyTotal)} ${audience}`,
     audience,
-    howFredHelps: howFredHelpsLine(investMonthly, units),
+    howFredHelps: howFredHelpsLine(units, coveredUnits),
     status,
     progressPct: clampPct(balance, target),
     relative: perKidRelative.some(Boolean),
@@ -788,7 +783,7 @@ function simpleView(
       : `Reaches ${fmtCompact(target)} in ${MONTH_ABBR[plan.reaches.month - 1]} ${plan.reaches.year}`,
     subtitle: `${amountLead(plan.monthly, plan.dueNow)} ${audience}`,
     audience,
-    howFredHelps: howFredHelpsLine(plan.monthly, [{ kind: plan.rateKind, babyFund: false }]),
+    howFredHelps: howFredHelpsLine([{ kind: plan.rateKind, babyFund: false }], null),
     coversLine: null,
     whyInvestLine: plan.rateKind === 'market' && plan.n > 0
       ? whyInvestLineFor(target, plan.fromYou + goal.currentBalance, plan.fromGrowth, null)

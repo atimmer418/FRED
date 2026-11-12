@@ -1,9 +1,5 @@
 import {
-<<<<<<< HEAD
-  CUSTOM_ELEMENTS_SCHEMA, Component, DestroyRef, ElementRef, OnInit, ViewChild, computed, inject, signal,
-=======
-  CUSTOM_ELEMENTS_SCHEMA, Component, ElementRef, NgZone, OnInit, ViewChild, computed, inject, signal,
->>>>>>> feature/goals-v3-polish
+  CUSTOM_ELEMENTS_SCHEMA, Component, DestroyRef, ElementRef, NgZone, OnInit, ViewChild, computed, inject, signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -158,12 +154,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
   private readonly route = inject(ActivatedRoute);
   private readonly navCtrl = inject(NavController);
   private readonly modalCtrl = inject(ModalController);
-<<<<<<< HEAD
-=======
   private readonly zone = inject(NgZone);
-  private readonly actionSheetCtrl = inject(ActionSheetController);
-  private readonly alertCtrl = inject(AlertController);
->>>>>>> feature/goals-v3-polish
   private readonly goalsService = inject(GoalsService);
   private readonly draftService = inject(GoalDraftService);
   private readonly authService = inject(AuthService);

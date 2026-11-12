@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
-import { NavController } from '@ionic/angular';
+import { NavController, ViewWillLeave } from '@ionic/angular';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { trigger, style, animate, transition } from '@angular/animations';
@@ -18,7 +18,12 @@ import {
   IonList, IonItem, IonLabel, IonReorderGroup,
   IonItemSliding, IonItemOptions, IonItemOption, IonSpinner, IonSearchbar, IonBadge
 } from '@ionic/angular/standalone';
+import { AmountTrayHost, TrayHostField } from '../plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.component';
+import { PlanAmountScale } from '../../utils/plan-amount-scale';
 
+/** Every row's allocation: whole percents, 0 to 100; the minus and plus move by one. */
+const ALLOCATION_SCALE: PlanAmountScale = { min: 0, max: 100, step: 1, fine: 1 };
 
 interface PortfolioItem {
   symbol: string;
@@ -82,7 +87,8 @@ interface Stock {
     IonHeader, IonToolbar, IonContent, IonButton, IonIcon,
     IonList, IonItem, IonLabel, IonReorderGroup,
     IonItemSliding, IonItemOptions, IonItemOption, IonSpinner, IonSearchbar, IonBadge,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective,
+    AmountTraySlotComponent
   ],
   animations: [
     trigger('deleteAnimation', [
@@ -93,9 +99,22 @@ interface Stock {
     ])
   ]
 })
-export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
+export class PortfolioCustomizeComponent implements OnInit, OnDestroy, ViewWillLeave {
   private destroy$ = new Subject<void>();
   searchInput$ = new Subject<string>();
+
+  /**
+   * One tray for all the rows, keyed by symbol: tapping a row opens it under that row, tapping
+   * another switches. Rows come and go, so a row's field is registered the first time it is
+   * tapped; each one reads and writes the stock by symbol, so a reset that rebuilds the list
+   * leaves them valid.
+   */
+  private readonly rowFields: Record<string, TrayHostField> = {};
+  readonly tray = new AmountTrayHost<string>({
+    root: inject(ElementRef),
+    destroyRef: inject(DestroyRef),
+    fields: this.rowFields,
+  });
 
   // Current portfolio
   portfolio: Stock[] = [];
@@ -213,6 +232,30 @@ export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  /** Leaving the page: the tray snaps shut rather than collapsing into a view that is going. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
+  }
+
+  /** A row's allocation tap: open the tray under it, switch to it, or close it. */
+  toggleRow(stock: Stock): void {
+    this.rowFields[stock.symbol] ??= {
+      label: `${stock.symbol} allocation`,
+      scale: ALLOCATION_SCALE,
+      unit: 'percent',
+      value: () => this.stockOf(stock.symbol)?.percentage ?? 0,
+      set: v => {
+        const row = this.stockOf(stock.symbol);
+        if (row) row.percentage = v;
+      },
+    };
+    this.tray.toggle(stock.symbol);
+  }
+
+  private stockOf(symbol: string): Stock | undefined {
+    return this.portfolio.find(s => s.symbol === symbol);
   }
 
   private getAuthHeaders(): HttpHeaders {
@@ -407,38 +450,6 @@ export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
     ];
   }
 
-  // Update stock allocation
-  updateAllocation(stock: Stock, event: any) {
-    const val = event.detail?.value ?? (event.target as HTMLInputElement)?.value;
-    
-    // If cleared, set to null (so it shows as empty)
-    if (val === '' || val === null) {
-      stock.percentage = null;
-      return;
-    }
-    
-    // Use parseFloat to support decimals (up to 2 places desired by user)
-    let percentage = parseFloat(val);
-    
-    // Clamp between 0 and 100
-    if (percentage > 100) {
-      percentage = 100;
-      // Force update the input element if we clamped the value
-      if (event.target) {
-        event.target.value = 100;
-      }
-    } else if (percentage < 0) {
-      percentage = 0;
-      if (event.target) {
-        event.target.value = 0;
-      }
-    } else if (isNaN(percentage)) {
-      percentage = 0;
-    }
-    
-    stock.percentage = percentage;
-  }
-
   // Normalize allocations to ensure they add up to 100%
   normalizeAllocations() {
     const total = this.getTotalAllocation();
@@ -461,6 +472,8 @@ export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
 
   // Remove stock from portfolio
   removeStock(stock: Stock) {
+    // The row leaves with its slot, so there is nothing left to collapse.
+    if (this.tray.shown() === stock.symbol) this.tray.close(true);
     const index = this.portfolio.findIndex(s => s.symbol === stock.symbol);
     if (index > -1) {
       this.portfolio.splice(index, 1);
@@ -502,7 +515,7 @@ export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
     // Check if already exists
     const exists = this.portfolio.find(s => s.symbol.toLowerCase() === this.newStock.symbol.toLowerCase());
     if (exists) {
-      alert('This stock is already in your portfolio');
+      this.toastService.show({ severity: 'warning', message: 'This stock is already in your portfolio' });
       return;
     }
 
@@ -531,6 +544,8 @@ export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
 
   // Reset to default portfolio
   resetToDefault() {
+    // The rows are about to be replaced under the tray.
+    this.tray.close(true);
     // If the user's saved portfolio is already the default, just show success toast
     if (!this.isSavedPortfolioDifferentFromDefault()) {
       this.portfolio = this.getDefaultPortfolioStructure();
@@ -566,6 +581,7 @@ export class PortfolioCustomizeComponent implements OnInit, OnDestroy {
 
   // Save portfolio and return to confirmation
   async savePortfolio() {
+    this.tray.close();
     if (!this.isValidAllocation()) {
       this.toastService.showToast('Portfolio allocations must add up to 100%', 'danger');
       return;

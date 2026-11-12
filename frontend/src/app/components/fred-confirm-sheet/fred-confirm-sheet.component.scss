@@ -1,0 +1,128 @@
+// FRED confirm sheet. The ion-modal shell (mc-bottom-sheet-modal in global.scss) provides the
+// rounded white chrome; this styles the content inside it. The two buttons are the house
+// .gs-remove (goal-remove-confirm-sheet) and .fd-cta (theme/_plan-page) recipes.
+
+:host {
+  display: block;
+}
+
+.gs-body {
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  font-family: 'Manrope', sans-serif;
+}
+
+.gs-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 16px;
+}
+
+// The optional chip above the title: blue by default, red on a destructive sheet.
+.cs-chip {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #eef4ff;
+  color: #2563eb;
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+
+  .material-symbols-outlined { font-size: 20px; }
+
+  &--danger {
+    background: #fef2f2;
+    color: #dc2626;
+  }
+}
+
+h3 {
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0 0 5px;
+}
+
+.gs-sub {
+  font-size: 12.5px;
+  color: #6b7280;
+  font-weight: 500;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+// Shared by both tones: the spinner sits beside the label while busy.
+.cs-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.85; }
+}
+
+.cs-spinner {
+  width: 18px;
+  height: 18px;
+}
+
+.gs-remove {
+  height: 46px;
+  border: 1.5px solid #dc2626;
+  border-radius: 13px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 14px;
+  font-weight: 800;
+
+  .cs-spinner { color: #dc2626; }
+}
+
+.fd-cta {
+  height: 50px;
+  border: none;
+  border-radius: 13px;
+  background: #111827;
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 800;
+
+  .cs-spinner { color: #fff; }
+}
+
+// The button is only ever disabled while busy, and busy keeps its own colour: it is working, not
+// unavailable.
+.cs-confirm[disabled] {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.gs-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 0;
+  text-align: center;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &[disabled] {
+    opacity: 0.5;
+    cursor: default;
+  }
+}

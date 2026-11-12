@@ -1,3 +1,4 @@
+import { ElementRef } from '@angular/core';
 import { fakeAsync, tick } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -45,6 +46,7 @@ describe('LumpSumInvestmentPage clientUuid', () => {
         'trackErrorShown',
         'screen',
       ]),
+      new ElementRef(document.createElement('div')),
     );
   });
 

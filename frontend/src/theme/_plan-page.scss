@@ -171,6 +171,18 @@
   &::placeholder { color: #cbd5e1; font-weight: 600; }
 }
 
+// The same figure as a read-only span: for a tile that is a button (the Freedom page's tiles open
+// the slide tray instead of a keyboard).
+.fd-tile-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
 // ── Insight rows ─────────────────────────────────────────────────────────────
 .fd-insights {
   display: flex;

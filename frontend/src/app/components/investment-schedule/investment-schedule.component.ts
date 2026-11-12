@@ -1,21 +1,24 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import {
-  IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner, NavController
+  IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner, NavController, ViewWillLeave
 } from '@ionic/angular/standalone';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { InvestmentService } from '../../services/investment.service'; // Import this
+import { ToastService } from '../../services/toast.service';
 import { environment } from '../../../environments/environment';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
+import { AmountTrayHost } from '../plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.component';
+import { PiecewiseScale } from '../../utils/plan-amount-scale';
 
 export interface InvestmentSchedule {
   payFrequency: string;
-  investmentAmount: number;
   startDate: string;
   isEnabled: boolean;
 }
@@ -35,6 +38,21 @@ export interface InvestmentScheduleResponse {
   updatedAt: string;
 }
 
+/** The one tray-driven field on this screen. */
+type TrayField = 'amount';
+
+/**
+ * The amount per paycheck, as the rollout table sets it
+ * (docs/superpowers/specs/2026-11-11-amount-tray-rollout-design.md): $5 to $10,000, the dollar step
+ * growing with the amount; minus and plus move $5.
+ */
+const AMOUNT_SCALE: PiecewiseScale = {
+  min: 5,
+  max: 10_000,
+  fine: 5,
+  segments: [{ to: 500, step: 5 }, { to: 2000, step: 50 }, { to: 5000, step: 250 }, { to: 10_000, step: 500 }],
+};
+
 @Component({
   selector: 'app-investment-schedule',
   templateUrl: './investment-schedule.component.html',
@@ -43,12 +61,17 @@ export interface InvestmentScheduleResponse {
   imports: [
     CommonModule, FormsModule,
     IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective, AmountTraySlotComponent
   ]
 })
-export class InvestmentScheduleComponent implements OnInit {
+export class InvestmentScheduleComponent implements OnInit, OnDestroy, ViewWillLeave {
   // User's financial data from initial survey
   monthlyGoal: number = 0;
+
+  /** The amount per paycheck: a signal, so the tray under it follows every change. */
+  readonly investmentAmount = signal(0);
+  /** The slide tray under the amount: open, close, outside tap and the label swap live in the host. */
+  readonly tray: AmountTrayHost<TrayField>;
 
   isSubmitting: boolean = false;
   isReady: boolean = false;
@@ -79,13 +102,27 @@ export class InvestmentScheduleComponent implements OnInit {
     private authService: AuthService,
     private investmentService: InvestmentService,
     private http: HttpClient,
-    private analytics: AnalyticsService
-  ) {}
+    private analytics: AnalyticsService,
+    private toastService: ToastService,
+    el: ElementRef<HTMLElement>
+  ) {
+    this.tray = new AmountTrayHost<TrayField>({
+      root: el,
+      fields: {
+        amount: {
+          label: 'Amount',
+          scale: AMOUNT_SCALE,
+          value: this.investmentAmount,
+          set: v => this.investmentAmount.set(v),
+          valueSuffix: ' per paycheck',
+        },
+      },
+    });
+  }
 
   // Investment schedule configuration
   schedule: InvestmentSchedule = {
     payFrequency: 'BIWEEKLY',
-    investmentAmount: 0,
     startDate: '', // This will be the next pay date
     isEnabled: true
   };
@@ -136,6 +173,15 @@ export class InvestmentScheduleComponent implements OnInit {
 
   }
 
+  ngOnDestroy(): void {
+    this.tray.destroy();
+  }
+
+  /** Leaving the screen: the tray snaps shut instead of collapsing into a screen that is going. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
+  }
+
   private restoreAcatsFromStorage(): void {
     const saved = localStorage.getItem('pendingAcats');
     if (saved) {
@@ -164,7 +210,7 @@ export class InvestmentScheduleComponent implements OnInit {
         if (savedSchedule && savedSchedule.frequency && savedSchedule.investmentAmount) {
           console.log('[InvestmentScheduleComponent] ✅ Restoring saved schedule:', savedSchedule);
           this.schedule.payFrequency = savedSchedule.frequency;
-          this.schedule.investmentAmount = savedSchedule.investmentAmount;
+          this.investmentAmount.set(savedSchedule.investmentAmount);
           this.schedule.startDate = this.parseDateValue(savedSchedule.startDate) || this.getInvestmentDate();
         } else {
           this.schedule.startDate = this.getInvestmentDate();
@@ -227,10 +273,6 @@ export class InvestmentScheduleComponent implements OnInit {
     this.schedule.startDate = this.getInvestmentDate();
     // Angular's change detection will automatically update the description when these properties change
     console.log('[InvestmentScheduleComponent] Frequency changed to:', frequency, 'Start date set to:', this.schedule.startDate);
-  }
-
-  onAmountChange() {
-    // Amount changes don't affect the schedule description
   }
 
   onStartDateChange(date: string) {
@@ -301,9 +343,7 @@ export class InvestmentScheduleComponent implements OnInit {
     const selectedFrequency = this.getSelectedFrequencyDetails();
 
     if (selectedFrequency) {
-      this.schedule.investmentAmount = Math.round(
-        this.monthlyGoal / selectedFrequency.paychecksPerMonth
-      );
+      this.investmentAmount.set(Math.round(this.monthlyGoal / selectedFrequency.paychecksPerMonth));
     }
   }
 
@@ -314,7 +354,7 @@ export class InvestmentScheduleComponent implements OnInit {
   getMonthlyProjection(): number {
     const frequencyDetails = this.getSelectedFrequencyDetails();
     if (!frequencyDetails) return 0;
-    return this.schedule.investmentAmount * frequencyDetails.paychecksPerMonth;
+    return this.investmentAmount() * frequencyDetails.paychecksPerMonth;
   }
 
   getMonthlyShortfall(): number {
@@ -528,12 +568,13 @@ export class InvestmentScheduleComponent implements OnInit {
   }
 
   canProceed(): boolean {
-    if (this.schedule.investmentAmount <= 0 || this.schedule.startDate === '') return false;
+    if (this.investmentAmount() <= 0 || this.schedule.startDate === '') return false;
     if (this.showTransferOptions && (!this.transferBrokerageDtc || !this.transferAccountNumber)) return false;
     return true;
   }
 
   goToStockPreferences(): void {
+    this.tray.close();
     console.log('[InvestmentScheduleComponent] Proceeding to investment confirmation with schedule:', this.schedule);
     // At the tap. The amount and frequency themselves are a server-side fact (recurring_created).
     this.analytics.trackOnboardingStepCompleted('investment_schedule', null);
@@ -541,7 +582,7 @@ export class InvestmentScheduleComponent implements OnInit {
 
     // Prepare data for backend - match CreateInvestmentScheduleRequest DTO
     const investmentScheduleData = {
-      investmentAmount: this.schedule.investmentAmount,
+      investmentAmount: this.investmentAmount(),
       frequency: this.schedule.payFrequency,
       startDate: this.schedule.startDate // Send as string in YYYY-MM-DD format
     };
@@ -585,16 +626,14 @@ export class InvestmentScheduleComponent implements OnInit {
         error: (error) => {
           console.error('[InvestmentScheduleComponent] ❌ Error saving investment schedule:', error);
           this.isSubmitting = false;
-          // Before the alert, which blocks the thread until the user dismisses it.
           this.analytics.trackErrorShown(
             isNetworkFailure(error) ? 'network' : 'save_failed',
             'onboarding',
-            'alert',
+            'toast',
             httpStatusOf(error),
             true,
           );
-          // Show error message to user
-          alert('Error saving investment schedule. Please try again.');
+          this.toastService.show({ severity: 'error', message: 'Error saving investment schedule. Please try again.' });
         }
       });
   }

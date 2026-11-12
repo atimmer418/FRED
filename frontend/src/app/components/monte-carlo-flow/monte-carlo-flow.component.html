@@ -86,29 +86,60 @@
     <h1 class="fs-h1">Count everything<br>you've built.</h1>
     <p class="fs-sub">Balances you hold outside FRED, added to your starting portfolio.</p>
 
-    <div class="fs-center">
-      <div class="glass-field">
-        <label>401(k) balance</label>
-        <div class="gf-row">
-          <span class="gf-pre">$</span>
-          <input type="tel"
-                 inputmode="numeric"
-                 placeholder="250,000"
-                 [value]="k401Raw"
-                 (input)="onK401Input($event)">
+    <!-- Each balance is a value button that opens the slide tray inside its glass field; tapping
+         the other field moves the tray there. Done sits in the label row while it is open. While
+         the tray is shown the column is held where it sat (see pinOutsideColumn). -->
+    <div
+      #outsideCenter
+      class="fs-center"
+      [class.tray-pinned]="tray.shown() !== null"
+      [style.padding-top.px]="tray.shown() !== null ? outsidePinPx() : null">
+      <div class="glass-field" [class.active]="tray.isOpen('k401')">
+        <div class="field-label-row">
+          <label class="field-label" [class.active]="tray.isOpen('k401')">{{ tray.label('k401') }}</label>
+          @if (tray.shown() === 'k401') {
+            <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+          }
         </div>
+        <button type="button"
+                class="gf-row field-value-btn"
+                [class.active]="tray.isOpen('k401')"
+                [attr.aria-expanded]="tray.isOpen('k401')"
+                (click)="tray.toggle('k401')">
+          <span class="gf-pre field-affix">$</span>
+          @if (k401Balance()) {
+            <span class="gf-val">{{ k401Balance() | number:'1.0-0' }}</span>
+          } @else {
+            <span class="gf-val field-placeholder">250,000</span>
+          }
+        </button>
+        @if (tray.shown() === 'k401') {
+          <app-amount-tray-slot [tray]="tray" field="k401" />
+        }
       </div>
 
-      <div class="glass-field">
-        <label>Roth IRA balance</label>
-        <div class="gf-row">
-          <span class="gf-pre">$</span>
-          <input type="tel"
-                 inputmode="numeric"
-                 placeholder="85,000"
-                 [value]="rothRaw"
-                 (input)="onRothInput($event)">
+      <div class="glass-field" [class.active]="tray.isOpen('roth')">
+        <div class="field-label-row">
+          <label class="field-label" [class.active]="tray.isOpen('roth')">{{ tray.label('roth') }}</label>
+          @if (tray.shown() === 'roth') {
+            <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+          }
         </div>
+        <button type="button"
+                class="gf-row field-value-btn"
+                [class.active]="tray.isOpen('roth')"
+                [attr.aria-expanded]="tray.isOpen('roth')"
+                (click)="tray.toggle('roth')">
+          <span class="gf-pre field-affix">$</span>
+          @if (rothBalance()) {
+            <span class="gf-val">{{ rothBalance() | number:'1.0-0' }}</span>
+          } @else {
+            <span class="gf-val field-placeholder">85,000</span>
+          }
+        </button>
+        @if (tray.shown() === 'roth') {
+          <app-amount-tray-slot [tray]="tray" field="roth" />
+        }
       </div>
 
       <div class="combined-line">

@@ -1,11 +1,12 @@
 import { ChangeDetectorRef } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { NavController, ToastController } from '@ionic/angular/standalone';
+import { NavController } from '@ionic/angular/standalone';
 import { of, throwError } from 'rxjs';
 import { AlpacaAccountResponse, AlpacaService } from '../../services/alpaca.service';
 import { AuthService, UserProgress } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
+import { ToastService } from '../../services/toast.service';
 import { KycVerificationComponent } from './kyc-verification.component';
 
 const EMPTY_PROGRESS: UserProgress = {
@@ -23,7 +24,7 @@ describe('KycVerificationComponent — analytics', () => {
   let analytics: jasmine.SpyObj<AnalyticsService>;
   let router: jasmine.SpyObj<Router>;
   let navCtrl: jasmine.SpyObj<NavController>;
-  let toastController: jasmine.SpyObj<ToastController>;
+  let toastService: jasmine.SpyObj<ToastService>;
   let cdr: jasmine.SpyObj<ChangeDetectorRef>;
   let alpacaService: jasmine.SpyObj<AlpacaService>;
   let authService: AuthService;
@@ -40,7 +41,7 @@ describe('KycVerificationComponent — analytics', () => {
       navCtrl,
       authService,
       alpacaService,
-      toastController,
+      toastService,
       cdr,
       analytics,
     );
@@ -77,10 +78,7 @@ describe('KycVerificationComponent — analytics', () => {
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     navCtrl = jasmine.createSpyObj<NavController>('NavController', ['navigateBack', 'navigateForward']);
     cdr = jasmine.createSpyObj<ChangeDetectorRef>('ChangeDetectorRef', ['detectChanges']);
-    toastController = jasmine.createSpyObj<ToastController>('ToastController', ['create']);
-    toastController.create.and.returnValue(
-      Promise.resolve({ present: () => Promise.resolve() } as unknown as HTMLIonToastElement),
-    );
+    toastService = jasmine.createSpyObj<ToastService>('ToastService', ['showToast']);
     alpacaService = jasmine.createSpyObj<AlpacaService>('AlpacaService', [
       'createAlpacaAccount',
       'getKycData',
@@ -153,6 +151,33 @@ describe('KycVerificationComponent — analytics', () => {
     expect(analytics.trackErrorShown).toHaveBeenCalledWith('save_failed', 'onboarding', 'toast', 422, true);
     const everySentArgument = JSON.stringify(analytics.trackErrorShown.calls.allArgs());
     expect(everySentArgument).not.toContain('Taxpayer');
+    // The toast, unlike analytics, does carry the server message, and reads as danger.
+    expect(toastService.showToast).toHaveBeenCalledOnceWith('Taxpayer id is invalid', 'danger');
+  });
+
+  it('warns, rather than errors, when the settings form cannot load the saved KYC data', () => {
+    alpacaService.getKycData.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+    component = build({ edit: 'true' });
+
+    component.ngOnInit();
+
+    expect(toastService.showToast).toHaveBeenCalledOnceWith(
+      'Could not load current KYC data. Please fill in your information.',
+      'warning',
+    );
+  });
+
+  it('marks a saved settings update as success', async () => {
+    component = build({ edit: 'true' });
+    component.ngOnInit();
+    fillStep1(component);
+    component.currentStep = 2;
+    component.step2Form.patchValue({ agreementsChecked: true });
+    alpacaService.updateKyc.and.returnValue(of({}));
+
+    await component.submitKyc();
+
+    expect(toastService.showToast).toHaveBeenCalledOnceWith('Your identity information has been updated.', 'success');
   });
 
   it('reports a connection that never reached the server as a network error', async () => {

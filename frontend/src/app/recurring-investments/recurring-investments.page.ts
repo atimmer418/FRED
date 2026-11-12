@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, ElementRef, OnInit, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -12,7 +12,8 @@ import {
   IonButtons,
   IonDatetime,
   IonModal,
-  AlertController
+  ModalController,
+  ViewWillLeave
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import {
@@ -31,7 +32,10 @@ import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AccountStatusService } from '../services/account-status.service';
-import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
+import { presentConfirmSheet } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
+import { AmountTrayHost } from '../components/plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
+import { PiecewiseScale } from '../utils/plan-amount-scale';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
@@ -41,6 +45,21 @@ interface InvestmentFrequencyOption {
   description: string;
   paychecksPerMonth: number;
 }
+
+/** The one tray-driven field on this page. */
+type TrayField = 'amount';
+
+/**
+ * The amount per period, as the rollout table sets it
+ * (docs/superpowers/specs/2026-11-11-amount-tray-rollout-design.md): $5 to $10,000, the dollar step
+ * growing with the amount; minus and plus move $5.
+ */
+const AMOUNT_SCALE: PiecewiseScale = {
+  min: 5,
+  max: 10_000,
+  fine: 5,
+  segments: [{ to: 500, step: 5 }, { to: 2000, step: 50 }, { to: 5000, step: 250 }, { to: 10_000, step: 500 }],
+};
 
 @Component({
   selector: 'app-recurring-investments',
@@ -55,21 +74,24 @@ interface InvestmentFrequencyOption {
     IonButtons,
     IonDatetime,
     IonModal,
-    KeyboardAvoidDirective
+    AmountTraySlotComponent
   ],
   templateUrl: './recurring-investments.page.html',
   styleUrls: ['./recurring-investments.page.scss']
 })
-export class RecurringInvestmentsPage implements OnInit, OnDestroy {
+export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeave {
   private destroy$ = new Subject<void>();
 
   currentInvestment: InvestmentSchedule | null = null;
   editedInvestment: Partial<InvestmentSchedule> = {
-    investmentAmount: 0,
     frequency: 'WEEKLY',
     isPaused: false,
     nextInvestmentDate: undefined
   };
+  /** The amount being edited, kept apart from the draft above so the tray can follow it. */
+  readonly editedAmount = signal(0);
+  /** The slide tray under the amount: open, close, outside tap and the label swap live in the host. */
+  readonly tray: AmountTrayHost<TrayField>;
 
   isLoading = false;
   isDatePickerOpen = false;
@@ -114,11 +136,23 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
     private pinService: PinService,
     private toastService: ToastService,
     private accountStatusService: AccountStatusService,
-    private alertController: AlertController,
+    private modalCtrl: ModalController,
     private navCtrl: NavController,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    el: ElementRef<HTMLElement>
   ) {
     addIcons({ cashOutline, timeOutline, calendarOutline, addOutline, checkmarkCircleOutline, pauseOutline, playOutline, alertCircleOutline, settingsOutline, informationCircleOutline });
+    this.tray = new AmountTrayHost<TrayField>({
+      root: el,
+      fields: {
+        amount: {
+          label: 'Amount',
+          scale: AMOUNT_SCALE,
+          value: this.editedAmount,
+          set: v => this.editedAmount.set(v),
+        },
+      },
+    });
   }
 
   ngOnInit() {
@@ -133,6 +167,12 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+    this.tray.destroy();
+  }
+
+  /** Leaving the page: the tray snaps shut instead of collapsing into a page that is going. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
   }
 
   private loadCurrentInvestment() {
@@ -143,8 +183,8 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
         next: (investment: InvestmentSchedule) => {
           this.currentInvestment = investment;
           if (investment) {
+            this.editedAmount.set(this.suggestedAmount ?? investment.investmentAmount);
             this.editedInvestment = {
-              investmentAmount: this.suggestedAmount ?? investment.investmentAmount,
               frequency: investment.frequency,
               isPaused: investment.isPaused,
               nextInvestmentDate: investment.nextInvestmentDate
@@ -492,43 +532,26 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
     }
   }
 
-  onAmountChange() {
-    // Ensure minimum amount
-    if (this.editedInvestment.investmentAmount && this.editedInvestment.investmentAmount < 1) {
-      this.editedInvestment.investmentAmount = 1;
-    }
-  }
-
   async toggleInvestmentStatus() {
     if (!this.currentInvestment) return;
 
     const isPausing = !this.currentInvestment.isPaused;
 
-    // If pausing and streak > 0, show confirmation alert first
+    // Pausing with a streak costs the streak, so ask first.
     if (isPausing && this.currentInvestment.monthlyStreak > 0) {
       const streak = this.currentInvestment.monthlyStreak;
-      const alert = await this.alertController.create({
-        header: 'Pause Investments?',
-        message: `This will reset your ${streak}-month investing streak to 0. Investing less is better than investing nothing. Consider reducing your amount instead.`,
-        buttons: [
-          {
-            text: 'Cancel',
-            role: 'cancel'
-          },
-          {
-            text: 'Pause Anyway',
-            role: 'destructive',
-            handler: () => {
-              this.executePauseOrResume(isPausing);
-            }
-          }
-        ]
+      const ok = await presentConfirmSheet(this.modalCtrl, {
+        tone: 'destructive',
+        icon: 'pause_circle',
+        title: 'Pause investments?',
+        body: `This will reset your ${streak}-month investing streak to 0. Investing less is better than investing nothing. Consider reducing your amount instead.`,
+        confirmLabel: 'Pause anyway',
+        cancelLabel: 'Keep investing',
       });
-      await alert.present();
-      return;
+      if (!ok) return;
     }
 
-    // No streak or resuming — proceed immediately
+    // No streak, or resuming: nothing to confirm.
     this.executePauseOrResume(isPausing);
   }
 
@@ -605,7 +628,9 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
   }
 
   async saveChanges() {
-    if (!this.editedInvestment.investmentAmount || this.editedInvestment.investmentAmount < 1) {
+    this.tray.close();
+    const amount = this.editedAmount();
+    if (!amount || amount < 1) {
       this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
       this.toastService.showToast('Investment amount must be at least $1', 'danger');
       return;
@@ -672,7 +697,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
 
       // Create update request
       const updateRequest: CreateInvestmentScheduleRequest = {
-        investmentAmount: this.editedInvestment.investmentAmount!,
+        investmentAmount: amount,
         frequency: this.editedInvestment.frequency || this.currentInvestment.frequency,
         startDate: startDateString,
         nextInvestmentDate: nextInvestmentDateString
@@ -720,7 +745,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy {
     if (!this.currentInvestment) return false;
 
     // Check amount
-    if (this.currentInvestment.investmentAmount !== this.editedInvestment.investmentAmount) {
+    if (this.currentInvestment.investmentAmount !== this.editedAmount()) {
       return true;
     }
 

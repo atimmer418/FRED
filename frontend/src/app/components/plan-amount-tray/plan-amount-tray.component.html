@@ -1,0 +1,63 @@
+<div class="tray-in">
+  <div class="tray-row">
+    <!-- The 44px hit band; the 6px track and the thumb sit inside it. -->
+    <div
+      #band
+      class="ps"
+      [class.dragging]="isDragging()"
+      role="slider"
+      tabindex="0"
+      [attr.aria-label]="ariaLabel()"
+      [attr.aria-valuemin]="scale().min"
+      [attr.aria-valuemax]="scale().max"
+      [attr.aria-valuenow]="ariaValue()"
+      [attr.aria-valuetext]="valueText()"
+      (pointerdown)="onPointerDown($event)"
+      (touchstart)="onTouchStart($event)"
+      (pointermove)="onPointerMove($event)"
+      (pointerup)="onPointerEnd($event)"
+      (pointercancel)="onPointerEnd($event)"
+      (keydown)="onKeydown($event)"
+    >
+      <div class="ps-track"><div class="ps-fill" [style.width.%]="fillPct()"></div></div>
+      <div class="ps-ticks" aria-hidden="true"></div>
+      <!-- One hairline where the step changes, on a piecewise scale. -->
+      <div class="ps-marks" aria-hidden="true">
+        @for (left of markLefts(); track $index) {
+          <i class="ps-mark" [style.left]="left"></i>
+        }
+      </div>
+      <div class="ps-thumb" [style.left]="thumbLeft()"></div>
+    </div>
+    <button
+      type="button"
+      class="nudge"
+      aria-label="Less"
+      [disabled]="atFloor()"
+      (click)="onNudgeClick(-1)"
+      (touchstart)="onNudgeTouchStart($event)"
+      (pointerdown)="onNudgeDown($event, -1)"
+      (pointerup)="onNudgeUp()"
+      (pointercancel)="onNudgeLeave()"
+      (pointerleave)="onNudgeLeave()"
+      (contextmenu)="onNudgeContextMenu($event)"
+    ><span class="material-symbols-outlined">remove</span></button>
+    <button
+      type="button"
+      class="nudge"
+      aria-label="More"
+      [disabled]="atCap()"
+      (click)="onNudgeClick(1)"
+      (touchstart)="onNudgeTouchStart($event)"
+      (pointerdown)="onNudgeDown($event, 1)"
+      (pointerup)="onNudgeUp()"
+      (pointercancel)="onNudgeLeave()"
+      (pointerleave)="onNudgeLeave()"
+      (contextmenu)="onNudgeContextMenu($event)"
+    ><span class="material-symbols-outlined">add</span></button>
+  </div>
+  <div class="ps-ends" aria-hidden="true">
+    <span>{{ minLabel() }}</span>
+    <span>{{ maxLabel() }}</span>
+  </div>
+</div>

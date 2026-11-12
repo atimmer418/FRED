@@ -10,7 +10,8 @@
   </div>
 </ion-header>
 
-<ion-content class="shell-content" appKeyboardAvoid>
+<!-- No keyboard on this page: the amount opens the slide tray, so no keyboard-avoid directive. -->
+<ion-content class="shell-content">
   <div class="shell-inner">
 
     <!-- Loading -->
@@ -65,19 +66,6 @@
               <span class="material-symbols-outlined" *ngIf="!isClosingAccount">delete</span>
               {{!canCloseAccount ? 'Complete steps above first' : 'Close My Account'}}
             </button>
-
-            <div *ngIf="showCloseConfirmation" class="confirm-panel">
-              <span class="material-symbols-outlined confirm-warning-icon">warning</span>
-              <h4 class="confirm-title">Are you sure?</h4>
-              <p class="confirm-body">This action is <strong>irreversible</strong> and will permanently destroy your account. All your data, settings, and history will be deleted. If you return, you'll need to start over.</p>
-              <div class="confirm-actions">
-                <button class="cancel-btn" [disabled]="isClosingAccount" (click)="cancelCloseAccount()">Cancel</button>
-                <button class="danger-btn confirm-danger-btn" [disabled]="isClosingAccount" (click)="confirmCloseAccount()">
-                  <ion-spinner *ngIf="isClosingAccount" name="crescent" class="btn-spinner-sm"></ion-spinner>
-                  {{isClosingAccount ? 'Closing...' : 'Close Account'}}
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -191,19 +179,35 @@
         <p class="card-subtitle">Transfer settled cash to your linked bank account.</p>
 
         <div class="withdraw-controls">
-          <div class="amount-header">
-            <span class="amount-label">Amount</span>
-            <span class="available-text">Available: {{formatCurrency(getWithdrawableCash())}}</span>
-          </div>
-          <div class="currency-input-wrap">
-            <span class="currency-sym">$</span>
-            <input
-              class="field-input currency-field-input"
-              type="number"
-              [(ngModel)]="withdrawAmount"
-              [min]="1"
-              [max]="maxWithdrawAmount"
-              placeholder="0.00">
+          <!-- The amount is a tray field: the label row carries Done while the tray is open, the
+               value button opens it, and the slot grows under the button inside this block. -->
+          <div class="withdraw-field">
+            <div class="amount-header">
+              <span class="amount-label" [class.active]="tray.isOpen('amount')">{{ tray.label('amount') }}</span>
+              <span class="amount-header-right">
+                <span class="available-text">Available: {{formatCurrency(getWithdrawableCash())}}</span>
+                @if (tray.shown()) {
+                  <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+                }
+              </span>
+            </div>
+            <button
+              type="button"
+              class="field-value-btn withdraw-value"
+              [class.active]="tray.isOpen('amount')"
+              [attr.aria-expanded]="tray.isOpen('amount')"
+              [disabled]="maxWithdrawAmount <= 0"
+              (click)="tray.toggle('amount')">
+              <span class="field-affix">$</span>
+              @if (withdrawAmount) {
+                {{ withdrawAmount | number:'1.0-2' }}
+              } @else {
+                <span class="field-placeholder">0.00</span>
+              }
+            </button>
+            @if (tray.shown()) {
+              <app-amount-tray-slot [tray]="tray" />
+            }
           </div>
 
           <div class="quick-amounts">

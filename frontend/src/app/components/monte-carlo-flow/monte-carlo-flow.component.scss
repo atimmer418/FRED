@@ -57,12 +57,55 @@
 }
 
 // ─── Outside accounts glass fields (the .glass-field shell is in blue-flow) ──
+// The balances open the slide tray instead of the keyboard, so the value is a button in the old
+// input's clothes: same row, same type, the $ beside it, the placeholder in the input's placeholder
+// colour. The open field's label and card edge come up to full ink (the white page's #2563EB cue
+// would vanish on the blue).
+
+.glass-field {
+  transition: border-color 0.2s;
+
+  &.active { border-color: rgba(255, 255, 255, 0.34); }
+
+  // The label and, while the tray is open, Done on one line.
+  .field-label-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .field-label.active { color: var(--bf-ink); }
+}
+
+.field-tray-done {
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--bf-ink);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 
 .gf-row {
   display: flex;
   align-items: baseline;
   gap: 4px;
   margin-top: 6px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 
   .gf-pre {
     font-size: 18px;
@@ -71,21 +114,49 @@
     flex-shrink: 0;
   }
 
-  input {
-    flex: 1;
-    background: transparent;
-    border: none;
-    outline: none;
-    font-family: 'Manrope', sans-serif;
+  .gf-val {
     font-size: 24px;
     font-weight: 800;
     color: #fff;
     letter-spacing: -0.02em;
     min-width: 0;
-    -webkit-appearance: none;
-
-    &::placeholder { color: rgba(255, 255, 255, 0.28); }
+    font-variant-numeric: tabular-nums;
   }
+
+  .field-placeholder { color: rgba(255, 255, 255, 0.28); }
+}
+
+// The step centres its content in .fs-center, so a tray growing inside it would re-centre the
+// column and slide the tapped field up under the finger. While the tray is shown the column is
+// held where it sat: top-aligned, its centred offset as inline padding (measured in the component
+// before the slot renders), and scrolling where the tray pushes the content past the CTA on a
+// short phone instead of running under it.
+.fscreen .fs-center.tray-pinned {
+  justify-content: flex-start;
+  overflow-y: auto;
+}
+
+// The tray in the blue flow: ink-on-blue like .sim-range, through the tray's custom properties
+// (components/plan-amount-tray SCSS header lists them), all mapped onto the --bf-* tokens so a
+// retune of the flow's palette carries into the tray. The thumb's dot takes the sim-range thumb's
+// inset tint, so it reads as that thumb rather than the white page's blue-dotted one.
+app-amount-tray-slot {
+  --tray-surface: var(--bf-fill-faint);
+  --tray-border: var(--glass-border);
+  --tray-track: var(--bf-track);
+  --tray-fill: var(--bf-ink);
+  --tray-thumb: var(--bf-thumb);
+  --tray-thumb-ring: transparent;
+  --tray-thumb-dot: rgba(37, 99, 235, 0.18);
+  --tray-thumb-glow: var(--bf-shadow);
+  --tray-focus: rgba(255, 255, 255, 0.35);
+  --tray-tick: rgba(255, 255, 255, 0.12);
+  --tray-mark: rgba(255, 255, 255, 0.45);
+  --tray-label: rgba(255, 255, 255, 0.4);
+  --tray-nudge: var(--bf-fill);
+  --tray-nudge-border: var(--bf-fill-press);
+  --tray-nudge-ink: var(--bf-ink);
+  --tray-nudge-press: var(--bf-fill-press);
 }
 
 .combined-line {

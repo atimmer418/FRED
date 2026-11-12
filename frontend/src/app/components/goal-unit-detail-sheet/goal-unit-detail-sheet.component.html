@@ -32,15 +32,21 @@
     @if (d.balance !== null || d.status !== null) {
       <div class="fd-tiles ud-tiles ud-tiles-2">
         @if (d.balance !== null) {
-          <div class="fd-tile ud-bal">
-            <span class="fd-tile-label">Saved so far</span>
-            @if (onBalance && !d.finished) {
-              <div class="fd-tile-edit">
+          <div class="fd-tile ud-bal" [class.active]="tray.isOpen('balance')">
+            @if (canEditBalance()) {
+              <!-- The tile's label row carries Done while the tray is open; the value opens it. -->
+              <span class="ud-tile-head">
+                <span class="fd-tile-label" [class.active]="tray.isOpen('balance')" [class.ud-step]="tray.showsStep('balance')">{{ tray.label('balance') }}</span>
+                @if (tray.shown()) {
+                  <button type="button" class="fd-reset ud-tray-done" (click)="tray.close()">Done</button>
+                }
+              </span>
+              <button type="button" class="fd-tile-edit ud-bal-btn" [attr.aria-expanded]="tray.isOpen('balance')" (click)="tray.toggle('balance')">
                 <span class="fd-pre">$</span>
-                <input class="fd-tile-input" type="text" inputmode="numeric" aria-label="Saved so far"
-                  [value]="wholeDollars(d.balance)" (blur)="saveBalance($any($event.target))" />
-              </div>
+                <span class="fd-tile-value">{{ shownBalance() | number:'1.0-0' }}</span>
+              </button>
             } @else {
+              <span class="fd-tile-label">Saved so far</span>
               <span class="ud-tile-val">{{ fmtMoney(d.balance) }}</span>
             }
           </div>
@@ -53,6 +59,10 @@
           </div>
         }
       </div>
+      <!-- The tray's slot, the full width of the sheet, right under the tiles; the sheet grows with it. -->
+      @if (tray.shown()) {
+        <app-amount-tray-slot [tray]="tray" />
+      }
     }
 
     @if (d.milestones.length) {

@@ -1,5 +1,5 @@
 import {
-  Component, OnInit, OnDestroy, Input, signal, ChangeDetectorRef, ElementRef
+  Component, OnInit, OnDestroy, Input, ViewChild, signal, ChangeDetectorRef, ElementRef, WritableSignal
 } from '@angular/core';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -28,6 +28,9 @@ import {
 } from '../../services/analytics/analytics-events';
 import { toCountBand } from '../../services/analytics/analytics-bands';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
+import { AmountTrayHost } from '../plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.component';
+import { PiecewiseScale } from '../../utils/plan-amount-scale';
 
 // ─── Flow step machine type ──────────────────────────────────────────────────
 
@@ -66,6 +69,26 @@ function valueToSlider(v: number): number {
   return Math.round(1000 * Math.log(c / PF_MIN) / Math.log(PF_MAX / PF_MIN));
 }
 
+// ─── Outside balances ─────────────────────────────────────────────────────────
+
+export type OutsideField = 'k401' | 'roth';
+
+/**
+ * The 401(k) and Roth IRA balances on the slide tray: $0 to $5M, the dollar step growing with the
+ * amount so a finger travels the same distance per detent (121 in all); minus and plus move $1,000.
+ */
+export const OUTSIDE_BALANCE_SCALE: PiecewiseScale = {
+  min: 0,
+  max: 5_000_000,
+  fine: 1_000,
+  segments: [
+    { to: 100_000, step: 5_000 },
+    { to: 500_000, step: 10_000 },
+    { to: 2_000_000, step: 50_000 },
+    { to: 5_000_000, step: 100_000 },
+  ],
+};
+
 // ─── Analytics constants ──────────────────────────────────────────────────────
 
 /**
@@ -90,6 +113,7 @@ const ADJUST_BURST_MS = 700;
   imports: [
     CommonModule,
     FormsModule,
+    AmountTraySlotComponent,
   ]
 })
 export class MonteCarloFlowComponent implements OnInit, OnDestroy {
@@ -232,28 +256,45 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   k401Balance = signal(0);
   rothBalance = signal(0);
-  k401Raw = '';
-  rothRaw = '';
+
+  /**
+   * The balances open the slide tray in place of the keyboard. The tray renders inside whichever
+   * glass field is open and moves to the other when it is tapped. Built in the constructor rather
+   * than with inject(): the analytics spec constructs the component with `new`, so there is no
+   * injection context for a DestroyRef; ngOnDestroy hands the outside-tap listener back instead.
+   */
+  readonly tray: AmountTrayHost<OutsideField>;
+
+  @ViewChild('outsideCenter') private outsideCenter?: ElementRef<HTMLElement>;
+  /** Where the step's centred column sat when the tray opened; its padding-top while the tray is shown. */
+  readonly outsidePinPx = signal(0);
+
+  /**
+   * The step centres its content in `.fs-center`, so a tray growing inside it would re-centre the
+   * column and slide the tapped field up under the finger. Measured as the tray opens, before the
+   * slot renders, the column is held at that offset (top-aligned, the offset as padding) for as
+   * long as the tray is shown; the template lets go in the same pass that removes the slot, and
+   * the content is centred again exactly where it was held. A switch finds the slot already in the
+   * column and keeps the hold.
+   */
+  private pinOutsideColumn(): void {
+    const col = this.outsideCenter?.nativeElement;
+    const first = col?.firstElementChild;
+    if (!col || !first || col.querySelector('.field-tray')) return;
+    // The first glass field's margin-top applies again once the column is top-aligned, so the
+    // hold is the offset of its margin box, not its border box, or the fields drop by that margin.
+    const marginTop = parseFloat(getComputedStyle(first).marginTop) || 0;
+    this.outsidePinPx.set(Math.max(0, first.getBoundingClientRect().top - col.getBoundingClientRect().top - marginTop));
+  }
 
   get combinedTotal(): number {
     return this.portfolioValue() + this.k401Balance() + this.rothBalance();
   }
 
-  onK401Input(event: Event): void {
-    const raw = (event.target as HTMLInputElement).value.replace(/[^0-9]/g, '');
-    this.k401Raw = raw ? (+raw).toLocaleString('en-US') : '';
-    (event.target as HTMLInputElement).value = this.k401Raw;
-    this.k401Balance.set(raw ? +raw : 0);
-    // Per-keystroke handler: record only. The step event fires at Continue.
-    this.recordInputMethod('outside', 'typed');
-  }
-
-  onRothInput(event: Event): void {
-    const raw = (event.target as HTMLInputElement).value.replace(/[^0-9]/g, '');
-    this.rothRaw = raw ? (+raw).toLocaleString('en-US') : '';
-    (event.target as HTMLInputElement).value = this.rothRaw;
-    this.rothBalance.set(raw ? +raw : 0);
-    this.recordInputMethod('outside', 'typed');
+  /** A detent or a nudge from the tray. Per-move handler: record only. The step event fires at Continue. */
+  private setOutsideBalance(balance: WritableSignal<number>, value: number): void {
+    balance.set(value);
+    this.recordInputMethod('outside', 'slider');
   }
 
   // ── Spend step ────────────────────────────────────────────────────────────
@@ -531,6 +572,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   showStep(step: FlowStep): void {
     this._restoreTransform(); // clear keyboard offset before crossfade
+    this.tray.close(true);    // the step crossfades away; an open tray goes with it
     this.currentStep.set(step);
   }
 
@@ -666,7 +708,26 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
     private el: ElementRef<HTMLElement>,
     private freedomStats: FreedomStatsService,
     private analytics: AnalyticsService,
-  ) {}
+  ) {
+    this.tray = new AmountTrayHost<OutsideField>({
+      root: el,
+      fields: {
+        k401: {
+          label: '401(k) balance',
+          scale: OUTSIDE_BALANCE_SCALE,
+          value: this.k401Balance,
+          set: v => this.setOutsideBalance(this.k401Balance, v),
+        },
+        roth: {
+          label: 'Roth IRA balance',
+          scale: OUTSIDE_BALANCE_SCALE,
+          value: this.rothBalance,
+          set: v => this.setOutsideBalance(this.rothBalance, v),
+        },
+      },
+      onOpen: () => this.pinOutsideColumn(),
+    });
+  }
 
   ngOnInit(): void {
     this.scenario.set(this.initialScenario);
@@ -720,6 +781,7 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this._cancelTimers();
+    this.tray.destroy();
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -864,14 +926,8 @@ export class MonteCarloFlowComponent implements OnInit, OnDestroy {
       const raw = localStorage.getItem(this._outsideKey);
       if (!raw) return;
       const d = JSON.parse(raw);
-      if (d.k401 != null) {
-        this.k401Balance.set(d.k401);
-        this.k401Raw = d.k401 > 0 ? d.k401.toLocaleString('en-US') : '';
-      }
-      if (d.roth != null) {
-        this.rothBalance.set(d.roth);
-        this.rothRaw = d.roth > 0 ? d.roth.toLocaleString('en-US') : '';
-      }
+      if (d.k401 != null) this.k401Balance.set(d.k401);
+      if (d.roth != null) this.rothBalance.set(d.roth);
     } catch { /* ignore */ }
   }
 

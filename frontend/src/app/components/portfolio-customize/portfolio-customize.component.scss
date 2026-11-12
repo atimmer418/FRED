@@ -230,30 +230,27 @@ ion-content { --keyboard-offset: 0px !important; }
       }
     }
 
-    .alloc-input-wrap {
-      display: flex;
-      align-items: center;
+    // The allocation's value button: the inline input's old look (blue, bold, right-aligned), sized to its text.
+    .alloc-btn {
+      width: auto;
+      color: #2563EB;
+      font-weight: 700;
+      padding: 4px 0;
+      margin-right: 8px;
+      justify-content: flex-end;
       gap: 2px;
-      padding-right: 8px;
 
-      // Native .field-input overrides for inline allocation input
-      input.alloc-input {
-        color: #2563EB;
-        font-size: 17px;
-        font-weight: 700;
-        text-align: right;
-        width: 30px;
-        padding: 4px 0;
-        border-bottom-color: #2563EB;
-      }
-
-      .percent-sign {
-        font-family: 'Manrope', sans-serif;
-        font-size: 14px;
-        font-weight: 700;
-        color: #2563EB;
-      }
+      .field-affix { font-size: 14px; }
     }
+
+    // The open row: a faint tint, since a row has no label to turn blue.
+    &.active { --background: #f8fafc; }
+  }
+
+  // The tray's slot sits between rows; inset to the rows' text, the card's own top padding spaces it.
+  .field-tray {
+    box-sizing: border-box;
+    padding: 0 10px;
   }
 }
 

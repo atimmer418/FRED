@@ -86,6 +86,7 @@
           [value]="beneficiary.socialSecurityNumber || ''"
           placeholder="XXX-XX-XXXX"
           type="text"
+          inputmode="numeric"
           maxlength="11"
           (input)="formatSSN($event)">
       </div>
@@ -101,16 +102,32 @@
         </div>
       </div>
 
+      <!-- The allocation opens the slide tray, not the keyboard: the tray grows right under this row. -->
       <div class="form-group form-group--last">
-        <label class="field-label">Allocation Percentage<span class="required-star">*</span></label>
-        <input
-          class="field-input"
-          [(ngModel)]="beneficiary.percentageAllocation"
-          placeholder="0.00"
-          type="number"
-          min="0.01"
-          max="100"
-          step="0.01">
+        <div class="field-label-row">
+          <label class="field-label" [class.active]="tray.isOpen('allocation')">
+            {{ tray.label('allocation') }}@if (!tray.showsStep('allocation')) {<span class="required-star">*</span>}
+          </label>
+          @if (tray.shown()) {
+            <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+          }
+        </div>
+        <button
+          type="button"
+          class="field-value-btn"
+          [class.active]="tray.isOpen('allocation')"
+          [attr.aria-expanded]="tray.isOpen('allocation')"
+          (click)="tray.toggle('allocation')">
+          @if (beneficiary.percentageAllocation) {
+            {{ beneficiary.percentageAllocation | number:'1.0-2' }}
+          } @else {
+            <span class="field-placeholder">0</span>
+          }
+          <span class="field-affix">%</span>
+        </button>
+        @if (tray.shown()) {
+          <app-amount-tray-slot [tray]="tray" />
+        }
       </div>
     </div>
 
@@ -197,6 +214,7 @@
             [(ngModel)]="beneficiary.postalCode"
             placeholder="12345"
             type="text"
+            inputmode="numeric"
             maxlength="10">
         </div>
       </div>

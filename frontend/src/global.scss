@@ -624,13 +624,6 @@ ion-toggle {
   opacity: 0.75 !important;
 }
 
-/* Stacked Toast Styles */
-ion-toast.stacked-toast {
-  --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transform: var(--toast-transform, translateY(0));
-  transition: transform 0.3s ease-in-out;
-}
-
 /* =============================================================================
    GLOBAL OVERRIDES
    ============================================================================= */

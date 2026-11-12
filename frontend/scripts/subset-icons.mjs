@@ -37,7 +37,7 @@ const DYNAMIC_ICONS = [
   // my-profile UI icons (FRED-216): camera badge + add-goal button
   'photo_camera', 'add_circle',
   // goals v3: Kids, Vacation and Wedding icons live in TS (picker tiles, goal-form.model)
-  'child_care', 'flight', 'favorite',
+  'child_care', 'flight', 'favorite', 'shopping_basket',
   // goals v3.1: gift-days switch-row icon input, college pick-grid options, calc screen tick
   'cake', 'travel_explore', 'do_not_disturb_on', 'check_circle',
   // goals v3.1 polish: plan page "What the monthly covers" card

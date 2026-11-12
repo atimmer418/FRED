@@ -1,7 +1,6 @@
 import { Component, Input, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalController } from '@ionic/angular/standalone';
-import { ToastService } from '../../services/toast.service';
 import { McInfoSheetComponent } from '../mc-info-sheet/mc-info-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
@@ -220,7 +219,6 @@ export class StrategyDeckComponent implements OnInit {
 
   constructor(
     private modalController: ModalController,
-    private toastService: ToastService,
     private analytics: AnalyticsService,
   ) {}
 

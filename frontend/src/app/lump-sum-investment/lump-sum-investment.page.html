@@ -110,21 +110,31 @@
         <p class="helper-hint" *ngIf="!selectedStock">Search for stocks and ETFs by typing a symbol or company name</p>
       </div>
 
-      <!-- Amount Input -->
+      <!-- Amount: opens the slide tray under it; Done shares its label line. -->
       <div class="form-group">
-        <label class="field-label">Investment Amount</label>
-        <div class="currency-input-wrap">
-          <span class="currency-sym">$</span>
-          <input
-            class="field-input currency-field-input"
-            type="number"
-            [(ngModel)]="investmentAmount"
-            (input)="validateInvestmentAmount($event)"
-            (blur)="onAmountChange()"
-            placeholder="0"
-            min="1">
+        <div class="field-label-row">
+          <label class="field-label" [class.active]="tray.isOpen('amount')">{{ tray.label('amount') }}</label>
+          @if (tray.shown()) {
+            <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+          }
         </div>
-        <p class="helper-hint">Enter the amount you want to invest in {{ getInvestmentTarget() }}</p>
+        <button
+          type="button"
+          class="field-value-btn"
+          [class.active]="tray.isOpen('amount')"
+          [attr.aria-expanded]="tray.isOpen('amount')"
+          (click)="tray.toggle('amount')">
+          <span class="field-affix">$</span>
+          @if (investmentAmount) {
+            {{ investmentAmount | number:'1.0-0' }}
+          } @else {
+            <span class="field-placeholder">0</span>
+          }
+        </button>
+        @if (tray.shown()) {
+          <app-amount-tray-slot [tray]="tray" />
+        }
+        <p class="helper-hint">Choose the amount you want to invest in {{ getInvestmentTarget() }}</p>
       </div>
 
       <!-- Projection -->
@@ -199,6 +209,7 @@
           <input
             class="field-input"
             type="text"
+            inputmode="numeric"
             [(ngModel)]="transferAccountNumber"
             placeholder="Enter account number">
         </div>

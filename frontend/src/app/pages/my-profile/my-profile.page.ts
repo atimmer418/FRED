@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, Signal, computed, signal, inject } from '
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
-  IonContent, IonHeader, IonIcon, IonAvatar, AlertController, ModalController, NavController
+  IonContent, IonHeader, IonIcon, IonAvatar, ModalController, NavController
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import { shareOutline, checkmarkCircleOutline, saveOutline, camera, walletOutline, timeOutline, ticketOutline } from 'ionicons/icons';
@@ -24,6 +24,7 @@ import { GoalsService, Goal, GoalType, RebalanceSchedule } from '../../services/
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalTypePickerSheetComponent } from '../../components/goal-type-picker-sheet/goal-type-picker-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { presentConfirmSheet } from '../../components/fred-confirm-sheet/fred-confirm-sheet.component';
 import { GoalPlanView, buildGoalPlanView } from '../goal/goal-plan.view-model';
 import { PlanStatusKind } from '../../utils/goal-plan.utils';
 import { RateAssumptionsService, DEFAULT_ANNUAL_RETURN, DEFAULT_WITHDRAWAL_RATE } from '../../services/rate-assumptions.service';
@@ -338,7 +339,6 @@ export class MyProfilePage implements OnInit, OnDestroy {
     private accountStatusService: AccountStatusService,
     private mfuService: MonthlyFreedomUpdateService,
     private router: Router,
-    private alertController: AlertController,
     private navCtrl: NavController,
     private modalController: ModalController,
     private goalsService: GoalsService,
@@ -680,28 +680,25 @@ export class MyProfilePage implements OnInit, OnDestroy {
   // ── Upgrade offers (referral-triggered) ────────────────────────────────────
 
   async confirmTierUpgrade(tier: string, label: string, price: number): Promise<void> {
-    const alert = await this.alertController.create({
-      header: `Upgrade to ${label}`,
-      message: `Upgrade to ${label} for $${price}/mo using your referral discount?`,
-      buttons: [
-        { text: 'Cancel', role: 'cancel' },
-        {
-          text: 'Confirm',
-          handler: () => {
-            this.authService.updateUserProfile({ selectedTier: tier, billingPeriod: 'monthly' }).subscribe({
-              next: () => {
-                this.selectedTier = tier;
-                this.toastService.showToast(`Upgraded to ${label}!`, 'success');
-              },
-              error: () => {
-                this.toastService.showToast('Upgrade failed. Please try again.', 'danger');
-              }
-            });
-          }
-        }
-      ]
+    const ok = await presentConfirmSheet(this.modalController, {
+      tone: 'primary',
+      icon: 'workspace_premium',
+      title: `Upgrade to ${label}?`,
+      body: `Upgrade to ${label} for $${price}/mo using your referral discount?`,
+      confirmLabel: 'Confirm upgrade',
+      cancelLabel: 'Not now',
     });
-    await alert.present();
+    if (!ok) return;
+
+    this.authService.updateUserProfile({ selectedTier: tier, billingPeriod: 'monthly' }).subscribe({
+      next: () => {
+        this.selectedTier = tier;
+        this.toastService.showToast(`Upgraded to ${label}!`, 'success');
+      },
+      error: () => {
+        this.toastService.showToast('Upgrade failed. Please try again.', 'danger');
+      }
+    });
   }
 
   // ── Rebalancing ────────────────────────────────────────────────────────────

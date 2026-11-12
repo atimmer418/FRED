@@ -1,0 +1,159 @@
+// FRED action sheet. The ion-modal shell (mc-bottom-sheet-modal in global.scss) provides the
+// rounded white chrome; this styles the content inside it. Sizes and colours follow the approved
+// mockup (goal-actions-sheet, the "Proposed" phone).
+
+:host {
+  display: block;
+}
+
+.gs-body {
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  font-family: 'Manrope', sans-serif;
+}
+
+.gs-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 16px;
+}
+
+// ── Header: chip, title, one-line status ──────────────────────────────────────
+.fs-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fs-chip {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #eef4ff;
+  color: #2563eb;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 20px; }
+}
+
+.fs-head-text {
+  min-width: 0;
+
+  h3 {
+    margin: 0;
+    font-family: 'Manrope', sans-serif;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #0f172a;
+  }
+
+  p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+  }
+}
+
+// ── Row cards ─────────────────────────────────────────────────────────────────
+.fs-list {
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.fs-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #eef1f6;
+  font: inherit;
+  font-family: 'Manrope', sans-serif;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:first-child { border-top: 0; }
+  &:active { background: #eef1f6; }
+}
+
+.fs-row-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  color: #2563eb;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 18px; }
+}
+
+.fs-row-text {
+  flex: 1;
+  min-width: 0;
+
+  b {
+    display: block;
+    font-size: 14px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  span {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #6b7280;
+    margin-top: 1px;
+  }
+}
+
+.fs-chevron {
+  color: #c3ccd9;
+  font-size: 18px;
+}
+
+// Destructive rows: white card with a red border, red chip and red label.
+.fs-list--danger {
+  margin-top: 10px;
+  background: #fff;
+  border-color: #fee2e2;
+
+  .fs-row-icon {
+    background: #fef2f2;
+    border-color: #fee2e2;
+    color: #dc2626;
+  }
+
+  .fs-row-text b { color: #dc2626; }
+}
+
+.gs-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 0 0;
+  text-align: center;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}

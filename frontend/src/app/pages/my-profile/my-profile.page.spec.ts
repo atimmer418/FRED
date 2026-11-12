@@ -18,7 +18,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
+import { NavController, ModalController } from '@ionic/angular/standalone';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { GoalTypePickerSheetComponent } from '../../components/goal-type-picker-sheet/goal-type-picker-sheet.component';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
@@ -58,7 +58,6 @@ function makePage(birthYear: number = 0): MyProfilePage {
     accountStatusMock,    // AccountStatusService
     {} as any,            // MonthlyFreedomUpdateService
     {} as any,            // Router
-    {} as any,            // AlertController
     {} as any,            // NavController
     {} as any,            // ModalController
     {} as any,            // GoalsService (FRED-216)
@@ -255,7 +254,6 @@ function setupDom(initialProgress: any, schedule$ = of(null as any)): DomHarness
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
       { provide: Router, useValue: { navigateByUrl: jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true)) } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-      { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {
           create: jasmine.createSpy('create').and.returnValue(Promise.resolve({
             present: () => Promise.resolve(),
@@ -502,7 +500,6 @@ describe('MyProfilePage: goals card', () => {
         { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
         { provide: Router, useValue: router },
         { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-        { provide: AlertController, useValue: {} },
         { provide: ModalController, useValue: { create: modalCreate } },
         { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy() } },
         { provide: GoalsService, useValue: {
@@ -612,5 +609,79 @@ describe('MyProfilePage: goals card', () => {
 
     const again = setupGoals({ userId: 'import-fail', legacy: [LEGACY] });
     expect(again.importLegacy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The referral tier upgrade asks through the FRED confirm sheet. Direct construction: the flow
+ * touches only the modal controller, AuthService.updateUserProfile and the toast.
+ */
+describe('MyProfilePage: tier upgrade confirm', () => {
+  interface UpgradeHarness {
+    page: MyProfilePage;
+    modalCreate: jasmine.Spy;
+    updateUserProfile: jasmine.Spy;
+    showToast: jasmine.Spy;
+  }
+
+  function setupUpgrade(role: string | undefined, update: () => Observable<unknown> = () => of({})): UpgradeHarness {
+    const modalCreate = jasmine.createSpy('create').and.resolveTo({
+      present: () => Promise.resolve(),
+      onDidDismiss: () => Promise.resolve({ role }),
+    });
+    const updateUserProfile = jasmine.createSpy('updateUserProfile').and.callFake(update);
+    const showToast = jasmine.createSpy('showToast');
+    const page = new MyProfilePage(
+      { updateUserProfile } as any,                  // AuthService
+      { showToast } as any,                          // ToastService
+      {} as any,                                     // PortfolioService
+      { actionRequired$: of(false) } as any,         // AccountStatusService
+      {} as any,                                     // MonthlyFreedomUpdateService
+      {} as any,                                     // Router
+      {} as any,                                     // NavController
+      { create: modalCreate } as any,                // ModalController
+      {} as any,                                     // GoalsService
+      { birthYear: () => 0, stats: () => ({}) } as any, // FreedomStatsService
+      analyticsStub()
+    );
+    page.selectedTier = 'core';
+    return { page, modalCreate, updateUserProfile, showToast };
+  }
+
+  it('presents a primary sheet with the offer, and Confirm upgrade saves the tier', async () => {
+    const h = setupUpgrade('confirm');
+
+    await h.page.confirmTierUpgrade('plus', 'Plus', 4);
+
+    const props = h.modalCreate.calls.mostRecent().args[0].componentProps;
+    expect(props.tone).toBe('primary');
+    expect(props.icon).toBe('workspace_premium');
+    expect(props.title).toBe('Upgrade to Plus?');
+    expect(props.body).toBe('Upgrade to Plus for $4/mo using your referral discount?');
+    expect(props.confirmLabel).toBe('Confirm upgrade');
+    expect(props.cancelLabel).toBe('Not now');
+    expect(h.updateUserProfile).toHaveBeenCalledOnceWith({ selectedTier: 'plus', billingPeriod: 'monthly' });
+    expect(h.page.selectedTier).toBe('plus');
+    expect(h.showToast).toHaveBeenCalledOnceWith('Upgraded to Plus!', 'success');
+  });
+
+  it('a bare dismiss saves nothing and says nothing', async () => {
+    const h = setupUpgrade(undefined);
+
+    await h.page.confirmTierUpgrade('plus', 'Plus', 4);
+
+    expect(h.modalCreate).toHaveBeenCalledTimes(1);
+    expect(h.updateUserProfile).not.toHaveBeenCalled();
+    expect(h.showToast).not.toHaveBeenCalled();
+    expect(h.page.selectedTier).toBe('core');
+  });
+
+  it('a failed save keeps the tier and toasts the failure', async () => {
+    const h = setupUpgrade('confirm', () => throwError(() => new HttpErrorResponse({ status: 500 })));
+
+    await h.page.confirmTierUpgrade('pro', 'Pro', 9);
+
+    expect(h.page.selectedTier).toBe('core');
+    expect(h.showToast).toHaveBeenCalledOnceWith('Upgrade failed. Please try again.', 'danger');
   });
 });

@@ -5,10 +5,11 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import {
   IonHeader, IonToolbar, IonContent,
-  IonFooter, IonSpinner, NavController, ToastController
+  IonFooter, IonSpinner, NavController
 } from '@ionic/angular/standalone';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
 import { AuthService } from '../../services/auth.service';
+import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { AlpacaService, CreateAlpacaAccountRequest, UpdateKycRequest } from '../../services/alpaca.service';
@@ -137,7 +138,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     private navCtrl: NavController,
     private authService: AuthService,
     private alpacaService: AlpacaService,
-    private toastController: ToastController,
+    private toastService: ToastService,
     private cdr: ChangeDetectorRef,
     private analytics: AnalyticsService
   ) {}
@@ -182,19 +183,13 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
           this.step1Snapshot = JSON.stringify(this.step1Form.value);
           this.cdr.detectChanges();
         },
-        error: async () => {
+        error: () => {
           this.isLoadingKycData = false;
           // Fall back to local data if fetch fails; set prefillFailed so
           // the user is never permanently stuck on the part-1 gate
           this.prefillFailed = true;
           this.prefillUserData();
-          const toast = await this.toastController.create({
-            message: 'Could not load current KYC data. Please fill in your information.',
-            duration: 3000,
-            color: 'warning',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast('Could not load current KYC data. Please fill in your information.', 'warning');
           this.cdr.detectChanges();
         }
       });
@@ -492,7 +487,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
             error: () => this.navCtrl.navigateForward('/link-bank', { replaceUrl: true })
           });
         },
-        error: async (err) => {
+        error: (err) => {
           this.isLoading = false;
           // Category and status only: this toast interpolates the server's own message.
           this.analytics.trackErrorShown(
@@ -503,13 +498,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
             true,
           );
           const msg = err.error?.message || err.message || 'Account creation failed. Please try again.';
-          const toast = await this.toastController.create({
-            message: msg,
-            duration: 4000,
-            color: 'danger',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast(msg, 'danger');
         }
       });
   }
@@ -534,27 +523,15 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     this.alpacaService.updateKyc(request)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: async () => {
+        next: () => {
           this.isLoading = false;
-          const toast = await this.toastController.create({
-            message: 'Your identity information has been updated.',
-            duration: 3000,
-            color: 'success',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast('Your identity information has been updated.', 'success');
           this.navCtrl.navigateBack('/security-settings');
         },
-        error: async (err) => {
+        error: (err) => {
           this.isLoading = false;
           const msg = err.error?.error || err.error?.message || err.message || 'Update failed. Please try again.';
-          const toast = await this.toastController.create({
-            message: msg,
-            duration: 4000,
-            color: 'danger',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast(msg, 'danger');
         }
       });
   }

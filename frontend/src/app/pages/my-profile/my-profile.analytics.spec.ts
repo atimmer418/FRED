@@ -14,7 +14,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
+import { NavController, ModalController } from '@ionic/angular/standalone';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { MyProfilePage } from './my-profile.page';
 import { AuthService } from '../../services/auth.service';
@@ -112,7 +112,6 @@ function setup(opts: Options = {}): Harness {
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
       { provide: Router, useValue: { navigateByUrl: jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true)) } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-      { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {
           create: jasmine.createSpy('create').and.returnValue(Promise.resolve({
             present: () => Promise.resolve(),

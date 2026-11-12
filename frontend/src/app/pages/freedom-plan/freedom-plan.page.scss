@@ -1,6 +1,6 @@
 // The Freedom Plan page. The header and white sheet come from settings-shell; the hero, tiles,
-// insight rows, return chips, note and CTA from plan-page (shared with the goal plan page). Only
-// the spacing below is this page's own.
+// insight rows, return chips, note and CTA from plan-page (shared with the goal plan page). This
+// page's own: the spacing, the tiles as buttons, and the slide tray's slot.
 @use '../../../theme/settings-shell';
 @use '../../../theme/plan-page';
 
@@ -9,19 +9,62 @@
   color: #111827;
 }
 
-// Each sentence on its own line, so the copy never breaks mid-sentence.
-.fp-sub {
-  margin: 0 0 4px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: #6b7280;
-  line-height: 1.5;
-
-  span { display: block; }
-}
-
 .fp-zone {
   margin-top: 8px;
+}
+
+// ── Tiles as buttons ─────────────────────────────────────────────────────────
+// The keyboard is gone from this page: a tile opens the tray. The tile recipe stays; the button
+// chrome goes (Ionic's normalize gives buttons line-height 1, which would squash the label and
+// value below the goal page's div tiles). The active tile lights its border and label; the border
+// width never changes, so nothing shifts.
+.fp-tile {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  text-align: left;
+  color: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+
+  &.active {
+    border-color: #2563eb;
+    background: #fff;
+
+    .fd-tile-label { color: #2563eb; }
+  }
+}
+
+// While the finger is down on the slider, the active tile's label reads the step size ("± $250").
+// Colour and text only, at the label's own size: a taller label would move the tray, and the thumb
+// under the finger, on every touch.
+.fd-tile-label.fp-step {
+  color: #2563eb;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+// An unset tile shows its placeholder in the input's old placeholder colour.
+.fd-tile-value.fp-empty {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+// ── Tray slot ────────────────────────────────────────────────────────────────
+// The wrapper's height is what grows and collapses (WAAPI, in the page class); overflow hidden
+// clips the card on the way. The gap above the card rides inside the wrapper so it grows with it.
+.fp-tray {
+  overflow: hidden;
+}
+
+.fp-tray-in {
+  padding-top: 9px;
 }
 
 // An insight is one sentence over two lines; keep each bold figure ("~10 months closer") whole.
@@ -29,6 +72,14 @@
 
 .fd-note span { display: block; }
 
+// Save plan keeps its slot while hidden (visibility, not display) so the page never jumps when it
+// fades in. The fade itself is WAAPI in the page class: the global reduced-motion rule zeroes CSS
+// transitions.
 .fp-cta {
   margin-top: auto;
+
+  &.fp-cta--hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
 }

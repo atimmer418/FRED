@@ -86,9 +86,57 @@ h3 {
   margin-top: 9px;
 }
 
+// The Saved so far tile: a label row (the label, and Done while the tray is open) over a value
+// button that opens the tray. The lit tile follows the plan pages: blue border, white face.
 .ud-bal {
   .fd-tile-edit { margin-top: 4px; }
-  .fd-tile-input { font-size: 16px; }
+  .fd-tile-value { font-size: 16px; }
+
+  &.active {
+    border-color: #2563eb;
+    background: #fff;
+  }
+}
+
+.ud-tile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.fd-tile-label.active {
+  color: #2563eb;
+}
+
+// While the finger is down on the slider the label reads the step size ("± $100"), at its own
+// size so the tray under it never moves.
+.fd-tile-label.ud-step {
+  color: #2563eb;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+// The value row as a button: the tile recipe stays, the button chrome goes.
+.ud-bal-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 .ud-status {

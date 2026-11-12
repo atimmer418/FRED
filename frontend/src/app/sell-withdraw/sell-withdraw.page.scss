@@ -175,59 +175,6 @@
   }
 }
 
-.confirm-panel {
-  margin-top: 14px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 10px;
-  padding: 14px;
-  text-align: center;
-
-  .confirm-warning-icon {
-    font-size: 28px;
-    color: #dc2626;
-    font-variation-settings: 'FILL' 1;
-    display: block;
-    margin-bottom: 6px;
-  }
-
-  .confirm-title {
-    font-family: 'Manrope', sans-serif;
-    font-size: 16px;
-    font-weight: 800;
-    color: #dc2626;
-    margin: 0 0 8px 0;
-  }
-
-  .confirm-body {
-    font-family: 'Manrope', sans-serif;
-    font-size: 13px;
-    color: #6b7280;
-    line-height: 1.45;
-    margin: 0 0 14px 0;
-  }
-
-  .confirm-actions {
-    display: flex;
-    gap: 10px;
-  }
-}
-
-.cancel-btn {
-  flex: 1;
-  height: 44px;
-  border-radius: 10px;
-  border: 1.5px solid #e5e7eb;
-  background: white;
-  color: #6b7280;
-  font-family: 'Manrope', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-}
-
 .danger-btn {
   width: 100%;
   height: 48px;
@@ -247,12 +194,6 @@
   margin-top: 12px;
 
   .material-symbols-outlined { font-size: 18px; }
-
-  &.confirm-danger-btn {
-    flex: 1;
-    height: 44px;
-    margin-top: 0;
-  }
 
   &:disabled { opacity: 0.5; cursor: not-allowed; }
   &:active:not(:disabled) { transform: scale(0.98); }
@@ -570,32 +511,28 @@
     }
   }
 
-  .currency-input-wrap {
-    display: flex;
-    align-items: center;
-    border-bottom: 2px solid #2563EB;
-    padding-bottom: 4px;
+  // The amount field and the tray's slot, one block, so the chips below move with the tray.
+  .withdraw-field {
     margin-bottom: 14px;
+  }
 
-    .currency-sym {
-      font-family: 'Manrope', sans-serif;
-      font-size: 17px;
-      font-weight: 600;
+  .amount-header-right {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  // The open field's label (and the step size it reads while the finger is down).
+  .amount-label.active {
+    color: #2563EB;
+  }
+
+  // The value button keeps the old input's look: 600 weight, blue $.
+  .withdraw-value {
+    font-weight: 600;
+
+    .field-affix {
       color: #2563EB;
-      margin-right: 4px;
-    }
-
-    // Native .field-input inside the currency wrap: suppress its own border-bottom
-    .currency-field-input {
-      border-bottom: none;
-      padding: 4px 0;
-      flex: 1;
-      font-size: 17px;
-      font-weight: 600;
-
-      &:focus {
-        border-bottom: none;
-      }
     }
   }
 }

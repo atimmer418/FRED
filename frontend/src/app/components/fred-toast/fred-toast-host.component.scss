@@ -1,0 +1,122 @@
+// -------------------------------------------------------
+// FRED toast host, FRED design system.
+// One white card per notification; the chip and a thin left accent carry
+// the severity colour. Light only. All motion is WAAPI, driven from the TS.
+// -------------------------------------------------------
+
+:host {
+  display: contents;
+}
+
+.ft-host {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: calc(100% - 32px);
+  max-width: 420px;
+  // Above every Ionic overlay, where Ionic's own toasts sat.
+  z-index: 60000;
+  pointer-events: none;
+}
+
+// Each card sits in a slot pinned to the top of the host. The slot carries
+// the stack offset and the dimming; the card carries enter, leave and swipe.
+.ft-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+
+.ft-card {
+  --ft-accent: transparent;
+  --ft-chip-bg: transparent;
+
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow:
+    0 10px 30px -12px rgba(15, 23, 42, 0.25),
+    inset 3px 0 0 var(--ft-accent);
+  font-family: 'Manrope', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+
+  &[data-severity="success"] { --ft-accent: #16a34a; --ft-chip-bg: #dcfce7; }
+  &[data-severity="error"]   { --ft-accent: #dc2626; --ft-chip-bg: #fee2e2; }
+  &[data-severity="warning"] { --ft-accent: #d97706; --ft-chip-bg: #fef3c7; }
+  &[data-severity="info"]    { --ft-accent: #2563eb; --ft-chip-bg: #dbeafe; }
+
+  &--leaving {
+    pointer-events: none;
+  }
+}
+
+.ft-chip {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ft-chip-bg);
+  color: var(--ft-accent);
+  font-size: 18px;
+  font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+}
+
+.ft-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ft-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.ft-message {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #111827;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ft-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #9aa6ba;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+
+  .material-symbols-outlined {
+    font-size: 18px;
+  }
+
+  &:active {
+    background: #f3f4f6;
+  }
+}

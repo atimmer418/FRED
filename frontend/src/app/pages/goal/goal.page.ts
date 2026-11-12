@@ -1,17 +1,19 @@
 import {
-  CUSTOM_ELEMENTS_SCHEMA, Component, ElementRef, OnInit, ViewChild, computed, inject, signal,
+  CUSTOM_ELEMENTS_SCHEMA, Component, DestroyRef, ElementRef, OnInit, ViewChild, computed, inject, signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import {
-  ActionSheetController, AlertController, IonContent, IonHeader, ModalController, NavController, ViewWillEnter,
+  IonContent, IonHeader, ModalController, NavController, ViewWillEnter, ViewWillLeave,
 } from '@ionic/angular/standalone';
 import type { SwiperContainer } from 'swiper/element';
 import type { SwiperOptions } from 'swiper/types';
 import { firstValueFrom, take } from 'rxjs';
 
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
+import { presentActionSheet } from '../../components/fred-action-sheet/fred-action-sheet.component';
+import { presentTextPrompt } from '../../components/fred-text-prompt-sheet/fred-text-prompt-sheet.component';
 import { GOAL_PAGE_NOW } from './goal-clock';
 import { AuthService } from '../../services/auth.service';
 import { GoalsService } from '../../services/goals.service';
@@ -31,9 +33,14 @@ import { kidAgeToday, kidCostFigures, kidsAtHome } from '../../utils/kid-cost.ut
 import { CHILDBIRTH_DOLLAR_YEAR_LABEL, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
-import { GoalUnitDetailSheetComponent, UnitDetail, UnitTitle } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
+import {
+  GoalUnitDetailSheetComponent, SavingTrayHost, UnitDetail, UnitTitle,
+} from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
 import { InfoNote } from '../../components/goal-plan-info-sheet/info-note';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
+import { TRAY_INSIDE_SELECTOR, TrayHostField } from '../../components/plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../../components/plan-amount-tray/amount-tray-slot.component';
+import { buildAmountScale, capAbove } from '../../utils/plan-amount-scale';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GoalForm, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso } from './goal-form.model';
 import {
@@ -43,8 +50,11 @@ import {
 /** A kid's balance: the 529, the brokerage, or the baby fund. */
 export type KidBalanceKey = KidAccountKey | 'firstYear';
 
-/** Which balance an inline field edits. */
-export type BalancePath = 'current' | 'vacation' | { kid: number; account: KidBalanceKey };
+/** The simple or vacation goal's Saved so far tile, the one tray field on this page. */
+export type BalanceField = 'current' | 'vacation';
+
+/** Which balance an edit lands on. */
+export type BalancePath = BalanceField | { kid: number; account: KidBalanceKey };
 
 export type PlanMode = 'preview-new' | 'preview-edit' | 'saved';
 
@@ -59,6 +69,8 @@ export interface KidUnitRow {
   monthly: number;
   finished: boolean;
   balance: number;
+  /** What the unit saves toward, in dollars: the cap of its Saved so far tray. */
+  target: number;
 }
 
 export interface KidCard {
@@ -76,6 +88,8 @@ export interface KidCard {
 }
 
 const HERO_COUNT_MS = 600;
+/** The Saved so far tray's minus and plus step. */
+const BALANCE_FINE = 25;
 
 /** A kid card's everyday line when the view carries none: nothing a month. */
 const NO_EVERYDAY: EverydayView = { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };
@@ -83,6 +97,20 @@ const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep
 
 /** Every word the status chip can read. A new chip word must be added here and given a tone. */
 type ChipText = 'Plan started' | 'Plan updated' | 'On plan' | 'Ahead' | 'Behind' | 'Done' | 'Update balance';
+
+/** What the menu's Edit plan row says the quiz will ask about, per goal type. */
+const EDIT_PLAN_HELPER: Record<GoalType, string> = {
+  KIDS: 'Kids, costs and the return you assume',
+  HOUSE: 'Price, down payment and the year',
+  CAR: 'Price, down payment and the year',
+  VACATION: 'Trips a year and the budget per trip',
+  EMERGENCY_FUND: 'Monthly expenses, months covered and the year',
+  WEDDING: 'The amount and the year',
+  CUSTOM: 'The amount and the year',
+};
+
+/** The header menu's rows. Remove chains into GoalRemoveConfirmSheet as before. */
+type MenuId = 'edit' | 'rename' | 'complete' | 'remove';
 
 const STATUS_CHIP: Record<GoalPlanView['status']['kind'], Exclude<ChipText, 'Update balance'>> = {
   started: 'Plan started',
@@ -116,17 +144,16 @@ const UNIT_ICON: Record<KidBalanceKey, KidUnitRow['icon']> = { firstYear: 'child
 @Component({
   selector: 'app-goal',
   standalone: true,
-  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent],
+  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent, AmountTraySlotComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './goal.page.html',
   styleUrls: ['./goal.page.scss'],
 })
-export class GoalPage implements OnInit, ViewWillEnter {
+export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
+  private readonly root = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly route = inject(ActivatedRoute);
   private readonly navCtrl = inject(NavController);
   private readonly modalCtrl = inject(ModalController);
-  private readonly actionSheetCtrl = inject(ActionSheetController);
-  private readonly alertCtrl = inject(AlertController);
   private readonly goalsService = inject(GoalsService);
   private readonly draftService = inject(GoalDraftService);
   private readonly authService = inject(AuthService);
@@ -282,11 +309,46 @@ export class GoalPage implements OnInit, ViewWillEnter {
     return { saved: '', target: '' };
   });
 
-  /** The balance the "Saved so far" tile shows for a simple or vacation goal. */
+  /** The stored balance behind the "Saved so far" tile of a simple or vacation goal. */
   readonly simpleBalance = computed(() => {
     const v = this.view();
     return v.vacation ? v.vacation.savedThisYear : this.planInput().currentBalance;
   });
+
+  /** Which balance the tile edits: a vacation's year of trips, else the goal's balance. */
+  readonly balanceField = computed<BalanceField>(() => (this.view().vacation ? 'vacation' : 'current'));
+  /** The slider's value while the tray is open, saved when it closes; null when nothing is pending. */
+  readonly balanceDraft = signal<number | null>(null);
+  /** What the tile shows: the draft while one is pending, else the stored balance. */
+  readonly shownBalance = computed(() => this.balanceDraft() ?? this.simpleBalance());
+  /** The tile's cap: the goal's target, or a vacation's year of trips. */
+  private readonly balanceTarget = computed(() => {
+    const v = this.view();
+    return v.vacation ? v.vacation.annual : v.simple?.target ?? 0;
+  });
+  /**
+   * A stored balance already past the target lifts the cap above it (capAbove), so the figure can
+   * still go up and a touch never pulls it down. From the stored balance, not the draft: the
+   * scale must not move under a finger.
+   */
+  readonly balanceScale = computed(() => buildAmountScale(0, capAbove(this.balanceTarget(), this.simpleBalance()), BALANCE_FINE));
+  /**
+   * The tile's slide tray. The value rides in balanceDraft while the tray is open (a PUT per
+   * detent would flood the write queue); closing it, however it closes, saves the draft.
+   */
+  readonly tray = new SavingTrayHost<BalanceField>({
+    root: this.root,
+    destroyRef: inject(DestroyRef),
+    fields: {
+      current: this.balanceTrayField('Saved so far'),
+      vacation: this.balanceTrayField('Saved so far this year'),
+    },
+    // The Update balance chip too: a second tap on it keeps the tray open rather than closing it on
+    // release (saving the draft) and re-opening it on the click.
+    insideSelector: `${TRAY_INSIDE_SELECTOR}, .gp-tile-btn, .gp-done, .gp-chip`,
+    labelSelector: '.fd-tile-label.active',
+    doneSelector: '.gp-done',
+  }, field => this.commitBalance(field));
 
   readonly kidCards = computed<KidCard[]>(() => {
     const v = this.view();
@@ -301,6 +363,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
           key: 'firstYear', icon: UNIT_ICON.firstYear, title: UNIT_TITLE.firstYear,
           targetLine: `${fmtMoney(fund.plan.target)} by ${monthYearLabel(fund.plan.due)}`,
           pill: fund.pill, monthly: fund.plan.monthly, finished: fund.plan.finished, balance: fund.balance,
+          target: fund.plan.target,
         });
       }
       for (const key of ['plan529', 'brokerage'] as KidAccountKey[]) {
@@ -310,6 +373,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
           key, icon: UNIT_ICON[key], title: UNIT_TITLE[key],
           targetLine: `${fmtMoney(row.plan.milestones.at18)} by ${row.plan.deadline.year}`,
           pill: row.pill, monthly: row.plan.monthly, finished: false, balance: row.balance,
+          target: row.plan.milestones.at18,
         });
       }
       const investMonthly = units.reduce((sum, u) => sum + (u.finished ? 0 : u.monthly), 0);
@@ -393,6 +457,11 @@ export class GoalPage implements OnInit, ViewWillEnter {
     if (latest && latest !== goal) this.existing.set(latest);
   }
 
+  /** Leaving the page: the tray snaps shut, and a pending balance saves on the way out. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
+  }
+
   /**
    * A preview's back returns to the quiz beneath; a saved page returns to my-profile. The draft is
    * left in place: the quiz reads it to tell "back to tweak an answer" from "my plan was created",
@@ -411,26 +480,35 @@ export class GoalPage implements OnInit, ViewWillEnter {
   async openMenu(): Promise<void> {
     const goal = this.existing();
     if (!goal || this.mode() !== 'saved') return;
-    const sheet = await this.actionSheetCtrl.create({
-      header: goal.name,
-      buttons: [
-        { text: 'Edit plan', handler: () => { void this.editPlan(); } },
-        { text: 'Rename', handler: () => { void this.renameGoal(); } },
+    const v = this.view();
+    // The subtitle reads like the hero: the figure it shows, then the status chip.
+    const lead = this.isDueNow() ? `${fmtMoney(v.dueNow)} due now` : `${fmtMoney(v.monthlyTotal)}/mo`;
+    const picked = await presentActionSheet<MenuId>(this.modalCtrl, {
+      header: { icon: goal.icon, title: goal.name, subtitle: `${lead} · ${this.statusChip()}` },
+      actions: [
+        { id: 'edit', icon: 'tune', label: 'Edit plan', helper: EDIT_PLAN_HELPER[goal.type] },
+        { id: 'rename', icon: 'edit', label: 'Rename', helper: goal.name },
         ...(goal.type !== 'VACATION'
-          ? [{ text: goal.completed ? 'Reopen' : 'Mark completed', handler: () => { void this.markCompleted(); } }]
+          ? [goal.completed
+              ? { id: 'complete' as const, icon: 'undo', label: 'Reopen', helper: 'Puts it back among your active goals' }
+              : { id: 'complete' as const, icon: 'check_circle', label: 'Mark completed', helper: 'Keeps it on your profile as done' }]
           : []),
-        { text: 'Remove goal', role: 'destructive', handler: () => { void this.confirmRemove(); } },
-        { text: 'Cancel', role: 'cancel' },
+        { id: 'remove', icon: 'delete', label: 'Remove goal', helper: 'Its plan goes with it', destructive: true },
       ],
     });
-    await sheet.present();
+    switch (picked) {
+      case 'edit': void this.editPlan(); break;
+      case 'rename': void this.renameGoal(); break;
+      case 'complete': void this.markCompleted(); break;
+      case 'remove': void this.confirmRemove(); break;
+    }
   }
 
   /** Pushes the quiz prefilled with every stored answer. */
   async editPlan(): Promise<void> {
     const goal = this.existing();
     if (!goal) return;
-    this.flushFocusedInput();
+    this.flushEdits();
     await this.pendingWrite;
     await this.navCtrl.navigateForward(['/goals', goal.id, 'edit']);
   }
@@ -439,16 +517,9 @@ export class GoalPage implements OnInit, ViewWillEnter {
   async renameGoal(): Promise<void> {
     const goal = this.existing();
     if (!goal) return;
-    const alert = await this.alertCtrl.create({
-      header: 'Rename goal',
-      inputs: [{ name: 'name', type: 'text', value: goal.name, attributes: { maxlength: 50 } }],
-      buttons: [{ text: 'Cancel', role: 'cancel' }, { text: 'Save', role: 'save' }],
-    });
-    await alert.present();
-    const { role, data } = await alert.onDidDismiss<{ values?: { name?: string } }>();
-    if (role !== 'save') return;
-    const name = (data?.values?.name ?? '').trim();
-    if (!name) return;
+    // The prompt trims and never resolves an empty string on save.
+    const name = await presentTextPrompt(this.modalCtrl, { title: 'Rename goal', label: 'Name', value: goal.name, maxlength: 50 });
+    if (name === null) return;
     await this.queueWrite(g => (g.name === name ? null : { name }));
   }
 
@@ -459,7 +530,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
     if (this.saving() || this.mode() !== 'preview-new') return;
     const draft = this.draft();
     if (!draft) return;
-    this.flushFocusedInput();
+    this.flushEdits();
     this.saving.set(true);
     try {
       await this.pendingWrite;
@@ -483,7 +554,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
     if (!draft) return;
     // A balance typed and not yet blurred is written first, and Update waits for it, so this body
     // is built from the goal that write returned.
-    this.flushFocusedInput();
+    this.flushEdits();
     this.saving.set(true);
     try {
       await this.pendingWrite;
@@ -544,10 +615,11 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   /**
    * Opens the detail sheet for one kid unit or the kid's everyday line: milestones, notes, sources,
-   * per paycheck, the Saved so far balance (units only) and the info button. Resolves with the
+   * per paycheck, the Saved so far balance (units only) and the info button. `openBalance` has the
+   * sheet open its Saved so far tray as it lands (the Update balance chip). Resolves with the
    * presented modal, or null when there is nothing to open (an unpriced everyday line).
    */
-  async openUnitDetail(kidIndex: number, unit: KidBalanceKey | 'everyday'): Promise<HTMLIonModalElement | null> {
+  async openUnitDetail(kidIndex: number, unit: KidBalanceKey | 'everyday', openBalance = false): Promise<HTMLIonModalElement | null> {
     if (!this.unitDetail(kidIndex, unit)) return null;
     const detail = computed(() => this.unitDetail(kidIndex, unit));
     const modal = await this.modalCtrl.create({
@@ -558,6 +630,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
           ? null
           : (value: number) => this.updateBalance({ kid: kidIndex, account: unit }, value),
         notes: this.infoNotes(),
+        openBalance,
       },
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
@@ -568,8 +641,8 @@ export class GoalPage implements OnInit, ViewWillEnter {
   /**
    * The status chip: "Update balance" opens the balance. A kids goal opens the sheet for the first
    * unfinished unit of the kid card in view (or, when that card is all finished, of the first other
-   * card in order with one) and focuses its Saved so far field; every other type scrolls to its
-   * inline tile and focuses it.
+   * card in order with one) with its Saved so far tray open; every other type scrolls to its
+   * inline tile and opens the tray on it.
    */
   async onChipTap(): Promise<void> {
     if (this.statusChip() !== 'Update balance') return;
@@ -580,22 +653,31 @@ export class GoalPage implements OnInit, ViewWillEnter {
       const card = ordered.find(c => c.units.some(u => !u.finished));
       const unit = card?.units.find(u => !u.finished);
       if (!card || !unit) return;
-      const modal = await this.openUnitDetail(card.index, unit.key);
-      modal?.querySelector<HTMLInputElement>('.ud-bal input')?.focus();
+      await this.openUnitDetail(card.index, unit.key, true);
       return;
     }
-    setTimeout(() => {
-      const field = document.querySelector<HTMLInputElement>('#gp-bal-current, #gp-bal-vacation');
-      field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      field?.focus();
-    });
+    const field = this.balanceField();
+    if (!this.tray.isOpen(field)) this.tray.toggle(field);
+    this.root.nativeElement.querySelector(`#gp-bal-${field}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   // ── Balances ────────────────────────────────────────────────────────────────
 
-  /** The simple or vacation goal's Saved so far tile. Kid balances are saved from the unit sheet. */
-  onBalanceBlur(path: 'current' | 'vacation', event: Event): void {
-    void this.updateBalance(path, this.sanitize(event, 9) ?? 0);
+  /** The simple or vacation goal's Saved so far tray closed: its draft, if any, is saved. */
+  private commitBalance(field: BalanceField): void {
+    const draft = this.balanceDraft();
+    if (draft === null) return;
+    void this.updateBalance(field, draft).then(() => {
+      // The tile keeps the draft until the save settles, so it never flashes the old figure; after
+      // a failed save (the page toasts) it shows the stored balance again. A tray re-opened in the
+      // meantime holds a newer draft, which its own close saves; until that write lands the tile
+      // keeps showing it, so an earlier write settling first never drops the tile to its figure.
+      if (this.tray.open() === null && this.balanceDraft() === draft) this.balanceDraft.set(null);
+    });
+  }
+
+  private balanceTrayField(label: string): TrayHostField {
+    return { label, scale: this.balanceScale, value: this.shownBalance, set: value => this.balanceDraft.set(value) };
   }
 
   /**
@@ -646,7 +728,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
   /** Toggles `completed`. Not offered for vacation goals. */
   async markCompleted(): Promise<void> {
     if (!this.existing() || this.saving()) return;
-    this.flushFocusedInput();
+    this.flushEdits();
     this.saving.set(true);
     try {
       await this.pendingWrite;
@@ -666,7 +748,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
 
   async confirmRemove(): Promise<void> {
     if (!this.existing()) return;
-    this.flushFocusedInput();
+    this.flushEdits();
     await this.pendingWrite;
     const goal = this.existing();
     if (!goal) return;
@@ -686,11 +768,6 @@ export class GoalPage implements OnInit, ViewWillEnter {
     } catch (err) {
       await this.handleWriteError(err);
     }
-  }
-
-  /** Whole dollars: the fields only ever hold digits, so a stored value with cents shows rounded. */
-  fmtNumber(value: number | null): string {
-    return value == null ? '' : String(Math.round(value));
   }
 
   // ── Internals: hero count-up ────────────────────────────────────────────────
@@ -768,6 +845,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
       perPaycheck: InvestmentFrequencyUtils.toPerPaycheckEquivalent(e.monthly, this.frequency()),
       finished: false,
       balance: null,
+      target: null,
       status: null,
       milestones: [],
       notes: [`${e.subLine}.`, 'Steps up on its own at 3, 6, 9, 12 and 15, the ages where the USDA figures change.'],
@@ -831,6 +909,7 @@ export class GoalPage implements OnInit, ViewWillEnter {
       perPaycheck,
       finished: row.finished,
       balance: row.balance,
+      target: row.target,
       status: { text: this.statusChip(), tone: this.statusTone(this.statusChip()) },
       milestones,
       notes,
@@ -1057,17 +1136,14 @@ export class GoalPage implements OnInit, ViewWillEnter {
     };
   }
 
-  /** Blurs a focused field so its blur handler (a balance write) runs before the action that follows. */
-  private flushFocusedInput(): void {
+  /**
+   * Settles the edits in flight before the action that follows: a focused field blurs (a kid's
+   * rename commits) and the tray closes (its balance draft is queued), so the write chain holds
+   * them when the caller awaits it.
+   */
+  private flushEdits(): void {
     (document.activeElement as HTMLElement | null)?.blur?.();
-  }
-
-  /** Digits only, capped, input rewritten in place. Empty input yields null. */
-  private sanitize(event: Event, maxDigits: number): number | null {
-    const input = event.target as HTMLInputElement;
-    const digits = (input.value || '').replace(/\D+/g, '').slice(0, maxDigits);
-    if (input.value !== digits) input.value = digits;
-    return digits ? parseInt(digits, 10) : null;
+    this.tray.close();
   }
 
   /** Whole percent, decimals trimmed (0.10 to "10", 0.085 to "8.5"). */

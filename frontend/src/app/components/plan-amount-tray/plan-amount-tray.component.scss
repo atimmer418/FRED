@@ -1,0 +1,178 @@
+// The slide tray: the tile recipe grown into a row under an amount field. The host owns the grow
+// and collapse (WAAPI on its wrapper); this is the card, the slider and the nudges.
+// The thumb's lift and lag are CSS transitions on purpose: decorative, so the global reduced-motion
+// rule zeroing them is the right snap.
+//
+// Theming: every colour reads a `--tray-*` custom property with the white-page value as its
+// fallback. Custom properties inherit, so a host restyles the tray by setting them on the tray
+// element or any ancestor (the blue onboarding flow maps them onto its `--bf-*` tokens):
+//   --tray-surface      card background            #f8fafc
+//   --tray-border       card border                #eef1f6
+//   --tray-track        the empty track            #e5e7eb
+//   --tray-fill         the filled track           #2563eb
+//   --tray-thumb        thumb face                 #fff
+//   --tray-thumb-ring   thumb's hairline border    rgba(15, 23, 42, 0.06)
+//   --tray-thumb-dot    thumb's centre dot         #2563eb
+//   --tray-thumb-glow   shadow tint while dragging rgba(37, 99, 235, 0.3)
+//   --tray-focus        keyboard focus ring        rgba(37, 99, 235, 0.3)
+//   --tray-tick         the dial texture hairlines #e5e7eb
+//   --tray-mark         breakpoint ticks           #cbd5e1
+//   --tray-label        the end labels             #9aa6ba
+//   --tray-nudge        minus/plus face            #fff
+//   --tray-nudge-border minus/plus border          #e5e7eb
+//   --tray-nudge-ink    minus/plus glyph           #2563eb
+//   --tray-nudge-press  minus/plus pressed face    #eef4ff
+
+:host {
+  display: block;
+  font-family: 'Manrope', sans-serif;
+}
+
+.tray-in {
+  background: var(--tray-surface, #f8fafc);
+  border: 1px solid var(--tray-border, #eef1f6);
+  border-radius: 13px;
+  padding: 8px 10px 6px 4px;
+}
+
+.tray-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+// ── Slider ───────────────────────────────────────────────────────────────────
+// Buttons sit to the RIGHT of the track so neither lands in Ionic's 50px swipe-back edge.
+.ps {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  touch-action: pan-y;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+
+  &:focus-visible .ps-thumb { box-shadow: 0 0 0 3px var(--tray-focus, rgba(37, 99, 235, 0.3)); }
+}
+
+.ps-track {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 17px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--tray-track, #e5e7eb);
+}
+
+.ps-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--tray-fill, #2563eb);
+}
+
+// A faint camera-dial texture under the track: a repeating hairline, faded out at both ends.
+.ps-ticks {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 28px;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, var(--tray-tick, #e5e7eb) 0 1px, transparent 1px 7px);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  pointer-events: none;
+}
+
+// Breakpoint ticks: one firmer hairline where the step changes, over the texture, under the thumb.
+.ps-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ps-mark {
+  position: absolute;
+  top: 27px;
+  width: 1px;
+  height: 10px;
+  background: var(--tray-mark, #cbd5e1);
+  transform: translateX(-50%);
+}
+
+.ps-thumb {
+  position: absolute;
+  top: 20px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--tray-thumb, #fff);
+  border: 1px solid var(--tray-thumb-ring, rgba(15, 23, 42, 0.06));
+  box-shadow: 0 0.5px 1.5px rgba(15, 23, 42, 0.24), 0 3px 8px rgba(15, 23, 42, 0.14);
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease-out, box-shadow 0.12s, left 0.06s ease-out;
+  pointer-events: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 9px;
+    border-radius: 50%;
+    background: var(--tray-thumb-dot, #2563eb);
+  }
+}
+
+.ps.dragging .ps-thumb {
+  transform: translate(-50%, -50%) scale(1.18);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.24), 0 6px 16px var(--tray-thumb-glow, rgba(37, 99, 235, 0.3));
+  transition: transform 0.12s ease-out, box-shadow 0.12s;
+}
+
+// ── Minus and plus ───────────────────────────────────────────────────────────
+.nudge {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--tray-nudge-border, #e5e7eb);
+  background: var(--tray-nudge, #fff);
+  color: var(--tray-nudge-ink, #2563eb);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+
+  .material-symbols-outlined { font-size: 18px; }
+
+  &:active { background: var(--tray-nudge-press, #eef4ff); }
+
+  &[disabled] {
+    opacity: 0.35;
+    pointer-events: none;
+  }
+}
+
+// ── End labels ───────────────────────────────────────────────────────────────
+// Right padding clears the two buttons (28 + 4 + 28, plus the track inset) so the cap label ends
+// under the track's right end.
+.ps-ends {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 86px 0 18px;
+  margin-top: -4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--tray-label, #9aa6ba);
+  font-variant-numeric: tabular-nums;
+}

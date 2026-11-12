@@ -341,6 +341,55 @@
   color: #8a94a6;
 }
 
+// ── Saved so far tile: a label row over a value button that opens the slide tray ──────────────
+// The tile recipe stays; the lit tile follows the Freedom page (blue border, white face, blue label).
+.gp-tile.active {
+  border-color: #2563eb;
+  background: #fff;
+}
+
+.gp-tile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fd-tile-label.active {
+  color: #2563eb;
+}
+
+// While the finger is down on the slider the label reads the step size ("± $25"). Colour and text
+// only, at the label's own size: a taller label would move the tray under the finger.
+.fd-tile-label.gp-step {
+  color: #2563eb;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+// The value row as a button: the button chrome goes (Ionic's normalize gives buttons line-height
+// 1, which would squash the figure), the tile's layout stays.
+.gp-tile-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
 // ── Assumptions, read-only: the Freedom Plan card with the figure where the chips were ─────
 .gp-assume-ro {
   display: flex;

@@ -1,8 +1,11 @@
 import { Signal, signal } from '@angular/core';
 import { ComponentFixture, TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { ModalController } from '@ionic/angular/standalone';
 
 import { GoalUnitDetailSheetComponent, UnitDetail } from './goal-unit-detail-sheet.component';
+import { PlanAmountTrayComponent } from '../plan-amount-tray/plan-amount-tray.component';
+import { detents } from '../../utils/plan-amount-scale';
 import { KidCostSourcesSheetComponent } from '../kid-cost-sources-sheet/kid-cost-sources-sheet.component';
 import { GoalPlanInfoSheetComponent } from '../goal-plan-info-sheet/goal-plan-info-sheet.component';
 import { InfoNote } from '../goal-plan-info-sheet/info-note';
@@ -18,6 +21,7 @@ function detail(partial: Partial<UnitDetail> = {}): UnitDetail {
     perPaycheck: 48,
     finished: false,
     balance: null,
+    target: 47_800,
     status: null,
     milestones: [
       { label: 'At 18', year: 2042, value: '$48K' },
@@ -37,6 +41,7 @@ const nestEgg = detail({
   monthly: 210,
   perPaycheck: 97,
   balance: 1200,
+  target: 120_000,
   sourcesLine: 'Your target, grown at the return you chose. At 22 and at 30 assume it stays invested.',
 });
 
@@ -47,10 +52,15 @@ describe('GoalUnitDetailSheetComponent', () => {
 
   function mount(
     d: Signal<UnitDetail | null>,
-    inputs: { onBalance?: ((value: number) => Promise<void>) | null; notes?: InfoNote[] } = {},
+    inputs: { onBalance?: ((value: number) => Promise<void>) | null; notes?: InfoNote[]; openBalance?: boolean } = {},
   ): Fixture {
     modal = jasmine.createSpyObj('ModalController', ['dismiss', 'create']);
     modal.create.and.resolveTo({ present: async () => {} } as unknown as HTMLIonModalElement);
+    // Reduced motion: the tray snaps open and shut, so its presence can be asserted without
+    // awaiting a collapse. The motion itself is the host's spec.
+    if (!jasmine.isSpy(window.matchMedia)) {
+      spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    }
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [GoalUnitDetailSheetComponent],
@@ -60,6 +70,7 @@ describe('GoalUnitDetailSheetComponent', () => {
     fixture.componentInstance.detail = d;
     if (inputs.onBalance !== undefined) fixture.componentInstance.onBalance = inputs.onBalance;
     if (inputs.notes !== undefined) fixture.componentInstance.notes = inputs.notes;
+    if (inputs.openBalance !== undefined) fixture.componentInstance.openBalance = inputs.openBalance;
     fixture.detectChanges();
     return fixture;
   }
@@ -68,15 +79,27 @@ describe('GoalUnitDetailSheetComponent', () => {
     return fixture.nativeElement.querySelector(selector) as HTMLElement;
   }
 
-  function input(fixture: Fixture, selector: string): HTMLInputElement {
-    return el(fixture, selector) as HTMLInputElement;
+  const balanceBtn = (fixture: Fixture) => el(fixture, '.ud-bal-btn') as HTMLButtonElement | null;
+  const trayDone = (fixture: Fixture) => el(fixture, '.ud-tray-done') as HTMLButtonElement | null;
+  const slot = (fixture: Fixture) => el(fixture, '.field-tray');
+  const tray = (fixture: Fixture) =>
+    fixture.debugElement.query(By.directive(PlanAmountTrayComponent))?.componentInstance as PlanAmountTrayComponent | undefined;
+
+  function click(fixture: Fixture, selector: string): void {
+    (el(fixture, selector) as HTMLElement).click();
+    fixture.detectChanges();
   }
 
-  function blur(fixture: Fixture, selector: string, value: string): void {
-    const field = input(fixture, selector);
-    field.value = value;
-    field.dispatchEvent(new Event('input'));
-    field.dispatchEvent(new Event('blur'));
+  /** The slider landing on a value: the tray's output, as a finger or a nudge would raise it. */
+  function slideTo(fixture: Fixture, value: number): void {
+    tray(fixture)!.valueChange.emit(value);
+    fixture.detectChanges();
+  }
+
+  /** A tap as the host's outside-tap listener sees it: a press and a release on the same element. */
+  function press(fixture: Fixture, target: Element): void {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
     fixture.detectChanges();
   }
 
@@ -134,44 +157,158 @@ describe('GoalUnitDetailSheetComponent', () => {
     expect(modal.dismiss).toHaveBeenCalledWith();
   });
 
-  it('shows the Saved so far field and the Status word, and saves the balance on blur', fakeAsync(() => {
+  it('shows the Saved so far value as a button (no input) with the Status word; tapping it opens the tray under the tiles', () => {
     const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
     const fixture = mount(signal({ ...nestEgg, balance: 4200, status: { text: 'On plan', tone: 'good' as const } }), { onBalance });
-    expect(input(fixture, '.ud-bal input').value).toBe('4200');
-    expect(input(fixture, '.ud-bal input').getAttribute('aria-label')).toBe('Saved so far');
-    expect(input(fixture, '.ud-bal input').getAttribute('inputmode')).toBe('numeric');
+    expect(el(fixture, '.ud-bal input')).toBeNull();
+    expect(text(fixture, '.ud-bal-btn')).toBe('$4,200');
+    expect(text(fixture, '.ud-bal .fd-tile-label')).toBe('Saved so far');
     expect(text(fixture, '.ud-status')).toBe('On plan');
     expect(el(fixture, '.ud-status').classList).toContain('good');
-    blur(fixture, '.ud-bal input', '5,000');
-    flushMicrotasks();
-    expect(onBalance).toHaveBeenCalledWith(5000);
-  }));
+    expect(slot(fixture)).toBeNull();
+    expect(trayDone(fixture)).toBeNull();
 
-  it('a save that leaves the balance unchanged (it failed) puts the old balance back in the field', fakeAsync(() => {
+    click(fixture, '.ud-bal-btn');
+    const sheet = fixture.componentInstance;
+    expect(sheet.tray.open()).toBe('balance');
+    expect(el(fixture, '.ud-bal').classList).toContain('active');
+    expect(el(fixture, '.ud-bal .fd-tile-label').classList).toContain('active');
+    expect(balanceBtn(fixture)!.getAttribute('aria-expanded')).toBe('true');
+    // Done sits in the tile's label row; the slot is the full-width block right after the tiles.
+    expect(el(fixture, '.ud-bal .ud-tile-head .ud-tray-done')).not.toBeNull();
+    expect(slot(fixture)).not.toBeNull();
+    expect(slot(fixture).previousElementSibling).toBe(el(fixture, '.ud-tiles-2'));
+    expect(el(fixture, '.ps').getAttribute('aria-label')).toBe('Saved so far');
+    expect(el(fixture, '.ps').getAttribute('aria-valuetext')).toBe('$4,200');
+  });
+
+  it('the tray runs from $0 to the unit target in $100 nudges; a unit with no target caps at $50,000', () => {
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance: () => Promise.resolve() });
+    click(fixture, '.ud-bal-btn');
+    const scale = tray(fixture)!.scale();
+    expect(scale.min).toBe(0);
+    expect(scale.max).toBe(120_000);
+    expect(scale.fine).toBe(100);
+    const list = detents(scale);
+    expect(list[list.length - 1]).toBe(120_000);
+    expect(list.length).toBeGreaterThanOrEqual(80);
+    expect(list.length).toBeLessThanOrEqual(160);
+    expect(Array.from(fixture.nativeElement.querySelectorAll('.ps-ends span')).map(e => (e as HTMLElement).textContent)).toEqual(['$0', '$120,000']);
+
+    const untargeted = mount(signal({ ...nestEgg, balance: 4200, target: null }), { onBalance: () => Promise.resolve() });
+    click(untargeted, '.ud-bal-btn');
+    expect(tray(untargeted)!.scale().max).toBe(50_000);
+  });
+
+  it('a balance already past the target lifts the cap to the next round number above it, so it can still go up', () => {
+    const fixture = mount(signal({ ...nestEgg, balance: 130_000 }), { onBalance: () => Promise.resolve() });
+    click(fixture, '.ud-bal-btn');
+    expect(tray(fixture)!.scale().max).toBe(250_000);
+    expect(el(fixture, '.ps').getAttribute('aria-valuenow')).toBe('130000');
+    // The draft never moves the cap: sliding under the target leaves the scale alone until a save lands.
+    slideTo(fixture, 100_000);
+    expect(tray(fixture)!.scale().max).toBe(250_000);
+  });
+
+  it('sliding shows the value at once and saves nothing until the tray closes; Done saves the draft as whole dollars', fakeAsync(() => {
     const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
-    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance });
-    blur(fixture, '.ud-bal input', '9,999');
+    const d = signal<UnitDetail | null>({ ...nestEgg, balance: 4200 });
+    const fixture = mount(d, { onBalance });
+    click(fixture, '.ud-bal-btn');
+    slideTo(fixture, 5000);
+    expect(text(fixture, '.ud-bal-btn')).toBe('$5,000');
+    expect(onBalance).not.toHaveBeenCalled();
+    slideTo(fixture, 5100);
+    click(fixture, '.ud-tray-done');
+    expect(onBalance).toHaveBeenCalledOnceWith(5100);
+    expect(fixture.componentInstance.tray.open()).toBeNull();
+    expect(slot(fixture)).toBeNull();
+    // The tile keeps the draft until the save settles and the live detail carries the new balance.
+    expect(text(fixture, '.ud-bal-btn')).toBe('$5,100');
+    d.set({ ...nestEgg, balance: 5100 });
     flushMicrotasks();
     fixture.detectChanges();
-    expect(onBalance).toHaveBeenCalledWith(9999);
-    expect(input(fixture, '.ud-bal input').value).toBe('4200');
+    expect(text(fixture, '.ud-bal-btn')).toBe('$5,100');
   }));
 
-  it('an emptied Saved so far field saves 0', fakeAsync(() => {
+  it('a save that leaves the balance unchanged (it failed) shows the live balance again', fakeAsync(() => {
     const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
-    const fixture = mount(signal(nestEgg), { onBalance });
-    blur(fixture, '.ud-bal input', '');
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance });
+    click(fixture, '.ud-bal-btn');
+    slideTo(fixture, 9900);
+    click(fixture, '.ud-tray-done');
     flushMicrotasks();
-    expect(onBalance).toHaveBeenCalledWith(0);
+    fixture.detectChanges();
+    expect(onBalance).toHaveBeenCalledWith(9900);
+    expect(text(fixture, '.ud-bal-btn')).toBe('$4,200');
   }));
 
-  it('a pasted amount with cents saves the whole dollars: "1,200.50" saves 1200, not 120050', fakeAsync(() => {
+  it('a tap outside the tile and the tray closes the tray and saves; a tap on the slider or the tile does not', () => {
     const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
-    const fixture = mount(signal(nestEgg), { onBalance });
-    blur(fixture, '.ud-bal input', '1,200.50');
-    flushMicrotasks();
-    expect(onBalance).toHaveBeenCalledWith(1200);
-  }));
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance });
+    click(fixture, '.ud-bal-btn');
+    slideTo(fixture, 6000);
+    press(fixture, el(fixture, '.ps-ends'));
+    press(fixture, balanceBtn(fixture)!);
+    expect(fixture.componentInstance.tray.open()).toBe('balance');
+    expect(onBalance).not.toHaveBeenCalled();
+    press(fixture, el(fixture, '.ud-sub'));
+    expect(fixture.componentInstance.tray.open()).toBeNull();
+    expect(onBalance).toHaveBeenCalledOnceWith(6000);
+  });
+
+  it('the sheet\'s Done closes the tray and saves before dismissing; leaving the sheet saves too', () => {
+    const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance });
+    click(fixture, '.ud-bal-btn');
+    slideTo(fixture, 7000);
+    click(fixture, '.ud-done');
+    expect(onBalance).toHaveBeenCalledOnceWith(7000);
+    expect(fixture.componentInstance.tray.open()).toBeNull();
+    expect(modal.dismiss).toHaveBeenCalledWith();
+
+    click(fixture, '.ud-bal-btn');
+    slideTo(fixture, 8000);
+    fixture.componentInstance.ionViewWillLeave();
+    fixture.detectChanges();
+    expect(onBalance).toHaveBeenCalledWith(8000);
+    expect(slot(fixture)).toBeNull();
+  });
+
+  it('tapping the open tile again closes the tray; a close with nothing slid saves nothing', () => {
+    const onBalance = jasmine.createSpy('onBalance').and.returnValue(Promise.resolve());
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance });
+    click(fixture, '.ud-bal-btn');
+    click(fixture, '.ud-bal-btn');
+    expect(fixture.componentInstance.tray.open()).toBeNull();
+    expect(onBalance).not.toHaveBeenCalled();
+  });
+
+  it('the label reads the step in force while the finger is down', () => {
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance: () => Promise.resolve() });
+    click(fixture, '.ud-bal-btn');
+    fixture.componentInstance.tray.onDragging(true);
+    fixture.detectChanges();
+    expect(text(fixture, '.ud-bal .fd-tile-label')).toMatch(/^± \$\d/);
+    expect(el(fixture, '.ud-bal .fd-tile-label').classList).toContain('ud-step');
+    fixture.componentInstance.tray.onDragging(false);
+    fixture.detectChanges();
+    expect(text(fixture, '.ud-bal .fd-tile-label')).toBe('Saved so far');
+  });
+
+  it('opened from the Update balance chip, the tray opens as the sheet lands; not for a finished unit', () => {
+    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance: () => Promise.resolve(), openBalance: true });
+    expect(fixture.componentInstance.tray.open()).toBeNull();
+    fixture.componentInstance.ionViewDidEnter();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.tray.open()).toBe('balance');
+    expect(slot(fixture)).not.toBeNull();
+
+    const finished = mount(signal({ ...nestEgg, balance: 4200, finished: true }), { onBalance: () => Promise.resolve(), openBalance: true });
+    finished.componentInstance.ionViewDidEnter();
+    finished.detectChanges();
+    expect(finished.componentInstance.tray.open()).toBeNull();
+  });
 
   it('each status tone sets its class', () => {
     const d = signal<UnitDetail | null>({ ...nestEgg, status: { text: 'Behind', tone: 'warn' } });
@@ -242,13 +379,13 @@ describe('GoalUnitDetailSheetComponent', () => {
       status: { text: 'Done', tone: 'muted' },
     })), { onBalance: () => Promise.resolve() });
     expect(el(fixture, '.ud-bal')).not.toBeNull();
-    expect(el(fixture, '.ud-bal input')).toBeNull();
+    expect(balanceBtn(fixture)).toBeNull();
     expect(text(fixture, '.ud-bal')).toContain('$20,800');
   });
 
   it('without an onBalance handler the balance is read-only text', () => {
     const fixture = mount(signal({ ...nestEgg, balance: 4200 }));
-    expect(el(fixture, '.ud-bal input')).toBeNull();
+    expect(balanceBtn(fixture)).toBeNull();
     expect(text(fixture, '.ud-bal')).toContain('$4,200');
   });
 });

@@ -1,7 +1,7 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
-import { NavController } from '@ionic/angular';
+import { NavController, ViewWillLeave } from '@ionic/angular';
 import { FormsModule } from '@angular/forms';
 import {
   IonHeader,
@@ -30,6 +30,14 @@ import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+import { AmountTrayHost } from '../components/plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
+import { PlanAmountScale } from '../utils/plan-amount-scale';
+
+/** The one tray-driven field on this screen. */
+type TrayField = 'allocation';
+/** Whole percents, 1 to 100; the minus and plus move by one. */
+const ALLOCATION_SCALE: PlanAmountScale = { min: 1, max: 100, step: 1, fine: 1 };
 
 @Component({
   selector: 'app-add-beneficiary',
@@ -42,12 +50,16 @@ import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-
     IonHeader, IonToolbar, IonContent, IonButton,
     IonIcon, IonButtons,
     IonModal, IonDatetime,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective,
+    AmountTraySlotComponent
   ],
   providers: [DatePipe]
 })
-export class AddBeneficiaryPage implements OnInit {
-  
+export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
+
+  /** The allocation field opens the slide tray instead of the keyboard; the value stays on `beneficiary`. */
+  readonly tray: AmountTrayHost<TrayField>;
+
   public beneficiary: Partial<Beneficiary> = {
     beneficiaryType: 'PRIMARY',
     country: 'US'
@@ -85,8 +97,23 @@ export class AddBeneficiaryPage implements OnInit {
     private pinService: PinService,
     private toastService: ToastService,
     private navCtrl: NavController,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    elementRef: ElementRef<HTMLElement>,
+    destroyRef: DestroyRef
   ) {
+    this.tray = new AmountTrayHost<TrayField>({
+      root: elementRef,
+      destroyRef,
+      fields: {
+        allocation: {
+          label: 'Allocation Percentage',
+          scale: ALLOCATION_SCALE,
+          unit: 'percent',
+          value: () => this.beneficiary.percentageAllocation ?? 0,
+          set: v => { this.beneficiary.percentageAllocation = v; },
+        },
+      },
+    });
     addIcons({
       arrowBackOutline,
       saveOutline,
@@ -100,6 +127,11 @@ export class AddBeneficiaryPage implements OnInit {
 
   goBack() {
     this.navCtrl.navigateBack('/beneficiaries');
+  }
+
+  /** Leaving the page: the tray snaps shut rather than collapsing into a view that is going. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
   }
 
   ngOnInit() {
@@ -179,6 +211,7 @@ export class AddBeneficiaryPage implements OnInit {
   }
 
   async onSave() {
+    this.tray.close();
     if (!this.validateForm()) {
       // Fired here rather than inside validateForm's nine branches: each one shows the same kind
       // of toast and would produce an identical payload, and the message is what differs, which is

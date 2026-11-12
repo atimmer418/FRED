@@ -1,0 +1,57 @@
+<div class="gs-body">
+  <div class="gs-handle"></div>
+
+  <div class="fs-head">
+    <div class="fs-chip" aria-hidden="true">
+      <span class="material-symbols-outlined">{{ header.icon }}</span>
+    </div>
+    <div class="fs-head-text">
+      <h3 [id]="titleId">{{ header.title }}</h3>
+      @if (header.subtitle) {
+        <p>{{ header.subtitle }}</p>
+      }
+    </div>
+  </div>
+
+  <div role="menu" [attr.aria-labelledby]="titleId">
+    @if (primaryActions.length) {
+      <div class="fs-list" role="group">
+        @for (action of primaryActions; track action.id) {
+          <button type="button" role="menuitem" class="fs-row" (click)="pick(action)">
+            <span class="fs-row-icon" aria-hidden="true">
+              <span class="material-symbols-outlined">{{ action.icon }}</span>
+            </span>
+            <span class="fs-row-text">
+              <b>{{ action.label }}</b>
+              @if (action.helper) {
+                <span>{{ action.helper }}</span>
+              }
+            </span>
+            <span class="material-symbols-outlined fs-chevron" aria-hidden="true">chevron_right</span>
+          </button>
+        }
+      </div>
+    }
+
+    @if (destructiveActions.length) {
+      <div class="fs-list fs-list--danger" role="group">
+        @for (action of destructiveActions; track action.id) {
+          <button type="button" role="menuitem" class="fs-row" (click)="pick(action)">
+            <span class="fs-row-icon" aria-hidden="true">
+              <span class="material-symbols-outlined">{{ action.icon }}</span>
+            </span>
+            <span class="fs-row-text">
+              <b>{{ action.label }}</b>
+              @if (action.helper) {
+                <span>{{ action.helper }}</span>
+              }
+            </span>
+            <span class="material-symbols-outlined fs-chevron" aria-hidden="true">chevron_right</span>
+          </button>
+        }
+      </div>
+    }
+  </div>
+
+  <button type="button" class="gs-cancel" (click)="close()">{{ cancelLabel }}</button>
+</div>

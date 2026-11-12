@@ -1,76 +1,77 @@
 import { Injectable } from '@angular/core';
-import { ToastController } from '@ionic/angular/standalone';
+import { Observable, Subject } from 'rxjs';
 
+/**
+ * What kind of thing happened. FredToastHostComponent turns it into the chip
+ * colour and icon, so a user can read the outcome from the colour alone.
+ */
+export type ToastSeverity = 'success' | 'error' | 'warning' | 'info' | 'neutral';
+
+export interface ToastRequest {
+  severity: ToastSeverity;
+  message: string;
+  title?: string;
+  /** Milliseconds on screen. Defaults to TOAST_DURATION_MS, or ERROR_TOAST_DURATION_MS for an error. */
+  duration?: number;
+}
+
+/** A request with every default filled in, the shape the host receives. */
+export interface ToastItem {
+  severity: ToastSeverity;
+  message: string;
+  title?: string;
+  duration: number;
+}
+
+export const TOAST_DURATION_MS = 3000;
+export const ERROR_TOAST_DURATION_MS = 4000;
+
+/**
+ * The Ionic colour names call sites have always passed to showToast, mapped
+ * onto severities. Anything unrecognised reads as info, the old default look.
+ */
+const SEVERITY_BY_COLOR: Record<string, ToastSeverity> = {
+  success: 'success',
+  danger: 'error',
+  warning: 'warning',
+  primary: 'info',
+  medium: 'neutral',
+};
+
+export function severityForColor(color: string | undefined): ToastSeverity {
+  return SEVERITY_BY_COLOR[color ?? ''] ?? 'info';
+}
+
+/**
+ * ToastService: the one way to put a notification on screen.
+ *
+ * It owns no DOM. Every request is pushed down items$ and drawn by the single
+ * FredToastHostComponent mounted inside ion-app, which stacks, times and
+ * dismisses the cards. showToast keeps the signature every call site already
+ * uses; show takes a severity directly.
+ */
 @Injectable({
   providedIn: 'root'
 })
 export class ToastService {
-  private activeToasts: HTMLIonToastElement[] = [];
-  private readonly TOAST_SPACING = 6; // px
-  private readonly TOAST_HEIGHT = 50; // Approximate height, tighter for standard messages
+  private readonly items = new Subject<ToastItem>();
 
-  constructor(private toastController: ToastController) {}
+  /** Every toast asked for, in order. FredToastHostComponent is the subscriber. */
+  readonly items$: Observable<ToastItem> = this.items.asObservable();
 
-  async showToast(message: string, color: string = 'primary', duration: number = 3000) {
-    // Create the new toast
-    const toast = await this.toastController.create({
-      message: message,
-      duration: duration,
-      color: color,
-      position: 'top',
-      cssClass: 'stacked-toast',
-      buttons: [
-        {
-          icon: 'close',
-          role: 'cancel'
-        }
-      ]
-    });
-
-    // Add to our tracking array immediately so we can adjust positions
-    this.activeToasts.push(toast);
-    
-    // Calculate position based on index in the stack
-    // Move existing toasts down BEFORE presenting the new one to avoid overlap
-    this.updateToastPositions();
-
-    // Present the toast
-    await toast.present();
-
-    // Handle dismissal
-    toast.onDidDismiss().then(() => {
-      this.removeToast(toast);
-    });
+  /**
+   * Legacy entry point: an Ionic colour name stands in for the severity. With
+   * no duration the severity's default applies, so a 'danger' toast stays up
+   * the extra second an error gets.
+   */
+  showToast(message: string, color: string = 'primary', duration?: number): void {
+    this.show({ severity: severityForColor(color), message, duration });
   }
 
-  private removeToast(toast: HTMLIonToastElement) {
-    const index = this.activeToasts.indexOf(toast);
-    if (index > -1) {
-      this.activeToasts.splice(index, 1);
-      this.updateToastPositions();
-    }
-  }
-
-  private updateToastPositions() {
-    // We need to manually adjust the top position of each toast
-    // Newest toast (last in array) should be at the top (offset 0)
-    // Older toasts should cascade down
-    
-    this.activeToasts.forEach((toast, index) => {
-      // Calculate position from top (0 = newest/bottom of array)
-      const positionFromTop = this.activeToasts.length - 1 - index;
-      
-      const offset = positionFromTop * (this.TOAST_HEIGHT + this.TOAST_SPACING);
-      
-      toast.style.setProperty('--toast-transform', `translateY(${offset}px)`);
-      toast.style.setProperty('transition', 'transform 0.3s ease-in-out');
-      
-      // Optional: Fade out older toasts slightly to emphasize the new one
-      if (positionFromTop > 0) {
-        toast.style.opacity = '0.9';
-      } else {
-        toast.style.opacity = '1';
-      }
-    });
+  show(request: ToastRequest): void {
+    const { severity, message, title } = request;
+    const duration = request.duration
+      ?? (severity === 'error' ? ERROR_TOAST_DURATION_MS : TOAST_DURATION_MS);
+    this.items.next({ severity, message, title, duration });
   }
 }

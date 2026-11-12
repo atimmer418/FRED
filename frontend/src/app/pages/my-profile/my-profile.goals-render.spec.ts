@@ -9,7 +9,7 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
+import { NavController, ModalController } from '@ionic/angular/standalone';
 import { BehaviorSubject, of } from 'rxjs';
 import { MyProfilePage } from './my-profile.page';
 import { AuthService } from '../../services/auth.service';
@@ -72,7 +72,6 @@ function setup(goals: Goal[]): ComponentFixture<MyProfilePage> {
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
       { provide: Router, useValue: { navigateByUrl: jasmine.createSpy(), navigate: jasmine.createSpy() } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-      { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {} },
       { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy('freedomPlanLeft') } },
       { provide: GoalsService, useValue: {

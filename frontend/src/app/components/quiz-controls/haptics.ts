@@ -13,3 +13,16 @@ export async function tickHaptic(): Promise<void> {
     // Ignored on purpose.
   }
 }
+
+/**
+ * A firmer thump for something that went wrong, so an error toast is felt as
+ * well as seen. Same contract as tickHaptic: native only, never throws.
+ */
+export async function thumpHaptic(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await Haptics.impact({ style: ImpactStyle.Medium });
+  } catch {
+    // Ignored on purpose.
+  }
+}

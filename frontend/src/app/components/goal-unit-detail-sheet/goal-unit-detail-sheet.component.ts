@@ -1,8 +1,12 @@
-import { Component, Input, Signal, effect, inject } from '@angular/core';
-import { ModalController } from '@ionic/angular/standalone';
+import { Component, DestroyRef, ElementRef, Input, Signal, computed, effect, inject, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
+import { ModalController, ViewDidEnter, ViewWillLeave } from '@ionic/angular/standalone';
 
 import { SheetDragDismissDirective } from '../../directives/sheet-drag-dismiss.directive';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { buildAmountScale, capAbove } from '../../utils/plan-amount-scale';
+import { AmountTrayHost, AmountTrayHostOptions, TRAY_INSIDE_SELECTOR } from '../plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.component';
 import { KidCostSourcesSheetComponent } from '../kid-cost-sources-sheet/kid-cost-sources-sheet.component';
 import { GoalPlanInfoSheetComponent } from '../goal-plan-info-sheet/goal-plan-info-sheet.component';
 import { InfoNote } from '../goal-plan-info-sheet/info-note';
@@ -25,6 +29,8 @@ export interface UnitDetail {
   finished: boolean;
   /** The unit's "Saved so far" in dollars. Null for the everyday line, which holds no money. */
   balance: number | null;
+  /** What the unit saves toward, in dollars: the Saved so far tray's cap. Null when it has none. */
+  target: number | null;
   /** The unit's Status word and its tone ("On plan", good). Null for the everyday line. */
   status: { text: string; tone: 'good' | 'warn' | 'info' | 'muted' } | null;
   /** Empty for a baby fund; At 18 / At 22 / At 30 for a 529 or nest egg. Years only for a dated, born kid. */
@@ -36,31 +42,82 @@ export interface UnitDetail {
   sourcesSheetKids: number | null;
 }
 
+/** The Saved so far tray's cap when the unit carries no target. */
+const UNIT_TARGET_FALLBACK = 50_000;
+/** The Saved so far tray's minus and plus step. */
+const BALANCE_FINE = 100;
+/** The one tray field on this sheet. */
+type BalanceField = 'balance';
+
+/**
+ * A tray host that saves on close. A balance rides as a draft while its tray is open (a write per
+ * detent would flood the goal's write queue), and `onClose` commits it however the tray closed:
+ * Done, a tap outside, the open field tapped again, submit, or leaving. Shared by this sheet and
+ * the plan page's Saved so far tile.
+ */
+export class SavingTrayHost<F extends string> extends AmountTrayHost<F> {
+  constructor(options: AmountTrayHostOptions<F>, private readonly onClose: (field: F) => void) {
+    super(options);
+  }
+
+  override close(instant = false): void {
+    const field = this.open();
+    super.close(instant);
+    if (field !== null) this.onClose(field);
+  }
+}
+
 /**
  * One kid unit, in detail: the 22 and 30 milestones, the cash explanation, the per-paycheck
- * figure, the Saved so far balance, the Status word and the sources, opened by tapping anywhere
- * on a unit row on the plan page. The detail is live (a signal), so a saved balance re-renders in
- * place; the sheet closes itself when the unit goes away. Presented with BOTTOM_SHEET_MODAL_OPTS.
+ * figure, the Saved so far balance (a slide tray, opened inside the sheet), the Status word and
+ * the sources, opened by tapping anywhere on a unit row on the plan page. The detail is live (a
+ * signal), so a saved balance re-renders in place; the sheet closes itself when the unit goes
+ * away. Presented with BOTTOM_SHEET_MODAL_OPTS.
  */
 @Component({
   selector: 'app-goal-unit-detail-sheet',
   standalone: true,
+  imports: [DecimalPipe, AmountTraySlotComponent],
   templateUrl: './goal-unit-detail-sheet.component.html',
   styleUrls: ['./goal-unit-detail-sheet.component.scss'],
   host: { class: 'ion-content-scroll-host' },
   hostDirectives: [SheetDragDismissDirective],
 })
-export class GoalUnitDetailSheetComponent {
+export class GoalUnitDetailSheetComponent implements ViewDidEnter, ViewWillLeave {
   /** The unit, live. Null once the unit no longer exists, which closes the sheet. */
   @Input({ required: true }) detail!: Signal<UnitDetail | null>;
   /** Saves a new Saved so far balance. Null leaves the balance read-only. */
   @Input() onBalance: ((value: number) => Promise<void>) | null = null;
   /** The "How FRED plans this" notes behind the info button. Empty hides the button. */
   @Input() notes: InfoNote[] = [];
+  /** True when opened from the Update balance chip: the Saved so far tray opens as the sheet lands. */
+  @Input() openBalance = false;
 
   private readonly modalCtrl = inject(ModalController);
 
   readonly fmtMoney = fmtMoney;
+
+  /** The slider's value while the tray is open, saved when it closes; null when nothing is pending. */
+  readonly balanceDraft = signal<number | null>(null);
+  /** What the tile shows: the draft while one is pending, else the live balance. */
+  readonly shownBalance = computed(() => this.balanceDraft() ?? this.detail()?.balance ?? 0);
+  private readonly unitTarget = computed(() => {
+    const target = this.detail()?.target;
+    return target && target > 0 ? target : UNIT_TARGET_FALLBACK;
+  });
+  /** A live balance already past the target lifts the cap above it (capAbove); from the live balance, not the draft, so the scale never moves under a finger. */
+  readonly balanceScale = computed(() => buildAmountScale(0, capAbove(this.unitTarget(), this.detail()?.balance ?? 0), BALANCE_FINE));
+  /** The Saved so far tray. The sheet's height follows it as it grows and collapses. */
+  readonly tray = new SavingTrayHost<BalanceField>({
+    root: inject<ElementRef<HTMLElement>>(ElementRef),
+    destroyRef: inject(DestroyRef),
+    fields: {
+      balance: { label: 'Saved so far', scale: this.balanceScale, value: this.shownBalance, set: value => this.balanceDraft.set(value) },
+    },
+    insideSelector: `${TRAY_INSIDE_SELECTOR}, .ud-bal-btn, .ud-tray-done`,
+    labelSelector: '.fd-tile-label.active',
+    doneSelector: '.ud-tray-done',
+  }, () => this.commitBalance());
 
   constructor() {
     effect(() => {
@@ -68,22 +125,32 @@ export class GoalUnitDetailSheetComponent {
     });
   }
 
-  /** The balance as whole dollars for the field: "4200". */
-  wholeDollars(value: number): string {
-    return String(Math.round(value));
+  /** True while the balance is the sheet's to edit: a handler was given and the unit is still saving. */
+  canEditBalance(): boolean {
+    const d = this.detail();
+    return !!this.onBalance && !!d && d.balance !== null && !d.finished;
   }
 
-  /** Whole dollars (cents after a "." dropped), digits only (empty is 0), saved as a non-negative amount. */
-  saveBalance(field: HTMLInputElement): void {
-    if (!this.onBalance) return;
-    const digits = field.value.split('.')[0].replace(/[^0-9]/g, '');
-    const value = Math.max(0, Math.round(Number(digits || '0')));
-    field.value = String(value);
-    // Re-sync to the live balance once the save settles: a failed save (the page toasts and the
-    // balance stays) must not leave the rejected number in the field.
-    void this.onBalance(value).then(() => {
-      const d = this.detail();
-      if (d && d.balance !== null) field.value = this.wholeDollars(d.balance);
+  /** The sheet has landed: opened from the Update balance chip, the tray opens straight away. */
+  ionViewDidEnter(): void {
+    if (this.openBalance && this.canEditBalance()) this.tray.toggle('balance');
+  }
+
+  /** The sheet is going (Done, a drag, the backdrop): the tray snaps shut and a pending balance saves. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
+  }
+
+  /** The tray closed: its draft, if any, is saved as a non-negative whole amount. */
+  private commitBalance(): void {
+    const draft = this.balanceDraft();
+    if (draft === null || !this.onBalance) return;
+    void this.onBalance(Math.max(0, Math.round(draft))).then(() => {
+      // The tile keeps the draft until the save settles, so it never flashes the old figure; after
+      // a failed save (the page toasts and the balance stays) it shows the live balance again. A
+      // tray re-opened in the meantime holds a newer draft, which its own close saves; the tile
+      // keeps showing it until that write lands, whatever order the writes settle in.
+      if (this.tray.open() === null && this.balanceDraft() === draft) this.balanceDraft.set(null);
     });
   }
 
@@ -108,6 +175,7 @@ export class GoalUnitDetailSheetComponent {
   }
 
   close(): void {
+    this.tray.close();
     this.modalCtrl.dismiss();
   }
 }

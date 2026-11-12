@@ -14,6 +14,7 @@ import { PushNotificationService } from './services/push-notification.service';
 import { JwtTokenUtils } from './utils/jwt-token.utils';
 import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourComponent } from './components/first-time-tour/first-time-tour.component';
+import { FredToastHostComponent } from './components/fred-toast/fred-toast-host.component';
 import { environment } from '../environments/environment';
 import { captureDevToolsKeyFromUrl } from './utils/dev-tools-key.utils';
 import { AnalyticsService } from './services/analytics/analytics.service';
@@ -38,7 +39,7 @@ const CRITICAL_FONT_SPECS = [
   templateUrl: 'app.component.html',
   styleUrls: ['app.component.scss'],
   standalone: true,
-  imports: [IonApp, IonRouterOutlet, CommonModule, FirstTimeTourComponent],
+  imports: [IonApp, IonRouterOutlet, CommonModule, FirstTimeTourComponent, FredToastHostComponent],
 })
 export class AppComponent implements OnInit {
 

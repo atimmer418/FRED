@@ -33,20 +33,27 @@
     <!-- Sections 2 + 3: Next Pay Date & Investment Amount (side by side) -->
     <div class="form-row-pair">
 
+      <!-- The amount opens the slide tray under the pair; Done shares its label line. -->
       <div class="form-section">
-        <p class="field-label">Investment amount</p>
-        <div class="field-row">
-          <span class="field-prefix">$</span>
-          <input
-            class="field-input"
-            type="number"
-            [(ngModel)]="schedule.investmentAmount"
-            (blur)="onAmountChange()"
-            placeholder="0"
-            inputmode="numeric" 
-            maxlength="5"
-            min="1" />
+        <div class="field-label-row">
+          <label class="field-label" [class.active]="tray.isOpen('amount')">{{ tray.label('amount') }}</label>
+          @if (tray.shown()) {
+            <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+          }
         </div>
+        <button
+          type="button"
+          class="field-value-btn"
+          [class.active]="tray.isOpen('amount')"
+          [attr.aria-expanded]="tray.isOpen('amount')"
+          (click)="tray.toggle('amount')">
+          <span class="field-affix">$</span>
+          @if (investmentAmount()) {
+            {{ investmentAmount() | number:'1.0-0' }}
+          } @else {
+            <span class="field-placeholder">0</span>
+          }
+        </button>
       </div>
 
       <div class="form-section">
@@ -64,6 +71,11 @@
 
     </div>
 
+    <!-- The tray's slot: under the pair, full width, there while the field is shown. -->
+    @if (tray.shown()) {
+      <app-amount-tray-slot [tray]="tray" />
+    }
+
     <!-- Recommendation tip (below the pair) -->
     <div class="info-tip info-tip--below-pair" *ngIf="monthlyGoal > 0">
       <span class="material-symbols-outlined info-tip-icon">info</span>
@@ -74,7 +86,7 @@
     </div>
 
     <!-- Section 4: Projections (conditional) -->
-    <div class="form-section" *ngIf="schedule.investmentAmount > 0">
+    <div class="form-section" *ngIf="investmentAmount() > 0">
       <p class="field-label">Projections</p>
       <div class="projection-grid">
         <div class="projection-card">

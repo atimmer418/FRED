@@ -249,6 +249,86 @@ input[type='number'].field-input {
   }
 }
 
+// --- Tray-driven amount field ---
+// The amount opens the slide tray (components/plan-amount-tray) instead of the keyboard: the
+// value is a button drawn like a .field-row, Done shares the label's line, and the slot sits
+// under the pair at full width. The class names are the ones AmountTrayHost looks for.
+.field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px 0;
+
+  .field-label {
+    margin-bottom: 0;
+  }
+}
+
+.field-label.active {
+  color: var(--schedule-primary);
+}
+
+.field-value-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  // The .field-row's 6px below, plus the 1px the input itself carried.
+  padding: 1px 0 7px;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--schedule-primary);
+  border-radius: 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: normal;
+  color: var(--schedule-text);
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+
+  // The $, as .field-prefix drew it.
+  .field-affix {
+    color: var(--schedule-gray);
+    flex-shrink: 0;
+  }
+
+  .field-placeholder {
+    color: #cbd5e1;
+    font-weight: 400;
+  }
+}
+
+// Bottom-aligned with the date field beside it, as the .field-row was.
+.form-row-pair .form-section .field-value-btn {
+  margin-top: auto;
+}
+
+.field-tray {
+  display: block;
+  width: 100%;
+}
+
+.field-tray-done {
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--schedule-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
 // --- Info tip (recommendation) ---
 .info-tip {
   display: flex;

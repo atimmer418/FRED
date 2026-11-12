@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { ActionSheetController, AlertController, ModalController, NavController } from '@ionic/angular/standalone';
+import { By } from '@angular/platform-browser';
+import { ModalController, NavController } from '@ionic/angular/standalone';
 import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
 
 import { GoalPage } from './goal.page';
@@ -16,10 +17,19 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { RateAssumptionsService } from '../../services/rate-assumptions.service';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { GoalRemoveConfirmSheetComponent } from '../../components/goal-remove-confirm-sheet/goal-remove-confirm-sheet.component';
+import {
+  FRED_ACTION_SHEET_ROLE, FredActionSheetComponent, FredActionSheetOptions,
+} from '../../components/fred-action-sheet/fred-action-sheet.component';
+import {
+  FRED_TEXT_PROMPT_ROLE, FredTextPromptSheetComponent,
+} from '../../components/fred-text-prompt-sheet/fred-text-prompt-sheet.component';
 import { GoalUnitDetailSheetComponent, UnitDetail } from '../../components/goal-unit-detail-sheet/goal-unit-detail-sheet.component';
 import { InfoNote } from '../../components/goal-plan-info-sheet/info-note';
 import { kidCostFigures } from '../../utils/kid-cost.utils';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
+import { AmountTraySlotComponent } from '../../components/plan-amount-tray/amount-tray-slot.component';
+import { PlanAmountTrayComponent } from '../../components/plan-amount-tray/plan-amount-tray.component';
+import { detents } from '../../utils/plan-amount-scale';
 import { toCountBand } from '../../services/analytics/analytics-bands';
 import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.model';
 import { GoalForm, defaultForm, formFromGoal } from './goal-form.model';
@@ -100,8 +110,8 @@ function newDraft(type: GoalForm['type'], patch: Partial<GoalForm> = {}): GoalFo
 describe('GoalPage', () => {
   let navCtrl: jasmine.SpyObj<NavController>;
   let modalCtrl: jasmine.SpyObj<ModalController>;
-  let actionSheetCtrl: jasmine.SpyObj<ActionSheetController>;
-  let alertCtrl: jasmine.SpyObj<AlertController>;
+  /** The row the mocked action sheet "taps" (null = dismissed with no role). A spec may reassign it between menus. */
+  let menuPick: string | null;
   let router: jasmine.SpyObj<Router>;
   let draftService: GoalDraftService;
   let goals: ReturnType<typeof signal<Goal[]>>;
@@ -118,7 +128,9 @@ describe('GoalPage', () => {
   let reducedMotion = false;
 
   interface CreateOpts {
-    goals?: Goal[]; loaded?: Goal[]; tier?: string; dismissRole?: string; alertRole?: string; alertName?: string;
+    goals?: Goal[]; loaded?: Goal[]; tier?: string;
+    /** How each mocked sheet dismisses: any other modal by role, the action sheet by row id, the text prompt by role + value. */
+    dismissRole?: string; menuPick?: string; promptRole?: string; promptValue?: string;
     createResult?: Observable<Goal>; updateResult?: Observable<Goal>; loadError?: unknown;
     /** The quiz's draft, set before the page opens. */
     draft?: { form: GoalForm; existing: Goal | null };
@@ -146,18 +158,19 @@ describe('GoalPage', () => {
     navCtrl = jasmine.createSpyObj<NavController>('NavController', ['navigateBack', 'navigateForward', 'back']);
     navCtrl.navigateBack.and.resolveTo(true);
     navCtrl.navigateForward.and.resolveTo(true);
+    menuPick = opts.menuPick ?? null;
     modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
-    modalCtrl.create.and.resolveTo({
-      present: async () => {},
-      onDidDismiss: async () => ({ role: opts.dismissRole }),
-    } as unknown as HTMLIonModalElement);
-    actionSheetCtrl = jasmine.createSpyObj<ActionSheetController>('ActionSheetController', ['create']);
-    actionSheetCtrl.create.and.resolveTo({ present: async () => {}, onDidDismiss: async () => ({}) } as unknown as HTMLIonActionSheetElement);
-    alertCtrl = jasmine.createSpyObj<AlertController>('AlertController', ['create']);
-    alertCtrl.create.and.resolveTo({
-      present: async () => {},
-      onDidDismiss: async () => ({ role: opts.alertRole, data: { values: { name: opts.alertName } } }),
-    } as unknown as HTMLIonAlertElement);
+    // Every sheet is one ModalController.create; what it dismisses with depends on which sheet it is.
+    modalCtrl.create.and.callFake(async ({ component }) => {
+      const dismissed = () => {
+        if (component === FredActionSheetComponent) {
+          return menuPick === null ? { role: undefined } : { role: FRED_ACTION_SHEET_ROLE, data: { id: menuPick } };
+        }
+        if (component === FredTextPromptSheetComponent) return { role: opts.promptRole, data: { value: opts.promptValue } };
+        return { role: opts.dismissRole };
+      };
+      return { present: async () => {}, onDidDismiss: async () => dismissed() } as unknown as HTMLIonModalElement;
+    });
 
     // The count-up runs on frames the spec drives by hand. A spec that creates two pages reuses the spies.
     rafCallbacks = [];
@@ -181,8 +194,6 @@ describe('GoalPage', () => {
         { provide: NavController, useValue: navCtrl },
         { provide: Router, useValue: router },
         { provide: ModalController, useValue: modalCtrl },
-        { provide: ActionSheetController, useValue: actionSheetCtrl },
-        { provide: AlertController, useValue: alertCtrl },
         { provide: GoalsService, useValue: { goals, load, create: createSpy, update: updateSpy, remove: removeSpy } },
         { provide: AuthService, useValue: {
             userProgress$: progress,
@@ -196,7 +207,7 @@ describe('GoalPage', () => {
     })
       // Ionic standalone components need their own providers; render their children as plain DOM.
       .overrideComponent(GoalPage, {
-        set: { imports: [CommonModule, KidTimelineComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+        set: { imports: [CommonModule, KidTimelineComponent, AmountTraySlotComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
       })
       .compileComponents();
 
@@ -227,11 +238,28 @@ describe('GoalPage', () => {
     fixture.detectChanges();
   }
 
-  function blurWith(fixture: ComponentFixture<GoalPage>, selector: string, value: string): void {
-    const input = fixture.nativeElement.querySelector(selector) as HTMLInputElement;
-    expect(input).withContext(selector).not.toBeNull();
-    input.value = value;
-    input.dispatchEvent(new Event('blur'));
+  const trayOf = (fixture: ComponentFixture<GoalPage>) =>
+    fixture.debugElement.query(By.directive(PlanAmountTrayComponent))?.componentInstance as PlanAmountTrayComponent | undefined;
+
+  /** Opens the Saved so far tile's tray (tap the value), under reduced motion so it snaps open. */
+  function openTray(fixture: ComponentFixture<GoalPage>, field: 'current' | 'vacation' = 'current'): void {
+    click(fixture, `#gp-bal-${field}`);
+    expect(fixture.componentInstance.tray.open()).toBe(field);
+  }
+
+  /** The slider landing on a value: the tray's output, as a finger or a nudge would raise it. */
+  function slideTo(fixture: ComponentFixture<GoalPage>, value: number): void {
+    trayOf(fixture)!.valueChange.emit(value);
+    fixture.detectChanges();
+  }
+
+  /** A tap as the host's outside-tap listener sees it: a press and a release on the same element. */
+  function press(fixture: ComponentFixture<GoalPage>, selector: string): void {
+    const target = fixture.nativeElement.querySelector(selector) as HTMLElement;
+    expect(target).withContext(selector).not.toBeNull();
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+    fixture.detectChanges();
   }
 
   /** The real service patches its signal on every write; the mock has to do the same. */
@@ -331,55 +359,91 @@ describe('GoalPage', () => {
 
     click(fixture, '.gp-menu');
     await fixture.whenStable();
-    expect(actionSheetCtrl.create).toHaveBeenCalledTimes(1);
-    const buttons = actionSheetCtrl.create.calls.mostRecent().args[0]!.buttons as Array<{ text: string; role?: string; handler?: () => void }>;
-    expect(buttons.map(b => b.text)).toEqual(['Edit plan', 'Rename', 'Mark completed', 'Remove goal', 'Cancel']);
-    expect(buttons.find(b => b.text === 'Remove goal')!.role).toBe('destructive');
+    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
+    const args = modalCtrl.create.calls.mostRecent().args[0];
+    expect(args.component).toBe(FredActionSheetComponent);
+    expect(args.cssClass).toBe('mc-bottom-sheet-modal');
+    const props = args.componentProps as FredActionSheetOptions;
+    // Header: the goal's icon and name, then the hero's monthly and the status chip.
+    expect(props.header.icon).toBe('home');
+    expect(props.header.title).toBe('First home');
+    expect(props.header.subtitle).toBe(`${page.fmtMoney(page.view().monthlyTotal)}/mo · ${page.statusChip()}`);
+    expect(props.header.subtitle).toMatch(/^\$\d[\d,]*\/mo · Plan started$/);
+    expect(props.actions.map(a => a.label)).toEqual(['Edit plan', 'Rename', 'Mark completed', 'Remove goal']);
+    expect(props.actions.map(a => a.id)).toEqual(['edit', 'rename', 'complete', 'remove']);
+    expect(props.actions.map(a => a.helper)).toEqual([
+      'Price, down payment and the year', 'First home', 'Keeps it on your profile as done', 'Its plan goes with it',
+    ]);
+    expect(props.actions.map(a => !!a.destructive)).toEqual([false, false, false, true]);
 
-    // Each button fires its page method (fire-and-forget, so the sheet closes at once).
+    // Dismissed with no row: nothing ran (no edit navigation, no second sheet, no write).
+    expect(navCtrl.navigateForward).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
     const edit = spyOn(page, 'editPlan').and.callThrough();
     const rename = spyOn(page, 'renameGoal').and.resolveTo();
     const complete = spyOn(page, 'markCompleted').and.resolveTo();
     const remove = spyOn(page, 'confirmRemove').and.resolveTo();
-    for (const b of buttons) b.handler?.();
+
+    // Each row id fires its page method (fire-and-forget, so the sheet closes at once).
+    for (const id of ['edit', 'rename', 'complete', 'remove']) {
+      menuPick = id;
+      await page.openMenu();
+    }
     await fixture.whenStable();
-    expect(edit).toHaveBeenCalled();
-    expect(rename).toHaveBeenCalled();
-    expect(complete).toHaveBeenCalled();
-    expect(remove).toHaveBeenCalled();
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
     expect(navCtrl.navigateForward).toHaveBeenCalledWith(['/goals', 7, 'edit']);
     TestBed.resetTestingModule();
 
-    // A completed goal offers Reopen; a vacation goal offers neither.
+    // A completed goal offers Reopen; a vacation goal offers neither; a kids plan names what its quiz asks.
     const done = await create({ id: '7' }, { goals: [houseGoal(7, true)] });
     await done.componentInstance.openMenu();
-    const doneButtons = actionSheetCtrl.create.calls.mostRecent().args[0]!.buttons as Array<{ text: string }>;
-    expect(doneButtons.map(b => b.text)).toContain('Reopen');
+    const doneActions = (modalCtrl.create.calls.mostRecent().args[0].componentProps as FredActionSheetOptions).actions;
+    expect(doneActions.map(a => a.label)).toEqual(['Edit plan', 'Rename', 'Reopen', 'Remove goal']);
+    expect(doneActions[2].icon).toBe('undo');
     TestBed.resetTestingModule();
 
     const trips = await create({ id: '6' }, { goals: [vacationGoalFixture(6)] });
     await trips.componentInstance.openMenu();
-    const tripButtons = actionSheetCtrl.create.calls.mostRecent().args[0]!.buttons as Array<{ text: string }>;
-    expect(tripButtons.map(b => b.text)).toEqual(['Edit plan', 'Rename', 'Remove goal', 'Cancel']);
+    const tripProps = modalCtrl.create.calls.mostRecent().args[0].componentProps as FredActionSheetOptions;
+    expect(tripProps.header.icon).toBe('flight');
+    expect(tripProps.actions.map(a => a.label)).toEqual(['Edit plan', 'Rename', 'Remove goal']);
+    expect(tripProps.actions[0].helper).toBe('Trips a year and the budget per trip');
+    TestBed.resetTestingModule();
+
+    const kids = await create({ id: '5' }, { goals: [kidsGoalFixture(5)] });
+    await kids.componentInstance.openMenu();
+    const kidProps = modalCtrl.create.calls.mostRecent().args[0].componentProps as FredActionSheetOptions;
+    expect(kidProps.header.icon).toBe('child_care');
+    expect(kidProps.actions[0].helper).toBe('Kids, costs and the return you assume');
   });
 
   it('Rename in the menu prompts for the goal name and PUTs it', async () => {
-    const fixture = await create({ id: '7' }, { goals: [houseGoal(7)], alertRole: 'save', alertName: '  Lake house ' });
+    const fixture = await create({ id: '7' }, { goals: [houseGoal(7)], promptRole: FRED_TEXT_PROMPT_ROLE, promptValue: 'Lake house' });
     echoUpdates();
     await fixture.componentInstance.renameGoal();
-    expect(alertCtrl.create).toHaveBeenCalledTimes(1);
-    const alertArgs = alertCtrl.create.calls.mostRecent().args[0]!;
-    expect(alertArgs.header).toBe('Rename goal');
-    expect(alertArgs.inputs![0].value).toBe('First home');
+    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
+    const args = modalCtrl.create.calls.mostRecent().args[0];
+    expect(args.component).toBe(FredTextPromptSheetComponent);
+    expect(args.cssClass).toBe('mc-bottom-sheet-modal');
+    expect(args.componentProps).toEqual({ title: 'Rename goal', label: 'Name', value: 'First home', maxlength: 50 });
     expect(updateSpy).toHaveBeenCalledTimes(1);
     expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).name).toBe('Lake house');
     fixture.detectChanges();
     expect(text(fixture, '.header-title')).toBe('Lake house');
     TestBed.resetTestingModule();
 
-    // Cancel, or an empty name, writes nothing.
-    const kept = await create({ id: '7' }, { goals: [houseGoal(7)], alertRole: 'cancel', alertName: 'Other' });
+    // Dismissed without the save role (Cancel, drag, tap outside): nothing is written.
+    const kept = await create({ id: '7' }, { goals: [houseGoal(7)], promptValue: 'Other' });
     await kept.componentInstance.renameGoal();
+    expect(updateSpy).not.toHaveBeenCalled();
+    TestBed.resetTestingModule();
+
+    // Saved with the name it already had: nothing is written either.
+    const same = await create({ id: '7' }, { goals: [houseGoal(7)], promptRole: FRED_TEXT_PROMPT_ROLE, promptValue: 'First home' });
+    await same.componentInstance.renameGoal();
     expect(updateSpy).not.toHaveBeenCalled();
   });
 
@@ -696,7 +760,7 @@ describe('GoalPage', () => {
   // ── Kids: groups, rows open the sheet, the hint ────────────────────────────
 
   /** The sheet's props from the last modalCtrl.create call. */
-  function sheetProps(): { detail: () => UnitDetail | null; onBalance: ((v: number) => Promise<void>) | null; notes: InfoNote[] } {
+  function sheetProps(): { detail: () => UnitDetail | null; onBalance: ((v: number) => Promise<void>) | null; notes: InfoNote[]; openBalance: boolean } {
     const args = modalCtrl.create.calls.mostRecent().args[0];
     expect(args.component).toBe(GoalUnitDetailSheetComponent);
     return args.componentProps as ReturnType<typeof sheetProps>;
@@ -842,28 +906,20 @@ describe('GoalPage', () => {
     expect(page.statusChip()).toBe('Update balance');
     expect(page.kidCards()[1].units.map(u => [u.key, u.finished])).toEqual([['firstYear', true], ['plan529', false], ['brokerage', false]]);
 
-    // The sheet's element, with its Saved so far field.
-    const modalEl = document.createElement('div');
-    modalEl.innerHTML = '<div class="ud-bal"><input type="text" /></div>';
-    const focus = spyOn(modalEl.querySelector('input')!, 'focus');
     let presented = false;
-    Object.assign(modalEl, {
-      present: async () => {
-        expect(focus).not.toHaveBeenCalled();
-        presented = true;
-      },
-      onDidDismiss: async () => ({}),
-    });
-    modalCtrl.create.and.resolveTo(modalEl as unknown as HTMLIonModalElement);
+    modalCtrl.create.and.resolveTo({ present: async () => { presented = true; }, onDidDismiss: async () => ({}) } as unknown as HTMLIonModalElement);
     page.activeKid.set(1);
     fixture.detectChanges();
     await page.onChipTap();
     expect(presented).toBeTrue();
-    const detail = sheetProps().detail()!;
+    const props = sheetProps();
+    const detail = props.detail()!;
     expect(detail.kidLabel).toBe('Theo');
     expect(detail.title).toBe('College');
-    // Focus lands only once present() resolved.
-    expect(focus).toHaveBeenCalledTimes(1);
+    // The sheet opens its Saved so far tray as it lands; a row tap does not ask for that.
+    expect(props.openBalance).toBeTrue();
+    await page.openUnitDetail(1, 'plan529');
+    expect(sheetProps().openBalance).toBeFalse();
   });
 
   it('the Update balance chip falls through to the next kid card with an unfinished unit when the active card is all finished', async () => {
@@ -899,35 +955,38 @@ describe('GoalPage', () => {
     expect(page.kidCards()[0].units.map(u => [u.key, u.finished])).toEqual([['firstYear', true]]);
     expect(page.kidCards()[1].units.map(u => [u.key, u.finished])).toEqual([['firstYear', false]]);
 
-    const modalEl = document.createElement('div');
-    modalEl.innerHTML = '<div class="ud-bal"><input type="text" /></div>';
-    const focus = spyOn(modalEl.querySelector('input')!, 'focus');
-    Object.assign(modalEl, { present: async () => {}, onDidDismiss: async () => ({}) });
-    modalCtrl.create.and.resolveTo(modalEl as unknown as HTMLIonModalElement);
-
     page.activeKid.set(0);
     await page.onChipTap();
     expect(modalCtrl.create).toHaveBeenCalledTimes(1);
-    const detail = sheetProps().detail()!;
+    const props = sheetProps();
+    const detail = props.detail()!;
     expect(detail.kidLabel).toBe('Ivy');
     expect(detail.title).toBe('Baby fund');
-    expect(focus).toHaveBeenCalledTimes(1);
+    expect(props.openBalance).toBeTrue();
   });
 
-  it('a house goal\'s chip still scrolls to its inline Saved so far tile', async () => {
+  it('a house goal\'s chip scrolls to its inline Saved so far tile and opens the tray on it', async () => {
+    reducedMotion = true;
     const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
     const goal: Goal = {
       ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500,
       planAnchoredAt: logged, balanceUpdatedAt: logged,
     };
     const fixture = await create({ id: '8' }, { goals: [goal] });
-    const input = fixture.nativeElement.querySelector('#gp-bal-current') as HTMLInputElement;
-    const scroll = spyOn(input, 'scrollIntoView');
-    const focus = spyOn(input, 'focus');
+    const tile = fixture.nativeElement.querySelector('#gp-bal-current') as HTMLButtonElement;
+    const scroll = spyOn(tile, 'scrollIntoView');
     click(fixture, '.gp-chip');
-    await new Promise(r => setTimeout(r));
     expect(scroll).toHaveBeenCalled();
-    expect(focus).toHaveBeenCalled();
+    expect(fixture.componentInstance.tray.open()).toBe('current');
+    expect(fixture.nativeElement.querySelector('.gp-plan .field-tray')).not.toBeNull();
+    // A second tap, as a device sends it (press, release, click), keeps it open rather than closing
+    // it on the release (saving the draft) and re-opening it on the click.
+    slideTo(fixture, 12_000);
+    press(fixture, '.gp-chip');
+    click(fixture, '.gp-chip');
+    expect(fixture.componentInstance.tray.open()).toBe('current');
+    expect(fixture.componentInstance.balanceDraft()).toBe(12_000);
+    expect(updateSpy).not.toHaveBeenCalled();
     expect(modalCtrl.create).not.toHaveBeenCalled();
   });
 
@@ -1008,7 +1067,8 @@ describe('GoalPage', () => {
 
   // ── Balances: serialization and sanitizing ─────────────────────────────────
 
-  it('Update my plan waits for a pending balance write before building its body', async () => {
+  it('Update my plan closes the tray, and waits for the balance write that queues, before building its body', async () => {
+    reducedMotion = true;
     const goal: Goal = { ...houseGoal(8), currentBalance: 1_000, anchorBalance: 1_000, anchorMonthly: 500 };
     const form = { ...formFromGoal(goal), price: 450_000 };
     const fixture = await create({ id: '8', preview: '1' }, { goals: [goal], draft: { form, existing: goal } });
@@ -1020,8 +1080,11 @@ describe('GoalPage', () => {
       return calls === 1 ? pending.asObservable() : of({ ...goal, ...body } as Goal);
     });
 
-    blurWith(fixture, '#gp-bal-current', '12000');
+    openTray(fixture);
+    slideTo(fixture, 12_000);
+    expect(updateSpy).not.toHaveBeenCalled(); // the draft waits for the tray to close
     const saving = page.updatePlan();
+    expect(page.tray.open()).toBeNull();
     await Promise.resolve();
     expect(updateSpy).toHaveBeenCalledTimes(1); // Update has not sent yet
 
@@ -1076,17 +1139,20 @@ describe('GoalPage', () => {
     expect(page.existing()!.completed).toBeTrue();
   });
 
-  it('shows whole dollars and never rewrites a stored balance with cents on focus and blur', async () => {
+  it('shows whole dollars, and a tray opened and closed with nothing slid never rewrites a stored balance with cents', async () => {
+    reducedMotion = true;
     const goal: Goal = { ...houseGoal(8), currentBalance: 1_234.56 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
-    const input = fixture.nativeElement.querySelector('#gp-bal-current') as HTMLInputElement;
-    expect(input.value).toBe('1235');
-    input.dispatchEvent(new Event('blur'));
+    expect(text(fixture, '#gp-bal-current')).toBe('$1,235');
+    openTray(fixture);
+    click(fixture, '.gp-done');
+    expect(fixture.componentInstance.tray.open()).toBeNull();
     await fixture.componentInstance.updateBalance('current', 1_235);
     expect(updateSpy).not.toHaveBeenCalled();
   });
 
   it('writes savedYear on a vacation balance edit and records a preview balance in the draft for the POST', async () => {
+    reducedMotion = true;
     const goal = vacationGoalFixture(6);
     const fixture = await create({ id: '6' }, { goals: [goal] });
     await fixture.componentInstance.updateBalance('vacation', 1_200);
@@ -1097,10 +1163,184 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     const preview = await create({ type: 'WEDDING', preview: '1' }, { draft: { form: newDraft('WEDDING'), existing: null } });
-    blurWith(preview, '#gp-bal-current', '5000');
+    openTray(preview);
+    slideTo(preview, 5_000);
     expect(updateSpy).not.toHaveBeenCalled();
     await preview.componentInstance.startPlan();
+    expect(preview.componentInstance.tray.open()).toBeNull();
     expect((createSpy.calls.mostRecent().args[0] as GoalWrite).currentBalance).toBe(5_000);
+  });
+
+  // ── The Saved so far tray ──────────────────────────────────────────────────
+
+  it('the Saved so far tile is a value button, not an input; tapping it opens the tray under the tiles with the target as its cap', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    expect(fixture.nativeElement.querySelector('.gp-tile input')).toBeNull();
+    expect(text(fixture, '#gp-bal-current')).toBe('$8,000');
+    expect(text(fixture, '.gp-tile .fd-tile-label')).toBe('Saved so far');
+    expect(fixture.nativeElement.querySelector('.gp-done')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.field-tray')).toBeNull();
+    // The keyboard stays for the kid rename field, so the directive stays on the content.
+    expect(fixture.nativeElement.querySelector('ion-content').hasAttribute('appkeyboardavoid')).toBeTrue();
+
+    openTray(fixture);
+    expect(fixture.nativeElement.querySelector('.gp-tile').classList).toContain('active');
+    expect(fixture.nativeElement.querySelector('.gp-tile .fd-tile-label').classList).toContain('active');
+    expect(fixture.nativeElement.querySelector('#gp-bal-current').getAttribute('aria-expanded')).toBe('true');
+    expect(fixture.nativeElement.querySelector('.gp-tile .gp-tile-head .gp-done')).not.toBeNull();
+    const slot = fixture.nativeElement.querySelector('.gp-plan > .field-tray') as HTMLElement;
+    expect(slot).not.toBeNull();
+    expect(slot.previousElementSibling).toBe(fixture.nativeElement.querySelector('.gp-tiles'));
+
+    const scale = trayOf(fixture)!.scale();
+    expect(scale).toBe(page.balanceScale());
+    expect(scale.min).toBe(0);
+    expect(scale.max).toBe(80_000);   // 20% of $400,000
+    expect(scale.fine).toBe(25);
+    const list = detents(scale);
+    expect(list[list.length - 1]).toBe(80_000);
+    expect(list.length).toBeGreaterThanOrEqual(80);
+    expect(list.length).toBeLessThanOrEqual(160);
+    expect(Array.from(fixture.nativeElement.querySelectorAll('.ps-ends span')).map(e => (e as HTMLElement).textContent)).toEqual(['$0', '$80,000']);
+    expect(fixture.nativeElement.querySelector('.ps').getAttribute('aria-label')).toBe('Saved so far');
+    expect(fixture.nativeElement.querySelector('.ps').getAttribute('aria-valuetext')).toBe('$8,000');
+  });
+
+  it('a stored balance past the target lifts the cap to the next round number above it, so it can be raised and is never pulled down', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 90_000, anchorBalance: 90_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    openTray(fixture);
+    const scale = trayOf(fixture)!.scale();
+    expect(scale.max).toBe(100_000);   // the target is $80,000; $90,000 sits inside the scale
+    expect(fixture.nativeElement.querySelector('.ps').getAttribute('aria-valuenow')).toBe('90000');
+    slideTo(fixture, 95_000);
+    click(fixture, '.gp-done');
+    await fixture.whenStable();
+    const body = updateSpy.calls.mostRecent().args[1] as GoalWrite;
+    expect(body.currentBalance).toBe(95_000);
+  });
+
+  it('a vacation goal\'s tile reads this year and is capped at the year of trips', async () => {
+    reducedMotion = true;
+    const fixture = await create({ id: '6' }, { goals: [vacationGoalFixture(6)] });
+    expect(text(fixture, '.gp-tile .fd-tile-label')).toBe('Saved so far this year');
+    expect(fixture.nativeElement.querySelector('#gp-bal-current')).toBeNull();
+    openTray(fixture, 'vacation');
+    expect(trayOf(fixture)!.scale().max).toBe(6_000);
+    expect(fixture.nativeElement.querySelector('.ps').getAttribute('aria-label')).toBe('Saved so far this year');
+    fixture.componentInstance.tray.onDragging(true);
+    fixture.detectChanges();
+    expect(text(fixture, '.gp-tile .fd-tile-label')).toBe('± $25');
+    expect(fixture.nativeElement.querySelector('.gp-tile .fd-tile-label').classList).toContain('gp-step');
+  });
+
+  it('sliding shows the value at once and writes nothing; Done saves the draft with one PUT and the tile keeps the figure', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    echoUpdates();
+    openTray(fixture);
+    slideTo(fixture, 12_000);
+    slideTo(fixture, 12_025);
+    expect(text(fixture, '#gp-bal-current')).toBe('$12,025');
+    expect(updateSpy).not.toHaveBeenCalled();
+    click(fixture, '.gp-done');
+    expect(fixture.componentInstance.tray.open()).toBeNull();
+    expect(fixture.nativeElement.querySelector('.field-tray')).toBeNull();
+    // The write is queued on close and sent on the next turn of the write chain.
+    expect(text(fixture, '#gp-bal-current')).toBe('$12,025');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).currentBalance).toBe(12_025);
+    expect(fixture.componentInstance.existing()!.currentBalance).toBe(12_025);
+    expect(fixture.componentInstance.balanceDraft()).toBeNull();
+    expect(text(fixture, '#gp-bal-current')).toBe('$12,025');
+    expect(text(fixture, '.gp-band-text')).toContain('Saved $12,025');
+  });
+
+  it('two quick Done saves: the tile keeps the newer draft while the first write settles, and shows it once both land', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    const first = new Subject<Goal>();
+    let calls = 0;
+    updateSpy.and.callFake((id: number, body: GoalWrite) => {
+      calls++;
+      return calls === 1 ? first.asObservable() : of({ ...goal, ...body } as Goal);
+    });
+
+    openTray(fixture);
+    slideTo(fixture, 12_000);
+    click(fixture, '.gp-done');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    openTray(fixture);
+    slideTo(fixture, 13_000);
+    click(fixture, '.gp-done');
+    expect(page.balanceDraft()).toBe(13_000);
+    expect(text(fixture, '#gp-bal-current')).toBe('$13,000');
+
+    // The first write lands while the second is still queued behind it: the tile holds $13,000.
+    first.next({ ...goal, currentBalance: 12_000 });
+    first.complete();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+    expect((updateSpy.calls.argsFor(1)[1] as GoalWrite).currentBalance).toBe(13_000);
+    expect(page.existing()!.currentBalance).toBe(13_000);
+    expect(page.balanceDraft()).toBeNull();
+    expect(text(fixture, '#gp-bal-current')).toBe('$13,000');
+  });
+
+  it('a tap outside saves too, and after a failed save the tile shows the stored balance again; a tap on the slider or the tile does not close it', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    updateSpy.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+    openTray(fixture);
+    slideTo(fixture, 20_000);
+    press(fixture, '.ps-ends');
+    press(fixture, '#gp-bal-current');
+    expect(page.tray.open()).toBe('current');
+    expect(updateSpy).not.toHaveBeenCalled();
+    press(fixture, '.fd-hero-label');
+    expect(page.tray.open()).toBeNull();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith('Could not save this goal. Try again.', 'danger');
+    expect(page.balanceDraft()).toBeNull();
+    expect(text(fixture, '#gp-bal-current')).toBe('$8,000');
+  });
+
+  it('tapping the open tile again closes the tray; leaving the page snaps it shut and saves the draft', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const page = fixture.componentInstance;
+    echoUpdates();
+    openTray(fixture);
+    click(fixture, '#gp-bal-current');
+    expect(page.tray.open()).toBeNull();
+    expect(updateSpy).not.toHaveBeenCalled();
+
+    openTray(fixture);
+    slideTo(fixture, 9_000);
+    page.ionViewWillLeave();
+    fixture.detectChanges();
+    expect(page.tray.open()).toBeNull();
+    expect(fixture.nativeElement.querySelector('.field-tray')).toBeNull();
+    await fixture.whenStable();
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).currentBalance).toBe(9_000);
   });
 
   // ── Errors, tier nudge, remove, analytics ──────────────────────────────────

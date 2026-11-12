@@ -136,24 +136,31 @@
             }
           </swiper-container>
         } @else {
-          <!-- Every other type: the one Saved so far tile (the status chip is on the band above) -->
-          <div class="fd-tiles gp-tiles">
-            <div class="fd-tile">
-              <label class="fd-tile-label" [attr.for]="v.vacation ? 'gp-bal-vacation' : 'gp-bal-current'">
-                {{ v.vacation ? 'Saved so far this year' : 'Saved so far' }}
-              </label>
-              <div class="fd-tile-edit">
-                <span class="fd-pre">$</span>
-                @if (v.vacation) {
-                  <input id="gp-bal-vacation" class="fd-tile-input" type="text" inputmode="numeric"
-                         [value]="fmtNumber(simpleBalance())" (blur)="onBalanceBlur('vacation', $event)" />
-                } @else {
-                  <input id="gp-bal-current" class="fd-tile-input" type="text" inputmode="numeric"
-                         [value]="fmtNumber(simpleBalance())" (blur)="onBalanceBlur('current', $event)" />
-                }
+          <!-- Every other type: the one Saved so far tile (the status chip is on the band above). The
+               value opens the slide tray; Done sits in the tile's label row while it is open. The tile
+               and the tray's slot share one block, so the page's gap stays as it was. -->
+          @if (balanceField(); as field) {
+            <div class="gp-plan">
+              <div class="fd-tiles gp-tiles">
+                <div class="fd-tile gp-tile" [class.active]="tray.isOpen(field)">
+                  <span class="gp-tile-head">
+                    <span class="fd-tile-label" [class.active]="tray.isOpen(field)" [class.gp-step]="tray.showsStep(field)">{{ tray.label(field) }}</span>
+                    @if (tray.shown()) {
+                      <button type="button" class="fd-reset gp-done" (click)="tray.close()">Done</button>
+                    }
+                  </span>
+                  <button type="button" class="fd-tile-edit gp-tile-btn" [id]="'gp-bal-' + field"
+                          [attr.aria-expanded]="tray.isOpen(field)" (click)="tray.toggle(field)">
+                    <span class="fd-pre">$</span>
+                    <span class="fd-tile-value">{{ shownBalance() | number:'1.0-0' }}</span>
+                  </button>
+                </div>
               </div>
+              @if (tray.shown()) {
+                <app-amount-tray-slot [tray]="tray" />
+              }
             </div>
-          </div>
+          }
         }
 
         <!-- Assumptions: the Freedom Plan page's card, read-only here. One return runs the whole app. -->

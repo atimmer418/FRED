@@ -10,16 +10,12 @@
   </div>
 </ion-header>
 
-<ion-content class="shell-content" appKeyboardAvoid=".fd-tile">
+<!-- No keyboard on this page: the tiles open the slide tray, so no keyboard-avoid directive. -->
+<ion-content class="shell-content">
   <div class="shell-inner fp-inner">
-    <!-- Two sentences, one line each: the copy breaks only between them. -->
-    <p class="fp-sub">
-      <span>Your path to work-optional.</span>
-      <span>Adjust the plan and watch the date move.</span>
-    </p>
-
     <!-- Hero: the date, front and center -->
     <section class="fd-hero">
+      <p class="fd-hero-label">Freedom date</p>
       <div class="fd-hero-year" *ngIf="heroYear() as year; else fdHeroEmpty">{{ year }}</div>
       <ng-template #fdHeroEmpty><div class="fd-hero-year fd-hero-year--empty">—</div></ng-template>
       <div class="fd-hero-meta">
@@ -36,39 +32,59 @@
       </div>
     </section>
 
-    <!-- Editable plan -->
-    <p class="fd-zone fp-zone">Your plan</p>
-    <div class="fd-tiles">
-      <div class="fd-tile">
-        <label class="fd-tile-label" for="fp-income">Income goal</label>
-        <div class="fd-tile-edit">
-          <span class="fd-pre">$</span>
-          <input
-            id="fp-income"
-            type="text"
-            inputmode="numeric"
-            class="fd-tile-input"
-            [value]="incomeSig() || ''"
-            (input)="onIncomeInput($event)"
-            placeholder="5,000"
-          />
-          <span class="fd-suf">/mo</span>
-        </div>
+    <!-- Editable plan: Done lives up here while the tray is open, so closing never needs a scroll. -->
+    <p class="fd-zone fp-zone">
+      Your plan
+      <button
+        *ngIf="trayShown()"
+        #doneBtn
+        type="button"
+        class="fd-reset fp-done"
+        (click)="closeTray()"
+      >Done</button>
+    </p>
+    <!-- Tiles plus the tray's slot, one block, so the page's flex gap stays as it was. -->
+    <div class="fd-plan">
+      <div class="fd-tiles">
+        <button
+          type="button"
+          class="fd-tile fp-tile"
+          [class.active]="trayField() === 'income'"
+          [attr.aria-expanded]="trayField() === 'income'"
+          (click)="toggleTray('income')"
+        >
+          <span class="fd-tile-label" [class.fp-step]="showsStep('income')">{{ tileLabel('income') }}</span>
+          <span class="fd-tile-edit">
+            <span class="fd-pre">$</span>
+            <span class="fd-tile-value" [class.fp-empty]="!incomeSig()">{{ incomeSig() ? (incomeSig() | number:'1.0-0') : '5,000' }}</span>
+            <span class="fd-suf">/mo</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="fd-tile fp-tile"
+          [class.active]="trayField() === 'invest'"
+          [attr.aria-expanded]="trayField() === 'invest'"
+          (click)="toggleTray('invest')"
+        >
+          <span class="fd-tile-label" [class.fp-step]="showsStep('invest')">{{ tileLabel('invest') }}</span>
+          <span class="fd-tile-edit">
+            <span class="fd-pre">$</span>
+            <span class="fd-tile-value" [class.fp-empty]="!investSig()">{{ investSig() ? (investSig() | number:'1.0-0') : '500' }}</span>
+            <span class="fd-suf">/mo</span>
+          </span>
+        </button>
       </div>
-      <div class="fd-tile">
-        <label class="fd-tile-label" for="fp-invest">Investing</label>
-        <div class="fd-tile-edit">
-          <span class="fd-pre">$</span>
-          <input
-            id="fp-invest"
-            type="text"
-            inputmode="numeric"
-            class="fd-tile-input"
-            [value]="investSig() || ''"
-            (input)="onInvestInput($event)"
-            placeholder="500"
+      <!-- The tray grows out of this wrapper (height, WAAPI) and collapses back into it. -->
+      <div class="fp-tray" #trayBox *ngIf="trayShown() as field">
+        <div class="fp-tray-in" #trayIn>
+          <app-plan-amount-tray
+            [field]="field"
+            [value]="trayValue()"
+            [scale]="trayScale()"
+            (valueChange)="onTrayValue($event)"
+            (dragging)="onTrayDragging($event)"
           />
-          <span class="fd-suf">/mo</span>
         </div>
       </div>
     </div>
@@ -94,12 +110,7 @@
     </div>
 
     <!-- Assumptions -->
-    <p class="fd-zone fp-zone">
-      Assumptions
-      <button class="fd-reset" *ngIf="!isDefaultRates()" (click)="resetRates()" type="button">
-        Reset to standard
-      </button>
-    </p>
+    <p class="fd-zone fp-zone">Assumptions</p>
     <div class="fd-assume">
       <div class="fd-assume-name">
         Avg annual return
@@ -120,6 +131,14 @@
       <span>Past performance is not indicative of future results.</span>
     </p>
 
-    <button class="fd-cta fp-cta" (click)="save()" [disabled]="!canSave() || saving()" type="button">Save plan</button>
+    <!-- Starts hidden; the page's isDirty effect reveals it (fade up and in) once the plan differs from what is saved. -->
+    <button
+      class="fd-cta fp-cta fp-cta--hidden"
+      aria-hidden="true"
+      tabindex="-1"
+      (click)="save()"
+      [disabled]="!canSave() || saving()"
+      type="button"
+    >Save plan</button>
   </div>
 </ion-content>

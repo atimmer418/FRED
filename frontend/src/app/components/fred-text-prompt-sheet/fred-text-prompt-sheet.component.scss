@@ -1,0 +1,78 @@
+// FRED text prompt sheet. The ion-modal shell (mc-bottom-sheet-modal in global.scss) provides the
+// rounded white chrome; this styles the content inside it. The field is the shared underline
+// recipe from theme/_form-fields.scss; Save is the house .fd-cta (theme/_plan-page) recipe.
+@use '../../../theme/form-fields' as ff;
+
+:host {
+  display: block;
+}
+
+.gs-body {
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  margin: 0;
+  font-family: 'Manrope', sans-serif;
+
+  @include ff.form-fields-scoped();
+}
+
+.gs-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 16px;
+}
+
+h3 {
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0 0 16px;
+}
+
+.fd-cta {
+  display: block;
+  width: 100%;
+  height: 50px;
+  border: none;
+  border-radius: 13px;
+  cursor: pointer;
+  background: #111827;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14.5px;
+  font-weight: 800;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.85; }
+
+  &[disabled] {
+    background: #cbd5e1;
+    cursor: default;
+
+    &:active { opacity: 1; }
+  }
+}
+
+// Room between the underline and Save.
+.tp-save {
+  margin-top: 22px;
+}
+
+.gs-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 0;
+  text-align: center;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}

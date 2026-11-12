@@ -1,0 +1,39 @@
+<!-- The one live region is always present so a card inserted into it is announced.
+     It turns assertive while an error is showing; the cards carry no region of
+     their own, so nothing is read out twice. Both roles imply aria-atomic, which
+     would re-read every card still on screen each time one arrives, so it is
+     switched off: only the added text is spoken, and removals stay silent. -->
+<div
+  class="ft-host"
+  [attr.role]="hasLiveError() ? 'alert' : 'status'"
+  [attr.aria-live]="hasLiveError() ? 'assertive' : 'polite'"
+  aria-atomic="false"
+>
+  @for (t of toasts(); track t.id) {
+    <div class="ft-slot" [attr.data-toast-slot]="t.id" [style.z-index]="toasts().length - $index">
+      <div
+        class="ft-card"
+        [attr.data-toast-id]="t.id"
+        [attr.data-severity]="t.severity"
+        [class.ft-card--leaving]="t.leaving"
+        (pointerdown)="onPointerDown($event, t)"
+      >
+        @switch (t.severity) {
+          @case ('success') { <span class="ft-chip material-symbols-outlined" aria-hidden="true">check_circle</span> }
+          @case ('error') { <span class="ft-chip material-symbols-outlined" aria-hidden="true">error</span> }
+          @case ('warning') { <span class="ft-chip material-symbols-outlined" aria-hidden="true">warning</span> }
+          @case ('info') { <span class="ft-chip material-symbols-outlined" aria-hidden="true">info</span> }
+        }
+        <div class="ft-text">
+          @if (t.title) {
+            <div class="ft-title">{{ t.title }}</div>
+          }
+          <div class="ft-message">{{ t.message }}</div>
+        </div>
+        <button type="button" class="ft-close" aria-label="Dismiss" (click)="dismiss(t.id)">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+    </div>
+  }
+</div>

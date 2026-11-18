@@ -24,6 +24,17 @@ describe('GoalTypePickerSheetComponent', () => {
     ]);
   });
 
+  it('the odd last tile spans the row and centres itself at the width of the others (Andy, 2026-11-18)', () => {
+    const tiles: HTMLElement[] = Array.from(fixture.nativeElement.querySelectorAll('.gtp-tile'));
+    // The fixture has no layout box in Karma, so this pins the declared placement, not pixels.
+    const last = getComputedStyle(tiles[tiles.length - 1]);
+    const first = getComputedStyle(tiles[0]);
+    expect(last.justifySelf).toBe('center');
+    expect(last.gridColumnStart).toBe('1');
+    expect(last.gridColumnEnd).toBe('-1');
+    expect(first.gridColumnStart).toBe('auto');
+  });
+
   it('dismisses with role picked and the type on tap', () => {
     const tiles: HTMLElement[] = Array.from(fixture.nativeElement.querySelectorAll('.gtp-tile'));
     tiles[0].click();

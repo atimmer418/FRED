@@ -33,6 +33,14 @@ h3 {
   gap: 10px;
 }
 
+// An odd tile count leaves the last tile alone on its row: keep it the width of the others and
+// centre it, so Something else sits in the bottom middle instead of hugging the left edge.
+.gtp-tile:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: calc(50% - 5px);
+}
+
 .gtp-tile {
   display: flex;
   flex-direction: column;

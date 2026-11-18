@@ -16,11 +16,11 @@ describe('GoalTypePickerSheetComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders seven tiles in the documented order', () => {
+  it('renders seven tiles, rows paired by copy length: Kids beside Vacation, House under Kids (Andy, 2026-11-18)', () => {
     const tiles: HTMLElement[] = Array.from(fixture.nativeElement.querySelectorAll('.gtp-tile'));
     expect(tiles.length).toBe(7);
     expect(tiles.map(t => (t.querySelector('.gtp-title') as HTMLElement).textContent!.trim())).toEqual([
-      'Kids', 'House', 'Emergency fund', 'Car', 'Vacation', 'Wedding', 'Something else',
+      'Kids', 'Vacation', 'House', 'Car', 'Emergency fund', 'Wedding', 'Something else',
     ]);
   });
 

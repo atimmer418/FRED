@@ -790,6 +790,12 @@ describe('GoalQuizPage', () => {
     expect(navCtrl.navigateBack).toHaveBeenCalledWith(['/goals', 3]);
   });
 
+  it('the quiz root carries ion-page: Ionic\'s iOS page slide moves only ion-content, ion-header or a child .ion-page, so without it the quiz never moved and just vanished at the end of the transition (Andy, 2026-11-18)', async () => {
+    const fixture = await create({ type: 'VACATION' });
+    const root = fixture.nativeElement.querySelector('.flow-host') as HTMLElement;
+    expect(root.classList.contains('ion-page')).toBeTrue();
+  });
+
   it('house terms: down payment chips, a year slider from next year, and the live chip', async () => {
     const fixture = await create({ type: 'HOUSE' });
     const page = fixture.componentInstance;

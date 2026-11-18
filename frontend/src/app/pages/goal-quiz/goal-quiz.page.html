@@ -1,5 +1,9 @@
-<!-- The goal quiz: every step shares the blue flow shell (theme/_blue-flow.scss). -->
-<div class="flow-host quiz-host">
+<!-- The goal quiz: every step shares the blue flow shell (theme/_blue-flow.scss).
+     ion-page on the root is what Ionic's iOS page transition slides: it moves only an ion-content,
+     an ion-header, or a child .ion-page, and without one of those the quiz never moved; it simply
+     vanished when the 540ms transition ended, and a swipe back dragged nothing. Every direct child
+     is absolutely positioned, so the class changes nothing about the layout. -->
+<div class="flow-host quiz-host ion-page">
 
   <!-- Top bar: back (from the second step on), the dots for the steps that will run, and close,
        which the cost step trades for the info button that opens the sources sheet (the mockup). -->

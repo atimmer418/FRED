@@ -390,7 +390,11 @@ export class AppComponent implements OnInit {
     const route = (targetRoute ?? this.router.url).split('?')[0].split('#')[0];
     const painted = this.preloadAssetsForRoute(route).then(() => this.waitForRoutePainted(stackRestored));
     const dataReady = route === '/tabs/tab1' ? this.waitForTab1DataPainted() : Promise.resolve();
-    Promise.all([painted, dataReady]).then(() => this.appLockService.hideAllCovers());
+    Promise.all([painted, dataReady]).then(() => {
+      // Re-checked here too: a landing may have started while this wait was running, and
+      // lifting now would show the tab before the page being pushed on top of it.
+      if (!this.landing) this.appLockService.hideAllCovers();
+    });
   }
 
   /**
@@ -520,8 +524,8 @@ export class AppComponent implements OnInit {
    * GET /user/progress still runs and remains the sole routing authority.
    * This method only PAINTS FASTER — it is purely additive.
    *
-   * @returns true when it navigated to /tabs/tab1 (and therefore OWNS the data-gated
-   *          cover-hide); false when no optimistic nav happened.
+   * @returns true when it started the onboarded landing (which then OWNS the cover-hide,
+   *          data-gated when it lands on /tabs/tab1); false when no optimistic nav happened.
    */
   private tryOptimisticNav(): boolean {
     if (!JwtTokenUtils.getValidJwtToken()) return false;

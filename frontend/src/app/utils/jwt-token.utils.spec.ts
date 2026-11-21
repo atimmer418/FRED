@@ -80,3 +80,19 @@ describe('JwtTokenUtils.NEXT_STEP_ROUTE_MAP', () => {
     });
   });
 });
+
+describe('JwtTokenUtils.clearJwtData', () => {
+  afterEach(() => {
+    localStorage.removeItem('userId');
+    localStorage.removeItem('fred.lastScreen.v1.u-1');
+  });
+
+  it('forgets the last screen so the next sign-in starts on the home tab', () => {
+    localStorage.setItem('userId', 'u-1');
+    localStorage.setItem('fred.lastScreen.v1.u-1', JSON.stringify({ userId: 'u-1', url: '/tabs/tab3', savedAt: 1 }));
+
+    JwtTokenUtils.clearJwtData();
+
+    expect(localStorage.getItem('fred.lastScreen.v1.u-1')).toBeNull();
+  });
+});

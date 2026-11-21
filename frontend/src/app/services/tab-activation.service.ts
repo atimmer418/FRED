@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { AnalyticsService } from './analytics/analytics.service';
 import { LastScreenUtils } from '../utils/last-screen.utils';
@@ -17,6 +18,7 @@ export class TabActivationService {
   readonly activeTab = this._activeTab.asReadonly();
 
   private readonly analytics = inject(AnalyticsService);
+  private readonly router = inject(Router);
 
   setActive(tab: string): void {
     this._activeTab.set(tab);
@@ -32,7 +34,14 @@ export class TabActivationService {
     this.analytics.screen(`/tabs/${tab}`);
 
     // Same reason, different consumer: remember the tab so a cold start can reopen on it.
-    LastScreenUtils.record(`/tabs/${tab}`);
+    // Only while the tabs are the routed screen. This also runs as a re-pulse when a pushed
+    // page starts to leave (an edge swipe fires it at the START of the gesture, and the swipe
+    // can still be cancelled) and while a launch is pushing pages on top of the tab; in both
+    // cases the pushed page is still the user's screen. A completed return to the tabs is
+    // recorded by ScreenTrackingService from the navigation itself.
+    if (this.router.url.startsWith('/tabs')) {
+      LastScreenUtils.record(`/tabs/${tab}`);
+    }
   }
 
   // Programmatic "move the pager to <tab>" requests (first-time tour). TabsPage

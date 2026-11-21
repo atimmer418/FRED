@@ -42,10 +42,12 @@ export class ScreenTrackingService {
         const screen = this.currentScreenName();
         if (screen && !screen.startsWith('/tabs')) {
           this.analytics.screen(screen);
-          // Remember the page so a cold start can reopen on it. This needs the real URL (the
-          // goal id), which stays on the device; tabs are recorded by TabActivationService.
-          LastScreenUtils.record(this.router.url);
         }
+        // Remember the screen so a cold start can reopen on it. This needs the real URL (the
+        // goal id), which stays on the device. A navigation onto the tabs is recorded too: at
+        // this moment the URL names the right tab. Later swipes between tabs do not navigate,
+        // and TabActivationService records those.
+        LastScreenUtils.record(this.router.url);
       });
   }
 

@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { NavController } from '@ionic/angular/standalone';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Subject, BehaviorSubject } from 'rxjs';
@@ -10,22 +11,21 @@ import { PasskeyService } from './services/passkey.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourService } from './services/first-time-tour.service';
-import { JwtTokenUtils } from './utils/jwt-token.utils';
+import { LastScreenUtils } from './utils/last-screen.utils';
 
 // ---------------------------------------------------------------------------
 // Lightweight stubs — only the surface AppComponent uses
 // ---------------------------------------------------------------------------
 
-function makeAuthServiceStub() {
+function makeAuthServiceStub(loggedIn = false, progress: UserProgress | null = null) {
   const authSucceededSubject = new Subject<void>();
-  const resumeNoLockSubject = new Subject<void>();
   return {
-    isLoggedIn$: new BehaviorSubject<boolean>(false).asObservable(),
-    userProgress$: new BehaviorSubject<UserProgress | null>(null).asObservable(),
+    isLoggedIn$: new BehaviorSubject<boolean>(loggedIn).asObservable(),
+    userProgress$: new BehaviorSubject<UserProgress | null>(progress).asObservable(),
     reAuthInProgress$: new BehaviorSubject<boolean>(false).asObservable(),
     authSucceeded$: authSucceededSubject.asObservable(),
     _authSucceededSubject: authSucceededSubject,
-    getCurrentProgress: jasmine.createSpy('getCurrentProgress').and.returnValue(null),
+    getCurrentProgress: jasmine.createSpy('getCurrentProgress').and.returnValue(progress),
     getUnifiedProgress: jasmine.createSpy('getUnifiedProgress').and.returnValue({
       getStartedCompleted: false, surveyInitialCompleted: false, fiPlanResultsCompleted: false,
       authFinalizeCompleted: false, kycVerificationCompleted: false, linkPlaidCompleted: false,
@@ -59,6 +59,7 @@ const firstTimeTourStub = {
   step$: new BehaviorSubject(null).asObservable(),
   suspended$: new BehaviorSubject(false).asObservable(),
   transit$: new BehaviorSubject(false).asObservable(),
+  hasSeenTour: jasmine.createSpy('hasSeenTour').and.returnValue(true),
 };
 
 // ---------------------------------------------------------------------------
@@ -76,6 +77,11 @@ function seedToken(payload: object): void {
 function clearToken(): void {
   localStorage.removeItem('jwtToken');
   localStorage.removeItem('jwtExpiration');
+}
+
+/** Let an in-flight landing (a chain of resolved promises) run to completion. */
+function settle(ms = 0): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +199,7 @@ describe('AppComponent — tryOptimisticNav (cold-start + post-reauth)', () => {
     // Reset again after detectChanges to isolate the authSucceeded$ emission.
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
+    await settle(); // the cold-start landing is single-flight: let it finish first
     (router.navigateByUrl as jasmine.Spy).calls.reset();
 
     // Simulate Face ID / passkey auth completion
@@ -212,6 +219,7 @@ describe('AppComponent — tryOptimisticNav (cold-start + post-reauth)', () => {
 
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
+    await settle(); // the cold-start landing is single-flight: let it finish first
     (router.navigateByUrl as jasmine.Spy).calls.reset();
 
     // Post-reauth resume: userProgress$ was reset to null and loadUserProgress() is in flight.
@@ -219,6 +227,265 @@ describe('AppComponent — tryOptimisticNav (cold-start + post-reauth)', () => {
     fixture.componentInstance.checkSurveyStatusAndNavigate();
 
     expect(router.navigateByUrl).toHaveBeenCalledWith('/tabs/tab1', jasmine.objectContaining({ replaceUrl: true }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reopen where you left off: the onboarded landing on a cold start
+// ---------------------------------------------------------------------------
+
+describe('AppComponent — onboarded landing restores the last screen on a cold start', () => {
+  const USER = 'restore-user';
+  const HOUR = 60 * 60 * 1000;
+  const COMPLETE: UserProgress = {
+    getStartedCompleted: true, surveyInitialCompleted: true, fiPlanResultsCompleted: true,
+    authFinalizeCompleted: true, kycVerificationCompleted: true, linkPlaidCompleted: true,
+    investmentScheduleCompleted: true, investmentConfirmationCompleted: true,
+    selectedTier: 'core',
+  } as UserProgress;
+
+  let router: Router;
+  let navCtrl: NavController;
+  let navigateByUrl: jasmine.Spy;
+  let navigateForward: jasmine.Spy;
+  let lockStub: ReturnType<typeof makeAppLockStub>;
+
+  function seedRecord(url: string, ageMs = HOUR): void {
+    localStorage.setItem('userId', USER);
+    localStorage.setItem(
+      LastScreenUtils.storageKey(USER),
+      JSON.stringify({ userId: USER, url, savedAt: Date.now() - ageMs }),
+    );
+  }
+
+  async function setup(authStub = makeAuthServiceStub()) {
+    lockStub = makeAppLockStub(false, false);
+    await TestBed.configureTestingModule({
+      imports: [AppComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: AuthService, useValue: authStub },
+        { provide: AppLockService, useValue: lockStub },
+        { provide: PasskeyService, useValue: passkeyServiceStub },
+        { provide: PushNotificationService, useValue: pushNotificationServiceStub },
+        { provide: PortfolioStoreService, useValue: portfolioStoreStub },
+        { provide: FirstTimeTourService, useValue: firstTimeTourStub },
+      ],
+    }).compileComponents();
+
+    router = TestBed.inject(Router);
+    navCtrl = TestBed.inject(NavController);
+    navigateByUrl = spyOn(router, 'navigateByUrl').and.returnValue(Promise.resolve(true));
+    navigateForward = spyOn(navCtrl, 'navigateForward').and.returnValue(Promise.resolve(true));
+  }
+
+  /** Boot the component the way a cold start with a still-valid, fully onboarded JWT does. */
+  function boot() {
+    const fixture = TestBed.createComponent(AppComponent);
+    const component = fixture.componentInstance as any;
+    // The cover gates wait on fonts and layout; neither exists in the test page.
+    spyOn(component, 'preloadAssetsForRoute').and.returnValue(Promise.resolve());
+    spyOn(component, 'waitForRoutePainted').and.returnValue(Promise.resolve());
+    spyOn(component, 'waitForTab1DataPainted').and.returnValue(Promise.resolve());
+    fixture.detectChanges();
+    return component;
+  }
+
+  beforeEach(() => {
+    firstTimeTourStub.hasSeenTour.and.returnValue(true);
+    seedToken({ sub: 'u@fred.com', exp: 9999999999, ns: 'complete' });
+  });
+
+  afterEach(() => {
+    clearToken();
+    localStorage.removeItem(LastScreenUtils.storageKey(USER));
+    localStorage.removeItem('userId');
+  });
+
+  it('lands on the tab the user left', async () => {
+    seedRecord('/tabs/tab2');
+    await setup();
+    boot();
+    await settle();
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab2']);
+    expect(navigateForward).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds the Profile tab and My Profile under a restored goal, in order', async () => {
+    seedRecord('/goals/7');
+    await setup();
+    const order: string[] = [];
+    navigateByUrl.and.callFake((url: any) => { order.push(url); return Promise.resolve(true); });
+    navigateForward.and.callFake((url: any) => { order.push(url); return Promise.resolve(true); });
+    boot();
+    await settle();
+
+    expect(order).toEqual(['/tabs/tab3', '/my-profile', '/goals/7']);
+    expect(navigateByUrl).toHaveBeenCalledWith('/tabs/tab3', jasmine.objectContaining({ replaceUrl: true }));
+    // A push with replaceUrl would make Ionic drop the page underneath.
+    for (const args of navigateForward.calls.allArgs()) {
+      expect(args[1]).toEqual({ animated: false });
+    }
+  });
+
+  it('keeps the launch cover up until the whole stack is built', async () => {
+    seedRecord('/my-profile');
+    await setup();
+    let finishPush!: (ok: boolean) => void;
+    navigateForward.and.returnValue(new Promise<boolean>(resolve => { finishPush = resolve; }));
+    const component = boot();
+    await settle();
+
+    // The tab is up and My Profile is still being pushed. Anything asking to lift the cover
+    // now (the DB result arriving, a resume) must be ignored.
+    component.hideCoversWhenReady('/tabs/tab3');
+    await settle();
+    expect(lockStub.hideAllCovers).not.toHaveBeenCalled();
+
+    finishPush(true);
+    await settle();
+    expect(component.waitForRoutePainted).toHaveBeenCalledWith(true);
+    expect(lockStub.hideAllCovers).toHaveBeenCalled();
+  });
+
+  // With App Lock on, a resume can start a cover wait on '/' before the landing exists. When
+  // that wait resolves mid-landing it must not lift the cover onto the tab.
+  it('ignores a cover wait that started before the landing did', async () => {
+    seedRecord('/my-profile');
+    await setup();
+    let finishPush!: (ok: boolean) => void;
+    navigateForward.and.returnValue(new Promise<boolean>(resolve => { finishPush = resolve; }));
+    const fixture = TestBed.createComponent(AppComponent);
+    const component = fixture.componentInstance as any;
+    let finishStaleWait!: () => void;
+    spyOn(component, 'preloadAssetsForRoute').and.returnValues(
+      new Promise<void>(resolve => { finishStaleWait = resolve; }), Promise.resolve());
+    spyOn(component, 'waitForRoutePainted').and.returnValue(Promise.resolve());
+    spyOn(component, 'waitForTab1DataPainted').and.returnValue(Promise.resolve());
+
+    component.hideCoversWhenReady('/'); // before ngOnInit starts the landing
+    fixture.detectChanges();
+    await settle();
+    finishStaleWait();
+    await settle();
+    expect(lockStub.hideAllCovers).not.toHaveBeenCalled();
+
+    finishPush(true);
+    await settle();
+    expect(lockStub.hideAllCovers).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops at the page it reached when a push fails, and still lifts the cover', async () => {
+    seedRecord('/goals/7');
+    await setup();
+    navigateForward.and.callFake((url: any) =>
+      url === '/my-profile' ? Promise.resolve(true) : Promise.reject(new Error('chunk failed')));
+    boot();
+    await settle();
+
+    expect(navigateForward.calls.allArgs().map(args => args[0])).toEqual(['/my-profile', '/goals/7']);
+    expect(lockStub.hideAllCovers).toHaveBeenCalled();
+  });
+
+  it('joins a second landing request instead of navigating twice', async () => {
+    seedRecord('/tabs/tab2');
+    await setup();
+    const component = boot();
+    component.checkSurveyStatusAndNavigate(); // progress still null: re-enters the optimistic nav
+    await settle();
+
+    expect(navigateByUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('lands on tab 1 when the record is older than 4 hours', async () => {
+    seedRecord('/tabs/tab2', 4 * HOUR + 1000);
+    await setup();
+    boot();
+    await settle();
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab1']);
+  });
+
+  it('lands on tab 1 until the first-time tour has been seen', async () => {
+    seedRecord('/tabs/tab2');
+    firstTimeTourStub.hasSeenTour.and.returnValue(false);
+    await setup();
+    boot();
+    await settle();
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab1']);
+  });
+
+  it('lands on tab 1 when this is not the first navigation of the launch', async () => {
+    seedRecord('/goals/7');
+    await setup();
+    router.navigated = true; // e.g. finishing onboarding, or signing in again
+    boot();
+    await settle();
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab1']);
+    expect(navigateForward).not.toHaveBeenCalled();
+  });
+
+  it('stops when another navigation takes over the first step', async () => {
+    seedRecord('/goals/7');
+    await setup();
+    navigateByUrl.and.returnValue(Promise.resolve(false)); // superseded by an onboarding redirect
+    boot();
+    await settle();
+
+    expect(navigateByUrl).toHaveBeenCalledTimes(1);
+    expect(navigateForward).not.toHaveBeenCalled();
+  });
+
+  it('falls back to tab 1 when the restored tab fails to load', async () => {
+    seedRecord('/tabs/tab2');
+    await setup();
+    navigateByUrl.and.callFake((url: any) =>
+      url === '/tabs/tab2' ? Promise.reject(new Error('chunk failed')) : Promise.resolve(true));
+    boot();
+    await settle();
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab2', '/tabs/tab1']);
+  });
+
+  // The path taken after more than a few minutes away: no valid token at boot, so the landing
+  // is decided when the DB progress arrives (after the passkey), not by the optimistic nav.
+  it('restores on the DB-progress path too', async () => {
+    clearToken();
+    seedRecord('/tabs/chat');
+    await setup(makeAuthServiceStub(true, { ...COMPLETE, _source: 'db' } as UserProgress));
+    boot();
+    await settle(350); // setupNavigationLogic debounces by 300ms
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/chat']);
+  });
+
+  it('lands on tab 1 when the subscription has expired', async () => {
+    clearToken();
+    seedRecord('/tabs/chat');
+    const expired = { ...COMPLETE, selectedTier: undefined, _source: 'db' } as UserProgress;
+    await setup(makeAuthServiceStub(true, expired));
+    boot();
+    await settle(350);
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab1']);
+  });
+
+  // Progress could not be loaded, so the backend is unreachable: only tab 1 has a snapshot and
+  // an error card to show.
+  it('lands on tab 1 when progress came from the offline fallback', async () => {
+    clearToken();
+    seedRecord('/goals/7');
+    await setup(makeAuthServiceStub(true, { ...COMPLETE, _source: 'localStorageFallback' } as UserProgress));
+    boot();
+    await settle(350);
+
+    expect(navigateByUrl.calls.allArgs().map(args => args[0])).toEqual(['/tabs/tab1']);
+    expect(navigateForward).not.toHaveBeenCalled();
   });
 });
 

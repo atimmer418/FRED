@@ -161,6 +161,9 @@ Build one shared settings-shell (family gradient header, white Manrope-800 18px 
 7. **Visual proof.** Headless screenshots per converted page (top + scrolled) as fred214-<page>.png, consistent with tab3.
 8. **Quality gates.** AOT build (dev config) zero new warnings; lint; subset-icons re-run if new ligatures; no TODOs/dead styles.
 
+## FRED-234 — Preload all images to prevent late pop-in
+load all images instantly or as quickly as possible, because some (like on the MFU) load after the MFU has already appeared, which is an issue
+
 
 \n# 💤 SLEEPING — Backlog (not yet started)
 _Queued but not prioritized. Promote to READY (remove the 💤) when ripe._

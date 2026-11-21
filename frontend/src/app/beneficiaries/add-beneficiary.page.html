@@ -52,31 +52,26 @@
           maxlength="100">
       </div>
 
+      <!-- The date of birth opens the FRED date sheet, not a calendar input; the echo says the age. -->
       <div class="form-group">
-        <label class="field-label">Date of Birth<span class="required-star">*</span></label>
-        <input
-          class="field-input field-input--readonly"
-          id="open-dob-modal"
-          [value]="beneficiary.dateOfBirth ? (beneficiary.dateOfBirth | date:'mediumDate') : ''"
-          readonly
-          placeholder="Select date">
-
-        <ion-modal #dobModal trigger="open-dob-modal" [keepContentsMounted]="true" style="--height: auto; --width: auto; --border-radius: 16px;">
-          <ng-template>
-            <ion-datetime
-              #datetime
-              presentation="date"
-              [(ngModel)]="beneficiary.dateOfBirth"
-              [max]="today"
-              color="primary"
-              style="height: auto; max-width: 350px;">
-              <span slot="title">Select Date of Birth</span>
-              <ion-buttons slot="buttons">
-                <ion-button color="primary" (click)="datetime.confirm(); dobModal.dismiss()">Done</ion-button>
-              </ion-buttons>
-            </ion-datetime>
-          </ng-template>
-        </ion-modal>
+        <p class="field-label">Date of Birth<span class="required-star">*</span></p>
+        <button
+          type="button"
+          class="field-value-btn field-value-btn--date"
+          aria-haspopup="dialog"
+          [attr.aria-label]="dobAriaLabel"
+          (click)="openDateOfBirth()">
+          @if (beneficiary.dateOfBirth) {
+            <span>{{ dobLabel }}</span>
+          } @else {
+            <span class="field-placeholder">Select date</span>
+          }
+          <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+        </button>
+        <p class="field-echo" [class.field-echo--empty]="!beneficiary.dateOfBirth">
+          <span class="material-symbols-outlined" aria-hidden="true">cake</span>
+          <span>{{ dobEcho }}</span>
+        </p>
       </div>
 
       <div class="form-group">

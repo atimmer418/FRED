@@ -1,5 +1,5 @@
 import { Component, DestroyRef, ElementRef, OnInit } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { NavController, ViewWillLeave } from '@ionic/angular';
 import { FormsModule } from '@angular/forms';
@@ -7,11 +7,8 @@ import {
   IonHeader,
   IonToolbar,
   IonContent,
-  IonButton,
   IonIcon,
-  IonButtons,
-  IonModal,
-  IonDatetime
+  ModalController
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import { 
@@ -32,6 +29,8 @@ import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 import { AmountTrayHost } from '../components/plan-amount-tray/amount-tray-host';
 import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
+import { presentDateSheet } from '../components/fred-date-sheet/fred-date-sheet.component';
+import { ageOn, formatFull, formatLong, todayYmd } from '../utils/local-date';
 import { PlanAmountScale } from '../utils/plan-amount-scale';
 
 /** The one tray-driven field on this screen. */
@@ -47,13 +46,11 @@ const ALLOCATION_SCALE: PlanAmountScale = { min: 1, max: 100, step: 1, fine: 1 }
   imports: [
     CommonModule,
     FormsModule,
-    IonHeader, IonToolbar, IonContent, IonButton,
-    IonIcon, IonButtons,
-    IonModal, IonDatetime,
+    IonHeader, IonToolbar, IonContent,
+    IonIcon,
     KeyboardAvoidDirective,
     AmountTraySlotComponent
-  ],
-  providers: [DatePipe]
+  ]
 })
 export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
 
@@ -65,8 +62,7 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
     country: 'US'
   };
   private originalBeneficiary: string = '';
-  
-  public today = new Date().toISOString();
+
   public isLoading = false;
   public editMode = false;
   public beneficiaryId?: number;
@@ -98,6 +94,7 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
     private toastService: ToastService,
     private navCtrl: NavController,
     private analytics: AnalyticsService,
+    private modalCtrl: ModalController,
     elementRef: ElementRef<HTMLElement>,
     destroyRef: DestroyRef
   ) {
@@ -132,6 +129,36 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
   /** Leaving the page: the tray snaps shut rather than collapsing into a view that is going. */
   ionViewWillLeave(): void {
     this.tray.close(true);
+  }
+
+  /** The date of birth opens the FRED date sheet, no later than today. Nothing changes until Done. */
+  async openDateOfBirth(): Promise<void> {
+    const date = await presentDateSheet(this.modalCtrl, {
+      title: 'Date of birth',
+      mode: 'birthday',
+      value: this.beneficiary.dateOfBirth || null,
+      max: todayYmd(),
+    });
+    if (date !== null) {
+      this.beneficiary.dateOfBirth = date;
+    }
+  }
+
+  /** 'Mar 14, 1991' on the button; empty while nothing is chosen. */
+  get dobLabel(): string {
+    return this.beneficiary.dateOfBirth ? formatLong(this.beneficiary.dateOfBirth) : '';
+  }
+
+  /** '34 years old' under the field, as of today; empty while nothing is chosen. */
+  get dobEcho(): string {
+    if (!this.beneficiary.dateOfBirth) return '';
+    const years = ageOn(this.beneficiary.dateOfBirth, todayYmd());
+    return `${years} ${years === 1 ? 'year' : 'years'} old`;
+  }
+
+  get dobAriaLabel(): string {
+    const value = this.beneficiary.dateOfBirth ? formatFull(this.beneficiary.dateOfBirth) : 'not set';
+    return `Date of birth, ${value}. Opens a date picker`;
   }
 
   ngOnInit() {
@@ -245,7 +272,8 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
         lastName: this.beneficiary.lastName!,
         email: this.beneficiary.email,
         phone: this.beneficiary.phone,
-        dateOfBirth: this.formatDateForBackend(this.beneficiary.dateOfBirth),
+        // Already the backend's YYYY-MM-DD: the sheet returns it and parseBackendDate normalises to it.
+        dateOfBirth: this.beneficiary.dateOfBirth,
         socialSecurityNumber: this.beneficiary.socialSecurityNumber,
         addressLine1: this.beneficiary.addressLine1,
         addressLine2: this.beneficiary.addressLine2,
@@ -425,46 +453,15 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
       }
     }
     
-    // Try to parse as a Date object
-    try {
-      const parsedDate = new Date(date);
-      if (!isNaN(parsedDate.getTime())) {
-        return parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-      }
-    } catch (e) {
-      console.warn('Could not parse date:', date);
+    // A date-time string ("2025-11-16T22:22:13"): the calendar day is its first ten characters.
+    // Read, not parsed through Date, so the day never shifts with the device's timezone.
+    const dateTime = typeof date === 'string' ? /^(\d{4}-\d{2}-\d{2})T/.exec(date) : null;
+    if (dateTime) {
+      return dateTime[1];
     }
-    
-    return '';
-  }
 
-  /**
-   * Format date for backend submission
-   * Ensures the date is in YYYY-MM-DD format
-   */
-  private formatDateForBackend(dateValue: any): string | undefined {
-    if (!dateValue) return undefined;
-    
-    // If it's already a string in YYYY-MM-DD format, return as is
-    if (typeof dateValue === 'string') {
-      // Check if it's already in YYYY-MM-DD format
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
-        return dateValue;
-      }
-      
-      // Try to parse and reformat if it's in a different string format
-      const date = new Date(dateValue);
-      if (!isNaN(date.getTime())) {
-        return date.toISOString().split('T')[0]; // YYYY-MM-DD
-      }
-    }
-    
-    // If it's a Date object, format it
-    if (dateValue instanceof Date) {
-      return dateValue.toISOString().split('T')[0]; // YYYY-MM-DD
-    }
-    
-    return undefined;
+    console.warn('Could not parse date:', date);
+    return '';
   }
 
   formatSSN(event: Event) {

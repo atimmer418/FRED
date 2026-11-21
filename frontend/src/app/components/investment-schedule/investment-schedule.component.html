@@ -56,18 +56,31 @@
         </button>
       </div>
 
+      <!-- The pay date opens the FRED date sheet; SEMI_MONTHLY locks it with the echo below the pair. -->
       <div class="form-section">
         <p class="field-label">Next pay date</p>
-        <div class="field-row">
-          <input
-            class="field-input"
-            type="date"
-            [(ngModel)]="schedule.startDate"
-            (change)="onStartDateChange($any($event).target.value)"
-            [min]="getMinDate()"
-            [disabled]="schedule.payFrequency === 'SEMI_MONTHLY'" />
-        </div>
+        <button
+          type="button"
+          class="field-value-btn field-date-btn"
+          aria-haspopup="dialog"
+          [attr.aria-label]="payDateAriaLabel()"
+          [disabled]="payDateLocked()"
+          (click)="openPayDateSheet()">
+          @if (schedule.startDate) {
+            <span class="field-date-text">{{ payDateText() }}</span>
+          } @else {
+            <span class="field-placeholder">Pick a day</span>
+          }
+          <span class="material-symbols-outlined field-date-icon" aria-hidden="true">calendar_month</span>
+        </button>
       </div>
+
+      @if (payDateLocked()) {
+        <p class="field-echo field-echo--pay-date">
+          <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+          <span>{{ PAY_DATE_LOCKED_ECHO }}</span>
+        </p>
+      }
 
     </div>
 

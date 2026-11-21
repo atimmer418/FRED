@@ -78,10 +78,48 @@ ion-content {
   margin-left: 2px;
 }
 
-// Readonly field override (calendar trigger)
-.field-input--readonly {
-  color: #64748b;
-  cursor: pointer;
+// The date of birth button: the mixin's .field-value-btn with the calendar glyph pushed to the right edge.
+// Under :host so it outranks the scoped .field-value-btn recipe (baseline alignment, 4px gap).
+:host .field-value-btn.field-value-btn--date {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+
+  .material-symbols-outlined {
+    font-size: 18px;
+    color: #6b7280;
+    flex-shrink: 0;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563EB;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+// One line under the field that says what the date means: the age, with the cake glyph.
+// Kept in the flow while empty so the form does not jump when a date is chosen.
+.field-echo {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 6px 0 0;
+  min-height: 16px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #6b7280;
+
+  .material-symbols-outlined {
+    font-size: 14px;
+    color: #6b7280;
+  }
+
+  &.field-echo--empty {
+    visibility: hidden;
+  }
 }
 
 // Select wrappers (unchanged)

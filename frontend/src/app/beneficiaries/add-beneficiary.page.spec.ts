@@ -4,9 +4,12 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
+import { ModalController } from '@ionic/angular/standalone';
 import { of, throwError } from 'rxjs';
 import { AddBeneficiaryPage } from './add-beneficiary.page';
+import { FRED_DATE_SHEET_ROLE, FredDateSheetComponent } from '../components/fred-date-sheet/fred-date-sheet.component';
 import { PlanAmountTrayComponent } from '../components/plan-amount-tray/plan-amount-tray.component';
+import { ageOn, todayYmd } from '../utils/local-date';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
 import { BeneficiaryService, Beneficiary } from '../services/beneficiary.service';
 import { PasskeyService } from '../services/passkey.service';
@@ -65,6 +68,7 @@ describe('AddBeneficiaryPage — analytics', () => {
       jasmine.createSpyObj<ToastService>('ToastService', ['showToast']),
       jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
       analytics,
+      jasmine.createSpyObj<ModalController>('ModalController', ['create']),
       new ElementRef(document.createElement('div')),
       { onDestroy: () => () => {} } as unknown as DestroyRef,
     );
@@ -202,6 +206,7 @@ describe('AddBeneficiaryPage: allocation tray', () => {
         { provide: ToastService, useValue: { showToast } },
         { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
         { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown', 'screen']) },
+        { provide: ModalController, useValue: jasmine.createSpyObj<ModalController>('ModalController', ['create']) },
       ],
     })
       // The Capacitor Keyboard plugin rejects on web, and the directive's listener would surface
@@ -213,7 +218,8 @@ describe('AddBeneficiaryPage: allocation tray', () => {
   });
 
   const root = () => fixture.nativeElement as HTMLElement;
-  const valueBtn = () => root().querySelector('.field-value-btn') as HTMLButtonElement;
+  // The date of birth is a value button too, so the allocation's is the one inside the tray's label row.
+  const valueBtn = () => root().querySelector('.field-label-row + .field-value-btn') as HTMLButtonElement;
   const label = () => root().querySelector('.field-label-row .field-label') as HTMLElement;
   const slot = () => root().querySelector('.field-tray') as HTMLElement | null;
   const done = () => root().querySelector('.field-tray-done') as HTMLButtonElement | null;
@@ -371,5 +377,180 @@ describe('AddBeneficiaryPage: allocation tray', () => {
     slide(50);
     expect(page.isFormComplete).toBeTrue();
     expect(page['validateForm']()).toBeTrue();
+  });
+});
+
+/**
+ * The date of birth opens the FRED date sheet in birthday mode, capped at today, and the page
+ * keeps the backend's YYYY-MM-DD string throughout: the sheet returns it, parseBackendDate
+ * normalises to it, and the save payload sends it as is. Nothing lands until Done.
+ */
+describe('AddBeneficiaryPage: date of birth', () => {
+  let fixture: ComponentFixture<AddBeneficiaryPage>;
+  let page: AddBeneficiaryPage;
+  let modalCtrl: jasmine.SpyObj<ModalController>;
+  let beneficiaryService: jasmine.SpyObj<BeneficiaryService>;
+  let modalEl: { present: jasmine.Spy; onDidDismiss: jasmine.Spy };
+
+  /** The next presented sheet dismisses this way. */
+  function sheetDismisses(role: string | undefined, value?: string): void {
+    modalEl = {
+      present: jasmine.createSpy('present').and.resolveTo(),
+      onDidDismiss: jasmine.createSpy('onDidDismiss').and.resolveTo({ role, data: value === undefined ? undefined : { value } }),
+    };
+    modalCtrl.create.and.resolveTo(modalEl as unknown as HTMLIonModalElement);
+  }
+
+  beforeEach(() => {
+    modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
+    beneficiaryService = jasmine.createSpyObj<BeneficiaryService>('BeneficiaryService', ['getBeneficiaries', 'createBeneficiary', 'updateBeneficiary']);
+    const pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
+    pin.hasPin.and.resolveTo(false);
+    TestBed.configureTestingModule({
+      imports: [AddBeneficiaryPage],
+      providers: [
+        { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigate']) },
+        { provide: ActivatedRoute, useValue: { params: of({}), queryParams: of({}), snapshot: { queryParams: {} } } },
+        { provide: BeneficiaryService, useValue: beneficiaryService },
+        { provide: PasskeyService, useValue: {} },
+        { provide: PinService, useValue: pin },
+        { provide: ToastService, useValue: { showToast: jasmine.createSpy('showToast') } },
+        { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
+        { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown', 'screen']) },
+        { provide: ModalController, useValue: modalCtrl },
+      ],
+    })
+      // As above: the Capacitor Keyboard plugin rejects on web.
+      .overrideComponent(AddBeneficiaryPage, { remove: { imports: [KeyboardAvoidDirective] } });
+    fixture = TestBed.createComponent(AddBeneficiaryPage);
+    page = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  const root = () => fixture.nativeElement as HTMLElement;
+  const dobBtn = () => root().querySelector('.field-value-btn--date') as HTMLButtonElement;
+  const echo = () => root().querySelector('.field-echo') as HTMLElement;
+  const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+  async function tapDob(): Promise<void> {
+    dobBtn().click();
+    // The click handler awaits the sheet; let its promise chain settle before reading the page.
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('the field is a value button with a placeholder and the calendar glyph, not a calendar input', () => {
+    expect(root().querySelector('ion-datetime')).toBeNull();
+    expect(root().querySelector('ion-modal')).toBeNull();
+    expect(root().querySelector('input[readonly]')).toBeNull();
+    expect(dobBtn()).not.toBeNull();
+    expect(dobBtn().getAttribute('aria-haspopup')).toBe('dialog');
+    expect(dobBtn().getAttribute('aria-label')).toBe('Date of birth, not set. Opens a date picker');
+    expect(dobBtn().querySelector('.field-placeholder')?.textContent).toBe('Select date');
+    expect(text(dobBtn().querySelector('.material-symbols-outlined'))).toBe('calendar_month');
+    // The echo keeps its line while empty so the form does not jump on the first pick.
+    expect(echo().classList.contains('field-echo--empty')).toBeTrue();
+    expect(text(echo().querySelector('.material-symbols-outlined'))).toBe('cake');
+  });
+
+  it('the date button rule is host-scoped so it outranks the mixin: centred, with the 8px gap to the glyph', () => {
+    // Karma has no layout, so the rule is read from the stylesheet Angular attached, not from the box.
+    const rules: CSSStyleRule[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      // A cross-origin sheet (the Manrope link) throws on read and holds nothing of ours anyway.
+      let own: CSSRule[];
+      try { own = Array.from(sheet.cssRules); } catch { own = []; }
+      rules.push(...own.filter((r): r is CSSStyleRule => r instanceof CSSStyleRule));
+    }
+    const rule = rules.find(r => /^\[_nghost-\S+\] \.field-value-btn\.field-value-btn--date\[_ngcontent-\S+\]$/.test(r.selectorText));
+    expect(rule).withContext('a [_nghost] .field-value-btn.field-value-btn--date rule').toBeDefined();
+    expect(rule!.style.alignItems).toBe('center');
+    expect(rule!.style.gap).toBe('8px');
+    expect(rule!.style.justifyContent).toBe('space-between');
+  });
+
+  it('a tap presents the date sheet in birthday mode, capped at today, with nothing chosen', async () => {
+    sheetDismisses(undefined);
+    await tapDob();
+
+    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
+    const createArgs = modalCtrl.create.calls.mostRecent().args[0];
+    expect(createArgs.component).toBe(FredDateSheetComponent);
+    expect(createArgs.cssClass).toBe('mc-bottom-sheet-modal');
+    expect(createArgs.componentProps).toEqual({
+      title: 'Date of birth',
+      mode: 'birthday',
+      value: null,
+      max: todayYmd(),
+    });
+    expect(modalEl.present).toHaveBeenCalled();
+  });
+
+  it('an edit load seeds the sheet with the stored date', async () => {
+    page.beneficiary = { ...page.beneficiary, dateOfBirth: '1990-04-18' };
+    fixture.detectChanges();
+    sheetDismisses(undefined);
+    await tapDob();
+
+    expect(modalCtrl.create.calls.mostRecent().args[0].componentProps!['value']).toBe('1990-04-18');
+  });
+
+  it('Done writes the day as YYYY-MM-DD; the button and the echo say the date and the age', async () => {
+    sheetDismisses(FRED_DATE_SHEET_ROLE, '1991-03-14');
+    await tapDob();
+
+    expect(page.beneficiary.dateOfBirth).toBe('1991-03-14');
+    expect(text(dobBtn().firstElementChild)).toBe('Mar 14, 1991');
+    expect(dobBtn().querySelector('.field-placeholder')).toBeNull();
+    expect(dobBtn().getAttribute('aria-label')).toBe('Date of birth, Thursday, March 14, 1991. Opens a date picker');
+    expect(echo().classList.contains('field-echo--empty')).toBeFalse();
+    expect(text(echo().lastElementChild)).toBe(`${ageOn('1991-03-14', todayYmd())} years old`);
+  });
+
+  it('a dismissal without Done leaves the stored date alone', async () => {
+    page.beneficiary = { ...page.beneficiary, dateOfBirth: '1990-04-18' };
+    fixture.detectChanges();
+    for (const role of [undefined, 'backdrop', 'gesture']) {
+      sheetDismisses(role);
+      await tapDob();
+      expect(page.beneficiary.dateOfBirth).toBe('1990-04-18');
+    }
+    expect(text(dobBtn().firstElementChild)).toBe('Apr 18, 1990');
+  });
+
+  it('a one-year-old reads in the singular', () => {
+    const today = todayYmd();
+    // Last year's same day, which does not exist when today is Feb 29: the 28th is still one year old.
+    const monthDay = today.slice(4) === '-02-29' ? '-02-28' : today.slice(4);
+    page.beneficiary = { ...page.beneficiary, dateOfBirth: `${Number(today.slice(0, 4)) - 1}${monthDay}` };
+    fixture.detectChanges();
+    expect(text(echo().lastElementChild)).toBe('1 year old');
+  });
+
+  it('the save payload sends the chosen day exactly as the sheet returned it', async () => {
+    beneficiaryService.createBeneficiary.and.returnValue(of({} as Beneficiary));
+    page.beneficiary = {
+      beneficiaryType: 'PRIMARY', country: 'US', firstName: 'Dana', lastName: 'Example',
+      socialSecurityNumber: '123-45-6789', relationship: 'SPOUSE', percentageAllocation: 50, status: 'PENDING',
+    };
+    sheetDismisses(FRED_DATE_SHEET_ROLE, '1991-03-14');
+    await tapDob();
+    expect(page.isFormComplete).toBeTrue();
+
+    await page.onSave();
+
+    const sent = beneficiaryService.createBeneficiary.calls.mostRecent().args[0];
+    expect(sent.dateOfBirth).toBe('1991-03-14');
+  });
+
+  it('parseBackendDate reads the calendar day without going through Date, so the timezone cannot shift it', () => {
+    const parse = (value: unknown) => page['parseBackendDate'](value);
+    expect(parse('1990-04-18')).toBe('1990-04-18');
+    expect(parse([1990, 4, 8])).toBe('1990-04-08');
+    expect(parse('1990,4,8,22,22,13,637928000')).toBe('1990-04-08');
+    // 22:22 local on the 16th: a UTC conversion would have landed on the 17th east of Greenwich.
+    expect(parse('2025-11-16T22:22:13')).toBe('2025-11-16');
+    expect(parse('')).toBe('');
+    expect(parse('not a date')).toBe('');
   });
 });

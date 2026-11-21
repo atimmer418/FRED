@@ -3,19 +3,23 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { NavController } from '@ionic/angular/standalone';
+import { ModalController, NavController } from '@ionic/angular/standalone';
 import { of, throwError } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
 import { InvestmentService } from '../../services/investment.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { ToastService } from '../../services/toast.service';
-import { InvestmentScheduleComponent } from './investment-schedule.component';
+import { InvestmentScheduleComponent, PAY_DATE_LOCKED_ECHO } from './investment-schedule.component';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
 import { PlanAmountTrayComponent } from '../plan-amount-tray/plan-amount-tray.component';
+import { FRED_DATE_SHEET_ROLE, FredDateSheetComponent, FredDateSheetOptions } from '../fred-date-sheet/fred-date-sheet.component';
+import { addDays, formatShort, isWeekend, parseYmd, todayYmd, ymd } from '../../utils/local-date';
+import { nextBusinessDay } from '../../utils/business-days';
+import { quickPicks } from '../../utils/quick-picks';
 
 const ACATS_KEY = 'pendingAcats';
 
-describe('InvestmentScheduleComponent — analytics', () => {
+describe('InvestmentScheduleComponent: analytics', () => {
   let analytics: jasmine.SpyObj<AnalyticsService>;
   let toast: jasmine.SpyObj<ToastService>;
   let router: jasmine.SpyObj<Router>;
@@ -29,6 +33,7 @@ describe('InvestmentScheduleComponent — analytics', () => {
   function build(): InvestmentScheduleComponent {
     return new InvestmentScheduleComponent(
       router, navCtrl, authService, investmentService, http, analytics, toast,
+      jasmine.createSpyObj<ModalController>('ModalController', ['create']),
       new ElementRef(document.createElement('div')),
     );
   }
@@ -153,7 +158,7 @@ describe('InvestmentScheduleComponent — analytics', () => {
  * The amount's slide tray on the onboarding screen. The recommended amount shows in a value button,
  * not an input: a tap opens the tray under the date-and-amount pair, a detent lands on the signal
  * the projections read, and Done, a tap outside, Review & Finalize and leaving the screen close it.
- * The date and the account number still type, so the keyboard-avoid directive stays.
+ * The account number still types, so the keyboard-avoid directive stays.
  */
 describe('InvestmentScheduleComponent: amount tray', () => {
   let fixture: ComponentFixture<InvestmentScheduleComponent>;
@@ -168,6 +173,7 @@ describe('InvestmentScheduleComponent: amount tray', () => {
       providers: [
         { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigateByUrl']) },
         { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateForward']) },
+        { provide: ModalController, useValue: jasmine.createSpyObj<ModalController>('ModalController', ['create']) },
         { provide: AuthService, useValue: {
             userProgress$: of(null),
             getCurrentInvestmentSchedule: () => of(null),
@@ -224,13 +230,13 @@ describe('InvestmentScheduleComponent: amount tray', () => {
     fixture.detectChanges();
   }
 
-  it('the recommended amount shows in a value button, not an input; the typed fields keep the keyboard-avoid directive', () => {
+  it('the recommended amount shows in a value button, not an input; the account number keeps the keyboard-avoid directive', () => {
     // $2,000 a month over 2.17 bi-weekly paychecks.
     expect(component.investmentAmount()).toBe(922);
     expect(shownValue()).toBe('$922');
     expect(label().textContent).toBe('Amount');
     expect(el().querySelector('input[type="number"]')).toBeNull();
-    expect(el().querySelector('input[type="date"]')).not.toBeNull();
+    expect(el().querySelector('input[type="date"]')).toBeNull();
     expect(fixture.debugElement.query(By.directive(KeyboardAvoidDirective))).not.toBeNull();
     expect(slot()).toBeNull();
   });
@@ -330,5 +336,181 @@ describe('InvestmentScheduleComponent: amount tray', () => {
     expect(component.tray.open()).toBeNull();
     expect(component.tray.shown()).toBeNull();
     expect(slot()).toBeNull();
+  });
+});
+
+/**
+ * The next pay date on the onboarding screen: a value button with the calendar glyph that opens
+ * the FRED date sheet in upcoming mode (tomorrow onward, business days only, quick picks for the
+ * chosen frequency). Done writes the day; any other dismissal writes nothing. SEMI_MONTHLY locks
+ * the button with the "set by your pay schedule" echo, since the backend owns the 1st and 15th.
+ */
+describe('InvestmentScheduleComponent: pay date sheet', () => {
+  let fixture: ComponentFixture<InvestmentScheduleComponent>;
+  let component: InvestmentScheduleComponent;
+  let modalCtrl: jasmine.SpyObj<ModalController>;
+  let modalEl: { present: jasmine.Spy; onDidDismiss: jasmine.Spy };
+  let createOrUpdate: jasmine.Spy;
+
+  const today = todayYmd();
+  const tomorrow = addDays(today, 1);
+  /** A business day well ahead of every seed, so the write is visible. */
+  const picked = nextBusinessDay(addDays(today, 40));
+
+  beforeEach(async () => {
+    localStorage.removeItem(ACATS_KEY);
+    createOrUpdate = jasmine.createSpy('createOrUpdateInvestmentSchedule').and.returnValue(of({}));
+    modalEl = {
+      present: jasmine.createSpy('present').and.resolveTo(),
+      onDidDismiss: jasmine.createSpy('onDidDismiss').and.resolveTo({ role: undefined }),
+    };
+    modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
+    modalCtrl.create.and.resolveTo(modalEl as unknown as HTMLIonModalElement);
+    await TestBed.configureTestingModule({
+      imports: [InvestmentScheduleComponent],
+      providers: [
+        { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigateByUrl']) },
+        { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateForward']) },
+        { provide: ModalController, useValue: modalCtrl },
+        { provide: AuthService, useValue: {
+            userProgress$: of(null),
+            getCurrentInvestmentSchedule: () => of(null),
+            getCurrentProgress: () => null,
+            getUserProgress: () => of({ monthlyInvestment: 2000 }),
+            createOrUpdateInvestmentSchedule: createOrUpdate,
+            completeStep: jasmine.createSpy('completeStep').and.returnValue(of({})),
+        } },
+        { provide: InvestmentService, useValue: { pendingAcatsRequest: null } },
+        { provide: HttpClient, useValue: { post: jasmine.createSpy('post').and.returnValue(of({})) } },
+        { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', [
+            'track', 'trackOnboardingStepViewed', 'trackOnboardingStepCompleted', 'trackErrorShown', 'screen',
+        ]) },
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(InvestmentScheduleComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    localStorage.removeItem(ACATS_KEY);
+  });
+
+  const el = () => fixture.nativeElement as HTMLElement;
+  const dateBtn = () => el().querySelector('.field-date-btn') as HTMLButtonElement;
+  const dateText = () => dateBtn().querySelector('.field-date-text')?.textContent?.trim();
+  const echo = () => el().querySelector('.field-echo--pay-date') as HTMLElement | null;
+  const sheetOpts = () => modalCtrl.create.calls.mostRecent().args[0].componentProps as FredDateSheetOptions;
+
+  function dismissWith(role: string | undefined, value?: string): void {
+    modalEl.onDidDismiss.and.resolveTo({ role, data: value === undefined ? undefined : { value } });
+  }
+
+  async function tap(): Promise<void> {
+    dateBtn().click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('the seeded date shows in a value button with the calendar glyph; no date input is left', () => {
+    expect(el().querySelector('input[type="date"]')).toBeNull();
+    expect(el().querySelector('ion-datetime')).toBeNull();
+    expect(component.schedule.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(dateText()).toBe(formatShort(component.schedule.startDate));
+    expect(dateBtn().querySelector('.field-date-icon')!.textContent!.trim()).toBe('calendar_month');
+    expect(dateBtn().getAttribute('aria-haspopup')).toBe('dialog');
+    expect(dateBtn().disabled).toBeFalse();
+    expect(echo()).toBeNull();
+  });
+
+  it('every seed but the semi-monthly one lands on a business day; the monthly seed is the 1st of next month moved forward', () => {
+    const { y, m } = parseYmd(today);
+    const firstOfNextMonth = m === 12 ? ymd(y + 1, 1, 1) : ymd(y, m + 1, 1);
+
+    for (const frequency of ['WEEKLY', 'BIWEEKLY', 'MONTHLY'] as const) {
+      component.onFrequencyChange(frequency);
+      expect(isWeekend(component.schedule.startDate)).withContext(frequency).toBeFalse();
+      expect(component.schedule.startDate > today).withContext(frequency).toBeTrue();
+    }
+    expect(component.schedule.startDate).toBe(nextBusinessDay(firstOfNextMonth));
+  });
+
+  it('a tap opens the sheet in upcoming mode: tomorrow onward, business days only, the frequency\'s quick picks, no subline', async () => {
+    const seeded = component.schedule.startDate;
+    await tap();
+
+    const createArgs = modalCtrl.create.calls.mostRecent().args[0];
+    expect(createArgs.component).toBe(FredDateSheetComponent);
+    expect(createArgs.cssClass).toBe('mc-bottom-sheet-modal');
+    expect(modalEl.present).toHaveBeenCalled();
+    const opts = sheetOpts();
+    expect(opts.title).toBe('Next pay date');
+    expect(opts.mode).toBe('upcoming');
+    expect(opts.value).toBe(seeded);
+    expect(opts.min).toBe(tomorrow);
+    expect(opts.max).toBeUndefined();
+    expect(opts.businessDaysOnly).toBeTrue();
+    expect(opts.quickPicks).toEqual(quickPicks('BIWEEKLY', tomorrow, today, true));
+    expect(opts.quickPicks!.length).toBeGreaterThan(0);
+    expect(opts.subline).toBeUndefined();
+    expect(opts.doneLabel).toBeUndefined();
+  });
+
+  it('the quick picks follow the chosen frequency', async () => {
+    component.onFrequencyChange('MONTHLY');
+    fixture.detectChanges();
+    await tap();
+    expect(sheetOpts().quickPicks).toEqual(quickPicks('MONTHLY', tomorrow, today, true));
+    expect(sheetOpts().value).toBe(component.schedule.startDate);
+  });
+
+  it('Done writes the day as YYYY-MM-DD, the button follows, and Review & Finalize sends it', async () => {
+    dismissWith(FRED_DATE_SHEET_ROLE, picked);
+    await tap();
+
+    expect(component.schedule.startDate).toBe(picked);
+    expect(dateText()).toBe(formatShort(picked));
+    expect(component.canProceed()).toBeTrue();
+
+    component.goToStockPreferences();
+    expect(createOrUpdate).toHaveBeenCalledWith(jasmine.objectContaining({ startDate: picked, frequency: 'BIWEEKLY' }));
+  });
+
+  it('a drag, the backdrop or a Done with no value writes nothing', async () => {
+    const seeded = component.schedule.startDate;
+    for (const role of [undefined, 'gesture', 'backdrop']) {
+      dismissWith(role);
+      await tap();
+      expect(component.schedule.startDate).withContext(String(role)).toBe(seeded);
+    }
+    dismissWith(FRED_DATE_SHEET_ROLE);
+    await tap();
+    expect(component.schedule.startDate).toBe(seeded);
+    expect(dateText()).toBe(formatShort(seeded));
+  });
+
+  it('semi-monthly locks the button with the pay-schedule echo and never opens the sheet; another frequency unlocks it', async () => {
+    component.onFrequencyChange('SEMI_MONTHLY');
+    fixture.detectChanges();
+
+    expect(component.payDateLocked()).toBeTrue();
+    expect(dateBtn().disabled).toBeTrue();
+    expect(dateBtn().getAttribute('aria-label')).toContain('set by your pay schedule');
+    expect(echo()!.querySelector('.material-symbols-outlined')!.textContent!.trim()).toBe('lock');
+    expect(echo()!.lastElementChild!.textContent).toBe(PAY_DATE_LOCKED_ECHO);
+    expect(PAY_DATE_LOCKED_ECHO).toBe('Set by your pay schedule: the 1st and 15th.');
+    // The echo is the pair's own second-row child (the pair has no row gap, so only its 6px margin sits under the field).
+    expect(echo()!.parentElement!.classList).toContain('form-row-pair');
+    // The 1st or 15th the backend will use still shows, so the row never reads empty.
+    expect(dateText()).toBe(formatShort(component.schedule.startDate));
+
+    await component.openPayDateSheet();
+    expect(modalCtrl.create).not.toHaveBeenCalled();
+
+    component.onFrequencyChange('WEEKLY');
+    fixture.detectChanges();
+    expect(dateBtn().disabled).toBeFalse();
+    expect(dateBtn().getAttribute('aria-label')).toContain('Opens a date picker');
+    expect(echo()).toBeNull();
   });
 });

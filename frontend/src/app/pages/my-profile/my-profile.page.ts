@@ -33,6 +33,7 @@ import { FirstTimeTourService } from '../../services/first-time-tour.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { ErrorCategory, GatedFeature, Tier } from '../../services/analytics/analytics-events';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
+import { SkeletonComponent } from '../../components/skeleton/skeleton.component';
 
 /** One goal row on the Goals card: the saved goal and its plan view. */
 export interface GoalSummary {
@@ -107,13 +108,28 @@ function tlhEstimate(portfolioValue: number): number {
   imports: [
     CommonModule, FormsModule,
     IonContent, IonHeader, IonIcon, IonAvatar,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective, SkeletonComponent
   ]
 })
 export class MyProfilePage implements OnInit, OnDestroy {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   private readonly destroy$ = new Subject<void>();
+
+  // ── Page load ──────────────────────────────────────────────────────────────
+  // One flag per fetch, set on data or on error. The skeletons stay up until every one has
+  // settled, so a check that lands after the others cannot pop a pill or a row in late. Goals
+  // load from the progress emission (they need the userId), so they count as their own fetch.
+  private readonly progressSettled = signal(false);
+  private readonly goalsSettled = signal(false);
+  private readonly scheduleSettled = signal(false);
+  private readonly dashboardSettled = signal(false);
+  private readonly mfuSettled = signal(false);
+
+  /** True once the percentile, the Freedom line, the goal rows and the rebalance rows are all final. */
+  readonly loaded: Signal<boolean> = computed(() =>
+    this.progressSettled() && this.goalsSettled() && this.scheduleSettled()
+    && this.dashboardSettled() && this.mfuSettled());
 
   // ── Action-required banner ─────────────────────────────────────────────────
   actionRequired$: Observable<boolean>;
@@ -461,11 +477,13 @@ export class MyProfilePage implements OnInit, OnDestroy {
           // Load persisted goals + prefs now that userId is stable.
           this._loadGoalsAndPrefs();
           this.ratesService?.ensureUser();
+          this.progressSettled.set(true);
         }
       });
 
     this.authService.getCurrentInvestmentSchedule().subscribe({
       next: (investment) => {
+        this.scheduleSettled.set(true);
         if (investment) {
           this.currentScheduledInvestment = investment.investmentAmount;
           this.currentFrequency = investment.frequency ? investment.frequency.toLowerCase() : '';
@@ -490,6 +508,7 @@ export class MyProfilePage implements OnInit, OnDestroy {
         this.currentFrequency = '';
         this.frequencySig.set('');
         this.currentMonthlyEquivalent = 0;
+        this.scheduleSettled.set(true);
       }
     });
 
@@ -498,9 +517,11 @@ export class MyProfilePage implements OnInit, OnDestroy {
         if (data && data.summary) {
           this.currentPortfolioValue.set(data.summary.equity || 0);
         }
+        this.dashboardSettled.set(true);
       },
       error: () => {
         this.currentPortfolioValue.set(0);
+        this.dashboardSettled.set(true);
       }
     });
 
@@ -514,9 +535,11 @@ export class MyProfilePage implements OnInit, OnDestroy {
         if (data && data.equityLevel > 0) {
           this.equityLevel = data.equityLevel;
         }
+        this.mfuSettled.set(true);
       },
       error: () => {
         this.statusPercentile = null;
+        this.mfuSettled.set(true);
       }
     });
   }
@@ -878,13 +901,20 @@ export class MyProfilePage implements OnInit, OnDestroy {
 
   private _loadGoalsAndPrefs(): void {
     const uid = this.userId;
-    if (!uid) return;
+    if (!uid) {
+      // No user to load goals for: nothing is coming, so the card is as final as it gets.
+      this.goalsSettled.set(true);
+      return;
+    }
     const prefs = this.goalsService.getPrefs(uid);
     this.selectedSchedule = prefs.rebalanceSchedule;
     // TTL-cached by the service, so the repeat calls from userProgress$ re-emissions are cheap.
     this.goalsService.load().subscribe({
-      next: () => this._importLegacyGoals(uid),
-      error: () => {},
+      next: () => {
+        this.goalsSettled.set(true);
+        this._importLegacyGoals(uid);
+      },
+      error: () => this.goalsSettled.set(true),
     });
   }
 

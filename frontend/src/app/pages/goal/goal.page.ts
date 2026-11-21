@@ -40,6 +40,7 @@ import { InfoNote } from '../../components/goal-plan-info-sheet/info-note';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
 import { TRAY_INSIDE_SELECTOR, TrayHostField } from '../../components/plan-amount-tray/amount-tray-host';
 import { AmountTraySlotComponent } from '../../components/plan-amount-tray/amount-tray-slot.component';
+import { SkeletonComponent } from '../../components/skeleton/skeleton.component';
 import { buildAmountScale, capAbove } from '../../utils/plan-amount-scale';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GoalForm, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso } from './goal-form.model';
@@ -144,7 +145,7 @@ const UNIT_ICON: Record<KidBalanceKey, KidUnitRow['icon']> = { firstYear: 'child
 @Component({
   selector: 'app-goal',
   standalone: true,
-  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent, AmountTraySlotComponent],
+  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent, AmountTraySlotComponent, SkeletonComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './goal.page.html',
   styleUrls: ['./goal.page.scss'],

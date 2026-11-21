@@ -16,15 +16,69 @@
 
 // ion-content background and shell structure are provided by settings-shell.
 
-.loading-state {
+// Skeleton helpers. The blocks sit inside the real card, row and header classes; these only
+// stack text lines, place the subtitle, and give the amount field and chips their boxes.
+.sk-col {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 60px 0;
+  gap: 6px;
 
-  .loading-spinner { width: 24px; height: 24px; color: #2563EB; }
-  .loading-text { font-family: 'Manrope', sans-serif; font-size: 14px; color: #6b7280; }
+  &.sk-col--end { align-items: flex-end; }
+}
+
+// The real title is flex: 1 and pushes the chip to the edge; the skeleton title is not.
+.sk-right { margin-left: auto; }
+
+// A bar inline in a line of text. The wrapper carries the real text's font and line-height, so
+// the row's height is the text's line box; the bar is shorter than that box and rides inside it.
+.sk-inline app-skeleton {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+// Same margin and line box as .card-subtitle.
+.sk-subtitle {
+  margin: 0 0 14px 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+// The .field-value-btn box (its font sets the height) with its underline resting (grey, not blue)
+// until the field is real.
+.sk-field-value {
+  padding: 6px 0;
+  border-bottom: 2px solid #e5e7eb;
+  font-family: 'Manrope', sans-serif;
+  font-size: 17px;
+  line-height: normal;
+}
+
+// The quick-amount row: four equal chips, no wrapping, same gap and spacing as .quick-amounts.
+.sk-chips {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+
+  app-skeleton {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// Same margin as .cta-btn.
+.sk-cta { margin-bottom: 12px; }
+
+// The tip's icon slot (same offset and no shrink as .tip-icon) and its text column, which must
+// fill the box like wrapped text does so the line widths have something to be a percent of.
+.sk-tip-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.sk-tip-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .section-card {

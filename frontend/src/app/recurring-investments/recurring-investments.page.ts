@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -8,12 +8,7 @@ import {
   IonHeader,
   IonToolbar,
   IonContent,
-  IonButton,
-  IonButtons,
-  IonDatetime,
-  IonModal,
-  ModalController,
-  ViewWillLeave
+  ModalController
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import {
@@ -33,11 +28,14 @@ import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AccountStatusService } from '../services/account-status.service';
 import { presentConfirmSheet } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
-import { AmountTrayHost } from '../components/plan-amount-tray/amount-tray-host';
-import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
-import { PiecewiseScale } from '../utils/plan-amount-scale';
+import { presentDateSheet } from '../components/fred-date-sheet/fred-date-sheet.component';
+import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+import { SkeletonComponent } from '../components/skeleton/skeleton.component';
+import { tradeWindow } from '../utils/business-days';
+import { dayOfWeek, formatFull, formatLong, formatMonthDay, formatShort, parseYmd, todayYmd, ymd } from '../utils/local-date';
+import { quickPicks } from '../utils/quick-picks';
 
 interface InvestmentFrequencyOption {
   value: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'SEMI_MONTHLY';
@@ -46,20 +44,10 @@ interface InvestmentFrequencyOption {
   paychecksPerMonth: number;
 }
 
-/** The one tray-driven field on this page. */
-type TrayField = 'amount';
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/**
- * The amount per period, as the rollout table sets it
- * (docs/superpowers/specs/2026-11-11-amount-tray-rollout-design.md): $5 to $10,000, the dollar step
- * growing with the amount; minus and plus move $5.
- */
-const AMOUNT_SCALE: PiecewiseScale = {
-  min: 5,
-  max: 10_000,
-  fine: 5,
-  segments: [{ to: 500, step: 5 }, { to: 2000, step: 50 }, { to: 5000, step: 250 }, { to: 10_000, step: 500 }],
-};
+/** The echo under a locked Transfer Date: the backend owns the 1st and 15th. */
+export const SEMI_MONTHLY_LOCK_ECHO = 'Set by your pay schedule: the 1st and 15th.';
 
 @Component({
   selector: 'app-recurring-investments',
@@ -70,34 +58,29 @@ const AMOUNT_SCALE: PiecewiseScale = {
     IonHeader,
     IonToolbar,
     IonContent,
-    IonButton,
-    IonButtons,
-    IonDatetime,
-    IonModal,
-    AmountTraySlotComponent
+    KeyboardAvoidDirective,
+    SkeletonComponent
   ],
   templateUrl: './recurring-investments.page.html',
   styleUrls: ['./recurring-investments.page.scss']
 })
-export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeave {
+export class RecurringInvestmentsPage implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   currentInvestment: InvestmentSchedule | null = null;
+  /** nextInvestmentDate is held as a local YYYY-MM-DD string once edited; the loaded shape is read through toYmd(). */
   editedInvestment: Partial<InvestmentSchedule> = {
     frequency: 'WEEKLY',
     isPaused: false,
     nextInvestmentDate: undefined
   };
-  /** The amount being edited, kept apart from the draft above so the tray can follow it. */
-  readonly editedAmount = signal(0);
-  /** The slide tray under the amount: open, close, outside tap and the label swap live in the host. */
-  readonly tray: AmountTrayHost<TrayField>;
+  /**
+   * The amount field as typed. A string, not a number, so a half-typed "12." survives change
+   * detection; editedAmount() is the number the rest of the page reads.
+   */
+  amountInput = '';
 
   isLoading = false;
-  isDatePickerOpen = false;
-
-  // Helper property for date picker minimum date
-  readonly todayISO = new Date().toISOString();
 
   frequencyOptions: InvestmentFrequencyOption[] = [
     {
@@ -138,21 +121,9 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
     private accountStatusService: AccountStatusService,
     private modalCtrl: ModalController,
     private navCtrl: NavController,
-    private analytics: AnalyticsService,
-    el: ElementRef<HTMLElement>
+    private analytics: AnalyticsService
   ) {
     addIcons({ cashOutline, timeOutline, calendarOutline, addOutline, checkmarkCircleOutline, pauseOutline, playOutline, alertCircleOutline, settingsOutline, informationCircleOutline });
-    this.tray = new AmountTrayHost<TrayField>({
-      root: el,
-      fields: {
-        amount: {
-          label: 'Amount',
-          scale: AMOUNT_SCALE,
-          value: this.editedAmount,
-          set: v => this.editedAmount.set(v),
-        },
-      },
-    });
   }
 
   ngOnInit() {
@@ -167,12 +138,6 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
-    this.tray.destroy();
-  }
-
-  /** Leaving the page: the tray snaps shut instead of collapsing into a page that is going. */
-  ionViewWillLeave(): void {
-    this.tray.close(true);
   }
 
   private loadCurrentInvestment() {
@@ -183,7 +148,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
         next: (investment: InvestmentSchedule) => {
           this.currentInvestment = investment;
           if (investment) {
-            this.editedAmount.set(this.suggestedAmount ?? investment.investmentAmount);
+            this.amountInput = String(this.suggestedAmount ?? investment.investmentAmount);
             this.editedInvestment = {
               frequency: investment.frequency,
               isPaused: investment.isPaused,
@@ -259,62 +224,23 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
     const option = this.frequencyOptions.find(opt => opt.value === this.currentInvestment?.frequency);
     const baseDescription = option?.description || '';
 
-    // Add specific day information based on frequency and start date
-    // Use chosenDate (user preference) if available, otherwise fallback to nextInvestmentDate or startDate
-    const dateInput = this.currentInvestment.chosenDate || this.currentInvestment.nextInvestmentDate || this.currentInvestment.startDate;
+    // The day the schedule runs on: chosenDate is the user's anchor, before any holiday adjustment.
+    const date = this.toYmd(this.currentInvestment.chosenDate || this.currentInvestment.nextInvestmentDate || this.currentInvestment.startDate);
+    if (!date) return baseDescription;
 
-    if (dateInput) {
-      let date: Date;
-
-      // Handle array format from Java LocalDate serialization [year, month, day]
-      if (Array.isArray(dateInput) && dateInput.length === 3) {
-        const [year, month, day] = dateInput;
-        // Construct UTC date at noon
-        date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-      } else if (typeof dateInput === 'string') {
-        // Parse string manually to avoid UTC conversion issues
-        // If it contains 'T', split by 'T' first to get the date part
-        const datePart = dateInput.includes('T') ?
-          dateInput.split('T')[0] :
-          dateInput;
-
-        const parts = datePart.split('-');
-        if (parts.length === 3) {
-          const year = parseInt(parts[0]);
-          const month = parseInt(parts[1]);
-          const day = parseInt(parts[2]);
-          // Construct UTC date at noon
-          date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-        } else {
-          date = new Date(dateInput);
-        }
-      } else {
+    const weekday = WEEKDAYS[dayOfWeek(date)];
+    switch (this.currentInvestment.frequency) {
+      case 'WEEKLY':
+        return `Every ${weekday}`;
+      case 'BIWEEKLY':
+        return `Every other ${weekday}`;
+      case 'MONTHLY':
+        return `Every ${this.getOrdinal(parseYmd(date).d)}`;
+      case 'SEMI_MONTHLY':
+        return 'Every 1st and 15th';
+      default:
         return baseDescription;
-      }
-
-      if (isNaN(date.getTime())) {
-        return baseDescription;
-      }
-
-      const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
-      const dayOfMonth = date.getUTCDate();
-
-      switch (this.currentInvestment.frequency) {
-        case 'WEEKLY':
-          return `Every ${dayOfWeek}`;
-        case 'BIWEEKLY':
-          return `Every other ${dayOfWeek}`;
-        case 'MONTHLY':
-          const ordinal = this.getOrdinal(dayOfMonth);
-          return `Every ${ordinal}`;
-        case 'SEMI_MONTHLY':
-          return 'Every 1st and 15th';
-        default:
-          return baseDescription;
-      }
     }
-
-    return baseDescription;
   }
 
   private getOrdinal(day: number): string {
@@ -332,122 +258,116 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
     return day + 'th';
   }
 
+  /** The 1st/15th this page seeded for semi-monthly, so leaving semi-monthly can tell it from a date the user picked. */
+  private semiMonthlySeed: string | null = null;
+
   /**
    * Handle frequency change
    */
   onFrequencyChange() {
-    if (this.editedInvestment.frequency === 'SEMI_MONTHLY') {
-      const now = new Date();
-      const currentDay = now.getDate();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
-      
-      let nextDate: Date;
-      
-      // If today is 2nd-15th -> Next date is 15th of current month
-      if (currentDay >= 2 && currentDay <= 15) {
-        nextDate = new Date(Date.UTC(currentYear, currentMonth, 15, 12, 0, 0));
-      } 
-      // If today is 16th-1st (16th-End or 1st) -> Next date is 1st (of next month if 16th+, or current month if 1st)
-      else if (currentDay >= 16) {
-        nextDate = new Date(Date.UTC(currentYear, currentMonth + 1, 1, 12, 0, 0));
+    if (this.editedInvestment.frequency !== 'SEMI_MONTHLY') {
+      // The seed can fall on a weekend, which no other frequency may save: the saved date shows again.
+      if (this.semiMonthlySeed !== null && this.editedInvestment.nextInvestmentDate === this.semiMonthlySeed) {
+        this.editedInvestment.nextInvestmentDate = this.currentInvestment?.nextInvestmentDate;
+        this.semiMonthlySeed = null;
       }
-      else {
-         // Today is the 1st
-         // "if the date is the 16th-1st, the transfer date should show the 1st"
-         // If today is the 1st, we show the 1st (of current month).
-         nextDate = new Date(Date.UTC(currentYear, currentMonth, 1, 12, 0, 0));
-      }
-      
-      const nYear = nextDate.getUTCFullYear();
-      const nMonth = (nextDate.getUTCMonth() + 1).toString().padStart(2, '0');
-      const nDay = nextDate.getUTCDate().toString().padStart(2, '0');
-      
-      this.editedInvestment.nextInvestmentDate = `${nYear}-${nMonth}-${nDay}`;
+      return;
     }
+    const now = new Date();
+    const currentDay = now.getDate();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    let nextDate: Date;
+
+    // If today is 2nd-15th -> Next date is 15th of current month
+    if (currentDay >= 2 && currentDay <= 15) {
+      nextDate = new Date(Date.UTC(currentYear, currentMonth, 15, 12, 0, 0));
+    }
+    // If today is 16th-1st (16th-End or 1st) -> Next date is 1st (of next month if 16th+, or current month if 1st)
+    else if (currentDay >= 16) {
+      nextDate = new Date(Date.UTC(currentYear, currentMonth + 1, 1, 12, 0, 0));
+    }
+    else {
+      // Today is the 1st
+      // "if the date is the 16th-1st, the transfer date should show the 1st"
+      // If today is the 1st, we show the 1st (of current month).
+      nextDate = new Date(Date.UTC(currentYear, currentMonth, 1, 12, 0, 0));
+    }
+
+    const nYear = nextDate.getUTCFullYear();
+    const nMonth = (nextDate.getUTCMonth() + 1).toString().padStart(2, '0');
+    const nDay = nextDate.getUTCDate().toString().padStart(2, '0');
+
+    this.semiMonthlySeed = `${nYear}-${nMonth}-${nDay}`;
+    this.editedInvestment.nextInvestmentDate = this.semiMonthlySeed;
   }
 
   /**
-   * Convert date to ISO string for datetime picker
+   * A schedule date as a local YYYY-MM-DD string, or null when there is none. The backend sends
+   * either a Java LocalDate array [year, month, day] or a date string, sometimes with a time part;
+   * everything after this boundary is the plain date. A malformed string reads as no date.
    */
-  getDateForPicker(dateInput: string | number[] | undefined): string {
-    if (!dateInput) return '';
-
+  private toYmd(dateInput: string | number[] | undefined | null): string | null {
+    if (!dateInput) return null;
+    if (Array.isArray(dateInput)) {
+      return dateInput.length === 3 ? ymd(dateInput[0], dateInput[1], dateInput[2]) : null;
+    }
+    const datePart = dateInput.split('T')[0];
     try {
-      let date: Date;
-
-      if (Array.isArray(dateInput) && dateInput.length === 3) {
-        const [year, month, day] = dateInput;
-        // Construct UTC date at noon
-        date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-      } else if (typeof dateInput === 'string') {
-        // Parse string manually to avoid UTC conversion issues
-        // If it contains 'T', split by 'T' first to get the date part
-        const datePart = dateInput.includes('T') ? dateInput.split('T')[0] : dateInput;
-        const parts = datePart.split('-');
-        if (parts.length === 3) {
-          const year = parseInt(parts[0]);
-          const month = parseInt(parts[1]);
-          const day = parseInt(parts[2]);
-          // Construct UTC date at noon
-          date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-        } else {
-          date = new Date(dateInput);
-        }
-      } else {
-        return '';
-      }
-
-      if (isNaN(date.getTime())) {
-        return '';
-      }
-
-      // Return ISO string for the picker (which expects YYYY-MM-DD or full ISO)
-      // Use UTC methods to get the date parts we constructed
-      const year = date.getUTCFullYear();
-      const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-      const day = date.getUTCDate().toString().padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    } catch (error) {
-      console.error('Error converting date for picker:', error);
-      return '';
+      parseYmd(datePart);
+      return datePart;
+    } catch {
+      return null;
     }
   }
 
-  /**
-   * Confirm date selection from picker
-   */
-  confirmDate(value: any) {
-    if (value) {
-      // Handle both string and array (though for date presentation usually string)
-      const selectedDate = Array.isArray(value) ? value[0] : value;
-      this.editedInvestment.nextInvestmentDate = selectedDate;
+  /** The transfer date the field shows: the edit, else the saved schedule's. */
+  transferDate(): string | null {
+    return this.toYmd(this.editedInvestment.nextInvestmentDate) ?? this.toYmd(this.currentInvestment?.nextInvestmentDate);
+  }
+
+  /** Semi-monthly runs on the 1st and 15th by the backend's rule, so the date is not the user's to pick. */
+  isTransferDateLocked(): boolean {
+    return this.editedInvestment.frequency === 'SEMI_MONTHLY';
+  }
+
+  /** "Fri, Nov 20" in the field, or '' while no date is set (the template shows the placeholder). */
+  transferDateText(): string {
+    const date = this.transferDate();
+    return date ? formatShort(date) : '';
+  }
+
+  transferDateAriaLabel(): string {
+    const date = this.transferDate();
+    const when = date ? formatFull(date) : 'not set';
+    return `Transfer date, ${when}${this.isTransferDateLocked() ? ', set by your pay schedule' : '. Opens a date picker'}`;
+  }
+
+  /** The one line under the field: when the trades land, or why the field is locked. */
+  transferEcho(): string {
+    if (this.isTransferDateLocked()) return SEMI_MONTHLY_LOCK_ECHO;
+    const date = this.transferDate();
+    return date ? `Est. investment ${tradeWindow(date)}` : '';
+  }
+
+  /** Opens the date sheet; the edit lands only on Done. */
+  async openTransferDate() {
+    if (this.isTransferDateLocked()) return;
+    const today = todayYmd();
+    const frequency = this.editedInvestment.frequency ?? this.currentInvestment?.frequency ?? 'WEEKLY';
+    const date = await presentDateSheet(this.modalCtrl, {
+      title: 'Transfer date',
+      mode: 'upcoming',
+      value: this.transferDate(),
+      min: today,
+      businessDaysOnly: true,
+      quickPicks: quickPicks(frequency, today, today, true),
+      subline: d => `Trades land ${tradeWindow(d)}`,
+    });
+    if (date !== null) {
+      this.editedInvestment.nextInvestmentDate = date;
     }
-  }
-
-  /**
-   * Handle date selection from picker
-   */
-  onNextInvestmentDateChange(event: any) {
-    const selectedDate = event.detail.value;
-    if (selectedDate) {
-      // Store as ISO string in editedInvestment
-      this.editedInvestment.nextInvestmentDate = selectedDate;
-    }
-  }
-
-  /**
-   * Open date picker modal
-   */
-  openDatePicker() {
-    this.isDatePickerOpen = true;
-  }
-
-  /**
-   * Close date picker modal
-   */
-  closeDatePicker() {
-    this.isDatePickerOpen = false;
   }
 
   getMonthlyProjection(): number {
@@ -481,54 +401,35 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
     }).format(amount);
   }
 
+  /** "Oct 26, 2026", or "Oct 26" without the year; 'Not set' when there is no date. */
   formatDate(dateInput: string | number[], includeYear: boolean = true): string {
-    if (!dateInput) return 'Not set';
+    const date = this.toYmd(dateInput);
+    if (!date) return 'Not set';
+    return includeYear ? formatLong(date) : formatMonthDay(date);
+  }
 
-    try {
-      let date: Date;
+  /**
+   * The typed amount as a number: 0 when the field is empty or not a number. The field is
+   * type="text" so a half-typed "12." survives, which means commas reach us raw: a comma that
+   * groups thousands ("1,000") is dropped and a lone comma ("12,50", the decimal keypad under a
+   * non-US region) is the decimal point.
+   */
+  editedAmount(): number {
+    const raw = this.amountInput.trim().replace(/,(?=\d{3}(?!\d))/g, '').replace(',', '.');
+    const amount = raw === '' ? NaN : Number(raw);
+    return Number.isFinite(amount) ? amount : 0;
+  }
 
-      // Handle array format from Java LocalDate serialization [year, month, day]
-      if (Array.isArray(dateInput) && dateInput.length === 3) {
-        const [year, month, day] = dateInput;
-        // Construct UTC date at noon to avoid timezone issues
-        date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-      } else if (typeof dateInput === 'string') {
-        // Handle string format - parse manually to avoid UTC issues
-        // If it contains 'T', split by 'T' first to get the date part
-        const datePart = dateInput.includes('T') ? dateInput.split('T')[0] : dateInput;
-        const parts = datePart.split('-');
-        if (parts.length === 3) {
-          const year = parseInt(parts[0]);
-          const month = parseInt(parts[1]);
-          const day = parseInt(parts[2]);
-          // Construct UTC date at noon
-          date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-        } else {
-          date = new Date(dateInput);
-        }
-      } else {
-        console.error('Unexpected date format:', dateInput);
-        return 'Invalid date format';
-      }
+  /** Save needs at least $1, the same floor saveChanges() holds. */
+  isAmountValid(): boolean {
+    return this.editedAmount() >= 1;
+  }
 
-      if (isNaN(date.getTime())) {
-        return 'Invalid date';
-      }
-
-      const options: Intl.DateTimeFormatOptions = {
-        month: 'short',
-        day: 'numeric',
-        timeZone: 'UTC'
-      };
-
-      if (includeYear) {
-        options.year = 'numeric';
-      }
-
-      return new Intl.DateTimeFormat('en-US', options).format(date);
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return 'Date error';
+  /** Leaving the field with a fraction of a dollar lifts it to the $1 floor. */
+  onAmountChange() {
+    const amount = this.editedAmount();
+    if (amount > 0 && amount < 1) {
+      this.amountInput = '1';
     }
   }
 
@@ -628,7 +529,6 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
   }
 
   async saveChanges() {
-    this.tray.close();
     const amount = this.editedAmount();
     if (!amount || amount < 1) {
       this.analytics.trackErrorShown('validation', 'portfolio', 'toast', null, false);
@@ -654,53 +554,16 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
         }
       }
 
-      // Determine what start date to use - ALWAYS use existing start date to preserve history
-      let startDateString: string;
-      if (Array.isArray(this.currentInvestment.startDate)) {
-        const [year, month, day] = this.currentInvestment.startDate;
-        startDateString = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-      } else {
-        startDateString = this.currentInvestment.startDate;
-      }
-
-      // Determine next investment date
-      let nextInvestmentDateString: string | undefined;
-
-      // Use the edited next investment date (which defaults to current if not changed)
-      if (this.editedInvestment.nextInvestmentDate) {
-        let dateToAdjust: Date;
-
-        if (typeof this.editedInvestment.nextInvestmentDate === 'string') {
-          // Handle ISO string or YYYY-MM-DD
-          const datePart = this.editedInvestment.nextInvestmentDate.includes('T') ?
-            this.editedInvestment.nextInvestmentDate.split('T')[0] :
-            this.editedInvestment.nextInvestmentDate;
-
-          const parts = datePart.split('-');
-          const year = parseInt(parts[0]);
-          const month = parseInt(parts[1]);
-          const day = parseInt(parts[2]);
-          dateToAdjust = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-        } else if (Array.isArray(this.editedInvestment.nextInvestmentDate)) {
-          const [year, month, day] = this.editedInvestment.nextInvestmentDate;
-          dateToAdjust = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-        } else {
-          // Fallback if type is unknown, though it should be string or array
-          dateToAdjust = new Date();
-        }
-
-        const year = dateToAdjust.getUTCFullYear();
-        const month = (dateToAdjust.getUTCMonth() + 1).toString().padStart(2, '0');
-        const day = dateToAdjust.getUTCDate().toString().padStart(2, '0');
-        nextInvestmentDateString = `${year}-${month}-${day}`;
-      }
+      // Always the existing start date, to preserve history.
+      const startDate = this.currentInvestment.startDate;
+      const startDateString = Array.isArray(startDate) ? ymd(startDate[0], startDate[1], startDate[2]) : startDate;
 
       // Create update request
       const updateRequest: CreateInvestmentScheduleRequest = {
         investmentAmount: amount,
         frequency: this.editedInvestment.frequency || this.currentInvestment.frequency,
         startDate: startDateString,
-        nextInvestmentDate: nextInvestmentDateString
+        nextInvestmentDate: this.toYmd(this.editedInvestment.nextInvestmentDate) ?? undefined
       };
 
       this.investmentService.createSchedule(updateRequest)
@@ -754,85 +617,7 @@ export class RecurringInvestmentsPage implements OnInit, OnDestroy, ViewWillLeav
       return true;
     }
 
-    // Check next investment date
-    // Normalize both dates to YYYY-MM-DD string for comparison
-    const currentDate = this.getDateForPicker(this.currentInvestment.nextInvestmentDate);
-    const editedDate = this.getDateForPicker(this.editedInvestment.nextInvestmentDate);
-
-    if (currentDate !== editedDate) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Calculate estimated trade execution window (1-3 business days after transfer date)
-   */
-  getEstimatedTradeWindow(): string {
-    const transferDate = this.editedInvestment.nextInvestmentDate || this.currentInvestment?.nextInvestmentDate;
-    if (!transferDate) return '';
-
-    try {
-      let date: Date;
-
-      // Handle array format
-      if (Array.isArray(transferDate) && transferDate.length === 3) {
-        const [year, month, day] = transferDate;
-        date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-      } else if (typeof transferDate === 'string') {
-        const datePart = transferDate.includes('T') ? transferDate.split('T')[0] : transferDate;
-        const parts = datePart.split('-');
-        const year = parseInt(parts[0]);
-        const month = parseInt(parts[1]);
-        const day = parseInt(parts[2]);
-        date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-      } else {
-        return '';
-      }
-
-      if (isNaN(date.getTime())) return '';
-
-      // Calculate trade window: 1-3 business days after transfer
-      // "so if someones weekly schedule is friday, they will see the dates for the next monday - wednesday"
-      // If today is Friday -> +1 business day is Monday (Day 1). +3 business days is Wednesday (Day 3).
-      // Logic: addBusinessDays(1) to addBusinessDays(3)
-      const minDate = this.addBusinessDays(date, 1);
-      const maxDate = this.addBusinessDays(date, 3);
-
-      return `${this.formatDate(this.dateToArray(minDate), false)} - ${this.formatDate(this.dateToArray(maxDate), false)}`;
-    } catch (error) {
-      console.error('Error calculating trade window:', error);
-      return '';
-    }
-  }
-
-  /**
-   * Add business days to a date (skipping weekends)
-   */
-  private addBusinessDays(date: Date, days: number): Date {
-    const result = new Date(date);
-    let added = 0;
-
-    while (added < days) {
-      result.setUTCDate(result.getUTCDate() + 1);
-      // Skip weekends (0 = Sunday, 6 = Saturday)
-      if (result.getUTCDay() !== 0 && result.getUTCDay() !== 6) {
-        added++;
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Convert Date to array format for formatDate method
-   */
-  private dateToArray(date: Date): number[] {
-    return [
-      date.getUTCFullYear(),
-      date.getUTCMonth() + 1,
-      date.getUTCDate()
-    ];
+    // Both dates as plain YYYY-MM-DD, whatever shape each arrived in.
+    return this.toYmd(this.currentInvestment.nextInvestmentDate) !== this.toYmd(this.editedInvestment.nextInvestmentDate);
   }
 }

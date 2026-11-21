@@ -186,6 +186,36 @@
   // .field-label provided by ff.form-fields-scoped() mixin at :host level
 }
 
+// The typed amount: a $ prefix sharing one underline with the input.
+.currency-input-wrap {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid #2563EB;
+  padding-bottom: 4px;
+
+  .currency-sym {
+    font-family: 'Manrope', sans-serif;
+    font-size: 17px;
+    font-weight: 600;
+    color: #2563EB;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  // The wrap draws the underline, so the input inside drops its own.
+  .currency-field-input {
+    border-bottom: none;
+    padding: 4px 0;
+    flex: 1;
+    font-size: 17px;
+    font-weight: 600;
+
+    &:focus {
+      border-bottom: none;
+    }
+  }
+}
+
 .select-wrapper {
   position: relative;
   display: flex;
@@ -223,49 +253,51 @@
   font-style: italic;
   margin: 0 0 14px 0;
   line-height: 1.4;
+}
 
-  &.helper-hint--primary {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #2563EB;
-    font-weight: 500;
-    font-style: normal;
-    margin-top: 6px;
+// The transfer date at rest: the tray-style underline button with the calendar glyph on the right.
+// Under :host so it outranks the scoped .field-value-btn recipe (baseline alignment, 0.5 disabled).
+:host .field-value-btn.transfer-date-btn {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
 
-    .material-symbols-outlined {
-      font-size: 16px;
-      flex-shrink: 0;
-    }
+  .material-symbols-outlined {
+    font-size: 18px;
+    color: #6b7280;
+    flex-shrink: 0;
+  }
+
+  // Locked (semi-monthly): the date is the backend's, so the field only reads.
+  &:disabled {
+    color: #0f172a;
+    opacity: 0.4;
   }
 }
 
-.date-btn {
-  width: 100%;
-  height: 48px;
-  border-radius: 12px;
-  border: 1.5px solid #2563EB;
-  background: #eff6ff;
-  color: #1e40af;
-  font-family: 'Manrope', sans-serif;
-  font-size: 14px;
-  font-weight: 600;
+// One line under the field for what the date means: the trade window (blue), or why it is locked.
+.field-echo {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  margin-bottom: 8px;
-  transition: all 0.15s ease;
+  gap: 5px;
+  margin: 6px 0 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #6b7280;
+  min-height: 16px;
 
-  .material-symbols-outlined { font-size: 18px; }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .material-symbols-outlined {
+    font-size: 14px;
+    color: #6b7280;
+    flex-shrink: 0;
   }
 
-  &:active:not(:disabled) { transform: scale(0.99); }
+  &.primary,
+  &.primary .material-symbols-outlined {
+    color: #2563EB;
+  }
 }
 
 .cta-btn {
@@ -358,3 +390,12 @@
 
   .cta-btn { margin-top: 0; }
 }
+
+// ─── Loading skeleton ─────────────────────────────────────────────────────────
+// The placeholders take the real controls' margins, so the cards keep their height when data lands.
+.status-banner--sk {
+  background: #f8fafc;
+  border: 1.5px solid #eef1f6;
+}
+
+.cta-sk { margin-top: 4px; }

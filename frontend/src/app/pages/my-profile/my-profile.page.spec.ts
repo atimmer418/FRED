@@ -19,7 +19,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { NavController, ModalController } from '@ionic/angular/standalone';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
 import { GoalTypePickerSheetComponent } from '../../components/goal-type-picker-sheet/goal-type-picker-sheet.component';
 import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
 import { Goal, LegacyGoalV2 } from '../../models/goal.model';
@@ -609,6 +609,189 @@ describe('MyProfilePage: goals card', () => {
 
     const again = setupGoals({ userId: 'import-fail', legacy: [LEGACY] });
     expect(again.importLegacy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Loading skeleton: one flag across progress, goals, schedule, dashboard and
+// the MFU check. Until all five settle, the percentile pill, the Freedom sub
+// line, two goal rows and the rebalance rows are placeholders, and nothing
+// real is shown in their place, so nothing pops in after the rest.
+// ---------------------------------------------------------------------------
+
+describe('MyProfilePage: loading skeleton', () => {
+  const YEAR = new Date().getFullYear();
+  const WEDDING: Goal = {
+    id: 3, clientId: null, type: 'WEDDING', name: 'Wedding', icon: 'favorite',
+    config: { targetAmount: 30_000, targetYear: YEAR + 3 },
+    currentBalance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 700,
+    planRate: 0.10, planRateKind: 'market', planAnchoredAt: `${YEAR}-01-01T00:00:00`,
+    completed: false, sortOrder: 0, createdAt: '', updatedAt: '',
+  };
+
+  interface LoadHarness {
+    fixture: ComponentFixture<MyProfilePage>;
+    page: MyProfilePage;
+    progress$: BehaviorSubject<any>;
+    goals$: Subject<Goal[]>;
+    schedule$: Subject<any>;
+    dashboard$: Subject<any>;
+    mfu$: Subject<any>;
+  }
+
+  /** Every fetch held open, so each one can be landed (or failed) by hand. */
+  function setupLoading(userId: string | null = '40'): LoadHarness {
+    if (userId) localStorage.setItem('userId', userId);
+    else localStorage.removeItem('userId');
+    const progress$ = new BehaviorSubject<any>(null);
+    const goals$ = new Subject<Goal[]>();
+    const schedule$ = new Subject<any>();
+    const dashboard$ = new Subject<any>();
+    const mfu$ = new Subject<any>();
+
+    TestBed.configureTestingModule({
+      imports: [MyProfilePage],
+      providers: [
+        { provide: AuthService, useValue: {
+            userProgress$: progress$,
+            getCurrentInvestmentSchedule: () => schedule$,
+            updateUserProfile: () => of({}),
+            loadUserProgress: jasmine.createSpy('loadUserProgress'),
+        } },
+        { provide: ToastService, useValue: { showToast: jasmine.createSpy() } },
+        { provide: PortfolioService, useValue: { getPortfolioDashboard: () => dashboard$ } },
+        { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
+        { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => mfu$ } },
+        { provide: Router, useValue: { navigateByUrl: jasmine.createSpy(), navigate: jasmine.createSpy() } },
+        { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
+        { provide: ModalController, useValue: {} },
+        { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy() } },
+        { provide: GoalsService, useValue: {
+            goals: signal<Goal[]>([WEDDING]),
+            load: () => goals$,
+            refresh: () => of([WEDDING]),
+            readLegacyV2: () => [],
+            getPrefs: () => ({ rebalanceSchedule: 'Annual' }),
+        } },
+        { provide: FreedomStatsService, useValue: {
+            birthYear: () => 0,
+            stats: () => ({ freedomYear: '', freedomAge: '', dollarsAway: '' }),
+        } },
+        { provide: AnalyticsService, useValue: analyticsStub() },
+      ],
+    });
+    const fixture = TestBed.createComponent(MyProfilePage);
+    fixture.detectChanges();
+    return { fixture, page: fixture.componentInstance, progress$, goals$, schedule$, dashboard$, mfu$ };
+  }
+
+  afterEach(() => localStorage.removeItem('userId'));
+
+  const el = (h: LoadHarness) => h.fixture.nativeElement as HTMLElement;
+  const busyRegions = (h: LoadHarness) => el(h).querySelectorAll('[aria-busy="true"]').length;
+  const skeletons = (h: LoadHarness) => el(h).querySelectorAll('app-skeleton').length;
+  const freedomSub = (h: LoadHarness) => el(h).querySelector('[data-tour="freedom-row"] .goal-sub') as HTMLElement;
+
+  it('skeletons the Freedom sub line, two goal rows and the rebalance rows while nothing has landed', () => {
+    const h = setupLoading();
+
+    expect(h.page.loaded()).toBeFalse();
+    expect(busyRegions(h)).toBe(3);                       // hero, goals card, rebalancing card
+    expect(skeletons(h)).toBeGreaterThan(0);
+    // The pill is held back but has no placeholder: most users (first month, no MFU history) never
+    // get one, so a stand-in would shift the page down and then back up.
+    expect(el(h).querySelector('.percentile-pill')).toBeNull();
+    expect(el(h).querySelector('.id-hero app-skeleton')).toBeNull();
+    expect(freedomSub(h).querySelector('app-skeleton')).not.toBeNull();
+    // A share of the text column, never a fixed length: .goal-mid is ~190px on a 375 phone and
+    // does not clip, so a fixed bar would run under the status chip.
+    expect((freedomSub(h).querySelector('app-skeleton') as HTMLElement).style.width).toMatch(/%$/);
+    expect(freedomSub(h).textContent!.trim()).toBe('');
+    expect(el(h).querySelectorAll('.goal-row--sk').length).toBe(2);
+    expect(el(h).querySelectorAll('.goal-row').length).toBe(3);   // Freedom row + two placeholders
+    expect(el(h).querySelectorAll('.goal-row--sk .goal-bar').length).toBe(2);
+    expect(el(h).textContent).not.toContain('Wedding');
+    expect(el(h).querySelectorAll('.rb-chips button').length).toBe(0);
+    expect(el(h).querySelector('.rb-chips-sk')).not.toBeNull();
+    // Two lines: the Piggy note's shape, since Piggy is the tier until progress lands.
+    expect(el(h).querySelectorAll('.rb-note-sk .sk-block').length).toBe(2);
+    expect(el(h).querySelector('.rb-next')).toBeNull();
+    expect(el(h).querySelector('.rb-default-note')).toBeNull();
+  });
+
+  it('holds the skeleton until the last check settles, then swaps every region at once', () => {
+    const h = setupLoading();
+    h.progress$.next({ ...SAVED_PROGRESS });
+    h.goals$.next([WEDDING]);
+    h.schedule$.next(null);
+    h.dashboard$.next({ summary: { equity: 10_000 } });
+    h.fixture.detectChanges();
+
+    // Four of five are in; the MFU check is still out, so nothing real shows yet.
+    expect(h.page.loaded()).toBeFalse();
+    expect(skeletons(h)).toBeGreaterThan(0);
+    expect(el(h).querySelector('.percentile-pill')).toBeNull();
+    expect(el(h).textContent).not.toContain('Wedding');
+    expect(el(h).querySelectorAll('.rb-chips button').length).toBe(0);
+
+    h.mfu$.next({ hasMfuHistory: true, statusPercentile: 72, equityLevel: 2 });
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(skeletons(h)).toBe(0);
+    expect(busyRegions(h)).toBe(0);
+    expect(el(h).querySelector('.percentile-pill')!.textContent).toContain('Ahead of 72% of investors');
+    expect(freedomSub(h).textContent).toContain('$7,000/mo through FRED');
+    expect(el(h).querySelectorAll('.goal-row').length).toBe(2);   // Freedom row + Wedding
+    expect(el(h).textContent).toContain('Wedding');
+    const chips = Array.from(el(h).querySelectorAll('.rb-chips button')) as HTMLButtonElement[];
+    expect(chips.map(c => c.textContent!.trim())).toEqual(['Quarterly', 'Semi-annual', 'Annual']);
+    // The saved preference was already applied when the chips appeared: no Quarterly-to-Annual flip.
+    expect(chips.filter(c => c.classList.contains('on')).map(c => c.textContent!.trim())).toEqual(['Annual']);
+    expect(el(h).querySelector('.rb-next')).not.toBeNull();        // pro tier
+  });
+
+  it('a failed check settles its region too, so an error never leaves the skeleton up', () => {
+    const h = setupLoading();
+    h.progress$.next({ ...SAVED_PROGRESS });
+    h.goals$.error(new HttpErrorResponse({ status: 500 }));
+    h.schedule$.error(new HttpErrorResponse({ status: 500 }));
+    h.dashboard$.error(new HttpErrorResponse({ status: 500 }));
+    h.mfu$.error(new HttpErrorResponse({ status: 500 }));
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(skeletons(h)).toBe(0);
+    expect(busyRegions(h)).toBe(0);
+    expect(el(h).querySelector('.percentile-pill')).toBeNull();   // no percentile: nothing to show, nothing pending
+    expect(el(h).querySelectorAll('.rb-chips button').length).toBe(3);
+  });
+
+  it('a Piggy user gets the default-schedule note where the two-line placeholder stood', () => {
+    const h = setupLoading();
+    h.progress$.next({ ...SAVED_PROGRESS, selectedTier: 'piggy' });
+    h.goals$.next([WEDDING]);
+    h.schedule$.next(null);
+    h.dashboard$.next({ summary: { equity: 10_000 } });
+    h.mfu$.next(null);
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(el(h).querySelector('.rb-note-sk')).toBeNull();
+    expect(el(h).querySelector('.rb-next')).toBeNull();
+    expect(el(h).querySelector('.rb-default-note')!.textContent).toContain('On Piggy');
+  });
+
+  it('with no stored userId there are no goals to wait for', () => {
+    const h = setupLoading(null);
+    h.progress$.next({ ...SAVED_PROGRESS });
+    h.schedule$.next(null);
+    h.dashboard$.next({ summary: { equity: 0 } });
+    h.mfu$.next(null);
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(skeletons(h)).toBe(0);
   });
 });
 

@@ -21,6 +21,7 @@ import {
 import { AmountTrayHost, TrayHostField } from '../plan-amount-tray/amount-tray-host';
 import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.component';
 import { PlanAmountScale } from '../../utils/plan-amount-scale';
+import { SkeletonComponent } from '../skeleton/skeleton.component';
 
 /** Every row's allocation: whole percents, 0 to 100; the minus and plus move by one. */
 const ALLOCATION_SCALE: PlanAmountScale = { min: 0, max: 100, step: 1, fine: 1 };
@@ -88,7 +89,8 @@ interface Stock {
     IonList, IonItem, IonLabel, IonReorderGroup,
     IonItemSliding, IonItemOptions, IonItemOption, IonSpinner, IonSearchbar, IonBadge,
     KeyboardAvoidDirective,
-    AmountTraySlotComponent
+    AmountTraySlotComponent,
+    SkeletonComponent
   ],
   animations: [
     trigger('deleteAnimation', [

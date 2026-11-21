@@ -14,13 +14,90 @@
 <ion-content class="shell-content">
   <div class="shell-inner">
 
-    <!-- Loading -->
-    <div *ngIf="isLoading" class="loading-state">
-      <ion-spinner name="crescent" class="loading-spinner"></ion-spinner>
-      <span class="loading-text">Loading your portfolio...</span>
-    </div>
+    <!-- The loading region. The skeleton and the real cards are the two branches of one @if, so
+         nothing pops in late; the skeleton reuses the cards' own classes so nothing moves either. -->
+    <div [attr.aria-busy]="isLoading ? 'true' : null">
+    @if (isLoading) {
 
-    <div *ngIf="!isLoading">
+      <!-- Sell Holdings Card: header + buying power chip, subtitle, three holding rows -->
+      <div class="section-card">
+        <div class="card-header-row">
+          <app-skeleton width="18px" height="18px" radius="5px" />
+          <app-skeleton width="112px" height="16px" />
+          <div class="buying-power-chip sk-col sk-col--end sk-right">
+            <app-skeleton width="78px" height="10px" />
+            <app-skeleton width="64px" height="14px" />
+          </div>
+        </div>
+        <app-skeleton class="sk-subtitle" [lines]="2" height="14px" />
+
+        <div class="positions-list">
+          @for (i of [0, 1, 2]; track i) {
+            <div class="position-item">
+              <div class="position-row">
+                <app-skeleton height="36px" radius="circle" />
+                <div class="position-text sk-col">
+                  <app-skeleton width="56px" height="15px" />
+                  <app-skeleton width="70%" height="12px" />
+                </div>
+                <div class="position-values sk-col sk-col--end">
+                  <app-skeleton width="72px" height="14px" />
+                  <app-skeleton width="96px" height="12px" />
+                </div>
+                <div class="position-check">
+                  <app-skeleton height="22px" radius="circle" />
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Withdraw Cash Card: header + DRIP toggle, subtitle, balance line, amount field, chips, CTA, tip -->
+      <div class="section-card">
+        <div class="card-header-row">
+          <app-skeleton width="18px" height="18px" radius="5px" />
+          <app-skeleton width="112px" height="16px" />
+          <div class="drip-controls">
+            <app-skeleton width="51px" height="31px" radius="pill" />
+          </div>
+        </div>
+        <!-- One-line subtitle, label row and amount field: the bars sit inline in the real text's
+             font, so each row is as tall as its text will be, not as tall as the bar. -->
+        <p class="sk-subtitle sk-inline"><app-skeleton width="70%" height="12px" /></p>
+
+        <div class="withdraw-controls">
+          <div class="withdraw-field">
+            <div class="amount-header">
+              <span class="amount-label sk-inline"><app-skeleton width="56px" height="13px" /></span>
+              <span class="available-text sk-inline"><app-skeleton width="128px" height="12px" /></span>
+            </div>
+            <div class="sk-field-value sk-inline">
+              <app-skeleton width="96px" height="18px" radius="6px" />
+            </div>
+          </div>
+
+          <div class="sk-chips">
+            @for (i of [0, 1, 2, 3]; track i) {
+              <app-skeleton height="36px" />
+            }
+          </div>
+
+          <app-skeleton class="sk-cta" height="52px" radius="12px" />
+          <!-- The tip in its real box, with its copy as four inline lines in the real text font, so
+               the box is as tall as the copy wraps to on every phone width. -->
+          <div class="info-tip">
+            <app-skeleton class="sk-tip-icon" width="18px" height="18px" radius="5px" />
+            <div class="tip-text sk-tip-text">
+              @for (w of ['100%', '100%', '100%', '60%']; track $index) {
+                <div class="sk-inline"><app-skeleton [width]="w" height="10px" /></div>
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+
+    } @else {
 
       <!-- Sell Holdings Card -->
       <div class="section-card">
@@ -241,6 +318,7 @@
         </div>
       </div>
 
+    }
     </div>
   </div>
 </ion-content>

@@ -18,19 +18,38 @@
            (click)="onFredLogoClick()"> FRED</div>
     </div>
 
-    <!-- Freedom stat strip — three glass tiles below the user/branding row -->
-    <div class="stat-strip">
+    <!-- Freedom stat strip: three glass tiles below the user/branding row.
+         While the stats load, each value slot holds a shimmer bar the width of the number it stands in for. -->
+    <div class="stat-strip" [attr.aria-busy]="freedomStatsService.isLoading() ? 'true' : null">
       <div class="stat-tile">
         <span class="stat-label">Freedom date</span>
-        <span class="stat-value">{{ freedomStatsService.isLoading() ? '—' : freedomStatsService.stats().freedomYear }}</span>
+        <span class="stat-value">
+          @if (freedomStatsService.isLoading()) {
+            <app-skeleton width="52px" height="18px" />
+          } @else {
+            {{ freedomStatsService.stats().freedomYear }}
+          }
+        </span>
       </div>
       <div class="stat-tile">
         <span class="stat-label">Freedom age</span>
-        <span class="stat-value">{{ freedomStatsService.isLoading() ? '—' : freedomStatsService.stats().freedomAge }}</span>
+        <span class="stat-value">
+          @if (freedomStatsService.isLoading()) {
+            <app-skeleton width="36px" height="18px" />
+          } @else {
+            {{ freedomStatsService.stats().freedomAge }}
+          }
+        </span>
       </div>
       <div class="stat-tile">
         <span class="stat-label">To go</span>
-        <span class="stat-value">{{ freedomStatsService.isLoading() ? '—' : freedomStatsService.stats().dollarsAway }}</span>
+        <span class="stat-value">
+          @if (freedomStatsService.isLoading()) {
+            <app-skeleton width="60px" height="18px" />
+          } @else {
+            {{ freedomStatsService.stats().dollarsAway }}
+          }
+        </span>
       </div>
     </div>
   </div>

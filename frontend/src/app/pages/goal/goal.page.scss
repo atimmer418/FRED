@@ -426,6 +426,38 @@
   margin-top: auto;
 }
 
+// ── Skeleton: the plan's shapes while the goal loads (ready() is false) ──────
+// The hero keeps .fd-hero's radius and padding, flat and quiet instead of blue; the tile and the
+// rate card are the real containers with blocks inside, so the swap to data moves nothing.
+.gp-sk-hero {
+  border-radius: 20px;
+  padding: 18px 18px 12px;
+  background: #f8fafc;
+  box-shadow: inset 0 0 0 1px #eef1f6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gp-sk-amount { margin-top: 6px; }
+.gp-sk-meta { margin-top: 7px; }
+.gp-sk-bar { margin-top: 16px; }
+
+// The band's saved/target text on the left, the status chip on the right (.fd-hero-labels).
+.gp-sk-band {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 7px;
+}
+
+.gp-sk-value { margin-top: 5px; }
+.gp-sk-sub { margin-top: 5px; }
+
+// Two note lines where the How FRED helps cards sit (.fd-how padding).
+.gp-sk-lines { padding: 9px 11px; }
+
 @media (prefers-reduced-motion: reduce) {
   .gp-dots i { transition: none; }
 }

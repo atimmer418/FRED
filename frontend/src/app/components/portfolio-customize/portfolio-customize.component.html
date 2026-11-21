@@ -57,7 +57,7 @@
     </div>
 
     <!-- Your Allocation Card -->
-    <div class="section-card">
+    <div class="section-card" [attr.aria-busy]="isLoading ? 'true' : null">
       <div class="card-header-row">
         <span class="material-symbols-outlined card-icon">pie_chart</span>
         <h3 class="card-title">Your Allocation</h3>
@@ -68,12 +68,25 @@
         }
       </div>
 
-      <div *ngIf="isLoading" class="loading-state">
-        <ion-spinner name="crescent" class="loading-spinner"></ion-spinner>
-        <span class="loading-text">Loading portfolio...</span>
-      </div>
-
-      <ion-list class="portfolio-list" *ngIf="!isLoading">
+      @if (isLoading) {
+        <!-- Five rows in the list's own frame, each shaped like a real row (symbol and badge, name, value),
+             so the saved rows land in place without a jump. -->
+        <div class="portfolio-list">
+          @for (i of [0, 1, 2, 3, 4]; track i) {
+            <div class="skeleton-row">
+              <div class="skeleton-row__text">
+                <div class="skeleton-row__head">
+                  <app-skeleton width="44px" height="14px" radius="4px" />
+                  <app-skeleton width="30px" height="14px" radius="pill" />
+                </div>
+                <app-skeleton width="150px" height="12px" radius="4px" />
+              </div>
+              <app-skeleton width="44px" height="16px" radius="4px" />
+            </div>
+          }
+        </div>
+      } @else {
+      <ion-list class="portfolio-list">
         <ion-reorder-group [disabled]="false" (ionItemReorder)="reorderStocks($event)">
           <ng-container *ngFor="let stock of portfolio">
             <ion-item-sliding class="portfolio-sliding" @deleteAnimation>
@@ -117,6 +130,7 @@
           </ng-container>
         </ion-reorder-group>
       </ion-list>
+      }
     </div>
 
     <!-- Add Assets Card -->

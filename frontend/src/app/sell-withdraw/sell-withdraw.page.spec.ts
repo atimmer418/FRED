@@ -6,8 +6,9 @@ import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
 import { ModalController } from '@ionic/angular/standalone';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { SellWithdrawPage } from './sell-withdraw.page';
+import { SkeletonComponent } from '../components/skeleton/skeleton.component';
 import { FredConfirmSheetComponent, FredConfirmSheetOptions } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
 import { PasskeyPromptComponent } from '../components/passkey-prompt/passkey-prompt.component';
 import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
@@ -682,5 +683,159 @@ describe('SellWithdrawPage: withdraw tray', () => {
     const remove = spyOn(document, 'removeEventListener').and.callThrough();
     fixture.destroy();
     expect(remove.calls.allArgs().map(a => a[0])).toEqual(jasmine.arrayContaining(['pointerdown', 'pointerup', 'pointercancel']));
+  });
+});
+
+/**
+ * The loading skeleton: while the dashboard call is pending the sheet shows the two cards as
+ * grey blocks (Sell header, chip and three holding rows; Withdraw header, balance line, amount
+ * field) under aria-busy, with none of the real content; once the data lands the skeleton is gone
+ * and the real cards stand in its place. Karma has no layout, so this asserts presence, not size.
+ */
+describe('SellWithdrawPage: loading skeleton', () => {
+  let fixture: ComponentFixture<SellWithdrawPage>;
+  let dashboard$: Subject<PortfolioDashboardData>;
+
+  const position: Position = {
+    symbol: 'VTI',
+    name: 'Vanguard Total Stock Market ETF',
+    quantity: 10,
+    quantityAvailable: 10,
+    marketValue: 2500,
+    costBasis: 2000,
+    unrealizedPL: 500,
+    unrealizedPLPercent: 25,
+    currentPrice: 250,
+    averageCostBasis: 200,
+    percentOfAccount: 100,
+    todayGainLoss: 5,
+    todayGainLossPercent: 0.2,
+  };
+
+  const summary: AccountSummary = {
+    portfolioValue: 2500,
+    todayChange: 5,
+    todayChangePercent: 0.2,
+    buyingPower: 1000,
+    cash: 1000,
+    withdrawableCash: 1000,
+    equity: 2500,
+  };
+
+  /** Mounts the page with the dashboard call still pending. */
+  function mount(): void {
+    dashboard$ = new Subject<PortfolioDashboardData>();
+    const trading = jasmine.createSpyObj<TradingService>('TradingService', ['getDripStatus', 'formatCurrency', 'formatPercentage']);
+    trading.getDripStatus.and.returnValue(of({ dripEnabled: true }));
+    trading.formatCurrency.and.callFake((v: string | number) => `$${Number(v).toFixed(2)}`);
+    const portfolio = jasmine.createSpyObj<PortfolioService>('PortfolioService', ['getPortfolioDashboard']);
+    portfolio.getPortfolioDashboard.and.returnValue(dashboard$.asObservable());
+    const pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
+    pin.hasPin.and.resolveTo(false);
+    if (!jasmine.isSpy(window.matchMedia)) {
+      spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    }
+
+    TestBed.configureTestingModule({
+      imports: [SellWithdrawPage],
+      providers: [
+        { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigateByUrl']) },
+        { provide: TradingService, useValue: trading },
+        { provide: PortfolioService, useValue: portfolio },
+        { provide: ModalController, useValue: jasmine.createSpyObj<ModalController>('ModalController', ['create']) },
+        { provide: ToastService, useValue: jasmine.createSpyObj<ToastService>('ToastService', ['showToast']) },
+        { provide: PasskeyService, useValue: jasmine.createSpyObj<PasskeyService>('PasskeyService', ['startAuthentication']) },
+        { provide: PinService, useValue: pin },
+        { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
+        { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown']) },
+      ],
+    })
+      // Ionic's elements render as plain custom elements; the skeleton and the tray slot are real.
+      .overrideComponent(SellWithdrawPage, {
+        set: { imports: [CommonModule, AmountTraySlotComponent, SkeletonComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      });
+    fixture = TestBed.createComponent(SellWithdrawPage);
+    fixture.detectChanges();
+  }
+
+  /** Lands the dashboard data and lets the page settle on it. */
+  async function land(positions: Position[]): Promise<void> {
+    dashboard$.next({ positions, summary, recentTransactions: [] } as unknown as PortfolioDashboardData);
+    dashboard$.complete();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  const root = () => fixture.nativeElement as HTMLElement;
+  const busy = () => root().querySelector('[aria-busy="true"]');
+  const skeletons = () => root().querySelectorAll('app-skeleton');
+  const blocks = () => root().querySelectorAll('.sk-block');
+
+  it('while loading, the sheet is busy and shows both cards as skeleton with no real content', () => {
+    mount();
+    expect(busy()).not.toBeNull();
+    expect(root().querySelectorAll('.section-card').length).toBe(2);
+    expect(skeletons().length).toBeGreaterThan(0);
+    expect(blocks().length).toBeGreaterThan(0);
+
+    // Sell card: header, chip, three holding rows in the real row classes.
+    expect(root().querySelector('.card-header-row .buying-power-chip app-skeleton')).not.toBeNull();
+    expect(root().querySelectorAll('.positions-list .position-item').length).toBe(3);
+    expect(root().querySelectorAll('.position-item .position-row app-skeleton').length).toBe(3 * 6);
+
+    // Withdraw card: header toggle, balance line, amount field, chips, CTA.
+    expect(root().querySelector('.drip-controls app-skeleton')).not.toBeNull();
+    // The subtitle, label row and amount field take their height from the real text's font: each
+    // bar sits inline inside a wrapper that carries it.
+    expect(root().querySelector('p.sk-subtitle.sk-inline app-skeleton')).not.toBeNull();
+    expect(root().querySelectorAll('.amount-header app-skeleton').length).toBe(2);
+    expect(root().querySelector('.amount-header .amount-label.sk-inline app-skeleton')).not.toBeNull();
+    expect(root().querySelector('.amount-header .available-text.sk-inline app-skeleton')).not.toBeNull();
+    expect(root().querySelector('.withdraw-field .sk-field-value.sk-inline app-skeleton')).not.toBeNull();
+    expect(root().querySelectorAll('.sk-chips app-skeleton').length).toBe(4);
+    expect(root().querySelector('app-skeleton.sk-cta')).not.toBeNull();
+    // The tip is its real box with the copy as four inline lines in the real text font, so the box
+    // is as tall as the copy wraps to; the last line is the short one.
+    const tip = root().querySelector('.section-card:nth-of-type(2) .info-tip');
+    expect(tip).not.toBeNull();
+    expect(tip!.querySelector('app-skeleton.sk-tip-icon')).not.toBeNull();
+    const tipLines = tip!.querySelectorAll('.tip-text.sk-tip-text > .sk-inline app-skeleton');
+    expect(tipLines.length).toBe(4);
+    expect(Array.from(tipLines).map(l => (l as HTMLElement).style.width)).toEqual(['100%', '100%', '100%', '60%']);
+    expect(tip!.querySelector('.tip-text p')).toBeNull();
+
+    // Nothing real yet.
+    expect(root().querySelector('.card-title')).toBeNull();
+    expect(root().querySelector('.card-subtitle')).toBeNull();
+    expect(root().querySelector('.position-symbol')).toBeNull();
+    expect(root().querySelector('.withdraw-value')).toBeNull();
+    expect(root().querySelector('.cta-btn')).toBeNull();
+    expect(root().querySelector('ion-spinner')).toBeNull();
+  });
+
+  it('once the data lands, the skeleton is gone and the real cards stand in its place', async () => {
+    mount();
+    await land([position]);
+    expect(busy()).toBeNull();
+    expect(skeletons().length).toBe(0);
+    expect(blocks().length).toBe(0);
+    expect(root().querySelectorAll('.section-card').length).toBe(2);
+    expect(Array.from(root().querySelectorAll('.card-title')).map(t => t.textContent!.trim())).toEqual(['Sell Holdings', 'Withdraw Cash']);
+    expect(root().querySelectorAll('.position-item').length).toBe(1);
+    expect(root().querySelector('.position-symbol')!.textContent!.trim()).toBe('VTI');
+    expect(root().querySelector('.buying-power-value')!.textContent).toBe('$1000.00');
+    expect(root().querySelector('.withdraw-value')).not.toBeNull();
+    expect(root().querySelectorAll('.quick-amounts .quick-btn').length).toBe(4);
+    // The real tip copy stands where the four skeleton lines were.
+    expect(root().querySelector('.section-card:nth-of-type(2) .info-tip .tip-text p')).not.toBeNull();
+  });
+
+  it('with no holdings the skeleton still gives way to the empty state, not to more skeleton', async () => {
+    mount();
+    await land([]);
+    expect(busy()).toBeNull();
+    expect(skeletons().length).toBe(0);
+    expect(root().querySelector('.position-item')).toBeNull();
+    expect(root().querySelector('.empty-holdings .empty-title')!.textContent).toBe('No Holdings Found');
   });
 });

@@ -6,6 +6,9 @@
  * on the stock exactly as typing did, so the 100% sum check and the save payload are unchanged.
  * Karma's context has no layout, so the tray's motion is driven to its end by hand where a spec
  * needs the swap or the collapse to land.
+ *
+ * While the saved portfolio loads, the allocation card shows five skeleton rows in the list's frame
+ * instead of a spinner; the real rows take their place once the response lands.
  */
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -36,54 +39,95 @@ const SAVED_PORTFOLIO = {
   ],
 };
 
-describe('PortfolioCustomizeComponent', () => {
-  let fixture: ComponentFixture<PortfolioCustomizeComponent>;
-  let component: PortfolioCustomizeComponent;
-  let http: HttpTestingController;
-  let showToast: jasmine.Spy;
-  let show: jasmine.Spy;
+let fixture: ComponentFixture<PortfolioCustomizeComponent>;
+let component: PortfolioCustomizeComponent;
+let http: HttpTestingController;
+let showToast: jasmine.Spy;
+let show: jasmine.Spy;
 
-  beforeEach(async () => {
-    showToast = jasmine.createSpy('showToast');
-    show = jasmine.createSpy('show');
-    const pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
-    pin.hasPin.and.resolveTo(false);
-    TestBed.configureTestingModule({
-      imports: [PortfolioCustomizeComponent],
-      providers: [
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideNoopAnimations(),
-        { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigate']) },
-        { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({})) } },
-        { provide: ToastService, useValue: { showToast, show } },
-        { provide: PasskeyService, useValue: {} },
-        { provide: PinService, useValue: pin },
-        { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
-      ],
-    })
-      // The Capacitor Keyboard plugin rejects on web, and the directive's listener would surface
-      // that as an uncaught error in whichever spec is running when ion-content hydrates.
-      .overrideComponent(PortfolioCustomizeComponent, { remove: { imports: [KeyboardAvoidDirective] } });
-    http = TestBed.inject(HttpTestingController);
-    fixture = TestBed.createComponent(PortfolioCustomizeComponent);
-    component = fixture.componentInstance;
-    fixture.detectChanges();
-    http.expectOne(req => req.url.endsWith('/portfolio/current')).flush(SAVED_PORTFOLIO);
-    await fixture.whenStable();
-    fixture.detectChanges();
-  });
+const root = () => fixture.nativeElement as HTMLElement;
+const rows = () => Array.from(root().querySelectorAll('ion-item-sliding')) as HTMLElement[];
+const buttons = () => Array.from(root().querySelectorAll('.alloc-btn')) as HTMLButtonElement[];
+const slots = () => Array.from(root().querySelectorAll('.field-tray')) as HTMLElement[];
+const done = () => root().querySelector('.field-tray-done') as HTMLButtonElement | null;
+const tray = () => fixture.debugElement.query(By.directive(PlanAmountTrayComponent))?.componentInstance as PlanAmountTrayComponent | undefined;
+const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+const stock = (symbol: string) => component.portfolio.find(s => s.symbol === symbol)!;
+
+/** Mounts the page with the portfolio request still in flight. */
+function setup(): void {
+  showToast = jasmine.createSpy('showToast');
+  show = jasmine.createSpy('show');
+  const pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
+  pin.hasPin.and.resolveTo(false);
+  TestBed.configureTestingModule({
+    imports: [PortfolioCustomizeComponent],
+    providers: [
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      provideNoopAnimations(),
+      { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigate']) },
+      { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({})) } },
+      { provide: ToastService, useValue: { showToast, show } },
+      { provide: PasskeyService, useValue: {} },
+      { provide: PinService, useValue: pin },
+      { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
+    ],
+  })
+    // The Capacitor Keyboard plugin rejects on web, and the directive's listener would surface
+    // that as an uncaught error in whichever spec is running when ion-content hydrates.
+    .overrideComponent(PortfolioCustomizeComponent, { remove: { imports: [KeyboardAvoidDirective] } });
+  http = TestBed.inject(HttpTestingController);
+  fixture = TestBed.createComponent(PortfolioCustomizeComponent);
+  component = fixture.componentInstance;
+  fixture.detectChanges();
+}
+
+/** Lands the saved portfolio. */
+async function load(): Promise<void> {
+  http.expectOne(req => req.url.endsWith('/portfolio/current')).flush(SAVED_PORTFOLIO);
+  await fixture.whenStable();
+  fixture.detectChanges();
+}
+
+describe('PortfolioCustomizeComponent while the portfolio loads', () => {
+  beforeEach(setup);
 
   afterEach(() => http.verify());
 
-  const root = () => fixture.nativeElement as HTMLElement;
-  const rows = () => Array.from(root().querySelectorAll('ion-item-sliding')) as HTMLElement[];
-  const buttons = () => Array.from(root().querySelectorAll('.alloc-btn')) as HTMLButtonElement[];
-  const slots = () => Array.from(root().querySelectorAll('.field-tray')) as HTMLElement[];
-  const done = () => root().querySelector('.field-tray-done') as HTMLButtonElement | null;
-  const tray = () => fixture.debugElement.query(By.directive(PlanAmountTrayComponent))?.componentInstance as PlanAmountTrayComponent | undefined;
-  const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const stock = (symbol: string) => component.portfolio.find(s => s.symbol === symbol)!;
+  it('shows five skeleton rows in the list frame and no real rows, then swaps them for the saved rows', async () => {
+    const card = root().querySelector('.section-card[aria-busy="true"]');
+    expect(card).not.toBeNull();
+    expect(text(card!.querySelector('.card-title'))).toBe('Your Allocation');
+    const skeletonRows = Array.from(card!.querySelectorAll('.skeleton-row'));
+    expect(skeletonRows.length).toBe(5);
+    expect(skeletonRows[0].closest('.portfolio-list')).not.toBeNull();
+    // Each row: symbol, badge, name and value, in the real row's shape.
+    skeletonRows.forEach(row => {
+      const bars = Array.from(row.querySelectorAll('app-skeleton')) as HTMLElement[];
+      expect(bars.map(b => b.style.width)).toEqual(['44px', '30px', '150px', '44px']);
+      expect(bars.map(b => (b.querySelector('.sk-block') as HTMLElement).style.borderRadius)).toEqual(['4px', '999px', '4px', '4px']);
+    });
+    expect(card!.querySelector('ion-list')).toBeNull();
+    expect(root().querySelector('ion-spinner')).toBeNull();
+    expect(rows().length).toBe(0);
+
+    await load();
+    expect(root().querySelector('[aria-busy="true"]')).toBeNull();
+    expect(root().querySelector('.skeleton-row')).toBeNull();
+    expect(root().querySelector('app-skeleton')).toBeNull();
+    expect(rows().length).toBe(3);
+    expect(buttons().map(text)).toEqual(['75 %', '20 %', '5 %']);
+  });
+});
+
+describe('PortfolioCustomizeComponent', () => {
+  beforeEach(async () => {
+    setup();
+    await load();
+  });
+
+  afterEach(() => http.verify());
 
   function tapRow(index: number): void {
     buttons()[index].click();
@@ -146,6 +190,16 @@ describe('PortfolioCustomizeComponent', () => {
     expect(slider.getAttribute('aria-valuemax')).toBe('100');
     expect(slider.getAttribute('aria-valuetext')).toBe('20%');
     expect(Array.from(root().querySelectorAll('.ps-ends span')).map(e => e.textContent)).toEqual(['0%', '100%']);
+  });
+
+  it('the tray card floats between rows: the slot the host animates wraps an inner that carries the gap, inside the list', () => {
+    tapRow(1);
+    const slot = slots()[0];
+    // The gap below the card is a rule on `.portfolio-list .field-tray > .field-tray-in`; this pins that shape.
+    expect(slot.closest('.portfolio-list')).not.toBeNull();
+    const inner = slot.firstElementChild as HTMLElement;
+    expect(inner.classList.contains('field-tray-in')).toBeTrue();
+    expect(inner.querySelector('app-plan-amount-tray')).not.toBeNull();
   });
 
   it('a detent lands on that stock alone; the total and the sum check follow', () => {

@@ -28,6 +28,7 @@ import { InfoNote } from '../../components/goal-plan-info-sheet/info-note';
 import { kidCostFigures } from '../../utils/kid-cost.utils';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
 import { AmountTraySlotComponent } from '../../components/plan-amount-tray/amount-tray-slot.component';
+import { SkeletonComponent } from '../../components/skeleton/skeleton.component';
 import { PlanAmountTrayComponent } from '../../components/plan-amount-tray/plan-amount-tray.component';
 import { detents } from '../../utils/plan-amount-scale';
 import { toCountBand } from '../../services/analytics/analytics-bands';
@@ -132,6 +133,8 @@ describe('GoalPage', () => {
     /** How each mocked sheet dismisses: any other modal by role, the action sheet by row id, the text prompt by role + value. */
     dismissRole?: string; menuPick?: string; promptRole?: string; promptValue?: string;
     createResult?: Observable<Goal>; updateResult?: Observable<Goal>; loadError?: unknown;
+    /** What the goals load returns instead of the fixtures, e.g. a Subject the spec completes later. */
+    loadResult?: Observable<Goal[]>;
     /** The quiz's draft, set before the page opens. */
     draft?: { form: GoalForm; existing: Goal | null };
   }
@@ -140,6 +143,7 @@ describe('GoalPage', () => {
     goals = signal<Goal[]>(opts.goals ?? []);
     load = jasmine.createSpy('load').and.callFake(() => {
       if (opts.loadError) return throwError(() => opts.loadError);
+      if (opts.loadResult) return opts.loadResult;
       if (opts.loaded) goals.set(opts.loaded);
       return of(goals());
     });
@@ -207,7 +211,7 @@ describe('GoalPage', () => {
     })
       // Ionic standalone components need their own providers; render their children as plain DOM.
       .overrideComponent(GoalPage, {
-        set: { imports: [CommonModule, KidTimelineComponent, AmountTraySlotComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+        set: { imports: [CommonModule, KidTimelineComponent, AmountTraySlotComponent, SkeletonComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
       })
       .compileComponents();
 
@@ -487,6 +491,42 @@ describe('GoalPage', () => {
     expect(logout).toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith('Your session ended. Sign in again to save this plan.', 'danger');
     expect(showToast).not.toHaveBeenCalledWith('Could not load this goal. Try again.', 'danger');
+  });
+
+  it('shows the plan skeleton with aria-busy while a deep-linked goal loads, and the real hero once it lands', async () => {
+    const pending = new Subject<Goal[]>();
+    const fixture = await create({ id: '7' }, { loadResult: pending });
+    const inner = () => fixture.nativeElement.querySelector('.gp-inner') as HTMLElement;
+    const skeletons = () => fixture.nativeElement.querySelectorAll('app-skeleton').length;
+
+    expect(fixture.componentInstance.ready()).toBeFalse();
+    expect(inner().getAttribute('aria-busy')).toBe('true');
+    expect(skeletons()).toBeGreaterThan(0);
+    expect(fixture.nativeElement.querySelector('.gp-sk-hero')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.fd-tile app-skeleton')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.fd-assume app-skeleton')).not.toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.gp-sk-lines .sk-block').length).toBe(2);
+    // Only the saved deep link loads (previews are ready at once), and a saved goal has no CTA,
+    // so the skeleton draws none: a bar there would vanish on every swap.
+    expect(fixture.nativeElement.querySelector('app-skeleton.gp-cta')).toBeNull();
+    // No real content while loading.
+    expect(fixture.nativeElement.querySelector('.fd-hero')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.fd-hero-big')).toBeNull();
+    expect(fixture.nativeElement.querySelector('#gp-bal-current')).toBeNull();
+    expect(navCtrl.navigateBack).not.toHaveBeenCalled();
+
+    goals.set([houseGoal(7)]);
+    pending.next(goals());
+    pending.complete();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.ready()).toBeTrue();
+    expect(inner().getAttribute('aria-busy')).toBeNull();
+    expect(skeletons()).toBe(0);
+    expect(fixture.nativeElement.querySelector('.gp-sk-hero')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.fd-hero-big')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('#gp-bal-current')).not.toBeNull();
   });
 
   // ── Hero ───────────────────────────────────────────────────────────────────

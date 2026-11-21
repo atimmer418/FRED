@@ -32,17 +32,21 @@
     </div>
 
     <!-- ── Identity hero ───────────────────────────────────────────────────── -->
-    <div class="id-hero">
+    <div class="id-hero" [attr.aria-busy]="loaded() ? null : 'true'">
       <div class="avatar-wrap">
         <ion-avatar class="user-avatar">
           <img [src]="avatarSrc" alt="User Avatar" />
         </ion-avatar>
       </div>
       <div class="id-name">{{ userName }}</div>
-      <div class="percentile-pill" *ngIf="statusPercentile !== null">
-        <span class="material-symbols-outlined pill-icon">trending_up</span>
-        <span>Ahead of {{ statusPercentile }}% of investors</span>
-      </div>
+      <!-- No pill placeholder: the pill only shows past month one, and a first-month user is the
+           likeliest one here, so a stand-in would shift the page when it left. -->
+      @if (loaded()) {
+        <div class="percentile-pill" *ngIf="statusPercentile !== null">
+          <span class="material-symbols-outlined pill-icon">trending_up</span>
+          <span>Ahead of {{ statusPercentile }}% of investors</span>
+        </div>
+      }
     </div>
 
     <!-- ── Goals (one active goal for everyone; more with Plus or Pro) ───────── -->
@@ -50,7 +54,7 @@
       Goals
       <span class="zone-label-hint">Tap for details</span>
     </p>
-    <div class="zone-card goals-card">
+    <div class="zone-card goals-card" [attr.aria-busy]="loaded() ? null : 'true'">
       <!-- Freedom Date row (always first), opens the Freedom page -->
       <div class="goal-row" data-tour="freedom-row" (click)="openFreedom()">
         <div class="goal-tile goal-tile--freedom">
@@ -61,7 +65,12 @@
             Freedom Date
             <span class="fred-invests-badge">FRED invests</span>
           </div>
-          <div class="goal-sub">{{ freedomGoalSub }}</div>
+          @if (loaded()) {
+            <div class="goal-sub">{{ freedomGoalSub }}</div>
+          } @else {
+            <!-- A share of the column, like the goal rows below: a fixed bar overflows under the chip on small phones. -->
+            <div class="goal-sub"><app-skeleton width="65%" height="15px" radius="4px" /></div>
+          }
           <div class="goal-bar">
             <i class="goal-bar-fill ok" [style.width.%]="progressPercentage() * 100"></i>
           </div>
@@ -71,38 +80,53 @@
         </div>
       </div>
 
-      <!-- Goal summaries: tap opens the goal page -->
-      <div
-        *ngFor="let s of goalSummaries(); trackBy: trackGoal"
-        class="goal-row"
-        [class.goal-done]="s.goal.completed"
-        (click)="openGoal(s.goal.id)"
-      >
-        <div class="goal-tile">
-          <span class="material-symbols-outlined">{{ s.goal.completed ? 'check_circle' : s.goal.icon }}</span>
-        </div>
-        <div class="goal-mid">
-          <div class="goal-name ellipsis">{{ s.goal.name }}</div>
-          <div class="goal-sub">{{ s.view.subtitle }}</div>
-          <div class="goal-bar">
-            <i
-              class="goal-bar-fill"
+      @if (loaded()) {
+        <!-- Goal summaries: tap opens the goal page -->
+        <div
+          *ngFor="let s of goalSummaries(); trackBy: trackGoal"
+          class="goal-row"
+          [class.goal-done]="s.goal.completed"
+          (click)="openGoal(s.goal.id)"
+        >
+          <div class="goal-tile">
+            <span class="material-symbols-outlined">{{ s.goal.completed ? 'check_circle' : s.goal.icon }}</span>
+          </div>
+          <div class="goal-mid">
+            <div class="goal-name ellipsis">{{ s.goal.name }}</div>
+            <div class="goal-sub">{{ s.view.subtitle }}</div>
+            <div class="goal-bar">
+              <i
+                class="goal-bar-fill"
+                [class.ok]="s.view.status.kind === 'on_plan' || s.view.status.kind === 'ahead' || s.view.status.kind === 'done'"
+                [class.late]="s.view.status.kind === 'behind'"
+                [class.neutral]="s.view.status.kind === 'started' || s.view.status.kind === 'imported'"
+                [style.width.%]="s.view.progressPct"
+              ></i>
+            </div>
+          </div>
+          <div class="goal-right">
+            <div
+              class="goal-proj"
               [class.ok]="s.view.status.kind === 'on_plan' || s.view.status.kind === 'ahead' || s.view.status.kind === 'done'"
               [class.late]="s.view.status.kind === 'behind'"
               [class.neutral]="s.view.status.kind === 'started' || s.view.status.kind === 'imported'"
-              [style.width.%]="s.view.progressPct"
-            ></i>
+            >{{ statusChip(s.view.status.kind) }}</div>
           </div>
         </div>
-        <div class="goal-right">
-          <div
-            class="goal-proj"
-            [class.ok]="s.view.status.kind === 'on_plan' || s.view.status.kind === 'ahead' || s.view.status.kind === 'done'"
-            [class.late]="s.view.status.kind === 'behind'"
-            [class.neutral]="s.view.status.kind === 'started' || s.view.status.kind === 'imported'"
-          >{{ statusChip(s.view.status.kind) }}</div>
-        </div>
-      </div>
+      } @else {
+        <!-- Two goal rows in outline: tile, name, sub line, the empty track and the chip. -->
+        @for (i of [0, 1]; track i) {
+          <div class="goal-row goal-row--sk">
+            <app-skeleton width="38px" height="38px" radius="11px" />
+            <div class="goal-mid">
+              <div class="goal-name"><app-skeleton width="45%" height="18px" radius="5px" /></div>
+              <div class="goal-sub"><app-skeleton width="70%" height="15px" radius="4px" /></div>
+              <div class="goal-bar"></div>
+            </div>
+            <div class="goal-right"><app-skeleton width="48px" height="15px" radius="4px" /></div>
+          </div>
+        }
+      }
 
       <button class="add-goal-btn" (click)="addGoal()" type="button">
         <span class="material-symbols-outlined">add_circle</span>Add a goal
@@ -151,7 +175,7 @@
         <span class="material-symbols-outlined">lock</span>Plus
       </span>
     </p>
-    <div class="zone-card">
+    <div class="zone-card" [attr.aria-busy]="loaded() ? null : 'true'">
       <div class="rb-row">
         <div class="rb-icon">
           <span class="material-symbols-outlined">balance</span>
@@ -162,22 +186,29 @@
         </div>
       </div>
 
-      <div class="rb-chips" [class.locked]="isPiggy">
-        <button
-          *ngFor="let s of rebalanceSchedules"
-          [class.on]="selectedSchedule === s"
-          (click)="selectSchedule(s)"
-          type="button"
-        >{{ s }}</button>
-      </div>
+      @if (loaded()) {
+        <div class="rb-chips" [class.locked]="isPiggy">
+          <button
+            *ngFor="let s of rebalanceSchedules"
+            [class.on]="selectedSchedule === s"
+            (click)="selectSchedule(s)"
+            type="button"
+          >{{ s }}</button>
+        </div>
 
-      <div class="rb-next" *ngIf="isPlusOrPro">
-        <span class="material-symbols-outlined">event_available</span>
-        Next rebalance: {{ nextRebalanceDate }}
-      </div>
-      <div class="rb-default-note" *ngIf="isPiggy">
-        On Piggy, FRED uses the default quarterly schedule. Upgrade to choose your own.
-      </div>
+        <div class="rb-next" *ngIf="isPlusOrPro">
+          <span class="material-symbols-outlined">event_available</span>
+          Next rebalance: {{ nextRebalanceDate }}
+        </div>
+        <div class="rb-default-note" *ngIf="isPiggy">
+          On Piggy, FRED uses the default quarterly schedule. Upgrade to choose your own.
+        </div>
+      } @else {
+        <!-- The chip track, then the Piggy note's two lines: Piggy is the tier until progress says
+             otherwise, and its note is what most users see under the chips. -->
+        <app-skeleton class="rb-chips-sk" height="40px" radius="12px" />
+        <app-skeleton class="rb-note-sk" [lines]="2" height="12px" radius="4px" />
+      }
     </div>
 
     <!-- ── Referrals ─────────────────────────────────────────────────────────── -->

@@ -17,7 +17,7 @@
 </ion-header>
 
 <ion-content class="shell-content" appKeyboardAvoid>
-  <div class="shell-inner gp-inner">
+  <div class="shell-inner gp-inner" [attr.aria-busy]="ready() ? null : 'true'">
     @if (ready()) {
       @if (view(); as v) {
 
@@ -204,6 +204,37 @@
         }
 
       }
+    } @else {
+      <!-- The plan's shapes while the goal loads: hero, the Saved so far tile, the rate card, two note
+           lines and the CTA, each where the real one lands so nothing moves when data arrives. -->
+      <section class="gp-sk-hero">
+        <app-skeleton width="84px" height="10px" radius="5px" />
+        <app-skeleton class="gp-sk-amount" width="150px" height="42px" radius="10px" />
+        <app-skeleton class="gp-sk-meta" width="170px" height="14px" radius="6px" />
+        <app-skeleton class="gp-sk-bar" height="6px" radius="pill" />
+        <div class="gp-sk-band">
+          <app-skeleton width="120px" height="10px" radius="5px" />
+          <app-skeleton width="64px" height="17px" radius="7px" />
+        </div>
+      </section>
+
+      <div class="fd-tiles">
+        <div class="fd-tile">
+          <app-skeleton width="72px" height="10px" radius="5px" />
+          <app-skeleton class="gp-sk-value" width="110px" height="25px" radius="7px" />
+        </div>
+      </div>
+
+      <p class="fd-zone gp-zone-gap">Assumptions</p>
+      <div class="fd-assume gp-assume-ro">
+        <div class="fd-assume-name">
+          <app-skeleton width="120px" height="14px" radius="6px" />
+          <app-skeleton class="gp-sk-sub" width="150px" height="11px" radius="5px" />
+        </div>
+        <app-skeleton width="44px" height="16px" radius="6px" />
+      </div>
+
+      <app-skeleton class="gp-sk-lines" [lines]="2" height="14px" radius="6px" />
     }
   </div>
 </ion-content>

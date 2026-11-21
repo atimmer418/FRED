@@ -11,23 +11,65 @@
 </ion-header>
 
 <ion-content class="shell-content">
-  <div class="shell-inner">
+  <!-- The sheet is the loading region: its cards are the skeleton or the real thing, never both,
+       and the skeleton reuses the cards' own classes so the swap does not move anything. -->
+  <div class="shell-inner" [attr.aria-busy]="loading ? 'true' : null">
+    @if (loading) {
 
-    <!-- Loading -->
-    <div *ngIf="loading" class="loading-state">
-      <ion-spinner name="crescent" class="loading-spinner"></ion-spinner>
-      <span class="loading-text">Loading documents...</span>
+    <!-- Tax Documents: header, subtitle, two form rows -->
+    <div class="section-card">
+      <div class="card-header-row">
+        <app-skeleton width="18px" height="18px" radius="5px" />
+        <app-skeleton width="124px" height="16px" />
+      </div>
+      <app-skeleton class="sk-subtitle" [lines]="3" height="13px" />
+
+      <div class="doc-list">
+        @for (i of [0, 1]; track i) {
+          <div class="doc-row">
+            <app-skeleton width="22px" height="22px" radius="6px" />
+            <div class="doc-text sk-col">
+              <app-skeleton width="48px" height="16px" />
+              <app-skeleton width="80px" height="13px" />
+            </div>
+            <app-skeleton height="18px" radius="circle" />
+          </div>
+        }
+      </div>
     </div>
 
+    <!-- Account Statements: header, subtitle, two year rows -->
+    <div class="section-card">
+      <div class="card-header-row">
+        <app-skeleton width="18px" height="18px" radius="5px" />
+        <app-skeleton width="156px" height="16px" />
+      </div>
+      <app-skeleton class="sk-subtitle" [lines]="3" height="13px" />
+
+      <div class="doc-list">
+        @for (i of [0, 1]; track i) {
+          <div class="year-group">
+            <div class="year-header">
+              <app-skeleton width="18px" height="18px" radius="5px" />
+              <app-skeleton width="48px" height="18px" />
+              <app-skeleton class="sk-right" height="20px" radius="circle" />
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    } @else {
+
     <!-- Empty (no documents at all) -->
-    <div *ngIf="!loading && taxFormsByYear.length === 0 && statementYears.length === 0" class="empty-state">
+    <div *ngIf="taxFormsByYear.length === 0 && statementYears.length === 0" class="empty-state">
       <span class="material-symbols-outlined empty-icon">description</span>
       <h3 class="empty-title">No Documents Yet</h3>
       <p class="empty-desc">Tax forms and account statements will appear here when available.</p>
     </div>
 
     <!-- Tax Documents -->
-    <div *ngIf="!loading" class="section-card">
+    <div class="section-card">
       <div class="card-header-row">
         <span class="material-symbols-outlined card-icon">receipt_long</span>
         <h3 class="card-title">Tax Documents</h3>
@@ -52,7 +94,7 @@
     </div>
 
     <!-- Account Statements -->
-    <div *ngIf="!loading" class="section-card">
+    <div class="section-card">
       <div class="card-header-row">
         <span class="material-symbols-outlined card-icon">folder_open</span>
         <h3 class="card-title">Account Statements</h3>
@@ -83,5 +125,6 @@
       </div>
     </div>
 
+    }
   </div>
 </ion-content>

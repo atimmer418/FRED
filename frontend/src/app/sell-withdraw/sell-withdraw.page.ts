@@ -44,6 +44,7 @@ import { PasskeyPromptComponent } from '../components/passkey-prompt/passkey-pro
 import { presentConfirmSheet } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
 import { AmountTrayHost, TRAY_INSIDE_SELECTOR } from '../components/plan-amount-tray/amount-tray-host';
 import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
+import { SkeletonComponent } from '../components/skeleton/skeleton.component';
 import { buildAmountScale } from '../utils/plan-amount-scale';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
@@ -68,7 +69,8 @@ const WITHDRAW_FINE = 5;
     IonRange,
     IonToggle,
     IonPopover,
-    AmountTraySlotComponent
+    AmountTraySlotComponent,
+    SkeletonComponent
   ]
 })
 export class SellWithdrawPage implements OnInit, OnDestroy {

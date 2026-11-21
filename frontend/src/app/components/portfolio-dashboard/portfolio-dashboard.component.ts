@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PortfolioService, PortfolioDashboardData, Position, PerformanceData, PortfolioHistory } from '../../services/portfolio.service';
 import { PortfolioStoreService, PortfolioBundle, PortfolioSnapshot } from '../../services/portfolio-store.service';
-import { LoadingController, ModalController } from '@ionic/angular/standalone';
+import { ModalController } from '@ionic/angular/standalone';
 import { ToastService } from '../../services/toast.service';
 import { AuthService, UserProgress } from '../../services/auth.service';
 import { MfuPresenterService } from '../../services/mfu-presenter.service';
@@ -13,10 +13,10 @@ import { TabBarScrollDirective } from '../../directives/tab-bar-scroll.directive
 import { PortfolioChartComponent, PortfolioDataPoint } from '../portfolio-chart/portfolio-chart.component';
 import { PositionDetailSheetComponent } from '../position-detail-sheet/position-detail-sheet.component';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
+import { SkeletonComponent } from '../skeleton/skeleton.component';
 import {
   IonHeader, IonToolbar, IonTitle, IonButton, IonIcon, IonContent,
-  IonRefresher, IonRefresherContent,
-  IonSpinner
+  IonRefresher, IonRefresherContent
 } from "@ionic/angular/standalone";
 
 @Component({
@@ -30,7 +30,7 @@ import {
     PortfolioChartComponent,
     IonHeader, IonToolbar, IonTitle, IonButton, IonIcon, IonContent,
     IonRefresher, IonRefresherContent,
-    IonSpinner,
+    SkeletonComponent,
     TabBarScrollDirective
   ]
 })
@@ -73,7 +73,6 @@ export class PortfolioDashboardComponent implements OnInit, OnDestroy {
   constructor(
     private portfolioService: PortfolioService,
     private portfolioStore: PortfolioStoreService,
-    private loadingController: LoadingController,
     private toastService: ToastService,
     private authService: AuthService,
     private mfuPresenter: MfuPresenterService,

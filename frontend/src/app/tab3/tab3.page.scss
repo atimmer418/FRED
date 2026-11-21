@@ -170,6 +170,13 @@ ion-header {
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 100%;
+
+      // The loading bar: 18px plus 4px above and below fills the 19px number's line box, so the
+      // tile keeps its height when the number lands. Dimmed, since full #eef1f6 glares on the glass.
+      app-skeleton {
+        margin: 4px auto;
+        opacity: .7;
+      }
     }
   }
 

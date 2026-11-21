@@ -818,3 +818,13 @@ $grad-z:    #0e3a96;
     &:active { opacity: 0.85; }
   }
 }
+
+// ─── Loading skeletons ─────────────────────────────────────────────────────────
+// Each placeholder takes the real element's margins, so the swap to data moves nothing.
+.goal-row--sk {
+  cursor: default;
+  pointer-events: none;
+}
+
+.rb-chips-sk { margin-top: 13px; }
+.rb-note-sk  { margin-top: 11px; }

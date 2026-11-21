@@ -44,11 +44,30 @@ describe('ToastService', () => {
       expect(received[0].duration).toBe(ERROR_TOAST_DURATION_MS);
     });
 
+    it('keeps an error on screen for ten seconds', () => {
+      service.showToast('Nope.', 'danger');
+
+      expect(received[0].duration).toBe(10000);
+    });
+
     it('keeps a custom duration', () => {
-      service.showToast('Quick.', 'danger', 2000);
-      service.showToast('Slow.', 'success', 5000);
+      service.showToast('Quick.', 'success', 2000);
+      service.showToast('Slow.', 'warning', 5000);
 
       expect(received.map(i => i.duration)).toEqual([2000, 5000]);
+    });
+
+    it('lifts a short custom duration on a danger toast to the ten-second floor', () => {
+      service.showToast('Document is empty', 'danger', 2000);
+      service.showToast('Failed to update bank account.', 'danger', 5000);
+
+      expect(received.map(i => i.duration)).toEqual([ERROR_TOAST_DURATION_MS, ERROR_TOAST_DURATION_MS]);
+    });
+
+    it('keeps a custom duration on a danger toast that is longer than the floor', () => {
+      service.showToast('Long one.', 'danger', 15000);
+
+      expect(received[0].duration).toBe(15000);
     });
 
     it('emits one item per call, in order', () => {
@@ -67,6 +86,13 @@ describe('ToastService', () => {
       service.show({ severity: 'warning', title: 'Heads up', message: 'Check this.', duration: 1500 });
 
       expect(received).toEqual([{ severity: 'warning', title: 'Heads up', message: 'Check this.', duration: 1500 }]);
+    });
+
+    it('holds an error at the ten-second floor when a shorter duration is passed', () => {
+      service.show({ severity: 'error', message: 'Broke.', duration: 1500 });
+      service.show({ severity: 'warning', message: 'Careful.', duration: 1500 });
+
+      expect(received.map(i => i.duration)).toEqual([ERROR_TOAST_DURATION_MS, 1500]);
     });
 
     it('fills in the default duration by severity', () => {

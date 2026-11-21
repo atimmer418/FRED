@@ -67,6 +67,20 @@ describe('FredActionSheetComponent', () => {
     expect(cards[0].classList).toContain('fs-list--danger');
   });
 
+  it('draws the row focus ring inside the row so the card overflow clip cannot hide it', () => {
+    create();
+    // Karma has no layout, so read the compiled component stylesheet rather than a rendered ring.
+    const rules: CSSStyleRule[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (rule instanceof CSSStyleRule) rules.push(rule);
+      }
+    }
+    const focusRule = rules.find(r => r.selectorText.includes('.fs-row') && r.selectorText.includes(':focus-visible'));
+    expect(focusRule).withContext('.fs-row:focus-visible rule').toBeDefined();
+    expect(focusRule!.style.outlineOffset).toBe('-2px');
+  });
+
   it('dismisses with role action and the row id on tap', () => {
     create();
     rows(fixture.nativeElement)[1].click();
@@ -106,6 +120,54 @@ describe('FredActionSheetComponent', () => {
     const focus = spyOn(rows(el)[0], 'focus');
     fixture.componentInstance.ionViewDidEnter();
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  describe('menu keyboard contract', () => {
+    let items: HTMLButtonElement[];
+    let focused: jasmine.Spy[];
+    let activeElement: jasmine.Spy;
+
+    beforeEach(() => {
+      create();
+      items = rows(fixture.nativeElement);
+      focused = items.map(r => spyOn(r, 'focus'));
+      activeElement = spyOnProperty(document, 'activeElement', 'get');
+    });
+
+    /** Fires the key from the given row, as activeElement cannot be set without layout. */
+    function press(key: string, from: number): KeyboardEvent {
+      activeElement.and.returnValue(items[from]);
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      items[from].dispatchEvent(event);
+      return event;
+    }
+
+    it('ArrowDown moves focus to the next row and wraps past the last', () => {
+      expect(press('ArrowDown', 0).defaultPrevented).toBeTrue();
+      expect(focused[1]).toHaveBeenCalledWith({ preventScroll: true });
+      // The destructive card is part of the same menu, so the walk crosses into it and back around.
+      expect(press('ArrowDown', 2).defaultPrevented).toBeTrue();
+      expect(focused[0]).toHaveBeenCalledWith({ preventScroll: true });
+    });
+
+    it('ArrowUp moves focus to the previous row and wraps before the first', () => {
+      press('ArrowUp', 0);
+      expect(focused[2]).toHaveBeenCalledWith({ preventScroll: true });
+      expect(focused[0]).not.toHaveBeenCalled();
+    });
+
+    it('Home and End jump to the first and last rows', () => {
+      press('End', 0);
+      expect(focused[2]).toHaveBeenCalledWith({ preventScroll: true });
+      press('Home', 2);
+      expect(focused[0]).toHaveBeenCalledWith({ preventScroll: true });
+    });
+
+    it('leaves other keys alone so Tab and Enter keep their browser behaviour', () => {
+      expect(press('Tab', 0).defaultPrevented).toBeFalse();
+      expect(press('Enter', 0).defaultPrevented).toBeFalse();
+      for (const spy of focused) expect(spy).not.toHaveBeenCalled();
+    });
   });
 });
 

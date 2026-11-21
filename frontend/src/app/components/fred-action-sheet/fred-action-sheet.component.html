@@ -13,7 +13,7 @@
     </div>
   </div>
 
-  <div role="menu" [attr.aria-labelledby]="titleId">
+  <div role="menu" [attr.aria-labelledby]="titleId" (keydown)="onMenuKeydown($event)">
     @if (primaryActions.length) {
       <div class="fs-list" role="group">
         @for (action of primaryActions; track action.id) {

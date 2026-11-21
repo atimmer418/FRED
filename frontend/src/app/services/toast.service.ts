@@ -11,7 +11,10 @@ export interface ToastRequest {
   severity: ToastSeverity;
   message: string;
   title?: string;
-  /** Milliseconds on screen. Defaults to TOAST_DURATION_MS, or ERROR_TOAST_DURATION_MS for an error. */
+  /**
+   * Milliseconds on screen. Defaults to TOAST_DURATION_MS, or ERROR_TOAST_DURATION_MS for an
+   * error. An error never shows shorter than ERROR_TOAST_DURATION_MS, whatever is passed.
+   */
   duration?: number;
 }
 
@@ -24,7 +27,8 @@ export interface ToastItem {
 }
 
 export const TOAST_DURATION_MS = 3000;
-export const ERROR_TOAST_DURATION_MS = 4000;
+/** Errors stay up ten seconds: the user has to read what went wrong and decide what to do next. */
+export const ERROR_TOAST_DURATION_MS = 10000;
 
 /**
  * The Ionic colour names call sites have always passed to showToast, mapped
@@ -60,9 +64,9 @@ export class ToastService {
   readonly items$: Observable<ToastItem> = this.items.asObservable();
 
   /**
-   * Legacy entry point: an Ionic colour name stands in for the severity. With
-   * no duration the severity's default applies, so a 'danger' toast stays up
-   * the extra second an error gets.
+   * Legacy entry point: an Ionic colour name stands in for the severity. A
+   * 'danger' toast stays up the full ten seconds an error gets, even when a
+   * call site passes something shorter.
    */
   showToast(message: string, color: string = 'primary', duration?: number): void {
     this.show({ severity: severityForColor(color), message, duration });
@@ -70,8 +74,10 @@ export class ToastService {
 
   show(request: ToastRequest): void {
     const { severity, message, title } = request;
-    const duration = request.duration
-      ?? (severity === 'error' ? ERROR_TOAST_DURATION_MS : TOAST_DURATION_MS);
+    const duration = severity === 'error'
+      // Errors hold the ten-second floor: a short duration from an older call site would cut them off.
+      ? Math.max(request.duration ?? 0, ERROR_TOAST_DURATION_MS)
+      : request.duration ?? TOAST_DURATION_MS;
     this.items.next({ severity, message, title, duration });
   }
 }

@@ -31,8 +31,11 @@ export interface FredConfirmSheetOptions {
 /** The dismiss role when the user confirmed. */
 export const FRED_CONFIRM_SHEET_ROLE = 'confirm';
 
-/** The events the sheet drag gesture starts from; swallowed at the host while busy. */
-const GESTURE_EVENTS = ['touchstart', 'touchmove', 'pointerdown', 'pointermove'] as const;
+/**
+ * The events the sheet drag gesture starts from; swallowed at the host while busy. Ionic's gesture
+ * arms on mousedown as well as touchstart, so the mouse pair keeps a desktop drag suspended too.
+ */
+const GESTURE_EVENTS = ['touchstart', 'touchmove', 'pointerdown', 'pointermove', 'mousedown', 'mousemove'] as const;
 
 /**
  * The FRED confirm sheet: title, body, one confirm button (red or black) and a cancel link.

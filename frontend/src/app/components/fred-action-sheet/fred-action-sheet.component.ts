@@ -76,8 +76,28 @@ export class FredActionSheetComponent implements OnInit, ViewDidEnter {
 
   /** Menu semantics: the first row takes focus once the sheet has landed. */
   ionViewDidEnter(): void {
-    const first = this.host.nativeElement.querySelector<HTMLElement>('[role="menuitem"]');
-    first?.focus({ preventScroll: true });
+    this.menuItems()[0]?.focus({ preventScroll: true });
+  }
+
+  /** The rest of the ARIA menu contract: arrows walk the rows and wrap, Home and End jump. */
+  onMenuKeydown(event: KeyboardEvent): void {
+    const items = this.menuItems();
+    if (!items.length) return;
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    let next: number;
+    switch (event.key) {
+      case 'ArrowDown': next = (current + 1) % items.length; break;
+      case 'ArrowUp': next = (current - 1 + items.length) % items.length; break;
+      case 'Home': next = 0; break;
+      case 'End': next = items.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    items[next].focus({ preventScroll: true });
+  }
+
+  private menuItems(): HTMLElement[] {
+    return Array.from(this.host.nativeElement.querySelectorAll<HTMLElement>('[role="menuitem"]'));
   }
 
   pick(action: FredActionSheetAction): void {

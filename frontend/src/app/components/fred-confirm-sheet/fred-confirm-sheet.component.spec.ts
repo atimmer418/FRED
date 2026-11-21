@@ -145,23 +145,26 @@ describe('FredConfirmSheetComponent', () => {
     expect(modal.dismiss).not.toHaveBeenCalled();
   });
 
-  it('swallows drag-gesture events at the host only while busy', () => {
-    const work = deferred();
-    create({ onConfirm: () => work.promise });
-    const reached = jasmine.createSpy('reached');
-    document.body.addEventListener('pointerdown', reached);
-    try {
-      const target = fixture.nativeElement.querySelector('h3') as HTMLElement;
-      target.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-      expect(reached).toHaveBeenCalledTimes(1);
+  // Ionic's gesture arms on touchstart and mousedown, so a mouse drag must be held back as well.
+  for (const type of ['pointerdown', 'touchstart', 'mousedown', 'mousemove']) {
+    it(`swallows ${type} at the host only while busy`, () => {
+      const work = deferred();
+      create({ onConfirm: () => work.promise });
+      const reached = jasmine.createSpy('reached');
+      document.body.addEventListener(type, reached);
+      try {
+        const target = fixture.nativeElement.querySelector('h3') as HTMLElement;
+        target.dispatchEvent(new Event(type, { bubbles: true }));
+        expect(reached).toHaveBeenCalledTimes(1);
 
-      confirmBtn().click();
-      target.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-      expect(reached).toHaveBeenCalledTimes(1);
-    } finally {
-      document.body.removeEventListener('pointerdown', reached);
-    }
-  });
+        confirmBtn().click();
+        target.dispatchEvent(new Event(type, { bubbles: true }));
+        expect(reached).toHaveBeenCalledTimes(1);
+      } finally {
+        document.body.removeEventListener(type, reached);
+      }
+    });
+  }
 });
 
 describe('presentConfirmSheet', () => {

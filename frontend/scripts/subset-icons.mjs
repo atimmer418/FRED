@@ -42,6 +42,9 @@ const DYNAMIC_ICONS = [
   'cake', 'travel_explore', 'do_not_disturb_on', 'check_circle',
   // goals v3.1 polish: plan page "What the monthly covers" card
   'checklist',
+  // FRED sheets: icons passed from TS to FredConfirmSheet (chip) and FredActionSheet (rows).
+  // Templates happen to use these too today, but the sheets must not depend on that.
+  'pause_circle', 'workspace_premium', 'warning', 'edit', 'delete',
 ];
 
 // Material Symbols renamed some legacy icon glyphs. The ligature text (used in templates)

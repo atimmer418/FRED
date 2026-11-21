@@ -86,6 +86,9 @@
 
   &:first-child { border-top: 0; }
   &:active { background: #eef1f6; }
+  // The card clips overflow to round the :active fill, which would also clip the global
+  // outside-the-box focus ring. Draw it inside the row so keyboard users can see it.
+  &:focus-visible { outline-offset: -2px; }
 }
 
 .fs-row-icon {

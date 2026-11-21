@@ -8,6 +8,12 @@ name: verify
 on:
   pull_request:
     branches: [develop]
+  # Direct pushes to develop are verified too, so work that lands without a PR still gets a
+  # result. The design-fidelity and auto-merge steps below stay pull-request only.
+  push:
+    branches: [develop]
+  # Manual run from the Actions tab or `gh workflow run verify`.
+  workflow_dispatch:
 
 # The final step squash-merges routine PRs; verification steps only need read.
 permissions:

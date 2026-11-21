@@ -1,4 +1,6 @@
 <div class="tray-in">
+  <!-- A host's optional header inside the card, above the band (the date sheet's "YEAR" caption and live year). Empty for most. -->
+  <div class="tray-head"><ng-content select="[trayHead]"></ng-content></div>
   <div class="tray-row">
     <!-- The 44px hit band; the 6px track and the thumb sit inside it. -->
     <div
@@ -32,7 +34,7 @@
     <button
       type="button"
       class="nudge"
-      aria-label="Less"
+      [attr.aria-label]="lessLabel()"
       [disabled]="atFloor()"
       (click)="onNudgeClick(-1)"
       (touchstart)="onNudgeTouchStart($event)"
@@ -45,7 +47,7 @@
     <button
       type="button"
       class="nudge"
-      aria-label="More"
+      [attr.aria-label]="moreLabel()"
       [disabled]="atCap()"
       (click)="onNudgeClick(1)"
       (touchstart)="onNudgeTouchStart($event)"

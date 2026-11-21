@@ -35,6 +35,14 @@
   padding: 8px 10px 6px 4px;
 }
 
+// The projected header: a plain block with no vertical padding or margin, so an empty slot adds no
+// height. With the card's own 4px, its text starts 14px in: 4px short of where the track starts,
+// about where the mockup draws the year rail's caption. The projected element lays itself out.
+.tray-head {
+  display: block;
+  padding: 0 4px 0 10px;
+}
+
 .tray-row {
   display: flex;
   align-items: center;
@@ -43,12 +51,15 @@
 
 // ── Slider ───────────────────────────────────────────────────────────────────
 // Buttons sit to the RIGHT of the track so neither lands in Ionic's 50px swipe-back edge.
+// `touch-action: none`: a finger on the band is the slider's, up-and-down drift included. The band
+// is a thin strip, so the page loses no scrolling it needs; pan-y let a drifting drag turn into a
+// page scroll that cancelled the pointer.
 .ps {
   position: relative;
   flex: 1;
   min-width: 0;
   height: 44px;
-  touch-action: pan-y;
+  touch-action: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   user-select: none;

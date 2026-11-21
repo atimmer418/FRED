@@ -28,15 +28,23 @@ const SWIPE_BACK_EDGE_PX = 50;
 /** Hold-to-repeat: a tap repeats after this long, then at 8 per second. */
 export const HOLD_DELAY_MS = 400;
 export const HOLD_INTERVAL_MS = 125;
-/** The gears: single steps, then x5 after 1.6s of holding, x25 after 3s. Checked top down. */
-export const HOLD_GEARS: ReadonlyArray<{ afterMs: number; steps: number }> = [
+/** One gear of a hold: how many steps each repeat moves once the button has been held `afterMs`. */
+export interface HoldGear {
+  afterMs: number;
+  steps: number;
+}
+/**
+ * The gears: single steps, then x5 after 1.6s of holding, x25 after 3s. Checked top down, so a
+ * list runs from the longest hold to the `afterMs: 0` gear that a fresh hold starts in.
+ */
+export const HOLD_GEARS: ReadonlyArray<HoldGear> = [
   { afterMs: 3000, steps: 25 },
   { afterMs: 1600, steps: 5 },
   { afterMs: 0, steps: 1 },
 ];
 
-/** What the value is: dollars ("$5,000") or a percentage ("35%"). */
-export type AmountUnit = 'dollars' | 'percent';
+/** What the value is: dollars ("$5,000"), a percentage ("35%") or a year ("1991"). */
+export type AmountUnit = 'dollars' | 'percent' | 'year';
 
 /**
  * The Freedom Plan's two tiles, which pass no `label` or `valueSuffix` of their own: their spoken
@@ -59,8 +67,15 @@ export function formatPercent(value: number): string {
   return Number(value.toFixed(2)) + '%';
 }
 
+/** "1991": a plain integer, no separators (a year is not a quantity). */
+export function formatYear(value: number): string {
+  return String(Math.round(value));
+}
+
 export function formatValue(value: number, unit: AmountUnit = 'dollars'): string {
-  return unit === 'percent' ? formatPercent(value) : formatAmount(value);
+  if (unit === 'percent') return formatPercent(value);
+  if (unit === 'year') return formatYear(value);
+  return formatAmount(value);
 }
 
 /** "± $250": what the active field's label reads while the finger is down, for the step in force at `value`. */
@@ -79,9 +94,14 @@ export function stepLabel(scale: PlanAmountScale, value: number = scale.min, uni
  * step when it has one. Colours come from `--tray-*` custom properties on any ancestor (see the
  * SCSS header), with the white-page values as defaults.
  *
- * Pointer events with capture on the hit band; `touch-action: pan-y` leaves vertical page scroll
- * to the page. The thumb follows the finger while dragging and settles onto the detent on release;
- * a detent commits only once the finger is 65% of the way to it.
+ * Pointer events with capture on the hit band. The band has `touch-action: none`: it is a thin
+ * strip, so the page loses no scrolling it needs, and a finger that drifts up or down mid-drag
+ * stays the slider's instead of handing the pointer to a page scroll (which cancelled the drag and
+ * moved the page under the thumb). iOS does not always honour touch-action once a drag is under
+ * way, so while a pointer is down a non-passive touchmove listener on the document holds the page
+ * still too; it is removed on release, cancel, a field switch and destroy. The thumb follows the
+ * finger while dragging and settles onto the detent on release; a detent commits only once the
+ * finger is 65% of the way to it.
  */
 @Component({
   selector: 'app-plan-amount-tray',
@@ -99,6 +119,17 @@ export class PlanAmountTrayComponent {
   readonly label = input<string>();
   /** Spoken after the value ("/mo"). */
   readonly valueSuffix = input<string>();
+  /** The two nudge buttons' spoken names. The date sheet's year rail passes "Earlier year" / "Later year". */
+  readonly lessLabel = input<string>('Less');
+  readonly moreLabel = input<string>('More');
+  /** The hold-to-repeat gears, longest hold first, ending in the `afterMs: 0` gear. The date sheet's year rail runs x1 / x5 / x10. */
+  readonly gears = input<ReadonlyArray<HoldGear>>(HOLD_GEARS);
+  /**
+   * Whether a touch on bare track inside Ionic's swipe-back edge is left to the page (see
+   * SWIPE_BACK_EDGE_PX). Inside a modal there is no swipe-back, and the guard would only swallow
+   * taps on the first few pixels of track, so a sheet passes false.
+   */
+  readonly edgeGuard = input<boolean>(true);
 
   readonly valueChange = output<number>();
   readonly dragging = output<boolean>();
@@ -106,7 +137,10 @@ export class PlanAmountTrayComponent {
   @ViewChild('band', { static: true }) private band!: ElementRef<HTMLElement>;
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.stopHold());
+    inject(DestroyRef).onDestroy(() => {
+      this.stopHold();
+      this.unlockScroll();
+    });
   }
 
   readonly isDragging = signal(false);
@@ -170,11 +204,11 @@ export class PlanAmountTrayComponent {
       // A synthetic pointer has nothing to capture; pointermove still reaches the band.
     }
     event.preventDefault();
+    this.lockScroll();
     this.isDragging.set(true);
     this.dragging.emit(true);
-    // Nothing commits yet: a vertical page scroll can start on the band, and the browser only
-    // cancels the pointer once it has decided. The first horizontal move arms the drag; a release
-    // with no move is a tap.
+    // Nothing commits yet: the first horizontal move arms the drag, and a release with no move is
+    // a tap. A finger drifting straight up or down moves nothing until it turns sideways.
     this.pendingDown = { x: event.clientX, y: event.clientY };
   }
 
@@ -197,9 +231,33 @@ export class PlanAmountTrayComponent {
     if (this.pendingDown && event.type === 'pointerup') this.armDrag(event.clientX);
     this.pendingDown = null;
     this.activePointer = null;
+    this.unlockScroll();
     this.fingerPos.set(null);
     this.isDragging.set(false);
     this.dragging.emit(false);
+  }
+
+  /**
+   * The page must not scroll while a finger is down on the slider. The band's `touch-action: none`
+   * asks for that, but iOS can still start a scroll from a touch that began on the band, so the
+   * document refuses every touchmove for as long as the pointer is held. Non-passive on purpose:
+   * a passive listener cannot prevent anything.
+   */
+  private readonly scrollLock = (event: TouchEvent): void => {
+    event.preventDefault();
+  };
+  private scrollLocked = false;
+
+  private lockScroll(): void {
+    if (this.scrollLocked) return;
+    this.scrollLocked = true;
+    document.addEventListener('touchmove', this.scrollLock, { passive: false });
+  }
+
+  private unlockScroll(): void {
+    if (!this.scrollLocked) return;
+    this.scrollLocked = false;
+    document.removeEventListener('touchmove', this.scrollLock);
   }
 
   /**
@@ -231,6 +289,7 @@ export class PlanAmountTrayComponent {
     }
     this.pendingDown = null;
     this.activePointer = null;
+    this.unlockScroll();
     this.fingerPos.set(null);
     this.isDragging.set(false);
     this.dragging.emit(false);
@@ -264,7 +323,7 @@ export class PlanAmountTrayComponent {
 
   /** True for a touch inside the swipe-back edge that misses the thumb: see SWIPE_BACK_EDGE_PX. */
   private leftToPage(clientX: number): boolean {
-    if (clientX > SWIPE_BACK_EDGE_PX) return false;
+    if (!this.edgeGuard() || clientX > SWIPE_BACK_EDGE_PX) return false;
     const rect = this.band.nativeElement.getBoundingClientRect();
     const span = Math.max(0, rect.width - THUMB_INSET_PX * 2);
     const thumbX = rect.left + THUMB_INSET_PX + span * positionOf(this.scale(), this.value());
@@ -312,7 +371,8 @@ export class PlanAmountTrayComponent {
         // This tick fires one interval after the last: the time held when it fires counts it.
         ticks++;
         const held = HOLD_DELAY_MS + ticks * HOLD_INTERVAL_MS;
-        const steps = HOLD_GEARS.find(g => held >= g.afterMs)!.steps;
+        // A gear list without an `afterMs: 0` entry still single-steps until its first gear engages.
+        const steps = this.gears().find(g => held >= g.afterMs)?.steps ?? 1;
         if (steps !== gear) { gear = steps; void tickHaptic(); }
         this.holdFired = true;
         this.nudgeBy(direction, steps);

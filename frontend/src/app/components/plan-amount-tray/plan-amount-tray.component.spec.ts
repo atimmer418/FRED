@@ -11,10 +11,13 @@ import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testin
 import {
   AmountUnit,
   HOLD_DELAY_MS,
+  HOLD_GEARS,
   HOLD_INTERVAL_MS,
+  HoldGear,
   PlanAmountTrayComponent,
   formatAmount,
   formatValue,
+  formatYear,
   stepLabel,
 } from './plan-amount-tray.component';
 import { PLAN_AMOUNT_SCALES, PiecewiseScale, PlanAmountScale, PlanField } from '../../utils/plan-amount-scale';
@@ -52,6 +55,46 @@ class HostComponent {
   onChange(v: number): void {
     this.emitted.push(v);
     this.value.set(v);
+  }
+}
+
+/** The date sheet's year rail: a uniform year scale, x1 / x5 / x10 gears, no edge guard, and a header projected into the card. */
+@Component({
+  standalone: true,
+  imports: [PlanAmountTrayComponent],
+  template: `
+    <div style="width: 328px">
+      <app-plan-amount-tray
+        field="year"
+        label="Year of birth"
+        unit="year"
+        [value]="year()"
+        [scale]="scale"
+        [gears]="gears"
+        [edgeGuard]="edgeGuard()"
+        (valueChange)="onChange($event)"
+        (dragging)="drags.push($event)"
+      >
+        <div trayHead class="rail-head"><span class="cap">Year</span><span class="live">{{ year() }}</span></div>
+      </app-plan-amount-tray>
+    </div>
+  `,
+})
+class YearHostComponent {
+  readonly year = signal(1991);
+  readonly scale: PlanAmountScale = { min: 1916, max: 2026, step: 1, fine: 1 };
+  readonly gears: ReadonlyArray<HoldGear> = [
+    { afterMs: 3000, steps: 10 },
+    { afterMs: 1600, steps: 5 },
+    { afterMs: 0, steps: 1 },
+  ];
+  readonly edgeGuard = signal(false);
+  emitted: number[] = [];
+  drags: boolean[] = [];
+
+  onChange(v: number): void {
+    this.emitted.push(v);
+    this.year.set(v);
   }
 }
 
@@ -106,8 +149,10 @@ describe('PlanAmountTrayComponent', () => {
     expect(band().getAttribute('aria-valuetext')).toBe('$5,000/mo');
     const ends = Array.from(fixture.nativeElement.querySelectorAll('.ps-ends span')) as HTMLElement[];
     expect(ends.map(e => e.textContent)).toEqual(['$500', '$30,000']);
+    expect(minus().getAttribute('aria-label')).toBe('Less');
+    expect(plus().getAttribute('aria-label')).toBe('More');
     expect(getComputedStyle(band()).height).toBe('44px');
-    expect(getComputedStyle(band()).touchAction).toBe('pan-y');
+    expect(getComputedStyle(band()).touchAction).toBe('none');
   });
 
   it('draws an off-grid seed exactly, at its interpolated position, and a value over the cap at the right end', () => {
@@ -147,16 +192,83 @@ describe('PlanAmountTrayComponent', () => {
     expect(host.drags).toEqual([true, false]);
   });
 
-  it('a vertical scroll that starts on the band moves nothing', () => {
+  it('a finger drifting straight up or down moves nothing until it turns sideways; a cancel ends it clean', () => {
     setup('invest', 1000);
     pointer('pointerdown', 0.5);
-    pointer('pointermove', 0.5, 7, 12);           // straight down: the page's, not the slider's
+    pointer('pointermove', 0.5, 7, 12);           // straight down: not yet a drag
     pointer('pointermove', 0.502, 7, 30);
     expect(host.emitted).toEqual([]);
     expect(tray().thumbLeft()).toContain('* 0.1)');
-    pointer('pointercancel', 0.502, 7, 40);       // the browser hands the pointer to the scroll
+    pointer('pointercancel', 0.502, 7, 40);
     expect(host.emitted).toEqual([]);
     expect(host.drags).toEqual([true, false]);
+  });
+
+  describe('the scroll lock', () => {
+    /** Whether a touchmove on the document is refused right now (the page cannot scroll). */
+    function pageScrollRefused(): boolean {
+      const move = new TouchEvent('touchmove', { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(move);
+      return move.defaultPrevented;
+    }
+
+    /** The document's touchmove listener calls, since the spies went in. */
+    const touchmoveCalls = (spy: jasmine.Spy) => spy.calls.allArgs().filter(args => args[0] === 'touchmove');
+
+    it('is taken on pointerdown with a non-passive touchmove listener, and released on pointerup', () => {
+      setup('invest', 1000);
+      const add = spyOn(document, 'addEventListener').and.callThrough();
+      const remove = spyOn(document, 'removeEventListener').and.callThrough();
+      expect(pageScrollRefused()).toBeFalse();
+
+      pointer('pointerdown', 0.5);
+      const added = touchmoveCalls(add);
+      expect(added.length).toBe(1);
+      expect(added[0][2]).toEqual(jasmine.objectContaining({ passive: false }));
+      expect(pageScrollRefused()).toBeTrue();
+      pointer('pointermove', 0.6, 7, 25);         // the finger drifts: the page still cannot scroll
+      expect(pageScrollRefused()).toBeTrue();
+
+      pointer('pointerup', 0.6);
+      const removed = touchmoveCalls(remove);
+      expect(removed.length).toBe(1);
+      expect(removed[0][1]).toBe(added[0][1]);
+      expect(pageScrollRefused()).toBeFalse();
+    });
+
+    it('is released on pointercancel', () => {
+      setup('invest', 1000);
+      pointer('pointerdown', 0.5);
+      expect(pageScrollRefused()).toBeTrue();
+      pointer('pointercancel', 0.5);
+      expect(pageScrollRefused()).toBeFalse();
+    });
+
+    it('is released when the field switches mid-drag', () => {
+      setup('invest', 1000);
+      pointer('pointerdown', 0.2);
+      pointer('pointermove', 0.201);
+      expect(pageScrollRefused()).toBeTrue();
+      host.field.set('income');
+      host.value.set(5000);
+      fixture.detectChanges();
+      expect(pageScrollRefused()).toBeFalse();
+    });
+
+    it('is released when the component goes away mid-drag', () => {
+      setup('invest', 1000);
+      pointer('pointerdown', 0.5);
+      expect(pageScrollRefused()).toBeTrue();
+      fixture.destroy();
+      expect(pageScrollRefused()).toBeFalse();
+    });
+
+    it('is not taken for a touch inside the swipe-back edge that is left to the page', () => {
+      setup('invest', 1000);                     // the thumb sits at 10%, clear of x=50
+      band().dispatchEvent(new PointerEvent('pointerdown', { clientX: 50, pointerId: 7, bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      expect(pageScrollRefused()).toBeFalse();
+    });
   });
 
   describe('the swipe-back edge', () => {
@@ -602,6 +714,159 @@ describe('PlanAmountTrayComponent', () => {
     fixture.detectChanges();
     expect(band().getAttribute('aria-label')).toBe('Investing');
     expect(band().getAttribute('aria-valuetext')).toBe('$100/mo');
+  });
+
+  it('formats a year as a plain integer, and the step label path takes the unit without throwing', () => {
+    expect(formatYear(1991)).toBe('1991');
+    expect(formatValue(2026, 'year')).toBe('2026');
+    expect(formatValue(1916, 'year')).not.toContain(',');
+    expect(stepLabel({ min: 1916, max: 2026, step: 1 }, 1991, 'year')).toBe('± 1');
+  });
+
+  it('the header slot is empty and adds no height for a host that projects nothing', () => {
+    setup('invest', 1000);
+    const card = fixture.nativeElement.querySelector('.tray-in') as HTMLElement;
+    const head = card.querySelector('.tray-head') as HTMLElement;
+    expect(head).not.toBeNull();
+    expect(head.children.length).toBe(0);
+    expect(head.textContent!.trim()).toBe('');
+    expect(card.firstElementChild).toBe(head);
+    const style = getComputedStyle(head);
+    expect(style.paddingTop).toBe('0px');
+    expect(style.paddingBottom).toBe('0px');
+    expect(style.marginTop).toBe('0px');
+    expect(style.marginBottom).toBe('0px');
+    expect(style.display).toBe('block');
+  });
+
+  it('the default gears are the x1 / x5 / x25 ladder', () => {
+    expect(HOLD_GEARS.map(g => g.steps)).toEqual([25, 5, 1]);
+    expect(HOLD_GEARS[HOLD_GEARS.length - 1].afterMs).toBe(0);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // The year rail (the date sheet's use): unit 'year', gears, edgeGuard, header slot
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe('as a year rail', () => {
+    let yearFixture: ComponentFixture<YearHostComponent>;
+    let yearHost: YearHostComponent;
+
+    const yearBand = () => yearFixture.nativeElement.querySelector('.ps') as HTMLElement;
+    const yearMinus = () => yearFixture.nativeElement.querySelector('.nudge[aria-label="Less"]') as HTMLButtonElement;
+    const yearPlus = () => yearFixture.nativeElement.querySelector('.nudge[aria-label="More"]') as HTMLButtonElement;
+
+    function yearSetup(year = 1991): void {
+      TestBed.configureTestingModule({ imports: [YearHostComponent] });
+      yearFixture = TestBed.createComponent(YearHostComponent);
+      yearHost = yearFixture.componentInstance;
+      yearHost.year.set(year);
+      yearFixture.detectChanges();
+      spyOn(yearBand(), 'getBoundingClientRect').and.returnValue(BAND_RECT);
+    }
+
+    function yearPointer(type: string, clientX: number, pointerId = 7): void {
+      yearBand().dispatchEvent(new PointerEvent(type, { clientX, clientY: 0, pointerId, bubbles: true, cancelable: true }));
+      yearFixture.detectChanges();
+    }
+
+    it('labels its ends and speaks the year as a plain integer: no $, no %, no separators', () => {
+      yearSetup(1991);
+      const ends = Array.from(yearFixture.nativeElement.querySelectorAll('.ps-ends span')) as HTMLElement[];
+      expect(ends.map(e => e.textContent)).toEqual(['1916', '2026']);
+      expect(yearBand().getAttribute('aria-label')).toBe('Year of birth');
+      expect(yearBand().getAttribute('aria-valuemin')).toBe('1916');
+      expect(yearBand().getAttribute('aria-valuemax')).toBe('2026');
+      expect(yearBand().getAttribute('aria-valuenow')).toBe('1991');
+      expect(yearBand().getAttribute('aria-valuetext')).toBe('1991');
+      const text = (yearFixture.nativeElement.querySelector('.tray-in') as HTMLElement).textContent!;
+      expect(text).not.toContain('$');
+      expect(text).not.toContain('%');
+      expect(text).not.toContain(',');
+    });
+
+    it('steps a year per nudge and per arrow key, and clamps at both ends', () => {
+      yearSetup(2025);
+      yearPlus().click();
+      yearFixture.detectChanges();
+      expect(yearHost.year()).toBe(2026);
+      expect(yearPlus().disabled).toBeTrue();
+      yearMinus().click();
+      yearBand().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true }));
+      expect(yearHost.emitted).toEqual([2026, 2025, 2024]);
+    });
+
+    it('drags a year per detent: the finger at 0 lands on 1916, at 1 on 2026', () => {
+      yearSetup(1991);
+      const r = yearBand().getBoundingClientRect();
+      yearPointer('pointerdown', r.left + 14);
+      yearPointer('pointerup', r.left + 14);
+      expect(yearHost.year()).toBe(1916);
+      yearPointer('pointerdown', r.left + r.width - 14);
+      yearPointer('pointerup', r.left + r.width - 14);
+      expect(yearHost.year()).toBe(2026);
+      expect(yearHost.drags).toEqual([true, false, true, false]);
+    });
+
+    it('runs the gears it is given: x5 after 1.6s and x10 after 3s of holding', fakeAsync(() => {
+      yearSetup(1916);
+      yearPlus().dispatchEvent(new PointerEvent('pointerdown', { pointerId: 3, bubbles: true, cancelable: true }));
+      tick(HOLD_DELAY_MS + HOLD_INTERVAL_MS * 9);    // 1525 held: nine single years
+      expect(yearHost.year()).toBe(1916 + 9);
+      tick(HOLD_INTERVAL_MS);                        // 1650 held: x5
+      expect(yearHost.year()).toBe(1916 + 14);
+      tick(HOLD_INTERVAL_MS * 10);                   // through 2900, all x5
+      expect(yearHost.year()).toBe(1916 + 64);
+      tick(HOLD_INTERVAL_MS);                        // 3025 held: x10, not the default x25
+      expect(yearHost.year()).toBe(1916 + 74);
+      yearPlus().dispatchEvent(new PointerEvent('pointerup', { pointerId: 3, bubbles: true }));
+      yearPlus().click();
+      expect(yearHost.year()).toBe(1916 + 74);
+    }));
+
+    it('with edgeGuard off, a touch on bare track inside the swipe-back edge is the slider\'s', () => {
+      yearSetup(1991);                               // the thumb sits far right of x=50
+      yearPointer('pointerdown', 50);
+      expect(yearHost.drags).toEqual([true]);
+      yearPointer('pointerup', 50);
+      // x=50 is 4px left of the track's start (left 40 + inset 14): the tap the guard would swallow lands on the floor year.
+      expect(yearHost.year()).toBe(1916);
+      expect(yearHost.drags).toEqual([true, false]);
+
+      const page = yearFixture.nativeElement as HTMLElement;
+      let reached = false;
+      const listener = () => { reached = true; };
+      page.addEventListener('touchstart', listener);
+      const touch = new Touch({ identifier: 1, target: yearBand(), clientX: 50, clientY: 10 });
+      yearBand().dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, changedTouches: [touch], touches: [touch], targetTouches: [touch] }));
+      page.removeEventListener('touchstart', listener);
+      expect(reached).toBeFalse();
+    });
+
+    it('with edgeGuard back on, the same touch is left to the page', () => {
+      yearSetup(1991);
+      yearHost.edgeGuard.set(true);
+      yearFixture.detectChanges();
+      yearPointer('pointerdown', 50);
+      expect(yearHost.drags).toEqual([]);
+      yearPointer('pointerup', 50);
+      expect(yearHost.emitted).toEqual([]);
+    });
+
+    it('projects the host\'s header inside the card, above the band', () => {
+      yearSetup(1991);
+      const card = yearFixture.nativeElement.querySelector('.tray-in') as HTMLElement;
+      const head = card.querySelector('.tray-head') as HTMLElement;
+      const projected = head.querySelector('.rail-head') as HTMLElement;
+      expect(projected).not.toBeNull();
+      expect(projected.querySelector('.cap')!.textContent).toBe('Year');
+      expect(projected.querySelector('.live')!.textContent).toBe('1991');
+      expect(card.firstElementChild).toBe(head);
+      expect(head.nextElementSibling!.classList.contains('tray-row')).toBeTrue();
+      yearHost.year.set(1960);
+      yearFixture.detectChanges();
+      expect(projected.querySelector('.live')!.textContent).toBe('1960');
+    });
   });
 
   it('wears the white-page colours by default and takes --tray-* custom properties from any ancestor', () => {

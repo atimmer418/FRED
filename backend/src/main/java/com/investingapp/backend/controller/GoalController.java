@@ -3,9 +3,7 @@ package com.investingapp.backend.controller;
 import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.dto.GoalImportRequest;
 import com.investingapp.backend.dto.GoalRequest;
-import com.investingapp.backend.dto.GoalResponse;
 import com.investingapp.backend.dto.MessageResponse;
-import com.investingapp.backend.model.Goal;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
@@ -32,7 +30,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.function.Function;
 
@@ -59,12 +56,12 @@ public class GoalController {
     @PostMapping("")
     public ResponseEntity<?> create(@Valid @RequestBody GoalRequest request) {
         return withUser(user -> ResponseEntity.status(HttpStatus.CREATED)
-                .body(toResponse(user, goalService.create(user, request))));
+                .body(goalService.create(user, request)));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable Long id, @Valid @RequestBody GoalRequest request) {
-        return withUser(user -> ResponseEntity.ok(toResponse(user, goalService.update(user, id, request))));
+        return withUser(user -> ResponseEntity.ok(goalService.update(user, id, request)));
     }
 
     @DeleteMapping("/{id}")
@@ -77,7 +74,7 @@ public class GoalController {
 
     @PostMapping("/import")
     public ResponseEntity<?> importLegacy(@Valid @RequestBody GoalImportRequest request) {
-        return withUser(user -> ResponseEntity.ok(goalService.toResponses(user, goalService.importLegacy(user, request))));
+        return withUser(user -> ResponseEntity.ok(goalService.importLegacy(user, request)));
     }
 
     /** Rejects bodies that fail bean validation with a 400 and the first field message. */
@@ -88,11 +85,6 @@ public class GoalController {
                 ? first.getField() + " " + first.getDefaultMessage()
                 : "Invalid goal request";
         return ResponseEntity.badRequest().body(new MessageResponse(message));
-    }
-
-    /** One goal, rolled forward and carrying its tally. */
-    private GoalResponse toResponse(User user, Goal goal) {
-        return goalService.toResponses(user, List.of(goal)).get(0);
     }
 
     /** Resolves the caller, runs the action, and maps service failures to HTTP statuses. */

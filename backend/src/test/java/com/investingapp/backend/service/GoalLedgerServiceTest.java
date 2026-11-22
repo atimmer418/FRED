@@ -417,4 +417,21 @@ class GoalLedgerServiceTest {
         assertEquals(List.of("kid:0:brokerage", "kid:0:plan529"), List.copyOf(tallies.keySet()));
         assertMoney("50.00", tallies.get("kid:0:plan529").nextCreditAmount());
     }
+
+    @Test
+    void rollForwardAloneReloadsTheGoalInItsOwnTransaction() throws Exception {
+        GoalRepository repo = savingGoals();
+        Goal stored = simpleGoal("1000", "900", LocalDate.of(2026, 10, 31));
+        when(repo.findById(1L)).thenReturn(Optional.of(stored));
+        when(repo.findById(2L)).thenReturn(Optional.empty());
+        GoalLedgerService alone = new GoalLedgerService(fakeLedger(ledger), repo, codec);
+
+        assertTrue(alone.rollForwardAlone(1L, semiMonthly(), TODAY));
+        assertMoney("1900", stored.getCurrentBalance());
+        assertFalse(alone.rollForwardAlone(2L, semiMonthly(), TODAY));
+
+        var tx = GoalLedgerService.class.getMethod("rollForwardAlone", Long.class, Optional.class, LocalDate.class)
+                .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+        assertEquals(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, tx.propagation());
+    }
 }

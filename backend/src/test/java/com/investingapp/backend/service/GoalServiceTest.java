@@ -124,7 +124,7 @@ class GoalServiceTest {
     @Test
     void createAnchorsToCurrentBalanceAndNow() {
         stubSave();
-        Goal goal = service.create(user, houseRequest("400000", "1500.50", "417"));
+        Goal goal = service.createGoal(user, houseRequest("400000", "1500.50", "417"));
 
         assertEquals(bd("1500.50"), goal.getAnchorBalance());
         assertEquals(bd("417"), goal.getAnchorMonthly());
@@ -142,7 +142,7 @@ class GoalServiceTest {
         GoalRequest r = houseRequest("400000", "0", "0");
         r.setConfig(mapper.readTree(requestText));
 
-        Goal goal = service.create(user, r);
+        Goal goal = service.createGoal(user, r);
 
         String expected = codec.write(codec.parse(GoalType.HOUSE, r.getConfig()));
         assertEquals(expected, goal.getConfigJson());
@@ -155,7 +155,7 @@ class GoalServiceTest {
         user.setSelectedTier("core");
         when(goalRepository.countByUserAndCompletedFalse(user)).thenReturn(1L);
 
-        assertThrows(TierLimitException.class, () -> service.create(user, houseRequest("400000", "0", "0")));
+        assertThrows(TierLimitException.class, () -> service.createGoal(user, houseRequest("400000", "0", "0")));
         verify(goalRepository, never()).save(any());
     }
 
@@ -165,7 +165,7 @@ class GoalServiceTest {
         user.setSelectedTier("core");
         when(goalRepository.countByUserAndCompletedFalse(user)).thenReturn(0L);
 
-        assertNotNull(service.create(user, houseRequest("400000", "0", "0")));
+        assertNotNull(service.createGoal(user, houseRequest("400000", "0", "0")));
     }
 
     @Test
@@ -173,7 +173,7 @@ class GoalServiceTest {
         stubSave();
         user.setSelectedTier("plus");
 
-        assertNotNull(service.create(user, houseRequest("400000", "0", "0")));
+        assertNotNull(service.createGoal(user, houseRequest("400000", "0", "0")));
     }
 
     @Test
@@ -181,7 +181,7 @@ class GoalServiceTest {
         user.setSelectedTier(null);
         when(goalRepository.countByUserAndCompletedFalse(user)).thenReturn(1L);
 
-        assertThrows(TierLimitException.class, () -> service.create(user, houseRequest("400000", "0", "0")));
+        assertThrows(TierLimitException.class, () -> service.createGoal(user, houseRequest("400000", "0", "0")));
     }
 
     // ---- validation ----
@@ -190,7 +190,7 @@ class GoalServiceTest {
     void kidsRequireAtLeastOneTarget() {
         KidsConfig config = kids("0", "0", kid("Sam", year - 3, acct("0", "0"), acct("0", "0")));
 
-        assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, kidsRequest(config, "0", "0")));
     }
 
     @Test
@@ -198,7 +198,7 @@ class GoalServiceTest {
         stubSave();
         KidsConfig config = kids("0", "30000", kid("Sam", year - 3, acct("0", "0"), acct("100", "50")));
 
-        assertNotNull(service.create(user, kidsRequest(config, "100", "50")));
+        assertNotNull(service.createGoal(user, kidsRequest(config, "100", "50")));
     }
 
     @Test
@@ -206,7 +206,7 @@ class GoalServiceTest {
         KidsConfig config = kids("50000", "0", kid("Sam", year - 18, acct("0", "0"), acct("0", "0")));
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, kidsRequest(config, "0", "0")));
+                () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         assertTrue(e.getMessage().startsWith("Already 18 or older"));
     }
 
@@ -215,7 +215,7 @@ class GoalServiceTest {
         KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(7), null, null);
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, kidsRequest(config, "0", "0")));
+                () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         assertEquals("Add between 1 and 6 kids.", e.getMessage());
     }
 
@@ -224,7 +224,7 @@ class GoalServiceTest {
         stubSave();
         KidsConfig config = new KidsConfig(bd("1000"), bd("1000"), kidList(6), null, null);
 
-        assertNotNull(service.create(user, kidsRequest(config, "0", "0")));
+        assertNotNull(service.createGoal(user, kidsRequest(config, "0", "0")));
     }
 
     private List<KidsConfig.Kid> kidList(int count) {
@@ -241,9 +241,9 @@ class GoalServiceTest {
         var ten = new com.investingapp.backend.model.goals.VacationConfig(10, bd("3000"), bd("500"), year);
         var eleven = new com.investingapp.backend.model.goals.VacationConfig(11, bd("3000"), bd("500"), year);
 
-        assertNotNull(service.create(user, requestWith(GoalType.VACATION, "flight", ten, "0", false)));
+        assertNotNull(service.createGoal(user, requestWith(GoalType.VACATION, "flight", ten, "0", false)));
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, requestWith(GoalType.VACATION, "flight", eleven, "0", false)));
+                () -> service.createGoal(user, requestWith(GoalType.VACATION, "flight", eleven, "0", false)));
         assertEquals("Pick 1 to 10 trips a year.", e.getMessage());
     }
 
@@ -251,12 +251,12 @@ class GoalServiceTest {
     void flippingGiftDaysIsAPlanInputChangeAndReanchors() {
         stubSave();
         KidsConfig off = kids("1000", "1000", kid("Sam", year - 2, acct("0", "0"), acct("0", "0")));
-        Goal stored = storedGoal(service.create(user, kidsRequest(off, "100", "50")), 21L);
+        Goal stored = storedGoal(service.createGoal(user, kidsRequest(off, "100", "50")), 21L);
         var oldAnchoredAt = stored.getPlanAnchoredAt().minusDays(30);
         stored.setPlanAnchoredAt(oldAnchoredAt);
 
         KidsConfig on = new KidsConfig(off.brokerageTarget(), off.plan529Target(), off.kids(), null, true);
-        Goal updated = service.update(user, 21L, kidsRequest(on, "150", "50"));
+        Goal updated = service.updateGoal(user, 21L, kidsRequest(on, "150", "50"));
 
         assertTrue(updated.getPlanAnchoredAt().isAfter(oldAnchoredAt));
         assertEquals(bd("100"), updated.getAnchorBalance());
@@ -267,13 +267,13 @@ class GoalServiceTest {
     void nullAndFalseGiftDaysAreTheSameForReanchoring() {
         stubSave();
         KidsConfig stale = kids("1000", "1000", kid("Sam", year - 2, acct("0", "0"), acct("0", "0")));
-        Goal stored = storedGoal(service.create(user, kidsRequest(stale, "100", "50")), 22L);
+        Goal stored = storedGoal(service.createGoal(user, kidsRequest(stale, "100", "50")), 22L);
         var anchoredAt = stored.getPlanAnchoredAt().minusDays(30);
         stored.setPlanAnchoredAt(anchoredAt);
 
         KidsConfig explicitFalse = new KidsConfig(stale.brokerageTarget(), stale.plan529Target(), stale.kids(),
                 null, false);
-        Goal updated = service.update(user, 22L, kidsRequest(explicitFalse, "150", "50"));
+        Goal updated = service.updateGoal(user, 22L, kidsRequest(explicitFalse, "150", "50"));
 
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
         assertEquals(bd("100"), updated.getAnchorBalance());
@@ -284,13 +284,13 @@ class GoalServiceTest {
     void kidsRejectNegativeAccountBalance() {
         KidsConfig config = kids("1000", "1000", kid("Sam", year - 2, acct("-1", "0"), acct("0", "0")));
 
-        assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, kidsRequest(config, "0", "0")));
     }
 
     @Test
     void kidsCreateCopiesAnchorMonthlyFromConfig() {
         stubSave();
-        Goal goal = service.create(user, kidsRequest(oneKid("1000", "2000"), "3000", "300"));
+        Goal goal = service.createGoal(user, kidsRequest(oneKid("1000", "2000"), "3000", "300"));
 
         KidsConfig stored = (KidsConfig) codec.parse(GoalType.KIDS, goal.getConfigJson());
         KidsConfig.Accounts accounts = stored.kids().get(0).accounts();
@@ -304,21 +304,21 @@ class GoalServiceTest {
     @Test
     void rejectsAmountAboveOneHundredMillion() {
         assertThrows(GoalValidationException.class,
-                () -> service.create(user, houseRequest("100000000.01", "0", "0")));
+                () -> service.createGoal(user, houseRequest("100000000.01", "0", "0")));
     }
 
     @Test
     void rejectsTargetYearBeyondFiftyYears() {
         GoalRequest r = request(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 51), "0", "0");
 
-        assertThrows(GoalValidationException.class, () -> service.create(user, r));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, r));
     }
 
     @Test
     void rejectsIconNotInAllowlistForType() {
         GoalRequest r = request(GoalType.HOUSE, "flight", new HouseCarConfig(bd("400000"), 20, year + 5, null, null), "0", "0");
 
-        assertThrows(GoalValidationException.class, () -> service.create(user, r));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, r));
     }
 
     // ---- update ----
@@ -326,11 +326,11 @@ class GoalServiceTest {
     @Test
     void updateReanchorsWhenAPlanInputChanges() {
         stubSave();
-        Goal stored = storedGoal(service.create(user, houseRequest("400000", "1000", "417")), 7L);
+        Goal stored = storedGoal(service.createGoal(user, houseRequest("400000", "1000", "417")), 7L);
         var oldAnchoredAt = stored.getPlanAnchoredAt().minusDays(30);
         stored.setPlanAnchoredAt(oldAnchoredAt);
 
-        Goal updated = service.update(user, 7L, houseRequest("450000", "2500", "500"));
+        Goal updated = service.updateGoal(user, 7L, houseRequest("450000", "2500", "500"));
 
         // The plan restarts from the stored tally; the balance sent is ignored.
         assertEquals(bd("1000"), updated.getAnchorBalance());
@@ -342,13 +342,13 @@ class GoalServiceTest {
     @Test
     void updateKeepsAnchorWhenOnlyBalancesChange() {
         stubSave();
-        Goal stored = storedGoal(service.create(user, houseRequest("400000", "1000", "417")), 7L);
+        Goal stored = storedGoal(service.createGoal(user, houseRequest("400000", "1000", "417")), 7L);
         var anchoredAt = stored.getPlanAnchoredAt().minusDays(30);
         stored.setPlanAnchoredAt(anchoredAt);
 
         GoalRequest edit = houseRequest("400000", "1800", "999");
         edit.setPlanRate(bd("0.0900"));
-        Goal updated = service.update(user, 7L, edit);
+        Goal updated = service.updateGoal(user, 7L, edit);
 
         assertEquals(bd("1000"), updated.getAnchorBalance());
         assertEquals(bd("417"), updated.getAnchorMonthly());
@@ -362,13 +362,13 @@ class GoalServiceTest {
     @Test
     void updateWithSameBalanceLeavesBalanceDateAlone() {
         stubSave();
-        Goal stored = storedGoal(service.create(user, houseRequest("400000", "1000", "417")), 7L);
+        Goal stored = storedGoal(service.createGoal(user, houseRequest("400000", "1000", "417")), 7L);
         var stamp = EasternTime.now().minusDays(5);
         stored.setBalanceUpdatedAt(stamp);
 
         GoalRequest edit = houseRequest("400000", "1000", "417");
         edit.setName("Renamed");
-        Goal updated = service.update(user, 7L, edit);
+        Goal updated = service.updateGoal(user, 7L, edit);
 
         assertEquals(stamp, updated.getBalanceUpdatedAt());
         assertEquals("Renamed", updated.getName());
@@ -389,7 +389,7 @@ class GoalServiceTest {
         imported.setPlanAnchoredAt(EasternTime.now().minusDays(60));
         when(goalRepository.findByIdAndUser(9L, user)).thenReturn(Optional.of(imported));
 
-        Goal updated = service.update(user, 9L, houseRequest("400000", "950", "417"));
+        Goal updated = service.updateGoal(user, 9L, houseRequest("400000", "950", "417"));
 
         assertEquals(bd("800"), updated.getAnchorBalance());
         assertEquals(bd("417"), updated.getAnchorMonthly());
@@ -400,10 +400,10 @@ class GoalServiceTest {
     @Test
     void kidsUpdateKeepsEachStoredAccountTally() {
         stubSave();
-        Goal stored = storedGoal(service.create(user, kidsRequest(oneKid("1000", "2000"), "3000", "300")), 5L);
+        Goal stored = storedGoal(service.createGoal(user, kidsRequest(oneKid("1000", "2000"), "3000", "300")), 5L);
         var anchoredAt = stored.getPlanAnchoredAt();
 
-        Goal updated = service.update(user, 5L, kidsRequest(oneKid("1000", "2500"), "3500", "300"));
+        Goal updated = service.updateGoal(user, 5L, kidsRequest(oneKid("1000", "2500"), "3500", "300"));
 
         KidsConfig result = (KidsConfig) codec.parse(GoalType.KIDS, updated.getConfigJson());
         KidsConfig.Accounts accounts = result.kids().get(0).accounts();
@@ -418,12 +418,12 @@ class GoalServiceTest {
     @Test
     void renamingAKidKeepsTheAnchor() {
         stubSave();
-        Goal stored = storedGoal(service.create(user, kidsRequest(oneKid("1000", "2000"), "3000", "300")), 5L);
+        Goal stored = storedGoal(service.createGoal(user, kidsRequest(oneKid("1000", "2000"), "3000", "300")), 5L);
         var anchoredAt = stored.getPlanAnchoredAt();
 
         KidsConfig renamed = kids("50000", "30000",
                 kid("Samantha", year - 3, acct("1000", "100"), acct("2000", "200")));
-        Goal updated = service.update(user, 5L, kidsRequest(renamed, "3000", "300"));
+        Goal updated = service.updateGoal(user, 5L, kidsRequest(renamed, "3000", "300"));
 
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
         assertEquals(bd("3000"), updated.getAnchorBalance());
@@ -435,7 +435,7 @@ class GoalServiceTest {
     void updateOfAnotherUsersGoalThrowsNoSuchElement() {
         when(goalRepository.findByIdAndUser(42L, user)).thenReturn(Optional.empty());
 
-        assertThrows(NoSuchElementException.class, () -> service.update(user, 42L, houseRequest("400000", "0", "0")));
+        assertThrows(NoSuchElementException.class, () -> service.updateGoal(user, 42L, houseRequest("400000", "0", "0")));
     }
 
     // ---- import ----
@@ -465,7 +465,7 @@ class GoalServiceTest {
         when(goalRepository.existsByUserAndClientId(user, "b")).thenReturn(true);
         when(goalRepository.existsByUserAndClientId(user, "c")).thenReturn(false);
 
-        List<Goal> saved = service.importLegacy(user, importOf(
+        List<Goal> saved = service.importGoals(user, importOf(
                 legacy("a", "flag", "1000", year + 2, "0"),
                 legacy("b", "flag", "1000", year + 2, "0"),
                 legacy("c", "flag", "1000", year + 2, "0")));
@@ -477,7 +477,7 @@ class GoalServiceTest {
     @Test
     void importMapsLegacyFields() {
         stubSave();
-        List<Goal> saved = service.importLegacy(user, importOf(legacy("a", "savings", "25000", year + 3, "1200")));
+        List<Goal> saved = service.importGoals(user, importOf(legacy("a", "savings", "25000", year + 3, "1200")));
 
         Goal goal = saved.get(0);
         assertEquals(GoalType.CUSTOM, goal.getType());
@@ -495,7 +495,7 @@ class GoalServiceTest {
     @Test
     void importClampsPastTargetYearAndUnknownIcon() {
         stubSave();
-        List<Goal> saved = service.importLegacy(user, importOf(legacy("a", "sparkle", "1000", 2019, "-50")));
+        List<Goal> saved = service.importGoals(user, importOf(legacy("a", "sparkle", "1000", 2019, "-50")));
 
         Goal goal = saved.get(0);
         TargetConfig config = (TargetConfig) codec.parse(GoalType.CUSTOM, goal.getConfigJson());
@@ -507,7 +507,7 @@ class GoalServiceTest {
     @Test
     void importClampsFarFutureTargetYear() {
         stubSave();
-        List<Goal> saved = service.importLegacy(user, importOf(legacy("a", "flag", "1000", 2099, "0")));
+        List<Goal> saved = service.importGoals(user, importOf(legacy("a", "flag", "1000", 2099, "0")));
 
         TargetConfig config = (TargetConfig) codec.parse(GoalType.CUSTOM, saved.get(0).getConfigJson());
         assertEquals(year + 50, config.targetYear());
@@ -517,17 +517,17 @@ class GoalServiceTest {
     void kidsRejectNegativeAccountAnchorMonthly() {
         KidsConfig config = kids("1000", "1000", kid("Sam", year - 2, acct("0", "-5"), acct("0", "0")));
 
-        assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, kidsRequest(config, "0", "0")));
     }
 
     @Test
     void rejectsOutOfRangeTopLevelAnchorMonthlyAndBalanceScale() {
         assertThrows(GoalValidationException.class,
-                () -> service.create(user, houseRequest("400000", "0", "100000001")));
+                () -> service.createGoal(user, houseRequest("400000", "0", "100000001")));
         assertThrows(GoalValidationException.class,
-                () -> service.create(user, houseRequest("400000", "0", "10.005")));
+                () -> service.createGoal(user, houseRequest("400000", "0", "10.005")));
         assertThrows(GoalValidationException.class,
-                () -> service.create(user, houseRequest("400000", "10.005", "0")));
+                () -> service.createGoal(user, houseRequest("400000", "10.005", "0")));
     }
 
     @Test
@@ -538,7 +538,7 @@ class GoalServiceTest {
         when(goalRepository.findByIdAndUser(3L, user)).thenReturn(Optional.of(custom));
 
         assertThrows(GoalValidationException.class,
-                () -> service.update(user, 3L, houseRequest("400000", "0", "0")));
+                () -> service.updateGoal(user, 3L, houseRequest("400000", "0", "0")));
     }
 
     // ---- first-year fund ----
@@ -586,7 +586,7 @@ class GoalServiceTest {
         KidsConfig config = fundGoal("0", "30000", true, fundKid("Sam", year - 3, null, null, null, null));
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, kidsRequest(config, "0", "0")));
+                () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         assertEquals("Turn off the first-year fund or add a kid who is not here yet.", e.getMessage());
     }
 
@@ -599,7 +599,7 @@ class GoalServiceTest {
                 fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "1000.123", year + 1, 6)));
         for (KidsConfig config : badTargets) {
             GoalValidationException e = assertThrows(GoalValidationException.class,
-                    () -> service.create(user, kidsRequest(config, "0", "0")));
+                    () -> service.createGoal(user, kidsRequest(config, "0", "0")));
             assertEquals("Enter a first-year amount greater than $0.", e.getMessage());
         }
         List<KidsConfig> badDates = List.of(
@@ -609,7 +609,7 @@ class GoalServiceTest {
                 fundGoal("0", "30000", true, fundKid("A", year + 1, acct("0", "0"), "5000", null, 6)));
         for (KidsConfig config : badDates) {
             assertThrows(GoalValidationException.class,
-                    () -> service.create(user, kidsRequest(config, "0", "0")));
+                    () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         }
     }
 
@@ -619,7 +619,7 @@ class GoalServiceTest {
                 fundKid("Sam", year - 1, acct("0", "0"), "5000", year, 6));
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, kidsRequest(config, "0", "0")));
+                () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         assertEquals("The first-year fund is for kids who are not here yet.", e.getMessage());
     }
 
@@ -629,7 +629,7 @@ class GoalServiceTest {
             KidsConfig config = fundGoal("0", "30000", true,
                     fundKid("Baby", year + 1, acct("0", "0"), "5000", due, 6));
             assertThrows(GoalValidationException.class,
-                    () -> service.create(user, kidsRequest(config, "0", "0")));
+                    () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         }
     }
 
@@ -648,7 +648,7 @@ class GoalServiceTest {
                         new KidsConfig.Accounts(acct("0", "0"), acct("0", "0"), acct("1200", "100")),
                         bd("5000"), year - 1, 12));
         var anchoredAt = stored.getPlanAnchoredAt();
-        Goal updated = service.update(user, 9L, kidsRequest(sent, "3200", "300"));
+        Goal updated = service.updateGoal(user, 9L, kidsRequest(sent, "3200", "300"));
 
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
@@ -665,7 +665,7 @@ class GoalServiceTest {
         KidsConfig config = fundGoal("0", "0", true,
                 fundKid("Someday", null, acct("0", "50"), "5000", null, null));
 
-        Goal goal = service.create(user, kidsRequest(config, "0", "50"));
+        Goal goal = service.createGoal(user, kidsRequest(config, "0", "50"));
 
         KidsConfig result = storedConfigOf(goal);
         assertEquals(Boolean.TRUE, result.firstYearFund());
@@ -679,7 +679,7 @@ class GoalServiceTest {
         KidsConfig config = fundGoal("0", "0", true,
                 fundKid("Someday", null, acct("0", "50"), "5000", 1999, 1));
 
-        Goal goal = service.create(user, kidsRequest(config, "0", "50"));
+        Goal goal = service.createGoal(user, kidsRequest(config, "0", "50"));
 
         var after = EasternTime.now().plusMonths(36);
         KidsConfig.Kid result = storedConfigOf(goal).kids().get(0);
@@ -699,7 +699,7 @@ class GoalServiceTest {
             KidsConfig config = fundGoal("5000", "30000", off,
                     fundKid("Baby", year + 1, acct("10", "5"), "5000", year + 1, 6));
 
-            Goal goal = service.create(user, kidsRequest(config, "0", "0"));
+            Goal goal = service.createGoal(user, kidsRequest(config, "0", "0"));
 
             KidsConfig result = storedConfigOf(goal);
             KidsConfig.Kid kid = result.kids().get(0);
@@ -718,7 +718,7 @@ class GoalServiceTest {
                 fundKid("Baby", year + 1, acct("0", "0"), "5000", year + 1, 6),
                 fundKid("Sam", year - 3, null, "7000", year + 2, 3));
 
-        KidsConfig result = storedConfigOf(service.create(user, kidsRequest(config, "0", "0")));
+        KidsConfig result = storedConfigOf(service.createGoal(user, kidsRequest(config, "0", "0")));
 
         KidsConfig.Kid sam = result.kids().get(1);
         assertNull(sam.accounts().firstYear());
@@ -733,7 +733,7 @@ class GoalServiceTest {
         KidsConfig off = fundGoal("0", "0", false, fundKid("Baby", year + 1, acct("0", "0"), "5000", year + 1, 6));
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, kidsRequest(off, "0", "0")));
+                () -> service.createGoal(user, kidsRequest(off, "0", "0")));
         assertEquals("Set a target for at least one account.", e.getMessage());
     }
 
@@ -741,7 +741,7 @@ class GoalServiceTest {
     void kidsCreateAnchorsTheFirstYearAccount() {
         stubSave();
 
-        Goal goal = service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100"));
+        Goal goal = service.createGoal(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100"));
 
         KidsConfig.Kid kid = storedConfigOf(goal).kids().get(0);
         AccountState fund = kid.accounts().firstYear();
@@ -757,11 +757,11 @@ class GoalServiceTest {
     @Test
     void updateReanchorsWhenTheFundIsSwitchedOff() {
         stubSave();
-        storedGoal(service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
+        storedGoal(service.createGoal(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
 
         KidsConfig off = fundGoal("0", "30000", false,
                 fundKid("Baby", year + 1, acct("400", "100"), "5000", year + 1, 6));
-        Goal updated = service.update(user, 6L, kidsRequest(off, "450", "100"));
+        Goal updated = service.updateGoal(user, 6L, kidsRequest(off, "450", "100"));
 
         assertEquals(bd("400"), updated.getAnchorBalance());
         KidsConfig result = storedConfigOf(updated);
@@ -772,12 +772,12 @@ class GoalServiceTest {
     @Test
     void updateReanchorsWhenAFirstYearTargetOrDueDateChanges() {
         stubSave();
-        storedGoal(service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
+        storedGoal(service.createGoal(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
 
-        Goal targetChanged = service.update(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 1), "450", "100"));
+        Goal targetChanged = service.updateGoal(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 1), "450", "100"));
         assertEquals(bd("400"), targetChanged.getAnchorBalance());
 
-        Goal dueChanged = service.update(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 2), "470", "100"));
+        Goal dueChanged = service.updateGoal(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 2), "470", "100"));
         assertEquals(bd("400"), dueChanged.getAnchorBalance());
         assertEquals(year + 2, storedConfigOf(dueChanged).kids().get(0).firstYearDueYear());
     }
@@ -786,13 +786,13 @@ class GoalServiceTest {
     void kidsUpdateKeepsTheStoredFirstYearTally() {
         stubSave();
         Goal stored = storedGoal(
-                service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
+                service.createGoal(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
         var anchoredAt = stored.getPlanAnchoredAt();
 
-        Goal same = service.update(user, 6L, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100"));
+        Goal same = service.updateGoal(user, 6L, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100"));
         assertNull(storedConfigOf(same).kids().get(0).accounts().firstYear().balanceUpdatedAt());
 
-        Goal updated = service.update(user, 6L, kidsRequest(oneFundKid("650", "5000", year + 1), "650", "100"));
+        Goal updated = service.updateGoal(user, 6L, kidsRequest(oneFundKid("650", "5000", year + 1), "650", "100"));
 
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
@@ -814,7 +814,7 @@ class GoalServiceTest {
         KidsConfig sent = new KidsConfig(bd("50000"), bd("80000"), List.of(new KidsConfig.Kid("Ava", year - 3, 4,
                 new KidsConfig.Accounts(acct("1000", "100"), acct("2500", "200"), null), null, null, null)), null, null);
 
-        Goal updated = service.update(user, 11L, kidsRequest(sent, "3500", "300"));
+        Goal updated = service.updateGoal(user, 11L, kidsRequest(sent, "3500", "300"));
 
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
@@ -856,7 +856,7 @@ class GoalServiceTest {
         user.setSelectedTier("core");
         when(goalRepository.countByUserAndCompletedFalse(user)).thenReturn(1L);
 
-        assertThrows(TierLimitException.class, () -> service.update(user, 4L,
+        assertThrows(TierLimitException.class, () -> service.updateGoal(user, 4L,
                 requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100", false)));
         verify(goalRepository, never()).save(any());
     }
@@ -869,7 +869,7 @@ class GoalServiceTest {
         user.setSelectedTier("core");
         when(goalRepository.countByUserAndCompletedFalse(user)).thenReturn(0L);
 
-        Goal updated = service.update(user, 4L,
+        Goal updated = service.updateGoal(user, 4L,
                 requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100", false));
         assertEquals(false, updated.isCompleted());
     }
@@ -881,7 +881,7 @@ class GoalServiceTest {
         stored.setCompleted(true);
         user.setSelectedTier("plus");
 
-        Goal updated = service.update(user, 4L,
+        Goal updated = service.updateGoal(user, 4L,
                 requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100", false));
         assertEquals(false, updated.isCompleted());
     }
@@ -892,21 +892,21 @@ class GoalServiceTest {
         TargetConfig past = new TargetConfig(bd("5000"), year - 1);
         rawStoredGoal(12L, GoalType.CUSTOM, "flag", past, "1000");
 
-        Goal balance = service.update(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", false));
+        Goal balance = service.updateGoal(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", false));
         assertEquals(bd("1000"), balance.getCurrentBalance());
-        Goal done = service.update(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", true));
+        Goal done = service.updateGoal(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", true));
         assertTrue(done.isCompleted());
 
         HouseCarConfig house = new HouseCarConfig(bd("30000"), 20, year - 1, null, null);
         rawStoredGoal(13L, GoalType.HOUSE, "home", house, "1000");
-        assertNotNull(service.update(user, 13L, requestWith(GoalType.HOUSE, "home", house, "2000", false)));
+        assertNotNull(service.updateGoal(user, 13L, requestWith(GoalType.HOUSE, "home", house, "2000", false)));
     }
 
     @Test
     void changingATargetYearToAPastValueIsStillRejected() {
         rawStoredGoal(12L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year - 1), "1000");
 
-        assertThrows(GoalValidationException.class, () -> service.update(user, 12L,
+        assertThrows(GoalValidationException.class, () -> service.updateGoal(user, 12L,
                 requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year - 2), "1000", false)));
     }
 
@@ -919,12 +919,12 @@ class GoalServiceTest {
 
         KidsConfig sent = kids("50000", "30000",
                 kid("Ava", year - 18, acct("1500", "100"), acct("2000", "200")));
-        Goal updated = service.update(user, 14L, kidsRequest(sent, "3500", "300"));
+        Goal updated = service.updateGoal(user, 14L, kidsRequest(sent, "3500", "300"));
         assertEquals(0, bd("1000").compareTo(storedConfigOf(updated).kids().get(0).accounts().brokerage().balance()));
 
         KidsConfig older = kids("50000", "30000",
                 kid("Ava", year - 19, acct("1500", "100"), acct("2000", "200")));
-        assertThrows(GoalValidationException.class, () -> service.update(user, 14L, kidsRequest(older, "3500", "300")));
+        assertThrows(GoalValidationException.class, () -> service.updateGoal(user, 14L, kidsRequest(older, "3500", "300")));
     }
 
     @Test
@@ -934,18 +934,18 @@ class GoalServiceTest {
                 new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("500"), year - 3);
         rawStoredGoal(15L, GoalType.VACATION, "flight", stale, "0");
 
-        assertNotNull(service.update(user, 15L, requestWith(GoalType.VACATION, "flight", stale, "0", false)));
+        assertNotNull(service.updateGoal(user, 15L, requestWith(GoalType.VACATION, "flight", stale, "0", false)));
 
         com.investingapp.backend.model.goals.VacationConfig changed =
                 new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("500"), year - 4);
-        assertThrows(GoalValidationException.class, () -> service.update(user, 15L,
+        assertThrows(GoalValidationException.class, () -> service.updateGoal(user, 15L,
                 requestWith(GoalType.VACATION, "flight", changed, "0", false)));
     }
 
     @Test
     void importPicksCashForAShortHorizonAndMarketForALongOne() {
         stubSave();
-        List<Goal> saved = service.importLegacy(user, importOf(
+        List<Goal> saved = service.importGoals(user, importOf(
                 legacy("a", "flag", "20000", year + 1, "2000"),
                 legacy("b", "flag", "20000", year + 3, "2000")));
 
@@ -958,7 +958,7 @@ class GoalServiceTest {
     @Test
     void importRoundsLegacyCentsToWholeDollarsAndCapsTheStart() {
         stubSave();
-        List<Goal> saved = service.importLegacy(user, importOf(
+        List<Goal> saved = service.importGoals(user, importOf(
                 legacy("a", "flag", "25000.49", year + 3, "1200.50"),
                 legacy("b", "flag", "25000", year + 3, "1000000000000")));
 
@@ -974,7 +974,7 @@ class GoalServiceTest {
         stubSave();
         when(goalRepository.countByUserAndClientIdIsNotNull(user)).thenReturn(49L);
 
-        List<Goal> saved = service.importLegacy(user, importOf(
+        List<Goal> saved = service.importGoals(user, importOf(
                 legacy("a", "flag", "1000", year + 2, "0"),
                 legacy("b", "flag", "1000", year + 2, "0"),
                 legacy("c", "flag", "1000", year + 2, "0")));
@@ -993,7 +993,7 @@ class GoalServiceTest {
 
         GoalRequest r = request(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "0", "0");
         r.setConfig(null);
-        assertThrows(GoalValidationException.class, () -> service.create(user, r));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, r));
     }
 
     @Test
@@ -1002,20 +1002,20 @@ class GoalServiceTest {
                 java.util.Arrays.asList(kid("Sam", year - 3, acct("0", "0"), acct("0", "0")), null), null, null);
 
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, kidsRequest(config, "0", "0")));
+                () -> service.createGoal(user, kidsRequest(config, "0", "0")));
         assertEquals("Goal details are not in the expected shape.", e.getMessage());
     }
 
     @Test
     void monthlyAmountMustFitTheColumn() {
         stubSave();
-        assertNotNull(service.create(user, houseRequest("400000", "0", "99999999.99")));
+        assertNotNull(service.createGoal(user, houseRequest("400000", "0", "99999999.99")));
         assertThrows(GoalValidationException.class,
-                () -> service.create(user, houseRequest("400000", "0", "100000000")));
+                () -> service.createGoal(user, houseRequest("400000", "0", "100000000")));
 
         KidsConfig config = kids("50000", "30000",
                 kid("Sam", year - 3, acct("0", "100000000"), acct("0", "0")));
-        assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, kidsRequest(config, "0", "0")));
     }
 
     // ---- loan terms and credits window ----
@@ -1029,21 +1029,21 @@ class GoalServiceTest {
     @Test
     void loanRateAbove30IsRejected() {
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, carRequest("30000", null, "30.5", "5000")));
+                () -> service.createGoal(user, carRequest("30000", null, "30.5", "5000")));
         assertEquals("Enter a loan rate from 0% to 30%.", e.getMessage());
     }
 
     @Test
     void downPaymentAmountAbovePriceIsRejected() {
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, carRequest("30000", null, "6.5", "30000.01")));
+                () -> service.createGoal(user, carRequest("30000", null, "6.5", "30000.01")));
         assertEquals("Enter a down payment from $0 up to the price.", e.getMessage());
     }
 
     @Test
     void carWithZeroDownPaymentIsRejected() {
         GoalValidationException e = assertThrows(GoalValidationException.class,
-                () -> service.create(user, carRequest("30000", null, "6.5", "0")));
+                () -> service.createGoal(user, carRequest("30000", null, "6.5", "0")));
         assertEquals("With $0 down there is nothing to save.", e.getMessage());
     }
 
@@ -1054,7 +1054,7 @@ class GoalServiceTest {
         Goal stored = rawStoredGoal(30L, GoalType.CAR, "directions_car", before, "1000");
         var anchoredAt = stored.getPlanAnchoredAt();
 
-        Goal updated = service.update(user, 30L, carRequest("30000", null, "7.25", "5000"));
+        Goal updated = service.updateGoal(user, 30L, carRequest("30000", null, "7.25", "5000"));
 
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
     }
@@ -1067,7 +1067,7 @@ class GoalServiceTest {
         stored.setPlanAnchoredAt(stored.getPlanAnchoredAt().minusDays(30));
         var anchoredAt = stored.getPlanAnchoredAt();
 
-        Goal updated = service.update(user, 31L, carRequest("30000", null, "6.5", "6000"));
+        Goal updated = service.updateGoal(user, 31L, carRequest("30000", null, "6.5", "6000"));
 
         assertNotEquals(anchoredAt, updated.getPlanAnchoredAt());
     }
@@ -1083,7 +1083,7 @@ class GoalServiceTest {
         r.setCreditsUntil(until);
         r.setTarget(bd("80000"));
 
-        Goal goal = service.create(user, r);
+        Goal goal = service.createGoal(user, r);
 
         assertEquals(until, goal.getCreditsUntil());
         assertEquals(0, bd("80000").compareTo(goal.getTarget()));
@@ -1097,9 +1097,9 @@ class GoalServiceTest {
     void targetOutOfRangeIsRejected() {
         GoalRequest r = houseRequest("400000", "0", "0");
         r.setTarget(bd("100000000.01"));
-        assertThrows(GoalValidationException.class, () -> service.create(user, r));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, r));
         r.setTarget(bd("-1"));
-        assertThrows(GoalValidationException.class, () -> service.create(user, r));
+        assertThrows(GoalValidationException.class, () -> service.createGoal(user, r));
     }
 
     @Test
@@ -1125,7 +1125,7 @@ class GoalServiceTest {
     @Test
     void createSeedsTheTallyWithASetEntryDatedToday() {
         stubSave();
-        Goal goal = service.create(user, houseRequest("400000", "1500.50", "417"));
+        Goal goal = service.createGoal(user, houseRequest("400000", "1500.50", "417"));
 
         var entries = savedEntries();
         assertEquals(1, entries.size());
@@ -1140,7 +1140,7 @@ class GoalServiceTest {
     @Test
     void kidsCreateSeedsEveryAccount() {
         stubSave();
-        Goal goal = service.create(user, kidsRequest(oneKid("1000", "2000"), "3000", "300"));
+        Goal goal = service.createGoal(user, kidsRequest(oneKid("1000", "2000"), "3000", "300"));
 
         var entries = savedEntries();
         assertEquals(List.of("kid:0:brokerage", "kid:0:plan529"),
@@ -1155,13 +1155,13 @@ class GoalServiceTest {
     void updateIgnoresTheSentBalanceAndAccountBalances() {
         stubSave();
         rawStoredGoal(50L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1000");
-        Goal updated = service.update(user, 50L,
+        Goal updated = service.updateGoal(user, 50L,
                 requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "9999", false));
         assertEquals(bd("1000"), updated.getCurrentBalance());
         assertNull(updated.getBalanceUpdatedAt());
 
         rawStoredKidsGoal(51L, codec.write(oneKid("1000", "2000")));
-        Goal kids = service.update(user, 51L, kidsRequest(oneKid("1500", "2500"), "4000", "300"));
+        Goal kids = service.updateGoal(user, 51L, kidsRequest(oneKid("1500", "2500"), "4000", "300"));
         KidsConfig.Accounts accounts = storedConfigOf(kids).kids().get(0).accounts();
         assertEquals(0, bd("1000").compareTo(accounts.brokerage().balance()));
         assertEquals(0, bd("2000").compareTo(accounts.plan529().balance()));
@@ -1177,7 +1177,7 @@ class GoalServiceTest {
         var lastEntry = EasternTime.now().minusDays(3);
         stored.setBalanceUpdatedAt(lastEntry);
 
-        Goal updated = service.update(user, 52L,
+        Goal updated = service.updateGoal(user, 52L,
                 requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("8000"), year + 2), "50", false));
 
         assertEquals(lastEntry, updated.getBalanceUpdatedAt());
@@ -1197,7 +1197,7 @@ class GoalServiceTest {
 
         KidsConfig changed = kids("60000", "30000",
                 kid("Sam", year - 3, acct("5", "150"), acct("5", "250")));
-        Goal updated = service.update(user, 53L, kidsRequest(changed, "10", "400"));
+        Goal updated = service.updateGoal(user, 53L, kidsRequest(changed, "10", "400"));
 
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(through, accounts.brokerage().creditedThrough());
@@ -1223,13 +1223,13 @@ class GoalServiceTest {
         GoalRequest sent = requestWith(GoalType.CUSTOM, "flag", config, "1000", false);
         sent.setCreditsUntil(newUntil);
         sent.setTarget(bd("7000"));
-        Goal updated = service.update(user, 54L, sent);
+        Goal updated = service.updateGoal(user, 54L, sent);
         assertEquals(newUntil, updated.getCreditsUntil());
         assertEquals(through, updated.getCreditedThrough());
         assertEquals(bd("5000"), updated.getTarget());
 
         sent.setCreditsUntil(null);
-        updated = service.update(user, 54L, sent);
+        updated = service.updateGoal(user, 54L, sent);
         assertEquals(newUntil, updated.getCreditsUntil());
 
         // The same rules per kid account.
@@ -1240,7 +1240,7 @@ class GoalServiceTest {
         KidsConfig sentKids = kids("50000", "30000", kid("Sam", year - 3,
                 new AccountState(bd("1000"), null, null, bd("100"), null, newUntil, bd("1")),
                 new AccountState(bd("2000"), null, null, bd("200"), null, null, bd("1"))));
-        KidsConfig.Accounts accounts = storedConfigOf(service.update(user, 55L, kidsRequest(sentKids, "3000", "300")))
+        KidsConfig.Accounts accounts = storedConfigOf(service.updateGoal(user, 55L, kidsRequest(sentKids, "3000", "300")))
                 .kids().get(0).accounts();
         assertEquals(newUntil, accounts.brokerage().creditsUntil());
         assertEquals(until, accounts.plan529().creditsUntil());
@@ -1257,7 +1257,7 @@ class GoalServiceTest {
         rawStoredGoal(56L, GoalType.VACATION, "flight", stored, "0");
 
         var sent = new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("0"), year);
-        Goal updated = service.update(user, 56L, requestWith(GoalType.VACATION, "flight", sent, "0", false));
+        Goal updated = service.updateGoal(user, 56L, requestWith(GoalType.VACATION, "flight", sent, "0", false));
 
         var result = (com.investingapp.backend.model.goals.VacationConfig)
                 codec.parse(GoalType.VACATION, updated.getConfigJson());
@@ -1271,6 +1271,8 @@ class GoalServiceTest {
         Goal simple = rawStoredGoal(57L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100");
         Goal family = rawStoredKidsGoal(58L, codec.write(oneKid("1000", "2000")));
         when(goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user)).thenReturn(List.of(simple, family));
+        when(goalRepository.findById(57L)).thenReturn(Optional.of(simple));
+        when(goalRepository.findById(58L)).thenReturn(Optional.of(family));
         when(investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user)).thenReturn(Optional.empty());
 
         var responses = service.listForUser(user);
@@ -1283,5 +1285,50 @@ class GoalServiceTest {
         assertEquals(java.util.Set.of("kid:0:brokerage", "kid:0:plan529"), responses.get(1).getUnitTallies().keySet());
         assertEquals(EasternTime.today(), responses.get(1).getUnitTallies().get("kid:0:plan529").creditedThrough());
         verify(investmentScheduleRepository, org.mockito.Mockito.times(1)).findTopByUserOrderByCreatedAtDesc(user);
+    }
+
+    @Test
+    void concurrentCreditLossStillReturnsTheGoal() {
+        GoalLedgerService ledger = org.mockito.Mockito.mock(GoalLedgerService.class);
+        GoalService racing = new GoalService(goalRepository, goalLedgerEntryRepository, investmentScheduleRepository,
+                ledger, codec);
+        Goal lost = rawStoredGoal(60L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100");
+        Goal won = rawStoredGoal(61L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "200");
+        Goal reread = rawStoredGoal(62L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "550");
+        when(goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user)).thenReturn(List.of(lost, won));
+        when(goalRepository.findById(60L)).thenReturn(Optional.of(reread));
+        when(goalRepository.findById(61L)).thenReturn(Optional.of(won));
+        when(investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user)).thenReturn(Optional.empty());
+        when(ledger.rollForwardAlone(any(), any(), any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("uq_goal_ledger_credit"))
+                .thenReturn(true);
+        com.investingapp.backend.dto.UnitTally tally = new com.investingapp.backend.dto.UnitTally(bd("550"),
+                EasternTime.today(), null, null, BigDecimal.ZERO, BigDecimal.ZERO, null, true);
+        when(ledger.talliesFor(any(), any(), any())).thenReturn(java.util.Map.of("goal", tally));
+
+        var responses = racing.listForUser(user);
+
+        assertEquals(2, responses.size());
+        // The losing read answers with what the winning read wrote.
+        assertEquals(bd("550"), responses.get(0).getCurrentBalance());
+        assertEquals(tally, responses.get(0).getTally());
+        assertEquals(61L, responses.get(1).getId());
+        verify(ledger, org.mockito.Mockito.times(2)).rollForwardAlone(any(), any(), any());
+    }
+
+    @Test
+    void createAndUpdateRespondWithTheTally() {
+        stubSave();
+        GoalRequest r = houseRequest("400000", "1500", "417");
+        var created = service.create(user, r);
+        assertEquals(0, bd("1500").compareTo(created.getTally().tally()));
+        assertEquals(EasternTime.today(), created.getTally().creditedThrough());
+
+        rawStoredGoal(63L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "700");
+        var updated = service.update(user, 63L,
+                requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "9", false));
+        assertEquals(0, bd("700").compareTo(updated.getTally().tally()));
+        // A goal from before the tally starts crediting from today on its first roll.
+        assertEquals(EasternTime.today(), updated.getTally().creditedThrough());
     }
 }

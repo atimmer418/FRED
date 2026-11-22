@@ -19,7 +19,11 @@ import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.util.EasternTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -41,6 +45,8 @@ import java.util.Set;
 @Service
 @Transactional
 public class GoalService {
+
+    private static final Logger logger = LoggerFactory.getLogger(GoalService.class);
 
     private static final int UNDECIDED_RUNWAY_MONTHS = 36;
     private static final BigDecimal MAX_AMOUNT = new BigDecimal("100000000");
@@ -77,34 +83,75 @@ public class GoalService {
         this.codec = codec;
     }
 
-    /** Every goal of the user, rolled forward to today, as responses carrying the tally. */
-    public List<GoalResponse> listForUser(User user) {
-        return toResponses(user, goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user));
-    }
-
     /**
-     * Rolls each goal forward to today (Eastern) and maps it to a response with its tally. The user's
-     * schedule is loaded once for all of them.
+     * Every goal of the user, rolled forward to today (Eastern), as responses carrying the tally. Runs
+     * outside a transaction: each goal rolls in its own (see GoalLedgerService.rollForwardAlone), so two
+     * reads at once never fail the request. The one that loses the race re-reads what the other wrote.
      */
-    public List<GoalResponse> toResponses(User user, List<Goal> goals) {
-        Optional<InvestmentSchedule> schedule = investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public List<GoalResponse> listForUser(User user) {
+        Optional<InvestmentSchedule> schedule = scheduleOf(user);
         LocalDate today = EasternTime.today();
         List<GoalResponse> responses = new ArrayList<>();
-        for (Goal goal : goals) {
-            ledgerService.rollForward(goal, schedule, today);
-            GoalResponse response = new GoalResponse(goal, codec);
-            Map<String, UnitTally> tallies = ledgerService.talliesFor(goal, schedule, today);
-            if (goal.getType() == GoalType.KIDS) {
-                response.setUnitTallies(tallies);
-            } else {
-                response.setTally(tallies.get(GoalLedgerService.GOAL_UNIT));
+        for (Goal goal : goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user)) {
+            try {
+                ledgerService.rollForwardAlone(goal.getId(), schedule, today);
+            } catch (DataIntegrityViolationException e) {
+                logger.info("Goal {} was rolled forward by a concurrent read", goal.getId());
             }
-            responses.add(response);
+            Optional<Goal> current = goalRepository.findById(goal.getId());
+            current.ifPresent(g -> responses.add(respond(g, schedule, today)));
         }
         return responses;
     }
 
-    public Goal create(User user, GoalRequest request) {
+    /** Creates the goal and returns it rolled forward, inside the save's transaction. */
+    public GoalResponse create(User user, GoalRequest request) {
+        return respondNow(user, createGoal(user, request));
+    }
+
+    /** Updates the goal and returns it rolled forward, inside the save's transaction. */
+    public GoalResponse update(User user, Long id, GoalRequest request) {
+        return respondNow(user, updateGoal(user, id, request));
+    }
+
+    /** Imports the legacy goals and returns them rolled forward, inside the save's transaction. */
+    public List<GoalResponse> importLegacy(User user, GoalImportRequest request) {
+        Optional<InvestmentSchedule> schedule = scheduleOf(user);
+        LocalDate today = EasternTime.today();
+        List<GoalResponse> responses = new ArrayList<>();
+        for (Goal goal : importGoals(user, request)) {
+            ledgerService.rollForward(goal, schedule, today);
+            responses.add(respond(goal, schedule, today));
+        }
+        return responses;
+    }
+
+    private GoalResponse respondNow(User user, Goal goal) {
+        Optional<InvestmentSchedule> schedule = scheduleOf(user);
+        LocalDate today = EasternTime.today();
+        ledgerService.rollForward(goal, schedule, today);
+        return respond(goal, schedule, today);
+    }
+
+    private Optional<InvestmentSchedule> scheduleOf(User user) {
+        return investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
+    }
+
+    /** Maps a goal already rolled forward to its response with the tally of each unit. */
+    private GoalResponse respond(Goal goal, Optional<InvestmentSchedule> schedule, LocalDate today) {
+        GoalResponse response = new GoalResponse(goal, codec);
+        Map<String, UnitTally> tallies = ledgerService.talliesFor(goal, schedule, today);
+        if (goal.getType() == GoalType.KIDS) {
+            response.setUnitTallies(tallies);
+        } else {
+            response.setTally(tallies.get(GoalLedgerService.GOAL_UNIT));
+        }
+        return response;
+    }
+
+    /** The create rules; returns the saved entity. Package-private so tests can read the stored state. */
+    Goal createGoal(User user, GoalRequest request) {
         enforceTierLimit(user);
         Object config = validate(request, null);
 
@@ -121,7 +168,8 @@ public class GoalService {
         return saved;
     }
 
-    public Goal update(User user, Long id, GoalRequest request) {
+    /** The update rules; returns the saved entity. Package-private so tests can read the stored state. */
+    Goal updateGoal(User user, Long id, GoalRequest request) {
         Goal goal = goalRepository.findByIdAndUser(id, user)
                 .orElseThrow(() -> new NoSuchElementException("Goal not found"));
         if (goal.getType() != request.getType()) {
@@ -158,7 +206,8 @@ public class GoalService {
         goalRepository.delete(goal);
     }
 
-    public List<Goal> importLegacy(User user, GoalImportRequest request) {
+    /** The import rules; returns the saved entities. Package-private so tests can read the stored state. */
+    List<Goal> importGoals(User user, GoalImportRequest request) {
         int nextSort = goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user).size();
         long imported = goalRepository.countByUserAndClientIdIsNotNull(user);
         List<Goal> saved = new ArrayList<>();

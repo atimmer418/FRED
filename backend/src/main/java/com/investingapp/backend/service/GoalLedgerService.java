@@ -17,6 +17,7 @@ import com.investingapp.backend.service.goals.PaydayCalendar;
 import com.investingapp.backend.service.goals.PaydayCalendar.PayRule;
 import com.investingapp.backend.util.EasternTime;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -83,6 +84,17 @@ public class GoalLedgerService {
             goals.save(goal);
         }
         return changed;
+    }
+
+    /**
+     * The read path's roll-forward: reloads the goal and rolls it in a transaction of its own, so a
+     * credit another read already wrote for the same day (the unique credit key) fails only this
+     * transaction. The caller catches DataIntegrityViolationException and re-reads the goal. Must be
+     * called through the Spring proxy. Returns false when the goal no longer exists.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean rollForwardAlone(Long goalId, Optional<InvestmentSchedule> schedule, LocalDate today) {
+        return goals.findById(goalId).map(goal -> rollForward(goal, schedule, today)).orElse(false);
     }
 
     /**

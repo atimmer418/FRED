@@ -50,7 +50,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SuppressWarnings("unchecked")
 class GoalControllerTest {
 
     private GoalService service;
@@ -76,10 +75,6 @@ class GoalControllerTest {
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
 
         controller = new GoalController(service, userRepository);
-        // The service maps goals to responses; here without a tally, which GoalServiceTest covers.
-        when(service.toResponses(any(User.class), any()))
-                .thenAnswer(inv -> ((List<Goal>) inv.getArgument(1)).stream()
-                        .map(g -> new GoalResponse(g, codec)).toList());
     }
 
     private List<GoalResponse> responses(Goal... goals) {
@@ -135,7 +130,7 @@ class GoalControllerTest {
 
     @Test
     void createReturns201() {
-        when(service.create(any(User.class), any(GoalRequest.class))).thenReturn(goal(3L));
+        when(service.create(any(User.class), any(GoalRequest.class))).thenReturn(new GoalResponse(goal(3L), codec));
 
         ResponseEntity<?> response = controller.create(request());
 
@@ -201,7 +196,7 @@ class GoalControllerTest {
     @Test
     void importReturns200WithSavedGoals() {
         when(service.importLegacy(any(User.class), any(GoalImportRequest.class)))
-                .thenReturn(List.of(goal(8L)));
+                .thenReturn(responses(goal(8L)));
 
         GoalImportRequest body = new GoalImportRequest();
         body.setGoals(List.of());
@@ -255,7 +250,7 @@ class GoalControllerTest {
         saved.setType(GoalType.KIDS);
         saved.setIcon("child_care");
         saved.setConfigJson(kidsConfig);
-        when(service.create(any(User.class), any(GoalRequest.class))).thenReturn(saved);
+        when(service.create(any(User.class), any(GoalRequest.class))).thenReturn(new GoalResponse(saved, codec));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(post("/api/goals")

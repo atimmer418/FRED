@@ -8,6 +8,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Data
 public class GoalResponse {
@@ -42,6 +43,12 @@ public class GoalResponse {
 
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = TIMESTAMP)
     private LocalDateTime updatedAt;
+
+    /** The "Saved so far" figures of a simple or vacation goal; null for kids. */
+    private UnitTally tally;
+
+    /** Kids only: each account's figures keyed by unit, such as {@code kid:0:plan529}. */
+    private Map<String, UnitTally> unitTallies;
 
     public GoalResponse(Goal goal, GoalConfigCodec codec) {
         this.id = goal.getId();

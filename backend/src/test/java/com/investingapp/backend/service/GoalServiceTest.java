@@ -14,6 +14,7 @@ import com.investingapp.backend.model.goals.KidsConfig;
 import com.investingapp.backend.model.goals.TargetConfig;
 import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
+import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.util.EasternTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,9 @@ class GoalServiceTest {
     @Mock
     private GoalLedgerEntryRepository goalLedgerEntryRepository;
 
+    @Mock
+    private InvestmentScheduleRepository investmentScheduleRepository;
+
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final GoalConfigCodec codec = new GoalConfigCodec(mapper);
     private final int year = EasternTime.today().getYear();
@@ -56,7 +60,8 @@ class GoalServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GoalService(goalRepository, goalLedgerEntryRepository, codec);
+        service = new GoalService(goalRepository, goalLedgerEntryRepository, investmentScheduleRepository,
+                new GoalLedgerService(goalLedgerEntryRepository, goalRepository, codec), codec);
         user = new User();
         user.setSelectedTier("pro");
     }
@@ -254,7 +259,7 @@ class GoalServiceTest {
         Goal updated = service.update(user, 21L, kidsRequest(on, "150", "50"));
 
         assertTrue(updated.getPlanAnchoredAt().isAfter(oldAnchoredAt));
-        assertEquals(bd("150"), updated.getAnchorBalance());
+        assertEquals(bd("100"), updated.getAnchorBalance());
         assertEquals(Boolean.TRUE, storedConfigOf(updated).giftDays());
     }
 
@@ -327,7 +332,8 @@ class GoalServiceTest {
 
         Goal updated = service.update(user, 7L, houseRequest("450000", "2500", "500"));
 
-        assertEquals(bd("2500"), updated.getAnchorBalance());
+        // The plan restarts from the stored tally; the balance sent is ignored.
+        assertEquals(bd("1000"), updated.getAnchorBalance());
         assertEquals(bd("500"), updated.getAnchorMonthly());
         assertTrue(updated.getPlanAnchoredAt().isAfter(oldAnchoredAt));
         assertNull(updated.getBalanceUpdatedAt());
@@ -348,8 +354,9 @@ class GoalServiceTest {
         assertEquals(bd("417"), updated.getAnchorMonthly());
         assertEquals(bd("0.0700"), updated.getPlanRate());
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
-        assertEquals(bd("1800"), updated.getCurrentBalance());
-        assertNotNull(updated.getBalanceUpdatedAt());
+        // The server owns the tally, so the 1800 sent is ignored.
+        assertEquals(bd("1000"), updated.getCurrentBalance());
+        assertNull(updated.getBalanceUpdatedAt());
     }
 
     @Test
@@ -384,14 +391,14 @@ class GoalServiceTest {
 
         Goal updated = service.update(user, 9L, houseRequest("400000", "950", "417"));
 
-        assertEquals(bd("950"), updated.getAnchorBalance());
+        assertEquals(bd("800"), updated.getAnchorBalance());
         assertEquals(bd("417"), updated.getAnchorMonthly());
         assertEquals(bd("0.0700"), updated.getPlanRate());
         assertTrue(updated.getPlanAnchoredAt().isAfter(EasternTime.now().minusMinutes(1)));
     }
 
     @Test
-    void kidsUpdateStampsOnlyTheChangedAccount() {
+    void kidsUpdateKeepsEachStoredAccountTally() {
         stubSave();
         Goal stored = storedGoal(service.create(user, kidsRequest(oneKid("1000", "2000"), "3000", "300")), 5L);
         var anchoredAt = stored.getPlanAnchoredAt();
@@ -401,8 +408,8 @@ class GoalServiceTest {
         KidsConfig result = (KidsConfig) codec.parse(GoalType.KIDS, updated.getConfigJson());
         KidsConfig.Accounts accounts = result.kids().get(0).accounts();
         assertNull(accounts.brokerage().balanceUpdatedAt());
-        assertNotNull(accounts.plan529().balanceUpdatedAt());
-        assertEquals(0, bd("2500").compareTo(accounts.plan529().balance()));
+        assertNull(accounts.plan529().balanceUpdatedAt());
+        assertEquals(0, bd("2000").compareTo(accounts.plan529().balance()));
         assertEquals(0, bd("2000").compareTo(accounts.plan529().anchorBalance()));
         assertEquals(0, bd("200").compareTo(accounts.plan529().anchorMonthly()));
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
@@ -570,7 +577,7 @@ class GoalServiceTest {
         g.setPlanRate(bd("0.0700"));
         g.setPlanRateKind("market");
         g.setPlanAnchoredAt(EasternTime.now().minusDays(30));
-        when(goalRepository.findByIdAndUser(id, user)).thenReturn(Optional.of(g));
+        org.mockito.Mockito.lenient().when(goalRepository.findByIdAndUser(id, user)).thenReturn(Optional.of(g));
         return g;
     }
 
@@ -645,10 +652,10 @@ class GoalServiceTest {
 
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
-        assertEquals(0, bd("1200").compareTo(accounts.firstYear().balance()));
+        assertEquals(0, bd("1000").compareTo(accounts.firstYear().balance()));
         assertEquals(0, bd("1000").compareTo(accounts.firstYear().anchorBalance()));
         assertEquals(0, bd("100").compareTo(accounts.firstYear().anchorMonthly()));
-        assertNotNull(accounts.firstYear().balanceUpdatedAt());
+        assertNull(accounts.firstYear().balanceUpdatedAt());
         assertEquals(year - 1, storedConfigOf(updated).kids().get(0).firstYearDueYear());
     }
 
@@ -756,7 +763,7 @@ class GoalServiceTest {
                 fundKid("Baby", year + 1, acct("400", "100"), "5000", year + 1, 6));
         Goal updated = service.update(user, 6L, kidsRequest(off, "450", "100"));
 
-        assertEquals(bd("450"), updated.getAnchorBalance());
+        assertEquals(bd("400"), updated.getAnchorBalance());
         KidsConfig result = storedConfigOf(updated);
         assertNull(result.kids().get(0).accounts().firstYear());
         assertEquals(Boolean.FALSE, result.firstYearFund());
@@ -768,15 +775,15 @@ class GoalServiceTest {
         storedGoal(service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
 
         Goal targetChanged = service.update(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 1), "450", "100"));
-        assertEquals(bd("450"), targetChanged.getAnchorBalance());
+        assertEquals(bd("400"), targetChanged.getAnchorBalance());
 
         Goal dueChanged = service.update(user, 6L, kidsRequest(oneFundKid("400", "6000", year + 2), "470", "100"));
-        assertEquals(bd("470"), dueChanged.getAnchorBalance());
+        assertEquals(bd("400"), dueChanged.getAnchorBalance());
         assertEquals(year + 2, storedConfigOf(dueChanged).kids().get(0).firstYearDueYear());
     }
 
     @Test
-    void kidsUpdateStampsOnlyTheChangedFirstYearBalance() {
+    void kidsUpdateKeepsTheStoredFirstYearTally() {
         stubSave();
         Goal stored = storedGoal(
                 service.create(user, kidsRequest(oneFundKid("400", "5000", year + 1), "400", "100")), 6L);
@@ -790,8 +797,8 @@ class GoalServiceTest {
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
         assertNull(accounts.plan529().balanceUpdatedAt());
-        assertNotNull(accounts.firstYear().balanceUpdatedAt());
-        assertEquals(0, bd("650").compareTo(accounts.firstYear().balance()));
+        assertNull(accounts.firstYear().balanceUpdatedAt());
+        assertEquals(0, bd("400").compareTo(accounts.firstYear().balance()));
         assertEquals(0, bd("400").compareTo(accounts.firstYear().anchorBalance()));
     }
 
@@ -812,7 +819,7 @@ class GoalServiceTest {
         KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
         assertEquals(anchoredAt, updated.getPlanAnchoredAt());
         assertEquals(0, bd("1800").compareTo(accounts.plan529().anchorBalance()));
-        assertEquals(0, bd("2500").compareTo(accounts.plan529().balance()));
+        assertEquals(0, bd("2000").compareTo(accounts.plan529().balance()));
         assertNull(accounts.firstYear());
     }
 
@@ -832,7 +839,7 @@ class GoalServiceTest {
         g.setPlanRate(bd("0.0400"));
         g.setPlanRateKind("cash");
         g.setPlanAnchoredAt(EasternTime.now().minusDays(400));
-        when(goalRepository.findByIdAndUser(id, user)).thenReturn(Optional.of(g));
+        org.mockito.Mockito.lenient().when(goalRepository.findByIdAndUser(id, user)).thenReturn(Optional.of(g));
         return g;
     }
 
@@ -886,7 +893,7 @@ class GoalServiceTest {
         rawStoredGoal(12L, GoalType.CUSTOM, "flag", past, "1000");
 
         Goal balance = service.update(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", false));
-        assertEquals(bd("1500"), balance.getCurrentBalance());
+        assertEquals(bd("1000"), balance.getCurrentBalance());
         Goal done = service.update(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", true));
         assertTrue(done.isCompleted());
 
@@ -913,7 +920,7 @@ class GoalServiceTest {
         KidsConfig sent = kids("50000", "30000",
                 kid("Ava", year - 18, acct("1500", "100"), acct("2000", "200")));
         Goal updated = service.update(user, 14L, kidsRequest(sent, "3500", "300"));
-        assertEquals(0, bd("1500").compareTo(storedConfigOf(updated).kids().get(0).accounts().brokerage().balance()));
+        assertEquals(0, bd("1000").compareTo(storedConfigOf(updated).kids().get(0).accounts().brokerage().balance()));
 
         KidsConfig older = kids("50000", "30000",
                 kid("Ava", year - 19, acct("1500", "100"), acct("2000", "200")));
@@ -1104,5 +1111,177 @@ class GoalServiceTest {
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(goalLedgerEntryRepository, goalRepository);
         order.verify(goalLedgerEntryRepository).deleteAllByGoalIn(List.of(stored));
         order.verify(goalRepository).delete(stored);
+    }
+
+    // ---- the tally ----
+
+    private List<com.investingapp.backend.model.GoalLedgerEntry> savedEntries() {
+        org.mockito.ArgumentCaptor<com.investingapp.backend.model.GoalLedgerEntry> captor =
+                org.mockito.ArgumentCaptor.forClass(com.investingapp.backend.model.GoalLedgerEntry.class);
+        verify(goalLedgerEntryRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        return captor.getAllValues();
+    }
+
+    @Test
+    void createSeedsTheTallyWithASetEntryDatedToday() {
+        stubSave();
+        Goal goal = service.create(user, houseRequest("400000", "1500.50", "417"));
+
+        var entries = savedEntries();
+        assertEquals(1, entries.size());
+        assertEquals("goal", entries.get(0).getUnit());
+        assertEquals(com.investingapp.backend.model.GoalLedgerEntry.LedgerKind.SET, entries.get(0).getKind());
+        assertEquals(EasternTime.today(), entries.get(0).getEntryDate());
+        assertEquals(0, bd("1500.50").compareTo(entries.get(0).getAmount()));
+        assertEquals(EasternTime.today(), goal.getCreditedThrough());
+        assertEquals(bd("1500.50"), goal.getCurrentBalance());
+    }
+
+    @Test
+    void kidsCreateSeedsEveryAccount() {
+        stubSave();
+        Goal goal = service.create(user, kidsRequest(oneKid("1000", "2000"), "3000", "300"));
+
+        var entries = savedEntries();
+        assertEquals(List.of("kid:0:brokerage", "kid:0:plan529"),
+                entries.stream().map(com.investingapp.backend.model.GoalLedgerEntry::getUnit).toList());
+        assertEquals(0, bd("2000").compareTo(entries.get(1).getAmount()));
+        KidsConfig.Accounts accounts = storedConfigOf(goal).kids().get(0).accounts();
+        assertEquals(EasternTime.today(), accounts.brokerage().creditedThrough());
+        assertEquals(EasternTime.today(), accounts.plan529().creditedThrough());
+    }
+
+    @Test
+    void updateIgnoresTheSentBalanceAndAccountBalances() {
+        stubSave();
+        rawStoredGoal(50L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1000");
+        Goal updated = service.update(user, 50L,
+                requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "9999", false));
+        assertEquals(bd("1000"), updated.getCurrentBalance());
+        assertNull(updated.getBalanceUpdatedAt());
+
+        rawStoredKidsGoal(51L, codec.write(oneKid("1000", "2000")));
+        Goal kids = service.update(user, 51L, kidsRequest(oneKid("1500", "2500"), "4000", "300"));
+        KidsConfig.Accounts accounts = storedConfigOf(kids).kids().get(0).accounts();
+        assertEquals(0, bd("1000").compareTo(accounts.brokerage().balance()));
+        assertEquals(0, bd("2000").compareTo(accounts.plan529().balance()));
+        assertEquals(bd("3000"), kids.getCurrentBalance());
+    }
+
+    @Test
+    void reanchorStartsFromTheStoredTally() {
+        stubSave();
+        Goal stored = rawStoredGoal(52L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1200");
+        java.time.LocalDate through = EasternTime.today().minusDays(3);
+        stored.setCreditedThrough(through);
+        var lastEntry = EasternTime.now().minusDays(3);
+        stored.setBalanceUpdatedAt(lastEntry);
+
+        Goal updated = service.update(user, 52L,
+                requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("8000"), year + 2), "50", false));
+
+        assertEquals(lastEntry, updated.getBalanceUpdatedAt());
+        assertEquals(bd("1200"), updated.getAnchorBalance());
+        assertEquals(bd("1200"), updated.getCurrentBalance());
+        assertEquals(through, updated.getCreditedThrough());
+    }
+
+    @Test
+    void reanchorKeepsCreditedThroughPerAccount() {
+        stubSave();
+        java.time.LocalDate through = EasternTime.today().minusDays(10);
+        KidsConfig storedConfig = kids("50000", "30000", kid("Sam", year - 3,
+                new AccountState(bd("1100"), null, bd("1000"), bd("100"), through, null, null),
+                new AccountState(bd("2200"), null, bd("2000"), bd("200"), through, null, null)));
+        rawStoredKidsGoal(53L, codec.write(storedConfig));
+
+        KidsConfig changed = kids("60000", "30000",
+                kid("Sam", year - 3, acct("5", "150"), acct("5", "250")));
+        Goal updated = service.update(user, 53L, kidsRequest(changed, "10", "400"));
+
+        KidsConfig.Accounts accounts = storedConfigOf(updated).kids().get(0).accounts();
+        assertEquals(through, accounts.brokerage().creditedThrough());
+        assertEquals(through, accounts.plan529().creditedThrough());
+        assertEquals(0, bd("1100").compareTo(accounts.brokerage().balance()));
+        assertEquals(0, bd("1100").compareTo(accounts.brokerage().anchorBalance()));
+        assertEquals(0, bd("150").compareTo(accounts.brokerage().anchorMonthly()));
+        assertEquals(0, bd("2200").compareTo(accounts.plan529().anchorBalance()));
+    }
+
+    @Test
+    void keepAnchorsCopiesCreditsUntilOnlyWhenSentAndKeepsCreditedThroughAndTarget() {
+        stubSave();
+        java.time.LocalDate through = EasternTime.today().minusDays(2);
+        java.time.LocalDate until = java.time.LocalDate.of(year + 2, 12, 31);
+        java.time.LocalDate newUntil = java.time.LocalDate.of(year + 3, 12, 31);
+        TargetConfig config = new TargetConfig(bd("5000"), year + 2);
+        Goal stored = rawStoredGoal(54L, GoalType.CUSTOM, "flag", config, "1000");
+        stored.setCreditedThrough(through);
+        stored.setCreditsUntil(until);
+        stored.setTarget(bd("5000"));
+
+        GoalRequest sent = requestWith(GoalType.CUSTOM, "flag", config, "1000", false);
+        sent.setCreditsUntil(newUntil);
+        sent.setTarget(bd("7000"));
+        Goal updated = service.update(user, 54L, sent);
+        assertEquals(newUntil, updated.getCreditsUntil());
+        assertEquals(through, updated.getCreditedThrough());
+        assertEquals(bd("5000"), updated.getTarget());
+
+        sent.setCreditsUntil(null);
+        updated = service.update(user, 54L, sent);
+        assertEquals(newUntil, updated.getCreditsUntil());
+
+        // The same rules per kid account.
+        KidsConfig storedKids = kids("50000", "30000", kid("Sam", year - 3,
+                new AccountState(bd("1000"), null, bd("1000"), bd("100"), through, until, bd("50000")),
+                new AccountState(bd("2000"), null, bd("2000"), bd("200"), through, until, bd("30000"))));
+        rawStoredKidsGoal(55L, codec.write(storedKids));
+        KidsConfig sentKids = kids("50000", "30000", kid("Sam", year - 3,
+                new AccountState(bd("1000"), null, null, bd("100"), null, newUntil, bd("1")),
+                new AccountState(bd("2000"), null, null, bd("200"), null, null, bd("1"))));
+        KidsConfig.Accounts accounts = storedConfigOf(service.update(user, 55L, kidsRequest(sentKids, "3000", "300")))
+                .kids().get(0).accounts();
+        assertEquals(newUntil, accounts.brokerage().creditsUntil());
+        assertEquals(until, accounts.plan529().creditsUntil());
+        assertEquals(through, accounts.brokerage().creditedThrough());
+        assertEquals(through, accounts.plan529().creditedThrough());
+        assertEquals(0, bd("50000").compareTo(accounts.brokerage().target()));
+        assertEquals(0, bd("30000").compareTo(accounts.plan529().target()));
+    }
+
+    @Test
+    void vacationUpdateKeepsTheStoredYearTally() {
+        stubSave();
+        var stored = new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("1200"), year);
+        rawStoredGoal(56L, GoalType.VACATION, "flight", stored, "0");
+
+        var sent = new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("0"), year);
+        Goal updated = service.update(user, 56L, requestWith(GoalType.VACATION, "flight", sent, "0", false));
+
+        var result = (com.investingapp.backend.model.goals.VacationConfig)
+                codec.parse(GoalType.VACATION, updated.getConfigJson());
+        assertEquals(0, bd("1200").compareTo(result.savedThisYear()));
+        assertEquals(year, result.savedYear());
+    }
+
+    @Test
+    void listForUserRollsForwardAndCarriesTheTally() {
+        stubSave();
+        Goal simple = rawStoredGoal(57L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100");
+        Goal family = rawStoredKidsGoal(58L, codec.write(oneKid("1000", "2000")));
+        when(goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user)).thenReturn(List.of(simple, family));
+        when(investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user)).thenReturn(Optional.empty());
+
+        var responses = service.listForUser(user);
+
+        assertEquals(EasternTime.today(), simple.getCreditedThrough());
+        assertEquals(EasternTime.today(), responses.get(0).getTally().creditedThrough());
+        assertEquals(0, bd("100").compareTo(responses.get(0).getTally().tally()));
+        assertNull(responses.get(0).getUnitTallies());
+        assertNull(responses.get(1).getTally());
+        assertEquals(java.util.Set.of("kid:0:brokerage", "kid:0:plan529"), responses.get(1).getUnitTallies().keySet());
+        assertEquals(EasternTime.today(), responses.get(1).getUnitTallies().get("kid:0:plan529").creditedThrough());
+        verify(investmentScheduleRepository, org.mockito.Mockito.times(1)).findTopByUserOrderByCreatedAtDesc(user);
     }
 }

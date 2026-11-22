@@ -2,8 +2,11 @@ package com.investingapp.backend.service;
 
 import com.investingapp.backend.dto.GoalImportRequest;
 import com.investingapp.backend.dto.GoalRequest;
+import com.investingapp.backend.dto.GoalResponse;
+import com.investingapp.backend.dto.UnitTally;
 import com.investingapp.backend.model.Goal;
 import com.investingapp.backend.model.GoalType;
+import com.investingapp.backend.model.InvestmentSchedule;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.model.goals.AccountState;
 import com.investingapp.backend.model.goals.EmergencyFundConfig;
@@ -14,18 +17,21 @@ import com.investingapp.backend.model.goals.TargetConfig;
 import com.investingapp.backend.model.goals.VacationConfig;
 import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
+import com.investingapp.backend.repository.InvestmentScheduleRepository;
 import com.investingapp.backend.util.EasternTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -57,18 +63,45 @@ public class GoalService {
 
     private final GoalRepository goalRepository;
     private final GoalLedgerEntryRepository goalLedgerEntryRepository;
+    private final InvestmentScheduleRepository investmentScheduleRepository;
+    private final GoalLedgerService ledgerService;
     private final GoalConfigCodec codec;
 
     public GoalService(GoalRepository goalRepository, GoalLedgerEntryRepository goalLedgerEntryRepository,
+                       InvestmentScheduleRepository investmentScheduleRepository, GoalLedgerService ledgerService,
                        GoalConfigCodec codec) {
         this.goalRepository = goalRepository;
         this.goalLedgerEntryRepository = goalLedgerEntryRepository;
+        this.investmentScheduleRepository = investmentScheduleRepository;
+        this.ledgerService = ledgerService;
         this.codec = codec;
     }
 
-    @Transactional(readOnly = true)
-    public List<Goal> list(User user) {
-        return goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user);
+    /** Every goal of the user, rolled forward to today, as responses carrying the tally. */
+    public List<GoalResponse> listForUser(User user) {
+        return toResponses(user, goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user));
+    }
+
+    /**
+     * Rolls each goal forward to today (Eastern) and maps it to a response with its tally. The user's
+     * schedule is loaded once for all of them.
+     */
+    public List<GoalResponse> toResponses(User user, List<Goal> goals) {
+        Optional<InvestmentSchedule> schedule = investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user);
+        LocalDate today = EasternTime.today();
+        List<GoalResponse> responses = new ArrayList<>();
+        for (Goal goal : goals) {
+            ledgerService.rollForward(goal, schedule, today);
+            GoalResponse response = new GoalResponse(goal, codec);
+            Map<String, UnitTally> tallies = ledgerService.talliesFor(goal, schedule, today);
+            if (goal.getType() == GoalType.KIDS) {
+                response.setUnitTallies(tallies);
+            } else {
+                response.setTally(tallies.get(GoalLedgerService.GOAL_UNIT));
+            }
+            responses.add(response);
+        }
+        return responses;
     }
 
     public Goal create(User user, GoalRequest request) {
@@ -80,8 +113,12 @@ public class GoalService {
         goal.setType(request.getType());
         goal.setSortOrder(goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user).size());
         applyEditableFields(goal, request);
-        reanchor(goal, request, config, EasternTime.now());
-        return goalRepository.save(goal);
+        goal.setCurrentBalance(request.getCurrentBalance());
+        reanchor(goal, request, config, null, EasternTime.now());
+        Goal saved = goalRepository.save(goal);
+        // The starting balance becomes the tally, recorded as a SET entry dated today.
+        ledgerService.seed(saved, EasternTime.today());
+        return saved;
     }
 
     public Goal update(User user, Long id, GoalRequest request) {
@@ -97,16 +134,19 @@ public class GoalService {
         }
         Object stored = codec.parse(goal.getType(), goal.getConfigJson());
         Object config = validate(request, stored);
+        if (config instanceof VacationConfig sent && stored instanceof VacationConfig old) {
+            // The server owns the year's tally; the client's copy is ignored.
+            config = new VacationConfig(sent.tripsPerYear(), sent.budgetPerTrip(), old.savedThisYear(), old.savedYear());
+        }
         LocalDateTime now = EasternTime.now();
 
         boolean firstPlan = goal.getAnchorMonthly().signum() == 0 && request.getAnchorMonthly().signum() > 0;
         boolean reanchor = firstPlan || planInputsChanged(request.getType(), stored, config);
-        BigDecimal previousBalance = goal.getCurrentBalance();
         applyEditableFields(goal, request);
         if (reanchor) {
-            reanchor(goal, request, config, now);
+            reanchor(goal, request, config, stored, now);
         } else {
-            keepAnchors(goal, request, stored, config, now, previousBalance);
+            keepAnchors(goal, request, stored, config);
         }
         return goalRepository.save(goal);
     }
@@ -147,51 +187,52 @@ public class GoalService {
 
     // ---- common field handling ----
 
+    /** The balance is not here: the server owns the tally once a goal exists. */
     private void applyEditableFields(Goal goal, GoalRequest request) {
         goal.setName(request.getName().trim());
         goal.setIcon(request.getIcon());
-        goal.setCurrentBalance(request.getCurrentBalance());
         goal.setCompleted(request.isCompleted());
     }
 
     // ---- anchor rules ----
 
-    /** Full re-anchor: the plan restarts from the balance and monthly amount sent now. */
-    private void reanchor(Goal goal, GoalRequest request, Object config, LocalDateTime now) {
-        goal.setAnchorBalance(request.getCurrentBalance());
+    /**
+     * Full re-anchor: the plan restarts from the tally and the monthly amount sent now. The stored
+     * config is null on create, where the tally is the balance sent. The tally, its last-entry stamp
+     * (balanceUpdatedAt) and creditedThrough are kept.
+     */
+    private void reanchor(Goal goal, GoalRequest request, Object config, Object storedOrNull, LocalDateTime now) {
+        goal.setAnchorBalance(goal.getCurrentBalance());
         goal.setAnchorMonthly(request.getAnchorMonthly());
         goal.setCreditsUntil(request.getCreditsUntil());
         goal.setTarget(request.getTarget());
         goal.setPlanRate(request.getPlanRate());
         goal.setPlanRateKind(request.getPlanRateKind());
         goal.setPlanAnchoredAt(now);
-        goal.setBalanceUpdatedAt(null);
         Object toStore = config;
         if (config instanceof KidsConfig kids) {
-            toStore = mapAccounts(kids, (sent, index, slot) -> anchored(sent));
+            KidsConfig old = storedOrNull instanceof KidsConfig k ? k : null;
+            toStore = mapAccounts(kids, (sent, index, slot) -> anchored(sent, storedAccount(old, index, slot)));
         }
         goal.setConfigJson(codec.write(toStore));
     }
 
-    /** Balance-only edit: the plan stays exactly as anchored, only balance dates move. */
-    private void keepAnchors(Goal goal, GoalRequest request, Object stored, Object config,
-                             LocalDateTime now, BigDecimal previousBalance) {
-        if (request.getCurrentBalance().compareTo(previousBalance) != 0) {
-            goal.setBalanceUpdatedAt(now);
-        }
+    /**
+     * An edit that changes no plan input: the plan stays exactly as anchored and the stored tallies
+     * stay as they are. Only a sent creditsUntil is taken.
+     */
+    private void keepAnchors(Goal goal, GoalRequest request, Object stored, Object config) {
         if (request.getCreditsUntil() != null) {
             goal.setCreditsUntil(request.getCreditsUntil());
         }
         Object toStore = config;
         if (config instanceof KidsConfig kids && stored instanceof KidsConfig old) {
             toStore = mapAccounts(kids, (sent, index, slot) -> {
-                AccountState before = accountAt(old, index, slot);
+                AccountState before = storedAccount(old, index, slot);
                 if (before == null) {
-                    return anchored(sent);
+                    return anchored(sent, null);
                 }
-                boolean changed = sent.balance().compareTo(before.balance()) != 0;
-                return new AccountState(sent.balance(),
-                        changed ? now : before.balanceUpdatedAt(),
+                return new AccountState(before.balance(), before.balanceUpdatedAt(),
                         before.anchorBalance(), before.anchorMonthly(),
                         before.creditedThrough(),
                         sent.creditsUntil() != null ? sent.creditsUntil() : before.creditsUntil(),
@@ -201,10 +242,17 @@ public class GoalService {
         goal.setConfigJson(codec.write(toStore));
     }
 
-    /** A fresh anchor: the plan starts from this balance and the monthly amount sent. */
-    private static AccountState anchored(AccountState sent) {
-        return new AccountState(sent.balance(), null, sent.balance(), orZero(sent.anchorMonthly()),
-                null, sent.creditsUntil(), sent.target());
+    /**
+     * A fresh anchor: the plan starts from the account's tally and the monthly amount sent. A stored
+     * account keeps its tally, balanceUpdatedAt and creditedThrough; a new one starts from the balance sent.
+     */
+    private static AccountState anchored(AccountState sent, AccountState storedOrNull) {
+        if (storedOrNull == null) {
+            return new AccountState(sent.balance(), null, sent.balance(), orZero(sent.anchorMonthly()),
+                    null, sent.creditsUntil(), sent.target());
+        }
+        return new AccountState(storedOrNull.balance(), storedOrNull.balanceUpdatedAt(), storedOrNull.balance(),
+                orZero(sent.anchorMonthly()), storedOrNull.creditedThrough(), sent.creditsUntil(), sent.target());
     }
 
     private boolean planInputsChanged(GoalType type, Object stored, Object incoming) {
@@ -297,8 +345,13 @@ public class GoalService {
                 config.giftDays());
     }
 
-    private static AccountState accountAt(KidsConfig config, int index, AccountSlot slot) {
-        KidsConfig.Accounts accounts = config.kids().get(index).accounts();
+    /** The stored account at this kid index and slot, or null when there is none. */
+    private static AccountState storedAccount(KidsConfig storedOrNull, int index, AccountSlot slot) {
+        if (storedOrNull == null || storedOrNull.kids() == null || index >= storedOrNull.kids().size()
+                || storedOrNull.kids().get(index) == null || storedOrNull.kids().get(index).accounts() == null) {
+            return null;
+        }
+        KidsConfig.Accounts accounts = storedOrNull.kids().get(index).accounts();
         return switch (slot) {
             case BROKERAGE -> accounts.brokerage();
             case PLAN_529 -> accounts.plan529();

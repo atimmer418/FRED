@@ -7,7 +7,6 @@ import com.investingapp.backend.dto.GoalResponse;
 import com.investingapp.backend.dto.MessageResponse;
 import com.investingapp.backend.model.Goal;
 import com.investingapp.backend.model.User;
-import com.investingapp.backend.model.goals.GoalConfigCodec;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.services.UserDetailsImpl;
 import com.investingapp.backend.service.GoalService;
@@ -45,29 +44,27 @@ public class GoalController {
     private static final Logger logger = LoggerFactory.getLogger(GoalController.class);
 
     private final GoalService goalService;
-    private final GoalConfigCodec codec;
     private final UserRepository userRepository;
 
-    public GoalController(GoalService goalService, GoalConfigCodec codec, UserRepository userRepository) {
+    public GoalController(GoalService goalService, UserRepository userRepository) {
         this.goalService = goalService;
-        this.codec = codec;
         this.userRepository = userRepository;
     }
 
     @GetMapping("")
     public ResponseEntity<?> list() {
-        return withUser(user -> ResponseEntity.ok(toResponses(goalService.list(user))));
+        return withUser(user -> ResponseEntity.ok(goalService.listForUser(user)));
     }
 
     @PostMapping("")
     public ResponseEntity<?> create(@Valid @RequestBody GoalRequest request) {
         return withUser(user -> ResponseEntity.status(HttpStatus.CREATED)
-                .body(new GoalResponse(goalService.create(user, request), codec)));
+                .body(toResponse(user, goalService.create(user, request))));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable Long id, @Valid @RequestBody GoalRequest request) {
-        return withUser(user -> ResponseEntity.ok(new GoalResponse(goalService.update(user, id, request), codec)));
+        return withUser(user -> ResponseEntity.ok(toResponse(user, goalService.update(user, id, request))));
     }
 
     @DeleteMapping("/{id}")
@@ -80,7 +77,7 @@ public class GoalController {
 
     @PostMapping("/import")
     public ResponseEntity<?> importLegacy(@Valid @RequestBody GoalImportRequest request) {
-        return withUser(user -> ResponseEntity.ok(toResponses(goalService.importLegacy(user, request))));
+        return withUser(user -> ResponseEntity.ok(goalService.toResponses(user, goalService.importLegacy(user, request))));
     }
 
     /** Rejects bodies that fail bean validation with a 400 and the first field message. */
@@ -93,8 +90,9 @@ public class GoalController {
         return ResponseEntity.badRequest().body(new MessageResponse(message));
     }
 
-    private List<GoalResponse> toResponses(List<Goal> goals) {
-        return goals.stream().map(goal -> new GoalResponse(goal, codec)).toList();
+    /** One goal, rolled forward and carrying its tally. */
+    private GoalResponse toResponse(User user, Goal goal) {
+        return goalService.toResponses(user, List.of(goal)).get(0);
     }
 
     /** Resolves the caller, runs the action, and maps service failures to HTTP statuses. */

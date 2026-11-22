@@ -50,6 +50,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+@SuppressWarnings("unchecked")
 class GoalControllerTest {
 
     private GoalService service;
@@ -74,7 +75,15 @@ class GoalControllerTest {
         SecurityContextHolder.getContext().setAuthentication(auth);
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
 
-        controller = new GoalController(service, codec, userRepository);
+        controller = new GoalController(service, userRepository);
+        // The service maps goals to responses; here without a tally, which GoalServiceTest covers.
+        when(service.toResponses(any(User.class), any()))
+                .thenAnswer(inv -> ((List<Goal>) inv.getArgument(1)).stream()
+                        .map(g -> new GoalResponse(g, codec)).toList());
+    }
+
+    private List<GoalResponse> responses(Goal... goals) {
+        return java.util.Arrays.stream(goals).map(g -> new GoalResponse(g, codec)).toList();
     }
 
     @AfterEach
@@ -112,7 +121,7 @@ class GoalControllerTest {
 
     @Test
     void listReturns200WithGoals() {
-        when(service.list(user)).thenReturn(List.of(goal(1L), goal(2L)));
+        when(service.listForUser(user)).thenReturn(responses(goal(1L), goal(2L)));
 
         ResponseEntity<?> response = controller.list();
 
@@ -205,7 +214,7 @@ class GoalControllerTest {
 
     @Test
     void timestampsSerializeAsIsoStrings() throws Exception {
-        when(service.list(user)).thenReturn(List.of(goal(1L)));
+        when(service.listForUser(user)).thenReturn(responses(goal(1L)));
         ObjectMapper wireMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .enable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);

@@ -35,6 +35,8 @@ export interface ToastItem {
 }
 
 export const TOAST_DURATION_MS = 3000;
+/** A toast with an action (Undo) stays five seconds: long enough to read it and tap. */
+export const ACTION_TOAST_DURATION_MS = 5000;
 /** Errors stay up ten seconds: the user has to read what went wrong and decide what to do next. */
 export const ERROR_TOAST_DURATION_MS = 10000;
 
@@ -85,7 +87,7 @@ export class ToastService {
     const duration = severity === 'error'
       // Errors hold the ten-second floor: a short duration from an older call site would cut them off.
       ? Math.max(request.duration ?? 0, ERROR_TOAST_DURATION_MS)
-      : request.duration ?? TOAST_DURATION_MS;
+      : request.duration ?? (action ? ACTION_TOAST_DURATION_MS : TOAST_DURATION_MS);
     // The field is left off when there is no action, so a plain toast keeps its old shape.
     this.items.next({ severity, message, title, duration, ...(action ? { action } : {}) });
   }

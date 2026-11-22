@@ -266,8 +266,11 @@ function progressOf(saved: number, part: number): number {
   return saved > 0 ? 100 : 0;
 }
 
-/** The band fragments from a unit's tally. A null tally (a preview, or not read yet) has no next or net. */
-function tallyLineFor(saved: number, pct: number, part: number, t: UnitTally | null): TallyLine {
+/**
+ * The band fragments from a unit's tally. A null tally (a preview, or not read yet) has no next or net.
+ * `whose` names the part: "your" ("3% of your $30K"), or a vacation's "this year's", since it resets each January.
+ */
+function tallyLineFor(saved: number, pct: number, part: number, t: UnitTally | null, whose = 'your'): TallyLine {
   const upcoming = t?.nextCreditDate ? `${fmtMoney(t.nextCreditAmount)} ${fmtMonthDay(t.nextCreditDate)}` : null;
   const beforeFirst = !!t && !t.startedCrediting && upcoming !== null;
   let net: string | null = null;
@@ -277,7 +280,7 @@ function tallyLineFor(saved: number, pct: number, part: number, t: UnitTally | n
     saved: `Saved ${fmtMoney(saved)}`,
     part: beforeFirst
       ? `First ${fmtMoney(t!.nextCreditAmount)} lands ${fmtMonthDay(t!.nextCreditDate!)}`
-      : `${Math.round(pct)}% of your ${fmtCompact(part)}`,
+      : `${Math.round(pct)}% of ${whose} ${fmtCompact(part)}`,
     next: beforeFirst || upcoming === null ? null : `Next ${upcoming}`,
     net,
   };
@@ -821,7 +824,7 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext, imported: boole
     pill: 'Cash',
     status: tallyStatus({ completed: goal.completed, imported, tally: t, target: plan.annual, today: ctx.now }),
     progressPct,
-    tallyLine: tallyLineFor(saved, progressPct, plan.annual, t),
+    tallyLine: tallyLineFor(saved, progressPct, plan.annual, t, "this year's"),
     growthLine: null,
     relative: false,
     vacation: plan,

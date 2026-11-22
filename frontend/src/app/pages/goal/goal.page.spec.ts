@@ -635,7 +635,7 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     const trips = await create({ id: '6' }, { goals: [vacationGoalFixture(6)] });
-    expect(text(trips, '.gp-band-text')).toBe('Saved $0 · 0% of your $6K');
+    expect(text(trips, '.gp-band-text')).toBe('Saved $0 · 0% of this year\'s $6K');
     expect(text(trips, '.gp-band .gp-band-right .fd-pill')).toBe('Cash');
     expect(text(trips, '.gp-band .gp-band-right .gp-chip')).toBe('Plan started');
     expect(trips.nativeElement.querySelector('#gp-bal-vacation')).not.toBeNull();

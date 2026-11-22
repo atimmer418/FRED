@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import {
-  ERROR_TOAST_DURATION_MS, TOAST_DURATION_MS, ToastItem, ToastService, severityForColor
+  ACTION_TOAST_DURATION_MS, ERROR_TOAST_DURATION_MS, TOAST_DURATION_MS, ToastItem, ToastService, severityForColor
 } from './toast.service';
 
 describe('ToastService', () => {
@@ -101,10 +101,19 @@ describe('ToastService', () => {
       service.show({ severity: 'success', message: 'Plain.' });
 
       expect(received[0]).toEqual({
-        severity: 'success', message: 'Saved so far is now $450.', title: undefined, duration: TOAST_DURATION_MS,
+        severity: 'success', message: 'Saved so far is now $450.', title: undefined, duration: ACTION_TOAST_DURATION_MS,
         action: { label: 'Undo', run },
       });
       expect('action' in received[1]).toBeFalse();
+    });
+
+    it('keeps a toast with an action up five seconds unless a duration is passed', () => {
+      const action = { label: 'Undo', run: () => undefined };
+      service.show({ severity: 'success', message: 'Undoable.', action });
+      service.show({ severity: 'success', message: 'Custom.', action, duration: 8000 });
+      service.show({ severity: 'success', message: 'Plain.' });
+
+      expect(received.map(i => i.duration)).toEqual([5000, 8000, TOAST_DURATION_MS]);
     });
 
     it('fills in the default duration by severity', () => {

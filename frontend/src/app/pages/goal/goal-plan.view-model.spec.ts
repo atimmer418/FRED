@@ -1148,7 +1148,7 @@ describe('buildGoalPlanView from the tally', () => {
     const done = vacation(6_000);
     expect(done.status.kind).toBe('done');
     expect(done.progressPct).toBe(100);
-    expect(done.tallyLine).toEqual({ saved: 'Saved $6,000', part: '100% of your $6K', next: null, net: null });
+    expect(done.tallyLine).toEqual({ saved: 'Saved $6,000', part: '100% of this year\'s $6K', next: null, net: null });
     expect(vacation(2_500).status.kind).toBe('on_plan');
     expect(vacation(2_500).growthLine).toBeNull();
   });

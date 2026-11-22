@@ -409,6 +409,11 @@ describe('goal-form.model: house and car terms', () => {
     expect(defaultLoanRate('WEDDING')).toBeNull();
   });
 
+  it("a legacy full-price car opens at the slider's max", () => {
+    const legacy = goalOf({ type: 'CAR', config: { price: 40_000, downPaymentPct: null, targetYear: 2029 } });
+    expect(formFromGoal(legacy).downPaymentAmount).toBe(25_000);
+  });
+
   it('formFromGoal maps a legacy null pct house to 20%', () => {
     const legacy = goalOf({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: null, targetYear: 2031 } });
     const form = formFromGoal(legacy);
@@ -431,9 +436,9 @@ describe('goal-form.model: house and car terms', () => {
     // $33,800 × 25% = $8,450 → $8,500.
     const up = goalOf({ type: 'CAR', config: { price: 33_800, downPaymentPct: 25, targetYear: 2029 } });
     expect(formFromGoal(up).downPaymentAmount).toBe(8_500);
-    // A full-price legacy car (null pct) saves the whole price, never more than it.
-    const full = goalOf({ type: 'CAR', config: { price: 32_300, downPaymentPct: null, targetYear: 2029 } });
-    expect(formFromGoal(full).downPaymentAmount).toBe(32_300);
+    // A full-price legacy car (null pct) saves the whole price, never more than it or the slider's max.
+    const full = goalOf({ type: 'CAR', config: { price: 20_300, downPaymentPct: null, targetYear: 2029 } });
+    expect(formFromGoal(full).downPaymentAmount).toBe(20_300);
   });
 
   it('formToConfig writes loanRate and downPaymentAmount', () => {

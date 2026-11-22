@@ -377,6 +377,8 @@ export function simpleTarget(type: GoalType, config: GoalConfig): number {
     case 'HOUSE':
     case 'CAR': {
       const c = config as HouseCarConfig;
+      // A car's plan is its dollar down payment; one stored before that falls back to price x pct.
+      if (type === 'CAR' && c.downPaymentAmount != null) return c.downPaymentAmount;
       return (c.price * (c.downPaymentPct ?? 100)) / 100;
     }
     case 'EMERGENCY_FUND': {

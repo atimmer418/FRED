@@ -73,6 +73,7 @@ export const MAX_AMOUNT = 100_000_000;
 /** A new car goal plans this much down. */
 export const DEFAULT_CAR_DOWN = 5_000;
 export const CAR_DOWN_STEP = 500;
+const CAR_DOWN_MAX = 25_000;
 const NO_CAR_DOWN = 'With $0 down there is nothing to save. Set a down payment, or pick Something else.';
 export const MAX_KIDS = 6;
 
@@ -223,9 +224,9 @@ export function formFromGoal(goal: Goal): GoalForm {
       form.loanRate = c.loanRate ?? defaultLoanRate(goal.type);
       if (goal.type === 'CAR') {
         // A car stored before dollar down payments: its old percent (null was the full price), to the
-        // nearest $500, never more than the price.
+        // nearest $500, never more than the price or the slider's $25,000 top.
         const legacy = Math.round((c.price * (c.downPaymentPct ?? 100)) / 100 / CAR_DOWN_STEP) * CAR_DOWN_STEP;
-        form.downPaymentAmount = c.downPaymentAmount ?? Math.min(legacy, c.price);
+        form.downPaymentAmount = c.downPaymentAmount ?? Math.min(legacy, c.price, CAR_DOWN_MAX);
       } else {
         form.downPaymentAmount = null;
       }

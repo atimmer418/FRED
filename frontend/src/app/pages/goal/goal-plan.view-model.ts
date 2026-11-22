@@ -45,6 +45,8 @@ import {
   yourPart,
 } from '../../utils/goal-plan.utils';
 import { formatMonthDay } from '../../utils/local-date';
+import { loanLine } from '../../utils/loan.utils';
+import { CAR_LOAN_RATE_DEFAULT_PCT, MORTGAGE_RATE_DEFAULT_PCT } from '../../constants/loan-rates';
 import { audienceLabel } from '../../utils/goal-quiz.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
@@ -497,7 +499,8 @@ export function buildGoalPlanView(goal: GoalPlanInput, ctx: GoalPlanContext): Go
     ...view,
     heroLabel: dueNowOnly ? 'Due now' : view.kids ? 'Family plan' : 'Save this month',
     // Nothing is left to spread over months, so there is no monthly to explain.
-    coversLine: dueNowOnly ? null : view.coversLine,
+    // A house or car keeps its loan line: it explains the down payment, not the monthly.
+    coversLine: dueNowOnly && goal.type !== 'HOUSE' && goal.type !== 'CAR' ? null : view.coversLine,
     whyInvestLine: dueNowOnly ? null : view.whyInvestLine,
     subtitle: imported ? IMPORTED_SUBTITLE : view.subtitle,
     perPaycheck: InvestmentFrequencyUtils.toPerPaycheckEquivalent(view.monthlyTotal, ctx.frequency),
@@ -835,6 +838,18 @@ function targetYearOf(goal: GoalPlanInput): number {
   return (goal.config as HouseCarConfig | EmergencyFundConfig | TargetConfig).targetYear;
 }
 
+/**
+ * The loan that follows a house or car down payment, at the goal's saved rate (a goal from before
+ * loan terms has none, so the type's default). Null for other types and when nothing is financed.
+ */
+function loanLineFor(goal: GoalPlanInput, down: number): string | null {
+  if (goal.type !== 'HOUSE' && goal.type !== 'CAR') return null;
+  const c = goal.config as HouseCarConfig;
+  if (!(c.price > down)) return null;
+  const rate = c.loanRate ?? (goal.type === 'HOUSE' ? MORTGAGE_RATE_DEFAULT_PCT : CAR_LOAN_RATE_DEFAULT_PCT);
+  return loanLine(goal.type, c.price, down, rate);
+}
+
 function simpleView(
   goal: GoalPlanInput,
   ctx: GoalPlanContext,
@@ -866,6 +881,8 @@ function simpleView(
   const progressPct = progressOf(saved, part);
 
   const audience = goalAudience(goal);
+  const loan = loanLineFor(goal, target);
+  const lead = amountLead(plan.monthly, plan.dueNow);
 
   return {
     monthlyTotal: plan.monthly,
@@ -876,10 +893,11 @@ function simpleView(
     headline: isDueNowOnly(plan.monthly, plan.dueNow)
       ? 'Target month reached'
       : `Reaches ${fmtCompact(target)} in ${MONTH_ABBR[plan.reaches.month - 1]} ${plan.reaches.year}`,
-    subtitle: `${amountLead(plan.monthly, plan.dueNow)} ${audience}`,
+    // A house or car leads with the down payment: that is the plan.
+    subtitle: loan ? `${fmtMoney(target)} down · ${lead} ${audience}` : `${lead} ${audience}`,
     audience,
     howFredHelps: howFredHelpsLine([{ kind: plan.rateKind, babyFund: false }], null),
-    coversLine: null,
+    coversLine: loan,
     whyInvestLine: plan.rateKind === 'market' && plan.n > 0
       ? whyInvestLineFor(target, plan.fromYou + value, plan.fromGrowth, null)
       : null,

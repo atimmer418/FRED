@@ -880,6 +880,13 @@ describe('GoalPage', () => {
     return args.componentProps as ReturnType<typeof sheetProps>;
   }
 
+  it("info sheet's second note for a house carries the loan line and the Freddie Mac source", async () => {
+    const fixture = await create({ id: '5' }, { goals: [{ ...houseGoal(5), config: { price: 500_000, downPaymentPct: 20, targetYear: YEAR + 5, loanRate: 6.5 } }] });
+    const notes = fixture.componentInstance.infoNotes();
+    expect(notes[1].text).toBe(
+      'Then the mortgage: ~$2,528 a month at 6.5% over 30 years, before taxes and insurance. Rate from Freddie Mac PMMS, week of November 19, 2026.');
+  });
+
   it('renders Invest and Everyday group labels with no totals (Andy, 2026-11-11), plain unit amounts, and the Tap for details hint', async () => {
     const fixture = await create({ id: '5' }, { goals: [sampleFamily(5)] });
     const card = fixture.componentInstance.kidCards()[0];
@@ -1035,7 +1042,7 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     const house = await create({ id: '7' }, { goals: [houseGoal(7)] });
-    expect(house.nativeElement.querySelectorAll('.fd-how').length).toBe(2);
+    expect(house.nativeElement.querySelectorAll('.fd-how').length).toBe(3);
     expect(text(house, '.fd-how')).toContain('How FRED helps.');
   });
 

@@ -27,6 +27,7 @@ import { RateAssumptionsService } from '../../services/rate-assumptions.service'
 import {
   AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, UnitTally, VacationConfig, unitKey,
 } from '../../models/goal.model';
+import { LOAN_RATE_SOURCES } from '../../constants/loan-rates';
 import { isKidNotYetBorn, kidDeadline, simpleTarget, tallyStatus } from '../../utils/goal-plan.utils';
 import { todayYmd } from '../../utils/local-date';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
@@ -93,6 +94,14 @@ export interface KidCard {
 }
 
 const HERO_COUNT_MS = 600;
+
+/** "Rate from Freddie Mac PMMS, week of November 19, 2026." The loan rate's source, from the one rates file. */
+function loanSourceLine(type: GoalType): string {
+  const s = LOAN_RATE_SOURCES.find((x) => x.usedIn === type);
+  if (!s) return '';
+  const short = type === 'HOUSE' ? 'Freddie Mac PMMS' : 'Federal Reserve G.19';
+  return `Rate from ${short}, ${s.period.charAt(0).toLowerCase()}${s.period.slice(1)}.`;
+}
 /** The Saved so far tray's minus and plus step. */
 const BALANCE_FINE = 25;
 
@@ -285,9 +294,13 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
   /** The "How FRED plans this" notes a unit sheet's info button opens, skipping the lines a plan lacks. */
   readonly infoNotes = computed<InfoNote[]>(() => {
     const v = this.view();
+    const type = this.planInput().type;
+    const loan = type === 'HOUSE' || type === 'CAR' ? v.coversLine : null;
     const notes: Array<[string, string, string | null]> = [
       ['account_balance_wallet', 'How FRED helps.', v.howFredHelps],
-      ['checklist', 'What the monthly covers.', v.coversLine],
+      loan
+        ? ['request_quote', 'The loan that follows.', `${loan} ${loanSourceLine(type)}`]
+        : ['checklist', 'What the monthly covers.', v.coversLine],
       ['trending_up', 'Why invest it.', v.whyInvestLine],
     ];
     return notes

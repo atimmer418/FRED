@@ -139,12 +139,13 @@ describe('buildGoalPlanView', () => {
       type: 'HOUSE',
       config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 },
     }), ctx());
-    expect(house.subtitle).toMatch(/^\$[\d,]+\/mo for your home$/);
+    expect(house.subtitle).toMatch(/^\$100,000 down · \$[\d,]+\/mo for your home$/);
 
     const car = buildGoalPlanView(base({
       type: 'CAR',
       config: { price: 40_000, downPaymentPct: null, targetYear: Y + 4 },
     }), ctx());
+    // Full price saved (a legacy null pct) leaves no loan, so no loan line and no down-payment lead.
     expect(car.subtitle).toMatch(/^\$[\d,]+\/mo for your car$/);
 
     const custom = buildGoalPlanView(base({}), ctx());
@@ -895,12 +896,12 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(simple.whyInvestLine).toBeNull();
   });
 
-  it('a HOUSE plan at the market rate reads the simple-plan first sentence and has no coversLine', () => {
+  it('a HOUSE plan at the market rate reads the simple-plan first sentence and its coversLine is the mortgage line', () => {
     const view = buildGoalPlanView(
       base({ type: 'HOUSE', currentBalance: 12_000, anchorBalance: 12_000, planAnchoredAt: '2026-11-01T00:00:00', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }),
       ctx(),
     );
-    expect(view.coversLine).toBeNull();
+    expect(view.coversLine).toBe('Then the mortgage: ~$2,737 a month at 7.28% over 30 years, before taxes and insurance.');
     const m = view.whyInvestLine!.match(SIMPLE_WHY);
     expect(m).withContext(view.whyInvestLine!).not.toBeNull();
     const [reaches, fromYou, fromGrowth] = [m![1], m![2], m![3]].map(dollars);
@@ -908,6 +909,33 @@ describe('buildGoalPlanView one-screen page', () => {
     // The $12,000 already saved is "from you" too.
     expect(fromYou).toBe(Math.round((view.simple!.fromYou + 12_000) / 1_000) * 1_000);
     expect(fromGrowth).toBe(Math.round(view.simple!.fromGrowth / 1_000) * 1_000);
+  });
+
+  it('house subtitle leads with the down payment and the mortgage line', () => {
+    const house = buildGoalPlanView(base({
+      type: 'HOUSE',
+      config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6, loanRate: 6.5 },
+    }), ctx());
+    expect(house.subtitle).toMatch(/^\$100,000 down · \$[\d,]+\/mo for your home$/);
+    expect(house.coversLine).toBe('Then the mortgage: ~$2,528 a month at 6.5% over 30 years, before taxes and insurance.');
+  });
+
+  it('car target is the dollar down payment', () => {
+    const car = buildGoalPlanView(base({
+      type: 'CAR',
+      config: { price: 40_000, downPaymentPct: null, downPaymentAmount: 5_000, loanRate: 7.5, targetYear: Y + 4 },
+    }), ctx());
+    expect(car.simple!.target).toBe(5_000);
+    expect(car.subtitle).toMatch(/^\$5,000 down · \$[\d,]+\/mo for your car$/);
+    expect(car.coversLine).toBe('Then the loan: ~$701 a month at 7.5% over 60 months.');
+  });
+
+  it('legacy car without downPaymentAmount still targets price × pct', () => {
+    const car = buildGoalPlanView(base({
+      type: 'CAR',
+      config: { price: 40_000, downPaymentPct: 25, targetYear: Y + 4 },
+    }), ctx());
+    expect(car.simple!.target).toBe(10_000);
   });
 
   it('cash plans have neither line: emergency fund, vacation, a short-dated car', () => {

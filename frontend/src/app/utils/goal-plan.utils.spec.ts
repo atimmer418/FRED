@@ -152,6 +152,7 @@ describe('proposeSimplePlan', () => {
 describe('simpleTarget', () => {
   it('applies the down payment', () => expect(simpleTarget('HOUSE', { price: 1000000, downPaymentPct: 20, targetYear: 2032 })).toBe(200000));
   it('uses the full price when null', () => expect(simpleTarget('CAR', { price: 40000, downPaymentPct: null, targetYear: 2029 })).toBe(40000));
+  it('a car targets its dollar down payment', () => expect(simpleTarget('CAR', { price: 40000, downPaymentPct: null, downPaymentAmount: 5000, targetYear: 2029 })).toBe(5000));
   it('multiplies emergency months', () => expect(simpleTarget('EMERGENCY_FUND', { monthlyExpenses: 4000, months: 6, targetYear: 2028 })).toBe(24000));
 });
 

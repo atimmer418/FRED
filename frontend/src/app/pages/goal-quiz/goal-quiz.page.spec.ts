@@ -29,7 +29,15 @@ function goalOf(id: number, type: GoalType, config: GoalConfig, extra: Partial<G
 }
 
 function houseGoal(id: number): Goal {
-  return goalOf(id, 'HOUSE', { price: 400_000, downPaymentPct: 20, targetYear: YEAR + 5 }, { name: 'First home', icon: 'home' });
+  return goalOf(id, 'HOUSE', {
+    price: 400_000, downPaymentPct: 20, targetYear: YEAR + 5, loanRate: 6.5, downPaymentAmount: null,
+  }, { name: 'First home', icon: 'home' });
+}
+
+function carGoal(id: number): Goal {
+  return goalOf(id, 'CAR', {
+    price: 32_000, downPaymentPct: 25, targetYear: YEAR + 3, loanRate: 7.5, downPaymentAmount: 6_000,
+  }, { name: 'Next car', icon: 'directions_car' });
 }
 
 function kidsGoal(id: number, kids: Array<{ birthYear: number | null; birthMonth: number | null }>): Goal {
@@ -796,23 +804,146 @@ describe('GoalQuizPage', () => {
     expect(root.classList.contains('ion-page')).toBeTrue();
   });
 
-  it('house terms: down payment chips, a year slider from next year, and the live chip', async () => {
+  /** The two terms lines on the current screen: the down payment FRED plans, then the loan. */
+  function termsLines(fixture: ComponentFixture<GoalQuizPage>): string[] {
+    return (Array.from(onScreen(fixture).querySelectorAll('.terms-line')) as HTMLElement[])
+      .map(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim());
+  }
+
+  /** The rate slider (the only app-quiz-slider on the house screen, the second on the car screen). */
+  function rateSlider(fixture: ComponentFixture<GoalQuizPage>): HTMLElement {
+    return onScreen(fixture).querySelector('app-quiz-slider.rate-slider') as HTMLElement;
+  }
+
+  function slide(slider: HTMLElement, value: number, fixture: ComponentFixture<GoalQuizPage>): void {
+    const input = slider.querySelector('input.sim-range') as HTMLInputElement;
+    input.value = String(value);
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+  }
+
+  it('house terms: chips 5/10/20, default 20, no Full price', async () => {
     const fixture = await create({ type: 'HOUSE' });
     const page = fixture.componentInstance;
     expect(page.form().price).toBe(650_000);
     goTo(fixture, 1);
     expect(text(fixture, '.fscreen.on .fs-h1')).toBe('How much, and when?');
+    expect(text(fixture, '.fscreen.on .fs-sub')).toBe('FRED plans the down payment. The mortgage comes after.');
+    const chips = Array.from(onScreen(fixture).querySelectorAll('app-quiz-chips .bf-chip')) as HTMLElement[];
+    expect(chips.map(c => c.textContent?.trim())).toEqual(['5%', '10%', '20%']);
+    expect(page.downPaymentOptions.map(o => o.value)).toEqual([5, 10, 20]);
+    expect(text(fixture, '.fscreen.on app-quiz-chips .bf-chip.on')).toBe('20%');
+    expect(onScreen(fixture).textContent).not.toContain('Full price');
     expect(page.form().downPaymentPct).toBe(20);
     expect(page.form().targetYear).toBe(YEAR + 5);
-    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toMatch(/^\$130K down · ~\$\d{1,3}(,\d{3})* a month$/);
-    page.setDownPayment('full');
-    fixture.detectChanges();
-    expect(page.form().fullPrice).toBeTrue();
-    expect(text(fixture, '.fscreen.on .fetch-chip .chip-text')).toMatch(/^\$650,000 in full · ~\$\d{1,3}(,\d{3})* a month$/);
-    page.setDownPayment(10);
-    expect(page.form().fullPrice).toBeFalse();
-    expect(page.form().downPaymentPct).toBe(10);
     expect(page.yearBounds()).toEqual({ min: YEAR + 1, max: YEAR + 20 });
+
+    chips[0].click();
+    fixture.detectChanges();
+    expect(page.form().downPaymentPct).toBe(5);
+    expect(termsLines(fixture)[0]).toMatch(/^\$32,500 down · ~\$[\d,]+ a month to get there$/);
+  });
+
+  it('house lines read $130K down · ~$X a month to get there and the mortgage line at the default rate', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    // 7.28% (Freddie Mac PMMS) starts the slider at the nearest eighth: 58 / 8 = 7.25%.
+    expect(page.form().loanRate).toBe(7.25);
+    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.25%');
+    // $650,000 × 20% = $130,000 down; the mortgage is the other $520,000 over 360 months.
+    expect(termsLines(fixture)).toEqual([
+      '$130,000 down · ~$1,644 a month to get there',
+      'Then the mortgage: ~$3,547 a month at 7.25% over 30 years, before taxes and insurance.',
+    ]);
+    expect(page.termsLines()).toEqual(termsLines(fixture) as [string, string]);
+  });
+
+  it('moving the mortgage rate slider to 7.125% updates the line and the form', async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    const slider = rateSlider(fixture);
+    const input = slider.querySelector('input.sim-range') as HTMLInputElement;
+    expect([input.min, input.max, input.step]).toEqual(['24', '80', '1']);
+    expect(input.value).toBe('58');
+    // A rate is slid, never typed.
+    expect(slider.querySelector('button.big-readout')).toBeNull();
+
+    slide(slider, 57, fixture);
+    expect(page.form().loanRate).toBe(7.125);
+    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.125%');
+    expect(termsLines(fixture)[1]).toBe('Then the mortgage: ~$3,503 a month at 7.125% over 30 years, before taxes and insurance.');
+    // The rate never changes what FRED plans: the down payment line stays.
+    expect(termsLines(fixture)[0]).toMatch(/^\$130,000 down · /);
+  });
+
+  it('car terms: dollar slider default $5,000, lines', async () => {
+    const fixture = await create({ type: 'CAR' });
+    const page = fixture.componentInstance;
+    expect(page.form().price).toBe(35_000);
+    goTo(fixture, 1);
+    expect(text(fixture, '.fscreen.on .fs-sub')).toBe('FRED plans the down payment. The loan comes after.');
+    expect(onScreen(fixture).querySelector('app-quiz-chips')).toBeNull();
+    expect(page.form().downPaymentAmount).toBe(5_000);
+    const down = onScreen(fixture).querySelector('app-quiz-slider.down-slider') as HTMLElement;
+    const downInput = down.querySelector('input.sim-range') as HTMLInputElement;
+    expect([downInput.min, downInput.max, downInput.step]).toEqual(['0', '25000', '500']);
+    expect(text(fixture, '.fscreen.on app-quiz-slider.down-slider .big-readout')).toBe('$5,000');
+
+    const rate = rateSlider(fixture).querySelector('input.sim-range') as HTMLInputElement;
+    expect([rate.min, rate.max, rate.value]).toEqual(['24', '120', '60']);
+    // 7.54% (Fed G.19) starts at 60 / 8 = 7.5%.
+    expect(page.form().loanRate).toBe(7.5);
+    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.5%');
+    expect(termsLines(fixture)).toEqual([
+      '$5,000 down · ~$116 a month to get there',
+      'Then the loan: ~$601 a month at 7.5% over 60 months.',
+    ]);
+
+    slide(down, 10_000, fixture);
+    expect(page.form().downPaymentAmount).toBe(10_000);
+    // $25,000 left to borrow at 7.5% over 60 months.
+    expect(termsLines(fixture)[1]).toBe('Then the loan: ~$501 a month at 7.5% over 60 months.');
+  });
+
+  it('car down payment clamps to the price and $0 blocks Continue', async () => {
+    const fixture = await create({ type: 'CAR' });
+    const page = fixture.componentInstance;
+    page.setCarDown(10_000);
+    page.setPrice(8_000);
+    expect(page.form().downPaymentAmount).toBe(8_000);
+    goTo(fixture, 1);
+    const downInput = onScreen(fixture).querySelector('app-quiz-slider.down-slider input.sim-range') as HTMLInputElement;
+    expect(downInput.max).toBe('8000');
+    expect(termsLines(fixture)[0]).toMatch(/^\$8,000 down · /);
+    expect(termsLines(fixture)[1]).toBe('Then the loan: ~$0 a month at 7.5% over 60 months.');
+
+    const cta = () => onScreen(fixture).querySelector('.fs-cta') as HTMLButtonElement;
+    expect(cta().disabled).toBeFalse();
+    page.setCarDown(0);
+    fixture.detectChanges();
+    expect(page.ctaDisabled()).toBeTrue();
+    expect(cta().disabled).toBeTrue();
+    expect(text(fixture, '.fscreen.on .terms-hint'))
+      .toBe('With $0 down there is nothing to save. Set a down payment, or pick Something else.');
+    expect(termsLines(fixture)).toEqual([]);
+    page.next();
+    expect(page.calcShowing()).toBeFalse();
+    expect(draft.draft()).toBeNull();
+
+    page.setCarDown(500);
+    fixture.detectChanges();
+    expect(cta().disabled).toBeFalse();
+    expect(fixture.nativeElement.querySelector('.fscreen.on .terms-hint')).toBeNull();
+  });
+
+  it('edit: a stored car opens its terms at the stored down payment and rate', async () => {
+    const fixture = await create({ id: '7' }, { goals: [carGoal(7)] });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    expect(page.form().downPaymentAmount).toBe(6_000);
+    expect(termsLines(fixture)[1]).toBe('Then the loan: ~$521 a month at 7.5% over 60 months.');
   });
 
   it('vacation: trips 1..10 with a budget slider and the monthly chip', async () => {
@@ -856,10 +987,11 @@ describe('GoalQuizPage', () => {
     expect(page.form().icon).toBe('savings');
   });
 
-  it('edit round trip: formFromGoal then formToConfig equals the stored config for KIDS, HOUSE, VACATION, EMERGENCY_FUND, WEDDING, CUSTOM', () => {
+  it('edit round trip: formFromGoal then formToConfig equals the stored config for KIDS, HOUSE, CAR, VACATION, EMERGENCY_FUND, WEDDING, CUSTOM', () => {
     const goals: Goal[] = [
       kidsGoal(1, [{ birthYear: 2024, birthMonth: null }, { birthYear: 2028, birthMonth: 4 }, { birthYear: null, birthMonth: null }]),
       houseGoal(2),
+      carGoal(7),
       goalOf(3, 'VACATION', { tripsPerYear: 3, budgetPerTrip: 2_500, savedThisYear: 400, savedYear: YEAR }),
       goalOf(4, 'EMERGENCY_FUND', { monthlyExpenses: 4_000, months: 3, targetYear: YEAR + 2 }),
       goalOf(5, 'WEDDING', { targetAmount: 30_000, targetYear: YEAR + 3 }),

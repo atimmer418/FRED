@@ -156,10 +156,10 @@
 
             <!-- ── House and Car 2: down payment and when ───────────────── -->
             @case ('house_terms') {
-              <ng-container *ngTemplateOutlet="terms"></ng-container>
+              <ng-container *ngTemplateOutlet="houseTerms"></ng-container>
             }
             @case ('car_terms') {
-              <ng-container *ngTemplateOutlet="terms"></ng-container>
+              <ng-container *ngTemplateOutlet="carTerms"></ng-container>
             }
 
             <!-- ── Vacation ─────────────────────────────────────────────── -->
@@ -255,16 +255,47 @@
   }
 </div>
 
-<!-- Shared bodies: the "How much, and when?" screen and the year slider. -->
-<ng-template #terms>
+<!-- Shared bodies: the two "How much, and when?" screens, their lines, and the year slider.
+     FRED plans only the down payment; the loan line says what follows it. Rate sliders hold
+     eighths of a percent as integers (58 is 7.25%) and are slid, never typed. -->
+<ng-template #houseTerms>
   <div class="bf-lab first">Down payment</div>
   <app-quiz-chips [options]="downPaymentOptions" [value]="downPayment()" (valueChange)="setDownPayment($event)" />
+  <div class="bf-lab">Mortgage rate</div>
+  <app-quiz-slider class="rate-slider" [value]="rateEighths()" [min]="24" [max]="80" [step]="1"
+                   [tapToType]="false" [format]="fmtRateEighths" [endLabels]="['3%', '10%']"
+                   (valueChange)="setLoanRateEighths($event)" />
   <div class="bf-lab">Buy in</div>
   <ng-container *ngTemplateOutlet="yearSlider"></ng-container>
-  <div class="fetch-chip static">
-    <span class="material-symbols-outlined">trending_up</span>
-    <span class="chip-text">{{ termsChip() }}</span>
-  </div>
+  <ng-container *ngTemplateOutlet="termsLinesBlock"></ng-container>
+</ng-template>
+
+<ng-template #carTerms>
+  <div class="bf-lab first">Down payment</div>
+  <app-quiz-slider class="down-slider" [value]="form().downPaymentAmount ?? 0" [min]="0"
+                   [max]="carDownMax()" [step]="500" [format]="fmtMoney" [endLabels]="carDownEnds()"
+                   (valueChange)="setCarDown($event)" />
+  <div class="bf-lab">Loan rate</div>
+  <app-quiz-slider class="rate-slider" [value]="rateEighths()" [min]="24" [max]="120" [step]="1"
+                   [tapToType]="false" [format]="fmtRateEighths" [endLabels]="['3%', '15%']"
+                   (valueChange)="setLoanRateEighths($event)" />
+  <div class="bf-lab">Buy in</div>
+  <ng-container *ngTemplateOutlet="yearSlider"></ng-container>
+  <ng-container *ngTemplateOutlet="termsLinesBlock"></ng-container>
+</ng-template>
+
+<ng-template #termsLinesBlock>
+  @if (carDownHint(); as hint) {
+    <p class="fs-sub fs-error terms-hint" role="alert">{{ hint }}</p>
+  } @else {
+    <div class="terms-lines">
+      <div class="fetch-chip static">
+        <span class="material-symbols-outlined">savings</span>
+        <span class="chip-text terms-line">{{ termsLines()[0] }}</span>
+      </div>
+      <p class="terms-line terms-loan">{{ termsLines()[1] }}</p>
+    </div>
+  }
 </ng-template>
 
 <ng-template #yearSlider>

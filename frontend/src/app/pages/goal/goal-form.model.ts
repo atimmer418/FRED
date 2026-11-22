@@ -5,6 +5,7 @@ import {
   KidInput, KidsConfig, KidUnitAccount, TargetConfig, VacationConfig,
 } from '../../models/goal.model';
 import { AT_18_PRESETS } from '../../constants/kid-costs';
+import { CAR_LOAN_RATE_DEFAULT_PCT, MORTGAGE_RATE_DEFAULT_PCT } from '../../constants/loan-rates';
 import { collegePresets, firstYearTargetForRank, kidRanks } from '../../utils/kid-cost.utils';
 import { firstYearDue, isKidNotYetBorn, kidDeadline } from '../../utils/goal-plan.utils';
 import { daysInMonth, ymd } from '../../utils/local-date';
@@ -38,8 +39,12 @@ export interface GoalForm {
   icon: GoalIcon;
   kids: KidsForm;
   price: number | null;
+  /** HOUSE: 5, 10 or 20. A CAR keeps whatever it stored; its plan uses downPaymentAmount. */
   downPaymentPct: number | null;
-  fullPrice: boolean;
+  /** The loan that follows the down payment, in percent (6.5 means 6.5%). Never a plan input. */
+  loanRate: number | null;
+  /** CAR: the dollar down payment FRED plans. A house plans from downPaymentPct. */
+  downPaymentAmount: number | null;
   targetYear: number | null;
   /** 1 to 10. */
   tripsPerYear: number;
@@ -65,6 +70,10 @@ export const CUSTOM_ICON_OPTIONS: ReadonlyArray<{ icon: GoalIcon; label: string 
 ];
 
 export const MAX_AMOUNT = 100_000_000;
+/** A new car goal plans this much down. */
+export const DEFAULT_CAR_DOWN = 5_000;
+export const CAR_DOWN_STEP = 500;
+const NO_CAR_DOWN = 'With $0 down there is nothing to save. Set a down payment, or pick Something else.';
 export const MAX_KIDS = 6;
 
 const TYPE_ICON: Record<GoalType, GoalIcon> = {
@@ -127,6 +136,16 @@ export function at18ChoiceFor(target: number): At18Choice {
   return AT_18_PRESETS.includes(target) ? target : 'custom';
 }
 
+/**
+ * The rate a house or car loan slider starts from: the type's sourced default at the nearest eighth
+ * of a percent, the slider's own step (7.28 becomes 7.25, 7.54 becomes 7.5). Null for other types.
+ */
+export function defaultLoanRate(type: GoalType): number | null {
+  if (type === 'HOUSE') return Math.round(MORTGAGE_RATE_DEFAULT_PCT * 8) / 8;
+  if (type === 'CAR') return Math.round(CAR_LOAN_RATE_DEFAULT_PCT * 8) / 8;
+  return null;
+}
+
 function defaultKidsForm(type: GoalType, now: Date): KidsForm {
   const kids = [newKidRow(0)];
   if (type !== 'KIDS') {
@@ -158,7 +177,8 @@ export function defaultForm(type: GoalType, now: Date): GoalForm {
     kids: defaultKidsForm(type, now),
     price: null,
     downPaymentPct: 20,
-    fullPrice: false,
+    loanRate: null,
+    downPaymentAmount: type === 'CAR' ? DEFAULT_CAR_DOWN : null,
     targetYear: year + yearsOut,
     tripsPerYear: 2,
     budgetPerTrip: null,
@@ -198,8 +218,17 @@ export function formFromGoal(goal: Goal): GoalForm {
     case 'CAR': {
       const c = goal.config as HouseCarConfig;
       form.price = c.price;
-      form.fullPrice = c.downPaymentPct == null;
+      // Full price is gone: a legacy full-price goal reads as 20% down.
       form.downPaymentPct = c.downPaymentPct ?? 20;
+      form.loanRate = c.loanRate ?? defaultLoanRate(goal.type);
+      if (goal.type === 'CAR') {
+        // A car stored before dollar down payments: its old percent (null was the full price), to the
+        // nearest $500, never more than the price.
+        const legacy = Math.round((c.price * (c.downPaymentPct ?? 100)) / 100 / CAR_DOWN_STEP) * CAR_DOWN_STEP;
+        form.downPaymentAmount = c.downPaymentAmount ?? Math.min(legacy, c.price);
+      } else {
+        form.downPaymentAmount = null;
+      }
       form.targetYear = c.targetYear;
       break;
     }
@@ -302,10 +331,16 @@ export function formToConfig(form: GoalForm, existing: Goal | null, now: Date): 
       return kidsToConfig(form.kids, existing, now);
     case 'HOUSE':
     case 'CAR': {
+      const price = form.price ?? 0;
       const config: HouseCarConfig = {
-        price: form.price ?? 0,
-        downPaymentPct: form.fullPrice ? null : form.downPaymentPct,
+        price,
+        downPaymentPct: form.downPaymentPct,
         targetYear: form.targetYear ?? 0,
+        loanRate: form.loanRate,
+        // A car down payment over the price is the price; a house plans from its percent.
+        downPaymentAmount: form.type === 'CAR' && form.downPaymentAmount != null
+          ? Math.min(form.downPaymentAmount, price)
+          : null,
       };
       return config;
     }
@@ -363,9 +398,11 @@ export function planInputsChanged(form: GoalForm, existing: Goal, now: Date): bo
     }
     case 'HOUSE':
     case 'CAR': {
+      // The loan rate only changes the line under the plan, never the plan.
       const c = existing.config as HouseCarConfig;
-      const pct = form.fullPrice ? null : form.downPaymentPct;
-      return (form.price ?? 0) !== c.price || pct !== c.downPaymentPct || (form.targetYear ?? 0) !== c.targetYear;
+      const next = formToConfig(form, existing, now) as HouseCarConfig;
+      return next.price !== c.price || next.downPaymentPct !== c.downPaymentPct || next.targetYear !== c.targetYear
+        || (next.downPaymentAmount ?? null) !== (c.downPaymentAmount ?? null);
     }
     case 'VACATION': {
       const c = existing.config as VacationConfig;
@@ -453,6 +490,8 @@ export function validateForm(form: GoalForm, now: Date, existing: Goal | null = 
     case 'CAR': {
       const e = amountError(form.price);
       if (e) errors['price'] = e;
+      // Over the price is clamped on save, not refused.
+      if (form.type === 'CAR' && !((form.downPaymentAmount ?? 0) > 0)) errors['downPaymentAmount'] = NO_CAR_DOWN;
       checkYear();
       break;
     }

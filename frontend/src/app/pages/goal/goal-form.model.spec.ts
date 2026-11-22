@@ -1,7 +1,7 @@
-import { AccountState, Goal, KidInput, KidsConfig } from '../../models/goal.model';
+import { AccountState, Goal, HouseCarConfig, KidInput, KidsConfig } from '../../models/goal.model';
 import {
-  GoalForm, MAX_KIDS, creditsUntilFor, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, planInputsChanged,
-  validateForm,
+  GoalForm, MAX_KIDS, creditsUntilFor, defaultFirstYearFund, defaultForm, defaultLoanRate, formFromGoal, formToConfig,
+  planInputsChanged, validateForm,
 } from './goal-form.model';
 
 const NOW = new Date(2026, 5, 15);
@@ -388,6 +388,98 @@ describe('goal-form.model', () => {
     const errors = validateForm(form, NOW);
     expect(errors['plan529Target']).toBe('That is more than we can plan for. Try a smaller amount.');
     expect(errors['kidsTargets']).toBeUndefined();
+  });
+});
+
+describe('goal-form.model: house and car terms', () => {
+  it('defaults a house to 20% down and a car to $5,000 down, with no Full price', () => {
+    const house = defaultForm('HOUSE', NOW);
+    const car = defaultForm('CAR', NOW);
+    expect(house.downPaymentPct).toBe(20);
+    expect(house.downPaymentAmount).toBeNull();
+    expect(car.downPaymentAmount).toBe(5_000);
+    expect('fullPrice' in house).toBeFalse();
+    // The rate comes from the quiz (withQuizDefaults) or the stored goal, never from defaultForm.
+    expect(house.loanRate).toBeNull();
+  });
+
+  it('defaultLoanRate is the sourced rate at the nearest eighth of a percent', () => {
+    expect(defaultLoanRate('HOUSE')).toBe(7.25); // 7.28 × 8 = 58.24 → 58 / 8
+    expect(defaultLoanRate('CAR')).toBe(7.5); // 7.54 × 8 = 60.32 → 60 / 8
+    expect(defaultLoanRate('WEDDING')).toBeNull();
+  });
+
+  it('formFromGoal maps a legacy null pct house to 20%', () => {
+    const legacy = goalOf({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: null, targetYear: 2031 } });
+    const form = formFromGoal(legacy);
+    expect(form.downPaymentPct).toBe(20);
+    expect(form.downPaymentAmount).toBeNull();
+    // No stored rate: the slider opens at the sourced default.
+    expect(form.loanRate).toBe(7.25);
+    expect('fullPrice' in form).toBeFalse();
+
+    const stored = goalOf({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 10, targetYear: 2031, loanRate: 6.125 } });
+    expect(formFromGoal(stored).downPaymentPct).toBe(10);
+    expect(formFromGoal(stored).loanRate).toBe(6.125);
+  });
+
+  it('formFromGoal maps a legacy car without downPaymentAmount to price × pct rounded to $500', () => {
+    // $32,300 × 25% = $8,075 → $8,000.
+    const legacy = goalOf({ type: 'CAR', config: { price: 32_300, downPaymentPct: 25, targetYear: 2029 } });
+    expect(formFromGoal(legacy).downPaymentAmount).toBe(8_000);
+    expect(formFromGoal(legacy).loanRate).toBe(7.5);
+    // $33,800 × 25% = $8,450 → $8,500.
+    const up = goalOf({ type: 'CAR', config: { price: 33_800, downPaymentPct: 25, targetYear: 2029 } });
+    expect(formFromGoal(up).downPaymentAmount).toBe(8_500);
+    // A full-price legacy car (null pct) saves the whole price, never more than it.
+    const full = goalOf({ type: 'CAR', config: { price: 32_300, downPaymentPct: null, targetYear: 2029 } });
+    expect(formFromGoal(full).downPaymentAmount).toBe(32_300);
+  });
+
+  it('formToConfig writes loanRate and downPaymentAmount', () => {
+    const house = { ...defaultForm('HOUSE', NOW), price: 400_000, downPaymentPct: 10, loanRate: 6.125 };
+    expect(formToConfig(house, null, NOW)).toEqual({
+      price: 400_000, downPaymentPct: 10, targetYear: 2031, loanRate: 6.125, downPaymentAmount: null,
+    });
+    const car = { ...defaultForm('CAR', NOW), price: 35_000, loanRate: 7.5 };
+    expect(formToConfig(car, null, NOW)).toEqual({
+      price: 35_000, downPaymentPct: 20, targetYear: 2029, loanRate: 7.5, downPaymentAmount: 5_000,
+    });
+    // A down payment over the price is clamped to the price, not refused.
+    const over = { ...car, downPaymentAmount: 40_000 };
+    expect((formToConfig(over, null, NOW) as HouseCarConfig).downPaymentAmount).toBe(35_000);
+    expect(validateForm(over, NOW)['downPaymentAmount']).toBeUndefined();
+  });
+
+  it('a car with $0 down has nothing to save', () => {
+    const message = 'With $0 down there is nothing to save. Set a down payment, or pick Something else.';
+    const car = { ...defaultForm('CAR', NOW), price: 35_000, loanRate: 7.5 };
+    expect(validateForm(car, NOW)).toEqual({});
+    expect(validateForm({ ...car, downPaymentAmount: 0 }, NOW)['downPaymentAmount']).toBe(message);
+    expect(validateForm({ ...car, downPaymentAmount: null }, NOW)['downPaymentAmount']).toBe(message);
+    // A house never asks for a dollar down payment.
+    const house = { ...defaultForm('HOUSE', NOW), price: 400_000, loanRate: 7.25 };
+    expect(validateForm(house, NOW)).toEqual({});
+  });
+
+  it('changing the loan rate is not a plan input', () => {
+    const car = goalOf({
+      type: 'CAR',
+      config: { price: 35_000, downPaymentPct: 20, targetYear: 2029, loanRate: 7.5, downPaymentAmount: 5_000 },
+    });
+    const form = formFromGoal(car);
+    expect(planInputsChanged(form, car, NOW)).toBeFalse();
+    expect(planInputsChanged({ ...form, loanRate: 9.25 }, car, NOW)).toBeFalse();
+    expect(planInputsChanged({ ...form, downPaymentAmount: 6_000 }, car, NOW)).toBeTrue();
+
+    const house = goalOf({
+      type: 'HOUSE',
+      config: { price: 500_000, downPaymentPct: 20, targetYear: 2031, loanRate: 6.5, downPaymentAmount: null },
+    });
+    const houseForm = formFromGoal(house);
+    expect(planInputsChanged(houseForm, house, NOW)).toBeFalse();
+    expect(planInputsChanged({ ...houseForm, loanRate: 8 }, house, NOW)).toBeFalse();
+    expect(planInputsChanged({ ...houseForm, downPaymentPct: 5 }, house, NOW)).toBeTrue();
   });
 });
 

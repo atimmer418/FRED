@@ -58,6 +58,27 @@
 
 .year-range { margin-top: 16px; }
 
+// ─── House and Car 2: the down payment FRED plans, then the loan that follows ──
+
+.terms-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  .fetch-chip { margin-top: 20px; }
+}
+
+// The loan line reads quieter than the plan: it is what comes after, not what FRED saves for.
+.terms-loan {
+  margin: 10px 0 0;
+  max-width: 320px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.72);
+}
+
 // ─── Kids 1: the icon row and the cap line ───────────────────────────────────
 
 .kid-icons {

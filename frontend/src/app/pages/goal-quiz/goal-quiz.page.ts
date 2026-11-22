@@ -19,9 +19,10 @@ import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
 import { GOAL_PAGE_NOW } from '../goal/goal-clock';
 import {
   CUSTOM_ICON_OPTIONS, CollegeChoice, DEFAULT_AT_18, DEFAULT_COLLEGE, GoalForm, KidFormRow, KidsForm, MAX_KIDS,
-  at18ChoiceFor, collegeAmount, defaultForm, formFromGoal, isGoalType, kidTiming, monthYearLabel, newKidRow,
-  validateForm,
+  at18ChoiceFor, collegeAmount, defaultForm, defaultLoanRate, formFromGoal, isGoalType, kidTiming, monthYearLabel,
+  newKidRow, validateForm,
 } from '../goal/goal-form.model';
+import { loanLine } from '../../utils/loan.utils';
 import { fmtMoney } from '../goal/goal-plan.view-model';
 import { isKidNotYetBorn, proposeSimplePlan, requiredMonthly } from '../../utils/goal-plan.utils';
 import { collegePresets, familyMonthly, firstYearTargetForRank, kidCostFigures, kidRanks } from '../../utils/kid-cost.utils';
@@ -36,7 +37,13 @@ const COST_FADE_MS = 500;
 const CALC_MIN_MS = 900;
 const CALC_MAX_MS = 2500;
 
-type DownPayment = number | 'full';
+/** The car down payment slider tops out here, or at the price when that is lower. */
+const CAR_DOWN_MAX = 25_000;
+
+/** A rate with up to 3 decimals, trailing zeros trimmed: 6.5, 7.125, 7. */
+function trimPct(ratePct: number): string {
+  return String(Number(ratePct.toFixed(3)));
+}
 
 /** Which validateForm keys each step shows and blocks Continue on. */
 function stepOwnsError(id: QuizStepId, key: string): boolean {
@@ -49,8 +56,8 @@ function stepOwnsError(id: QuizStepId, key: string): boolean {
     case 'kids_nest': return key === 'brokerageTarget' || key === 'kidsTargets';
     case 'house_price':
     case 'car_price': return key === 'price';
-    case 'house_terms':
-    case 'car_terms': return key === 'targetYear';
+    case 'house_terms': return key === 'targetYear';
+    case 'car_terms': return key === 'targetYear' || key === 'downPaymentAmount';
     case 'vacation': return key === 'budgetPerTrip';
     case 'emergency': return key === 'monthlyExpenses' || key === 'targetYear';
     case 'wedding':
@@ -187,22 +194,51 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
   // ── Other types ───────────────────────────────────────────────────────────
 
   readonly iconOptions = CUSTOM_ICON_OPTIONS;
-  readonly downPaymentOptions: QuizChipOption<DownPayment>[] = [
-    { label: '10%', value: 10 }, { label: '20%', value: 20 }, { label: 'Full price', value: 'full' },
+  readonly downPaymentOptions: QuizChipOption<number>[] = [
+    { label: '5%', value: 5 }, { label: '10%', value: 10 }, { label: '20%', value: 20 },
   ];
   readonly monthsOptions: QuizChipOption<3 | 6>[] = [{ label: '3 months', value: 3 }, { label: '6 months', value: 6 }];
   readonly byOptions: QuizChipOption<number>[] = [
     { label: '1 year', value: 1 }, { label: '2 years', value: 2 }, { label: '3 years', value: 3 },
   ];
-  readonly downPayment = computed<DownPayment>(() => this.form().fullPrice ? 'full' : (this.form().downPaymentPct ?? 20));
+  readonly downPayment = computed(() => this.form().downPaymentPct ?? 20);
   readonly byYears = computed(() => (this.form().targetYear ?? this.now.getFullYear()) - this.now.getFullYear());
 
-  readonly termsChip = computed(() => {
+  /** The car down payment slider's top: $25,000, or the price when that is lower. */
+  readonly carDownMax = computed(() => Math.min(CAR_DOWN_MAX, this.form().price ?? 0));
+  readonly carDownEnds = computed<[string, string]>(() => ['$0', fmtMoney(this.carDownMax())]);
+  /**
+   * The rate sliders hold eighths of a percent as integers (58 is 7.25%). The stored loanRate is
+   * the slider's value / 8, so a never-touched slider stores the sourced default at the nearest
+   * eighth (7.25 for the 7.28 mortgage rate, 7.5 for the 7.54 car rate), and the line says so.
+   */
+  readonly rateEighths = computed(() =>
+    Math.round((this.form().loanRate ?? defaultLoanRate(this.form().type) ?? 0) * 8));
+  readonly fmtRateEighths = (v: number): string => `${trimPct(v / 8)}%`;
+
+  /** The down payment FRED plans for a house or car: a percent of the price, or the car's dollars. */
+  private readonly termsDown = computed(() => {
     const f = this.form();
     const price = f.price ?? 0;
-    const target = f.fullPrice ? price : (price * (f.downPaymentPct ?? 20)) / 100;
-    const down = f.fullPrice ? `${fmtMoney(price)} in full` : `$${Math.round(target / 1000)}K down`;
-    return `${down} · ~${fmtMoney(this.simpleMonthly(target))} a month`;
+    if (f.type === 'CAR') return Math.min(f.downPaymentAmount ?? 0, price);
+    return (price * (f.downPaymentPct ?? 20)) / 100;
+  });
+  /** First the down payment FRED plans and its monthly, then the loan that follows it. */
+  readonly termsLines = computed<[string, string]>(() => {
+    const f = this.form();
+    const down = this.termsDown();
+    const kind = f.type === 'CAR' ? 'CAR' : 'HOUSE';
+    return [
+      `${fmtMoney(down)} down · ~${fmtMoney(this.simpleMonthly(down))} a month to get there`,
+      // The rate that will be saved (the quiz only ever writes eighths, so it matches the slider).
+      loanLine(kind, f.price ?? 0, down, f.loanRate ?? defaultLoanRate(f.type) ?? 0),
+    ];
+  });
+  /** A car with $0 down: the hint that stands in for the two lines while Continue is off. */
+  readonly carDownHint = computed<string | null>(() => {
+    const f = this.form();
+    if (f.type !== 'CAR') return null;
+    return validateForm(f, this.now, this.existing())['downPaymentAmount'] ?? null;
   });
   readonly vacationChip = computed(() => {
     const f = this.form();
@@ -312,7 +348,9 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
   }
 
   ctaDisabled(): boolean {
-    return this.currentStep().id === 'kids_fund' && this.allFundsOff();
+    const id = this.currentStep().id;
+    if (id === 'car_terms') return !((this.form().downPaymentAmount ?? 0) > 0);
+    return id === 'kids_fund' && this.allFundsOff();
   }
 
   next(): void {
@@ -568,13 +606,27 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
 
   // ── Other types ───────────────────────────────────────────────────────────
 
+  /** A car price below its down payment pulls the down payment down with it (not an error). */
   setPrice(v: number): void {
+    const f = this.form();
+    if (f.type === 'CAR' && f.downPaymentAmount != null && f.downPaymentAmount > v) {
+      this.patch({ price: v, downPaymentAmount: v });
+      return;
+    }
     this.patch({ price: v });
   }
 
-  setDownPayment(v: DownPayment): void {
-    if (v === 'full') this.patch({ fullPrice: true });
-    else this.patch({ fullPrice: false, downPaymentPct: v });
+  setDownPayment(pct: number): void {
+    this.patch({ downPaymentPct: pct });
+  }
+
+  setCarDown(v: number): void {
+    this.patch({ downPaymentAmount: Math.max(0, Math.min(v, this.form().price ?? 0)) });
+  }
+
+  /** The rate slider's value is eighths of a percent. */
+  setLoanRateEighths(v: number): void {
+    this.patch({ loanRate: v / 8 });
   }
 
   onYearSlider(event: Event): void {
@@ -674,8 +726,8 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
   /** The quiz's own starting amounts; defaultForm leaves them blank for the typed inputs it served. */
   private withQuizDefaults(form: GoalForm): GoalForm {
     switch (form.type) {
-      case 'HOUSE': return { ...form, price: 650_000 };
-      case 'CAR': return { ...form, price: 35_000 };
+      case 'HOUSE': return { ...form, price: 650_000, loanRate: defaultLoanRate('HOUSE') };
+      case 'CAR': return { ...form, price: 35_000, loanRate: defaultLoanRate('CAR') };
       case 'VACATION': return { ...form, budgetPerTrip: 5_000 };
       case 'EMERGENCY_FUND': return { ...form, monthlyExpenses: 4_000 };
       case 'WEDDING': return { ...form, targetAmount: 30_000 };

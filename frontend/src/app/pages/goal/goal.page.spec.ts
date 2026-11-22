@@ -122,7 +122,7 @@ function vacationGoalFixture(id: number): Goal {
 function newDraft(type: GoalForm['type'], patch: Partial<GoalForm> = {}): GoalForm {
   const form = defaultForm(type, NOW);
   if (type === 'WEDDING') Object.assign(form, { targetAmount: 60_000, targetYear: YEAR + 6 });
-  if (type === 'HOUSE') Object.assign(form, { price: 400_000, downPaymentPct: 20, fullPrice: false, targetYear: YEAR + 5 });
+  if (type === 'HOUSE') Object.assign(form, { price: 400_000, downPaymentPct: 20, targetYear: YEAR + 5 });
   if (type === 'EMERGENCY_FUND') Object.assign(form, { monthlyExpenses: 3_000, months: 6, targetYear: YEAR + 2 });
   return { ...form, ...patch };
 }

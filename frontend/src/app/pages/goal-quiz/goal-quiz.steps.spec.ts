@@ -53,6 +53,13 @@ describe('quizStepsFor', () => {
     expect(steps[3].subtitle).toBe('Turn one off to see what it would save you.');
   });
 
+  it('the terms steps say FRED plans the down payment and the loan comes after', () => {
+    expect(quizStepsFor(defaultForm('HOUSE', NOW), NOW)[1].subtitle)
+      .toBe('FRED plans the down payment. The mortgage comes after.');
+    expect(quizStepsFor(defaultForm('CAR', NOW), NOW)[1].subtitle)
+      .toBe('FRED plans the down payment. The loan comes after.');
+  });
+
   // The one-line proxy for the 390px copy audit. The two kids titles the spec approved as
   // two-liners are exempt; every other title stays on one line and every subtitle is one line.
   it('every step title is at most 24 characters and every subtitle at most 60', () => {

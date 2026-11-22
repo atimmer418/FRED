@@ -56,7 +56,7 @@ const STEPS: Record<QuizStepId, Omit<QuizStep, 'id'>> = {
   house_terms: {
     eyebrow: 'Your home',
     title: 'How much, and when?',
-    subtitle: 'More down now, less each month.',
+    subtitle: 'FRED plans the down payment. The mortgage comes after.',
   },
   car_price: {
     eyebrow: 'Your car',
@@ -66,7 +66,7 @@ const STEPS: Record<QuizStepId, Omit<QuizStep, 'id'>> = {
   car_terms: {
     eyebrow: 'Your car',
     title: 'How much, and when?',
-    subtitle: 'More down now, less each month.',
+    subtitle: 'FRED plans the down payment. The loan comes after.',
   },
   vacation: {
     eyebrow: 'Vacation',

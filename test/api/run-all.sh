@@ -1,18 +1,45 @@
 #!/bin/bash
 # Runs every domain test script and reports aggregate pass/fail.
 # Usage: bash test/api/run-all.sh
+#
+# A suite counts as passed only if it exits 0, prints its RESULT line (see finish_suite in
+# lib/helpers.sh) and ran at least one request. This runner once printed "ALL SUITES PASSED" for
+# months while every suite failed to load its helpers and sent nothing, because "0 failed" looked
+# the same as "0 run". Zero requests is now a failure, for a suite and for the whole run.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FAILED_SUITES=()
+TOTAL_PASS=0; TOTAL_FAIL=0; TOTAL_SKIP=0
 
 run_suite() {
   local name="$1" script="$2"
   echo "=============================="
   echo "Suite: $name"
   echo "=============================="
-  bash "$SCRIPT_DIR/$script"
-  local code=$?
-  [ $code -ne 0 ] && FAILED_SUITES+=("$name")
+  local out code
+  out=$(bash "$SCRIPT_DIR/$script" 2>&1)
+  code=$?
+  echo "$out"
+
+  local result pass fail skip
+  result=$(echo "$out" | grep -E "^RESULT pass=[0-9]+ fail=[0-9]+ skip=[0-9]+$" | tail -1)
+  if [ -z "$result" ]; then
+    echo "SUITE BROKEN: $name did not finish (no RESULT line, exit code $code)."
+    FAILED_SUITES+=("$name (did not finish)")
+    echo ""
+    return
+  fi
+  pass=$(echo "$result" | sed -E "s/.*pass=([0-9]+).*/\1/")
+  fail=$(echo "$result" | sed -E "s/.*fail=([0-9]+).*/\1/")
+  skip=$(echo "$result" | sed -E "s/.*skip=([0-9]+).*/\1/")
+  TOTAL_PASS=$((TOTAL_PASS + pass)); TOTAL_FAIL=$((TOTAL_FAIL + fail)); TOTAL_SKIP=$((TOTAL_SKIP + skip))
+
+  if [ $((pass + fail)) -eq 0 ]; then
+    echo "SUITE BROKEN: $name ran zero requests."
+    FAILED_SUITES+=("$name (zero requests)")
+  elif [ "$code" -ne 0 ] || [ "$fail" -ne 0 ]; then
+    FAILED_SUITES+=("$name")
+  fi
   echo ""
 }
 
@@ -25,7 +52,11 @@ run_suite "Trading"        trading.sh
 run_suite "Beneficiaries"  beneficiaries.sh
 
 echo "=============================="
-if [ ${#FAILED_SUITES[@]} -eq 0 ]; then
+echo "Requests run: $((TOTAL_PASS + TOTAL_FAIL))  passed: $TOTAL_PASS  failed: $TOTAL_FAIL  skipped: $TOTAL_SKIP"
+if [ $((TOTAL_PASS + TOTAL_FAIL)) -eq 0 ]; then
+  echo "FAILED: no requests were run at all"
+  FAILED_SUITES+=("(no requests)")
+elif [ ${#FAILED_SUITES[@]} -eq 0 ]; then
   echo "ALL SUITES PASSED"
 else
   echo "FAILED: ${FAILED_SUITES[*]}"

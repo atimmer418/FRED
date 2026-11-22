@@ -3,9 +3,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/auth.sh" || exit 1
-source "$SCRIPT_DIR/lib/helpers.sh"
-
-PASS=0; FAIL=0
+source "$SCRIPT_DIR/lib/helpers.sh" || { echo "ERROR: could not load lib/helpers.sh"; exit 1; }
 
 # Bucket C: SSE streaming endpoint
 # We use a separate test to consume the SSE stream and confirm at least one token
@@ -37,6 +35,4 @@ run_curl "POST /api/chat (legacy)" POST /api/chat '{"message":"Hello FRED","sess
 
 run_curl "GET /api/chat/history" GET "/api/chat/history?sessionId=verifier-c-test"
 
-echo "---"
-echo "Chat tests: $PASS passed, $FAIL failed"
-exit $FAIL
+finish_suite "Chat"

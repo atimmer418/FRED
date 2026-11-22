@@ -2,8 +2,11 @@
 # Sources config.local.sh, authenticates via /api/dev/authenticate-as-user,
 # and exports $TOKEN and $BASE_URL for use by domain test scripts.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/../config.local.sh"
+# This file is sourced by every suite, so it must not reuse the suite's own SCRIPT_DIR. It used to,
+# which pointed the caller at lib/ and made the next line of every suite look for
+# lib/lib/helpers.sh. No helper loaded, no request ran, and every suite reported "0 failed".
+API_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$API_LIB_DIR/../config.local.sh"
 
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "ERROR: $CONFIG_FILE not found."

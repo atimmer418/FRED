@@ -99,7 +99,12 @@ jobs:
           #!/bin/bash
           export TEST_USER_EMAIL="facebook@gmail.com"
           export BASE_URL="http://localhost:8080"
+          # The seeded user has no brokerage account and no schedule, and CI has no broker.
+          # These tell the suites to expect exactly that (see test/api/lib/helpers.sh).
+          export API_TEST_USER_STATE="new"
+          export API_TEST_BROKER="offline"
           EOF
+          # run-all.sh fails if a suite does not finish or runs zero requests.
           bash test/api/run-all.sh
 
       - name: Frontend — install + tsc + lint + scoped unit

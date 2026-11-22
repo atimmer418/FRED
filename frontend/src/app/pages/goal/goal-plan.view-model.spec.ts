@@ -896,12 +896,13 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(simple.whyInvestLine).toBeNull();
   });
 
-  it('a HOUSE plan at the market rate reads the simple-plan first sentence and its coversLine is the mortgage line', () => {
+  it('a HOUSE plan at the market rate reads the simple-plan first sentence and its loanLine is the mortgage line', () => {
     const view = buildGoalPlanView(
       base({ type: 'HOUSE', currentBalance: 12_000, anchorBalance: 12_000, planAnchoredAt: '2026-11-01T00:00:00', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }),
       ctx(),
     );
-    expect(view.coversLine).toBe('Then the mortgage: ~$2,737 a month at 7.28% over 30 years, before taxes and insurance.');
+    expect(view.coversLine).toBeNull();
+    expect(view.loanLine).toBe('Then the mortgage: ~$2,737 a month at 7.28% over 30 years, before taxes and insurance.');
     const m = view.whyInvestLine!.match(SIMPLE_WHY);
     expect(m).withContext(view.whyInvestLine!).not.toBeNull();
     const [reaches, fromYou, fromGrowth] = [m![1], m![2], m![3]].map(dollars);
@@ -917,7 +918,7 @@ describe('buildGoalPlanView one-screen page', () => {
       config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6, loanRate: 6.5 },
     }), ctx());
     expect(house.subtitle).toMatch(/^\$100,000 down · \$[\d,]+\/mo for your home$/);
-    expect(house.coversLine).toBe('Then the mortgage: ~$2,528 a month at 6.5% over 30 years, before taxes and insurance.');
+    expect(house.loanLine).toBe('Then the mortgage: ~$2,528 a month at 6.5% over 30 years, before taxes and insurance.');
   });
 
   it('car target is the dollar down payment', () => {
@@ -927,7 +928,27 @@ describe('buildGoalPlanView one-screen page', () => {
     }), ctx());
     expect(car.simple!.target).toBe(5_000);
     expect(car.subtitle).toMatch(/^\$5,000 down · \$[\d,]+\/mo for your car$/);
-    expect(car.coversLine).toBe('Then the loan: ~$701 a month at 7.5% over 60 months.');
+    expect(car.loanLine).toBe('Then the loan: ~$701 a month at 7.5% over 60 months.');
+  });
+
+  it('a fractional down payment is rounded to whole dollars in the subtitle', () => {
+    // $32,333 x 20% = $6,466.60, shown as $6,467.
+    const house = buildGoalPlanView(base({
+      type: 'HOUSE',
+      config: { price: 32_333, downPaymentPct: 20, targetYear: Y + 6 },
+    }), ctx());
+    expect(house.subtitle).toMatch(/^\$6,467 down · /);
+  });
+
+  it('a due-now house plan keeps its loan line and source', () => {
+    const house = buildGoalPlanView(base({
+      type: 'HOUSE',
+      currentBalance: 0, anchorBalance: 0, planAnchoredAt: `${Y}-01-01T00:00:00`,
+      config: { price: 500_000, downPaymentPct: 20, targetYear: Y - 1, loanRate: 6.5 },
+    }), ctx());
+    expect(house.heroLabel).toBe('Due now');
+    expect(house.loanLine).toContain('Then the mortgage:');
+    expect(house.loanSource).toBe('Default rate: Freddie Mac PMMS, 7.28% as of November 19, 2026.');
   });
 
   it('legacy car without downPaymentAmount still targets price × pct', () => {

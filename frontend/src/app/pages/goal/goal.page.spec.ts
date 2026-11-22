@@ -880,11 +880,30 @@ describe('GoalPage', () => {
     return args.componentProps as ReturnType<typeof sheetProps>;
   }
 
-  it("info sheet's second note for a house carries the loan line and the Freddie Mac source", async () => {
+  it('a house plan shows the loan card: lead, loan line, then the default-rate source, not the shown rate', async () => {
     const fixture = await create({ id: '5' }, { goals: [{ ...houseGoal(5), config: { price: 500_000, downPaymentPct: 20, targetYear: YEAR + 5, loanRate: 6.5 } }] });
-    const notes = fixture.componentInstance.infoNotes();
-    expect(notes[1].text).toBe(
-      'Then the mortgage: ~$2,528 a month at 6.5% over 30 years, before taxes and insurance. Rate from Freddie Mac PMMS, week of November 19, 2026.');
+    const cards = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.fd-how')) as HTMLElement[];
+    const loan = cards.find(c => c.textContent!.includes('The loan that follows.'));
+    expect(loan).withContext('loan card').toBeDefined();
+    expect(loan!.querySelector('b')!.textContent).toBe('The loan that follows.');
+    expect(loan!.querySelector('p')!.textContent!.replace(/\s+/g, ' ').trim()).toBe(
+      'The loan that follows. Then the mortgage: ~$2,528 a month at 6.5% over 30 years, before taxes and insurance. Default rate: Freddie Mac PMMS, 7.28% as of November 19, 2026.');
+    expect(loan!.textContent).not.toContain('What the monthly covers.');
+  });
+
+  it('a car plan shows the Federal Reserve default-rate source', async () => {
+    const car: Goal = { ...houseGoal(6), type: 'CAR', name: 'Car', icon: 'directions_car', config: { price: 40_000, downPaymentPct: null, downPaymentAmount: 5_000, loanRate: 7.5, targetYear: YEAR + 4 } };
+    const fixture = await create({ id: '6' }, { goals: [car] });
+    const t = (fixture.nativeElement as HTMLElement).textContent!.replace(/\s+/g, ' ');
+    expect(t).toContain('Then the loan: ~$701 a month at 7.5% over 60 months. Default rate: Federal Reserve G.19, 7.54% for 2026 Q3 (preliminary).');
+  });
+
+  it('kids and vacation plans have no loan card', async () => {
+    const kids = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    expect(kids.nativeElement.textContent).not.toContain('The loan that follows.');
+    TestBed.resetTestingModule();
+    const trips = await create({ id: '8' }, { goals: [vacationGoalFixture(8)] });
+    expect(trips.nativeElement.textContent).not.toContain('The loan that follows.');
   });
 
   it('renders Invest and Everyday group labels with no totals (Andy, 2026-11-11), plain unit amounts, and the Tap for details hint', async () => {
@@ -1042,7 +1061,7 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     const house = await create({ id: '7' }, { goals: [houseGoal(7)] });
-    expect(house.nativeElement.querySelectorAll('.fd-how').length).toBe(3);
+    expect(house.nativeElement.querySelectorAll('.fd-how').length).toBe(3); // how, loan, why
     expect(text(house, '.fd-how')).toContain('How FRED helps.');
   });
 

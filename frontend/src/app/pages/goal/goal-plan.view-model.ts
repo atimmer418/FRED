@@ -45,7 +45,7 @@ import {
   yourPart,
 } from '../../utils/goal-plan.utils';
 import { formatMonthDay } from '../../utils/local-date';
-import { loanLine } from '../../utils/loan.utils';
+import { loanLine, loanSourceLine } from '../../utils/loan.utils';
 import { CAR_LOAN_RATE_DEFAULT_PCT, MORTGAGE_RATE_DEFAULT_PCT } from '../../constants/loan-rates';
 import { audienceLabel } from '../../utils/goal-quiz.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
@@ -171,6 +171,10 @@ export interface GoalPlanView {
   howFredHelps: string;
   /** KIDS only: what the monthly covers (the whole month: the funds plus everyday costs), shown in the info sheet. */
   coversLine: string | null;
+  /** HOUSE and CAR: the loan that follows the down payment. Null for other types and when nothing is financed. */
+  loanLine: string | null;
+  /** HOUSE and CAR with a loan: where the default rate comes from. Never describes the rate shown. */
+  loanSource: string | null;
   /** Market plans: the contributions-vs-growth case for leaving the money invested. */
   whyInvestLine: string | null;
   /**
@@ -499,8 +503,7 @@ export function buildGoalPlanView(goal: GoalPlanInput, ctx: GoalPlanContext): Go
     ...view,
     heroLabel: dueNowOnly ? 'Due now' : view.kids ? 'Family plan' : 'Save this month',
     // Nothing is left to spread over months, so there is no monthly to explain.
-    // A house or car keeps its loan line: it explains the down payment, not the monthly.
-    coversLine: dueNowOnly && goal.type !== 'HOUSE' && goal.type !== 'CAR' ? null : view.coversLine,
+    coversLine: dueNowOnly ? null : view.coversLine,
     whyInvestLine: dueNowOnly ? null : view.whyInvestLine,
     subtitle: imported ? IMPORTED_SUBTITLE : view.subtitle,
     perPaycheck: InvestmentFrequencyUtils.toPerPaycheckEquivalent(view.monthlyTotal, ctx.frequency),
@@ -671,6 +674,8 @@ function kidsView(
 
   return {
     coversLine: kids.length > 0 ? coversLineFor(coveredUnits, kids, everyday, ctx.now) : null,
+    loanLine: null,
+    loanSource: null,
     whyInvestLine: invested.length > 0
       // From you = what is already saved plus every contribution still to come; growth is the rest.
       ? whyInvestLineFor(reaches, fromYou + investedTotal('balance'), Math.max(0, reaches - investedTotal('balance') - fromYou), investedUnits)
@@ -823,6 +828,8 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext, imported: boole
     audience,
     howFredHelps: CASH_HELP,
     coversLine: null,
+    loanLine: null,
+    loanSource: null,
     whyInvestLine: null,
     pill: 'Cash',
     status: tallyStatus({ completed: goal.completed, imported, tally: t, target: plan.annual, today: ctx.now }),
@@ -897,7 +904,9 @@ function simpleView(
     subtitle: loan ? `${fmtMoney(target)} down · ${lead} ${audience}` : `${lead} ${audience}`,
     audience,
     howFredHelps: howFredHelpsLine([{ kind: plan.rateKind, babyFund: false }], null),
-    coversLine: loan,
+    coversLine: null,
+    loanLine: loan,
+    loanSource: loan && (goal.type === 'HOUSE' || goal.type === 'CAR') ? loanSourceLine(goal.type) : null,
     whyInvestLine: plan.rateKind === 'market' && plan.n > 0
       ? whyInvestLineFor(target, plan.fromYou + value, plan.fromGrowth, null)
       : null,

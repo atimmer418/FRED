@@ -5,7 +5,7 @@ import {
   MORTGAGE_RATE_DEFAULT_PCT,
   MORTGAGE_TERM_MONTHS,
 } from '../constants/loan-rates';
-import { loanLine, loanPayment } from './loan.utils';
+import { loanLine, loanPayment, loanSourceLine } from './loan.utils';
 
 describe('loanPayment', () => {
   // Hand check: r = 6 / 100 / 12 = 0.005, (1.005)^360 ~= 6.0226,
@@ -87,5 +87,12 @@ describe('loan rate constants', () => {
       expect(['HOUSE', 'CAR']).toContain(s.usedIn);
     }
     expect(LOAN_RATE_SOURCES.map((s) => s.usedIn).sort()).toEqual(['CAR', 'HOUSE']);
+  });
+});
+
+describe('loanSourceLine', () => {
+  it('names the default rate and its source, built from the constants', () => {
+    expect(loanSourceLine('HOUSE')).toBe('Default rate: Freddie Mac PMMS, 7.28% as of November 19, 2026.');
+    expect(loanSourceLine('CAR')).toBe('Default rate: Federal Reserve G.19, 7.54% for 2026 Q3 (preliminary).');
   });
 });

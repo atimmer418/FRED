@@ -1,4 +1,10 @@
-import { CAR_LOAN_TERM_MONTHS, MORTGAGE_TERM_MONTHS } from '../constants/loan-rates';
+import {
+  CAR_LOAN_RATE_DEFAULT_PCT,
+  CAR_LOAN_TERM_MONTHS,
+  LOAN_RATE_SOURCES,
+  MORTGAGE_RATE_DEFAULT_PCT,
+  MORTGAGE_TERM_MONTHS,
+} from '../constants/loan-rates';
 import { fmtMoney } from './goal-plan.utils';
 
 /**
@@ -32,4 +38,16 @@ export function loanLine(kind: 'HOUSE' | 'CAR', price: number, down: number, rat
   }
   const monthly = fmtMoney(loanPayment(principal, ratePct, CAR_LOAN_TERM_MONTHS));
   return `Then the loan: ~${monthly} a month at ${rate}% over ${CAR_LOAN_TERM_MONTHS} months.`;
+}
+
+/**
+ * The source sentence under the loan line. It describes the DEFAULT rate, never the rate shown (a
+ * saved or slid rate is FRED's, not the publisher's): "Default rate: Freddie Mac PMMS, 7.28% as of
+ * November 19, 2026." Null when no source matches the type.
+ */
+export function loanSourceLine(kind: 'HOUSE' | 'CAR'): string | null {
+  const source = LOAN_RATE_SOURCES.find((s) => s.usedIn === kind);
+  if (!source) return null;
+  const pct = kind === 'HOUSE' ? MORTGAGE_RATE_DEFAULT_PCT : CAR_LOAN_RATE_DEFAULT_PCT;
+  return `Default rate: ${source.shortName}, ${fmtRate(pct)}% ${source.period}.`;
 }

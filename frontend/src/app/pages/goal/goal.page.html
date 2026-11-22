@@ -206,6 +206,14 @@
           }
         }
 
+        <!-- The loan that follows a house or car down payment. Due-now plans keep it: the loan still follows. -->
+        @if (v.loanLine) {
+          <div class="fd-how">
+            <span class="material-symbols-outlined">request_quote</span>
+            <p><b>The loan that follows.</b> {{ v.loanLine }}@if (v.loanSource) { {{ v.loanSource }}}</p>
+          </div>
+        }
+
         <!-- CTA, preview modes only -->
         @if (ctaLabel(); as label) {
           <button type="button" class="fd-cta gp-cta" [disabled]="saving()" (click)="mode() === 'preview-new' ? startPlan() : updatePlan()">{{ label }}</button>

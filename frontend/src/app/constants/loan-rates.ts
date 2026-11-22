@@ -28,19 +28,23 @@ export const CAR_LOAN_TERM_MONTHS = 60;
 /** Where each default rate comes from. `usedIn` names the goal whose slider starts from it. */
 export const LOAN_RATE_SOURCES: ReadonlyArray<{
   name: string;
+  /** The short name the plan page's source sentence uses. */
+  shortName: string;
   period: string;
   url: string;
   usedIn: 'HOUSE' | 'CAR';
 }> = [
   {
     name: 'Freddie Mac, Primary Mortgage Market Survey, 30-year fixed-rate mortgage',
-    period: 'Week of November 19, 2026',
+    shortName: 'Freddie Mac PMMS',
+    period: 'as of November 19, 2026',
     url: 'https://www.freddiemac.com/pmms',
     usedIn: 'HOUSE',
   },
   {
     name: 'Federal Reserve, G.19 Consumer Credit, new car loans at commercial banks, 60-month',
-    period: '2026 Q3 (preliminary)',
+    shortName: 'Federal Reserve G.19',
+    period: 'for 2026 Q3 (preliminary)',
     url: 'https://www.federalreserve.gov/releases/g19/current/',
     usedIn: 'CAR',
   },

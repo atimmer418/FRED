@@ -438,6 +438,34 @@ Potential future addition, not planned: if users would value it, let a kid's nes
 ## FRED-233 — Family plan everyday line
 Family plan everyday line: each kid card on the family plan page shows an Invest group and an Everyday group (FRED's age-band estimate of what a kid costs this month, USDA 2015 figures inflated to today and adjusted for kids at home); the card header and the "Family plan" hero are the kids' whole month; the baby fund is always cash; the page's info cards and inline balance field move into each row's detail sheet. Built on feature/goals-v3-polish, awaiting merge. Spec: docs/superpowers/specs/2026-11-10-family-everyday-plan-design.md.
 
+## FRED-235 — Goal tally: FRED credits paydays, Missed one / Doubled up; house and car loan terms
+FRED now keeps each goal's "saved so far" on the server: one paycheck share is credited per payday, and the user corrects it with Missed one, Doubled up, an Undo, or a typed figure. House plans offer 5, 10 or 20 percent down with a mortgage line, and a car has a dollar down payment with a loan line. Built on develop (commits b7f8204..90b70bb); this story is the device pass.
+
+### Summary
+Walk the new goal tally and loan terms on a real device. The server credits one paycheck share per payday; Missed one takes a share off, Doubled up adds one, Undo puts back exactly what moved. The house and car plans show the down payment as the plan and the loan that follows as its own card. One analytics event, `goal_tally_adjusted` (goal type and kind only), fires per accepted adjustment.
+
+### Acceptance Criteria
+1. Missed one, Doubled up and Undo work on a simple goal; the toast reads the new saved-so-far figure, and Undo offers no second Undo.
+2. The same three work in a kid sheet, and the toast neither dims nor dismisses the sheet.
+3. The band's Next date matches the Recurring investments page's next date.
+4. Editing a house in the quiz moves the rate slider.
+5. A car at $0 down blocks Continue and shows the hint.
+6. A car saved before this change opens cleanly (a full-price car opens in the quiz at the $25,000 slider max).
+7. The growth line ellipsis reads cleanly at narrow widths.
+8. The terms screens keep a steady height with 2 or 3 stacked readouts.
+
+## FRED-236 — Scheduler: MONTHLY day 29-31 skips a month after a weekend push
+Found during the goal tally build. `InvestmentSchedule.calculateNextInvestmentDate` adds a month to the already-adjusted payday, so a payday on Sat Oct 31 2026 is pushed to Mon Nov 2, and the next payday becomes Dec 31, skipping Nov 30. The goal ledger's `PaydayCalendar` deliberately does not copy this. The scheduler moves real money, so it was left alone.
+
+### Summary
+Fix the scheduler so a MONTHLY schedule on day 29 to 31 computes the next date from the nominal day of the month, not from the weekend-adjusted date. Done means no month is skipped after a weekend push, and the scheduler agrees with the goal ledger's payday calendar.
+
+### Acceptance Criteria
+1. `calculateNextInvestmentDate` computes the next MONTHLY date from the nominal day (clamped to the month's last day), then applies the weekend adjustment.
+2. A schedule on day 31 whose Oct 31 2026 payday lands on a Saturday yields Mon Nov 2, then Mon Nov 30, then Dec 31, with no month skipped.
+3. The parity test in `PaydayCalendarTest` drops its exclusion for this case and passes.
+4. Existing scheduler tests stay green; no change to non-MONTHLY frequencies.
+
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._
 

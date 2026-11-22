@@ -403,3 +403,19 @@ rulings, all made by the assistant under Andy's "answer what you can" instructio
    with a 5% floor.
 9. Changing the loan rate does not re-anchor the plan.
 10. The loan line appears on the plan page too (info sheet and subtitle), read-only.
+
+## Build notes (2026-11-22)
+
+Rulings that moved during the build, one line each.
+
+- Progress measures against the target when no monthly is planned (imports and due-now plans).
+- A never-planned import shows no growth line.
+- netSince counts an earlier Doubled up as cover for a later miss (already above).
+- Undo puts back exactly what moved (the server honours an explicit amount on missed and extra) and never offers a second Undo.
+- `set` stays allowed on a finished unit.
+- A toast with an action stays five seconds.
+- The vacation band says "this year's".
+- The loan card on the plan page is its own card, with a "Default rate" source sentence that never names the user's own rate.
+- A legacy full-price car opens in the quiz at the $25,000 slider max.
+- The payday calendar does not copy the scheduler's day 29 to 31 quirk (backlog FRED-236).
+- One analytics event, `goal_tally_adjusted`, carries goal type and kind only; an Undo emits the kind it posted.

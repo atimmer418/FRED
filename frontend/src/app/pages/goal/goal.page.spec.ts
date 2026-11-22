@@ -987,6 +987,44 @@ describe('GoalPage', () => {
     expect(props.detail()!.status).toEqual({ text: 'On plan', tone: 'good' });
   });
 
+  const tallyEvents = () => track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_tally_adjusted');
+
+  it('a missed tap emits goal_tally_adjusted with goal_type and kind only', async () => {
+    const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
+    kidAdjust();
+    await fixture.componentInstance.onTally({ kid: 1, account: 'brokerage' }, 'missed');
+    expect(tallyEvents()).toEqual([{ name: 'goal_tally_adjusted', props: { goal_type: 'KIDS', kind: 'missed' } }]);
+  });
+
+  it('an Undo emits the kind it actually posted', async () => {
+    const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
+    kidAdjust();
+    await fixture.componentInstance.onTally({ kid: 1, account: 'brokerage' }, 'missed');
+    lastToast().action!.run();
+    await fixture.whenStable();
+    expect(tallyEvents().map(e => e.props.kind)).toEqual(['missed', 'extra']);
+  });
+
+  it('a set from the tray emits goal_tally_adjusted with kind set', async () => {
+    reducedMotion = true;
+    const goal: Goal = { ...houseGoal(8), currentBalance: 90_000, anchorBalance: 90_000, anchorMonthly: 500 };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    openTray(fixture);
+    slideTo(fixture, 95_000);
+    click(fixture, '.gp-done');
+    await fixture.whenStable();
+    expect(tallyEvents()).toEqual([{ name: 'goal_tally_adjusted', props: { goal_type: 'HOUSE', kind: 'set' } }]);
+  });
+
+  it('a failed adjustment emits nothing', async () => {
+    const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
+    adjustSpy.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+    await fixture.componentInstance.onTally({ kid: 1, account: 'brokerage' }, 'missed');
+    adjustSpy.and.returnValue(throwError(() => new HttpErrorResponse({ status: 409, error: { code: 'UNIT_FINISHED' } })));
+    await fixture.componentInstance.onTally({ kid: 1, account: 'brokerage' }, 'extra');
+    expect(tallyEvents()).toEqual([]);
+  });
+
   it('the kid sheet detail carries the unit growth line (none for the baby fund) and no share for everyday or a finished unit', async () => {
     const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
     const page = fixture.componentInstance;

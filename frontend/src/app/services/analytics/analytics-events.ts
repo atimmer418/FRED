@@ -255,6 +255,18 @@ export type AnalyticsEvent =
     }
 
   /**
+   * A saved-so-far correction on a goal posted successfully: Missed one, Doubled up, an Undo of
+   * either, or a typed figure ('set'). Never the amount, the unit or which kid.
+   */
+  | {
+      name: 'goal_tally_adjusted';
+      props: {
+        goal_type: GoalType;
+        kind: 'missed' | 'extra' | 'set';
+      };
+    }
+
+  /**
    * A goal was created, edited, completed, reopened or removed. The goal's name and id never
    * leave the device; the icon and the bands are what describe it.
    */
@@ -367,6 +379,7 @@ export const CLIENT_EVENT_NAMES = [
   'strategy_viewed',
   'freedom_plan_changed',
   'goal_changed',
+  'goal_tally_adjusted',
   'setting_changed',
   'monte_carlo_opened',
   'monte_carlo_step_completed',
@@ -491,6 +504,7 @@ export const DECLARED_PROPERTY_KEYS = [
   'input_method',
   'invest_changed',
   'is_rerun',
+  'kind',
   'max_slide_reached',
   'monthly_income_band',
   'monthly_invest_band',

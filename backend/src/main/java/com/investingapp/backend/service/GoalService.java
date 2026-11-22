@@ -12,6 +12,7 @@ import com.investingapp.backend.model.goals.HouseCarConfig;
 import com.investingapp.backend.model.goals.KidsConfig;
 import com.investingapp.backend.model.goals.TargetConfig;
 import com.investingapp.backend.model.goals.VacationConfig;
+import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
 import com.investingapp.backend.util.EasternTime;
 import org.springframework.stereotype.Service;
@@ -55,10 +56,13 @@ public class GoalService {
             GoalType.CUSTOM, CUSTOM_ICONS);
 
     private final GoalRepository goalRepository;
+    private final GoalLedgerEntryRepository goalLedgerEntryRepository;
     private final GoalConfigCodec codec;
 
-    public GoalService(GoalRepository goalRepository, GoalConfigCodec codec) {
+    public GoalService(GoalRepository goalRepository, GoalLedgerEntryRepository goalLedgerEntryRepository,
+                       GoalConfigCodec codec) {
         this.goalRepository = goalRepository;
+        this.goalLedgerEntryRepository = goalLedgerEntryRepository;
         this.codec = codec;
     }
 
@@ -110,6 +114,7 @@ public class GoalService {
     public void delete(User user, Long id) {
         Goal goal = goalRepository.findByIdAndUser(id, user)
                 .orElseThrow(() -> new NoSuchElementException("Goal not found"));
+        goalLedgerEntryRepository.deleteAllByGoalIn(List.of(goal));
         goalRepository.delete(goal);
     }
 

@@ -12,6 +12,7 @@ import com.investingapp.backend.model.goals.GoalConfigCodec;
 import com.investingapp.backend.model.goals.HouseCarConfig;
 import com.investingapp.backend.model.goals.KidsConfig;
 import com.investingapp.backend.model.goals.TargetConfig;
+import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
 import com.investingapp.backend.util.EasternTime;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,9 @@ class GoalServiceTest {
     @Mock
     private GoalRepository goalRepository;
 
+    @Mock
+    private GoalLedgerEntryRepository goalLedgerEntryRepository;
+
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final GoalConfigCodec codec = new GoalConfigCodec(mapper);
     private final int year = EasternTime.today().getYear();
@@ -52,7 +56,7 @@ class GoalServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GoalService(goalRepository, codec);
+        service = new GoalService(goalRepository, goalLedgerEntryRepository, codec);
         user = new User();
         user.setSelectedTier("pro");
     }
@@ -1089,5 +1093,16 @@ class GoalServiceTest {
         assertThrows(GoalValidationException.class, () -> service.create(user, r));
         r.setTarget(bd("-1"));
         assertThrows(GoalValidationException.class, () -> service.create(user, r));
+    }
+
+    @Test
+    void deleteRemovesLedgerEntriesBeforeTheGoal() {
+        Goal stored = rawStoredGoal(40L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "100");
+
+        service.delete(user, 40L);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(goalLedgerEntryRepository, goalRepository);
+        order.verify(goalLedgerEntryRepository).deleteAllByGoalIn(List.of(stored));
+        order.verify(goalRepository).delete(stored);
     }
 }

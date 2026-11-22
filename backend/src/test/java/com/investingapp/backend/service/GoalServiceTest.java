@@ -928,18 +928,25 @@ class GoalServiceTest {
     }
 
     @Test
-    void storedVacationSavedYearIsAcceptedUnchanged() {
+    void vacationUpdateIgnoresTheSentSavedYear() {
         stubSave();
         com.investingapp.backend.model.goals.VacationConfig stale =
                 new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("500"), year - 3);
         rawStoredGoal(15L, GoalType.VACATION, "flight", stale, "0");
 
-        assertNotNull(service.updateGoal(user, 15L, requestWith(GoalType.VACATION, "flight", stale, "0", false)));
+        // The stored year is behind, so the roll-forward resets it before the edit is applied.
+        Goal updated = service.updateGoal(user, 15L, requestWith(GoalType.VACATION, "flight", stale, "0", false));
+        var result = (com.investingapp.backend.model.goals.VacationConfig)
+                codec.parse(GoalType.VACATION, updated.getConfigJson());
+        assertEquals(year, result.savedYear());
+        assertEquals(0, BigDecimal.ZERO.compareTo(result.savedThisYear()));
 
+        // A sent year the client could not set anymore is ignored, not rejected.
         com.investingapp.backend.model.goals.VacationConfig changed =
-                new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("500"), year - 4);
-        assertThrows(GoalValidationException.class, () -> service.updateGoal(user, 15L,
-                requestWith(GoalType.VACATION, "flight", changed, "0", false)));
+                new com.investingapp.backend.model.goals.VacationConfig(2, bd("3000"), bd("900"), year - 4);
+        Goal again = service.updateGoal(user, 15L, requestWith(GoalType.VACATION, "flight", changed, "0", false));
+        assertEquals(year, ((com.investingapp.backend.model.goals.VacationConfig)
+                codec.parse(GoalType.VACATION, again.getConfigJson())).savedYear());
     }
 
     @Test
@@ -1172,7 +1179,8 @@ class GoalServiceTest {
     void reanchorStartsFromTheStoredTally() {
         stubSave();
         Goal stored = rawStoredGoal(52L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1200");
-        java.time.LocalDate through = EasternTime.today().minusDays(3);
+        // Already rolled today, so the update's roll-forward writes nothing.
+        java.time.LocalDate through = EasternTime.today();
         stored.setCreditedThrough(through);
         var lastEntry = EasternTime.now().minusDays(3);
         stored.setBalanceUpdatedAt(lastEntry);
@@ -1189,7 +1197,8 @@ class GoalServiceTest {
     @Test
     void reanchorKeepsCreditedThroughPerAccount() {
         stubSave();
-        java.time.LocalDate through = EasternTime.today().minusDays(10);
+        // Already rolled today, so only the re-anchor could move it.
+        java.time.LocalDate through = EasternTime.today();
         KidsConfig storedConfig = kids("50000", "30000", kid("Sam", year - 3,
                 new AccountState(bd("1100"), null, bd("1000"), bd("100"), through, null, null),
                 new AccountState(bd("2200"), null, bd("2000"), bd("200"), through, null, null)));
@@ -1211,7 +1220,7 @@ class GoalServiceTest {
     @Test
     void keepAnchorsCopiesCreditsUntilOnlyWhenSentAndKeepsCreditedThroughAndTarget() {
         stubSave();
-        java.time.LocalDate through = EasternTime.today().minusDays(2);
+        java.time.LocalDate through = EasternTime.today();
         java.time.LocalDate until = java.time.LocalDate.of(year + 2, 12, 31);
         java.time.LocalDate newUntil = java.time.LocalDate.of(year + 3, 12, 31);
         TargetConfig config = new TargetConfig(bd("5000"), year + 2);
@@ -1330,5 +1339,63 @@ class GoalServiceTest {
         assertEquals(0, bd("700").compareTo(updated.getTally().tally()));
         // A goal from before the tally starts crediting from today on its first roll.
         assertEquals(EasternTime.today(), updated.getTally().creditedThrough());
+    }
+
+    /** Stubs a weekly schedule paid on the weekday of {@code after} and lists its paydays since then. */
+    private List<java.time.LocalDate> weeklyPaydays(java.time.LocalDate after) {
+        var weekly = new com.investingapp.backend.model.InvestmentSchedule();
+        weekly.setFrequency("WEEKLY");
+        weekly.setStartDate(after);
+        when(investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user)).thenReturn(Optional.of(weekly));
+        return com.investingapp.backend.service.goals.PaydayCalendar.paydays(
+                com.investingapp.backend.service.goals.PaydayCalendar.fromSchedule(weekly), after, EasternTime.today());
+    }
+
+    private List<com.investingapp.backend.model.GoalLedgerEntry> credits() {
+        org.mockito.ArgumentCaptor<com.investingapp.backend.model.GoalLedgerEntry> captor =
+                org.mockito.ArgumentCaptor.forClass(com.investingapp.backend.model.GoalLedgerEntry.class);
+        verify(goalLedgerEntryRepository, org.mockito.Mockito.atLeast(0)).save(captor.capture());
+        return captor.getAllValues().stream()
+                .filter(e -> e.getKind() == com.investingapp.backend.model.GoalLedgerEntry.LedgerKind.CREDIT).toList();
+    }
+
+    @Test
+    void updateCreditsPaydaysSinceTheLastReadBeforeItReanchors() {
+        stubSave();
+        java.time.LocalDate through = EasternTime.today().minusDays(10);
+        Goal stored = rawStoredGoal(70L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1000");
+        stored.setCreditedThrough(through);
+        List<java.time.LocalDate> paydays = weeklyPaydays(through);
+        assertTrue(!paydays.isEmpty(), "a weekly schedule pays at least once in ten days");
+
+        // A new target re-anchors the plan.
+        Goal updated = service.updateGoal(user, 70L,
+                requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("8000"), year + 2), "1000", false));
+
+        var credits = credits();
+        assertEquals(paydays, credits.stream().map(com.investingapp.backend.model.GoalLedgerEntry::getEntryDate).toList());
+        // The stored plan's share: 300 a month, weekly.
+        BigDecimal share = bd("69.28");
+        credits.forEach(c -> assertEquals(0, share.compareTo(c.getAmount())));
+        BigDecimal expected = bd("1000").add(share.multiply(BigDecimal.valueOf(paydays.size())));
+        assertEquals(0, expected.compareTo(updated.getCurrentBalance()));
+        assertEquals(0, expected.compareTo(updated.getAnchorBalance()));
+        assertEquals(EasternTime.today(), updated.getCreditedThrough());
+    }
+
+    @Test
+    void markingAGoalDoneStillCreditsThePaydaysBeforeIt() {
+        stubSave();
+        java.time.LocalDate through = EasternTime.today().minusDays(10);
+        Goal stored = rawStoredGoal(71L, GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1000");
+        stored.setCreditedThrough(through);
+        List<java.time.LocalDate> paydays = weeklyPaydays(through);
+
+        Goal done = service.updateGoal(user, 71L,
+                requestWith(GoalType.CUSTOM, "flag", new TargetConfig(bd("5000"), year + 2), "1000", true));
+
+        assertTrue(done.isCompleted());
+        assertEquals(paydays.size(), credits().size());
+        assertTrue(done.getCurrentBalance().compareTo(bd("1000")) > 0);
     }
 }

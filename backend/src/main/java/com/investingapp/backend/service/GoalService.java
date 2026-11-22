@@ -180,12 +180,11 @@ public class GoalService {
             // so the count covers only the user's other active goals.
             enforceTierLimit(user);
         }
+        // Credit the paydays since the last read under the stored plan and completion state first,
+        // so a re-anchor or a completed flip only affects paydays from now on.
+        ledgerService.rollForward(goal, scheduleOf(user), EasternTime.today());
         Object stored = codec.parse(goal.getType(), goal.getConfigJson());
         Object config = validate(request, stored);
-        if (config instanceof VacationConfig sent && stored instanceof VacationConfig old) {
-            // The server owns the year's tally; the client's copy is ignored.
-            config = new VacationConfig(sent.tripsPerYear(), sent.budgetPerTrip(), old.savedThisYear(), old.savedYear());
-        }
         LocalDateTime now = EasternTime.now();
 
         boolean firstPlan = goal.getAnchorMonthly().signum() == 0 && request.getAnchorMonthly().signum() > 0;
@@ -436,8 +435,8 @@ public class GoalService {
             case KIDS -> validateKids((KidsConfig) config, (KidsConfig) storedOrNull, year);
             case HOUSE, CAR -> validateHouseCar(request.getType(), (HouseCarConfig) config, year,
                     storedOrNull == null ? null : ((HouseCarConfig) storedOrNull).targetYear());
-            case VACATION -> validateVacation((VacationConfig) config, year,
-                    storedOrNull == null ? null : ((VacationConfig) storedOrNull).savedYear());
+            case VACATION -> validateVacation(withStoredTally((VacationConfig) config, (VacationConfig) storedOrNull),
+                    year, storedOrNull == null ? null : ((VacationConfig) storedOrNull).savedYear());
             case EMERGENCY_FUND -> validateEmergencyFund((EmergencyFundConfig) config, year,
                     storedOrNull == null ? null : ((EmergencyFundConfig) storedOrNull).targetYear());
             case WEDDING, CUSTOM -> validateTarget((TargetConfig) config, year,
@@ -580,6 +579,15 @@ public class GoalService {
             }
         }
         return config;
+    }
+
+    /** On update the server owns the year's tally, so the client's savedThisYear and savedYear are replaced. */
+    private static VacationConfig withStoredTally(VacationConfig sent, VacationConfig storedOrNull) {
+        if (storedOrNull == null) {
+            return sent;
+        }
+        return new VacationConfig(sent.tripsPerYear(), sent.budgetPerTrip(), storedOrNull.savedThisYear(),
+                storedOrNull.savedYear());
     }
 
     private VacationConfig validateVacation(VacationConfig config, int year, Integer storedSavedYear) {

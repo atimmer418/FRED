@@ -434,4 +434,30 @@ class GoalLedgerServiceTest {
                 .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
         assertEquals(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, tx.propagation());
     }
+
+    @Test
+    void earlierExtraCoversALaterMissForNetSince() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+        entry(goal, "goal", LocalDate.of(2026, 11, 2), LedgerKind.EXTRA, "450");
+        entry(goal, "goal", LocalDate.of(2026, 11, 3), LedgerKind.MISSED, "-450");
+        entry(goal, "goal", LocalDate.of(2026, 11, 16), LedgerKind.MISSED, "-450");
+
+        UnitTally tally = service.tallyFor(goal, "goal", semiMonthly(), TODAY);
+
+        assertMoney("-450", tally.net());
+        assertEquals(LocalDate.of(2026, 11, 16), tally.netSince());
+    }
+
+    @Test
+    void laterExtraCoversTheOldestMissForNetSince() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+        entry(goal, "goal", LocalDate.of(2026, 11, 3), LedgerKind.MISSED, "-450");
+        entry(goal, "goal", LocalDate.of(2026, 11, 5), LedgerKind.EXTRA, "450");
+        entry(goal, "goal", LocalDate.of(2026, 11, 16), LedgerKind.MISSED, "-450");
+
+        UnitTally tally = service.tallyFor(goal, "goal", semiMonthly(), TODAY);
+
+        assertMoney("-450", tally.net());
+        assertEquals(LocalDate.of(2026, 11, 16), tally.netSince());
+    }
 }

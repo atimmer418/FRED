@@ -7,10 +7,17 @@ import { Observable, Subject } from 'rxjs';
  */
 export type ToastSeverity = 'success' | 'error' | 'warning' | 'info' | 'neutral';
 
+/** One button on the card, such as Undo. A tap runs it once and dismisses the card. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface ToastRequest {
   severity: ToastSeverity;
   message: string;
   title?: string;
+  action?: ToastAction;
   /**
    * Milliseconds on screen. Defaults to TOAST_DURATION_MS, or ERROR_TOAST_DURATION_MS for an
    * error. An error never shows shorter than ERROR_TOAST_DURATION_MS, whatever is passed.
@@ -24,6 +31,7 @@ export interface ToastItem {
   message: string;
   title?: string;
   duration: number;
+  action?: ToastAction;
 }
 
 export const TOAST_DURATION_MS = 3000;
@@ -73,11 +81,12 @@ export class ToastService {
   }
 
   show(request: ToastRequest): void {
-    const { severity, message, title } = request;
+    const { severity, message, title, action } = request;
     const duration = severity === 'error'
       // Errors hold the ten-second floor: a short duration from an older call site would cut them off.
       ? Math.max(request.duration ?? 0, ERROR_TOAST_DURATION_MS)
       : request.duration ?? TOAST_DURATION_MS;
-    this.items.next({ severity, message, title, duration });
+    // The field is left off when there is no action, so a plain toast keeps its old shape.
+    this.items.next({ severity, message, title, duration, ...(action ? { action } : {}) });
   }
 }

@@ -98,6 +98,24 @@
   overflow: hidden;
 }
 
+.ft-action {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #2563eb;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:active {
+    background: #f3f4f6;
+  }
+}
+
 .ft-close {
   flex-shrink: 0;
   width: 28px;

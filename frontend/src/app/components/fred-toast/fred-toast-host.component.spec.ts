@@ -181,6 +181,23 @@ describe('FredToastHostComponent', () => {
     flush();
   }));
 
+  it('draws an action button only when asked, and a tap runs the action once and dismisses the card', fakeAsync(() => {
+    const run = jasmine.createSpy('run');
+    service.show({ severity: 'success', message: 'Saved so far is now $450.', action: { label: 'Undo', run } });
+    service.show({ severity: 'success', message: 'Plain.' });
+
+    expect(card('Plain.').querySelector('.ft-action')).toBeNull();
+    const button = card('Saved so far is now $450.').querySelector<HTMLButtonElement>('.ft-action')!;
+    expect(button.textContent!.trim()).toBe('Undo');
+    expect(button.type).toBe('button');
+
+    button.click();
+    button.click();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(card('Saved so far is now $450.').classList.contains('ft-card--leaving')).toBeTrue();
+    flush();
+  }));
+
   it('dismisses itself after its duration and removes the card once the leave ends', fakeAsync(() => {
     service.showToast('Bye soon.');
     tick(TOAST_DURATION_MS - 1);

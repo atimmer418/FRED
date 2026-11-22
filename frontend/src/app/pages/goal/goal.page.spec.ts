@@ -29,12 +29,13 @@ import { kidCostFigures } from '../../utils/kid-cost.utils';
 import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline.component';
 import { AmountTraySlotComponent } from '../../components/plan-amount-tray/amount-tray-slot.component';
 import { SkeletonComponent } from '../../components/skeleton/skeleton.component';
+import { TallyPillsComponent } from '../../components/tally-pills/tally-pills.component';
 import { PlanAmountTrayComponent } from '../../components/plan-amount-tray/plan-amount-tray.component';
 import { detents } from '../../utils/plan-amount-scale';
 import { toCountBand } from '../../services/analytics/analytics-bands';
-import { Goal, GoalWrite, KidsConfig, VacationConfig } from '../../models/goal.model';
+import { Goal, GoalWrite, KidsConfig, LedgerKind, UnitTally, VacationConfig } from '../../models/goal.model';
 import { GoalForm, defaultForm, formFromGoal } from './goal-form.model';
-import { buildGoalPlanView, fmtMoney } from './goal-plan.view-model';
+import { buildGoalPlanView, fmtCompact, fmtMoney } from './goal-plan.view-model';
 
 /** The page's clock in every spec: fixtures and horizons count from the same instant. */
 const NOW = new Date();
@@ -94,6 +95,24 @@ function sampleFamily(id: number): Goal {
   return { ...kidsGoalFixture(id), config };
 }
 
+/** A server tally for one unit: credited, on plan, $450 a payday, the next one on Jan 1 next year. */
+function tallyOf(patch: Partial<UnitTally> = {}): UnitTally {
+  return {
+    tally: 900, creditedThrough: `${YEAR}-11-15`, creditsUntil: `${YEAR + 5}-12-31`,
+    nextCreditDate: `${YEAR + 1}-01-01`, nextCreditAmount: 450, net: 0, netSince: null, startedCrediting: true,
+    ...patch,
+  };
+}
+
+/** A house anchored at $900 this month with the server tally beside it. */
+function talliedHouse(id: number, patch: Partial<UnitTally> = {}): Goal {
+  const t = tallyOf(patch);
+  return {
+    ...houseGoal(id), currentBalance: t.tally, anchorBalance: 900, anchorMonthly: 450,
+    planAnchoredAt: localIso(NOW), tally: t,
+  };
+}
+
 function vacationGoalFixture(id: number): Goal {
   const config: VacationConfig = { tripsPerYear: 2, budgetPerTrip: 3_000, savedThisYear: 0, savedYear: YEAR };
   return { ...houseGoal(id), type: 'VACATION', name: 'Trips', icon: 'flight', config, planRateKind: 'cash', planRate: 0.04 };
@@ -120,7 +139,10 @@ describe('GoalPage', () => {
   let createSpy: jasmine.Spy;
   let updateSpy: jasmine.Spy;
   let removeSpy: jasmine.Spy;
+  let adjustSpy: jasmine.Spy;
+  let refreshSpy: jasmine.Spy;
   let showToast: jasmine.Spy;
+  let show: jasmine.Spy;
   let trackErrorShown: jasmine.Spy;
   let track: jasmine.Spy;
   let logout: jasmine.Spy;
@@ -133,6 +155,8 @@ describe('GoalPage', () => {
     /** How each mocked sheet dismisses: any other modal by role, the action sheet by row id, the text prompt by role + value. */
     dismissRole?: string; menuPick?: string; promptRole?: string; promptValue?: string;
     createResult?: Observable<Goal>; updateResult?: Observable<Goal>; loadError?: unknown;
+    /** What a ledger post returns instead of the echo below. */
+    adjustResult?: Observable<{ goal: Goal; capped: boolean }>;
     /** What the goals load returns instead of the fixtures, e.g. a Subject the spec completes later. */
     loadResult?: Observable<Goal[]>;
     /** The quiz's draft, set before the page opens. */
@@ -152,7 +176,23 @@ describe('GoalPage', () => {
     updateSpy = jasmine.createSpy('update').and.callFake((id: number, body: GoalWrite) =>
       opts.updateResult ?? of({ ...(goals().find(g => g.id === id) ?? houseGoal(id)), ...body } as Goal));
     removeSpy = jasmine.createSpy('remove').and.returnValue(of(undefined));
+    // The real service posts to /ledger and patches its signal with the goal the server returns.
+    adjustSpy = jasmine.createSpy('adjust').and.callFake((id: number, unit: string, kind: LedgerKind, amount?: number) => {
+      if (opts.adjustResult) return opts.adjustResult;
+      const g = goals().find(x => x.id === id) ?? houseGoal(id);
+      const t = g.tally ?? null;
+      const share = t?.nextCreditAmount ?? 0;
+      const before = t?.tally ?? g.currentBalance;
+      const raw = kind === 'set' ? amount! : kind === 'missed' ? before - share : before + share;
+      const tally = Math.max(0, raw);
+      const net = kind === 'missed' ? -share : kind === 'extra' ? share : 0;
+      const updated: Goal = { ...g, currentBalance: tally, tally: t ? { ...t, tally, net: t.net + net } : t };
+      goals.update(list => list.map(x => (x.id === id ? updated : x)));
+      return of({ goal: updated, capped: raw < 0 });
+    });
+    refreshSpy = jasmine.createSpy('refresh').and.callFake(() => of(goals()));
     showToast = jasmine.createSpy('showToast');
+    show = jasmine.createSpy('show');
     trackErrorShown = jasmine.createSpy('trackErrorShown');
     track = jasmine.createSpy('track');
     logout = jasmine.createSpy('logout');
@@ -198,20 +238,20 @@ describe('GoalPage', () => {
         { provide: NavController, useValue: navCtrl },
         { provide: Router, useValue: router },
         { provide: ModalController, useValue: modalCtrl },
-        { provide: GoalsService, useValue: { goals, load, create: createSpy, update: updateSpy, remove: removeSpy } },
+        { provide: GoalsService, useValue: { goals, load, create: createSpy, update: updateSpy, remove: removeSpy, adjust: adjustSpy, refresh: refreshSpy } },
         { provide: AuthService, useValue: {
             userProgress$: progress,
             getCurrentInvestmentSchedule: () => of({ investmentAmount: 500, frequency: 'BIWEEKLY' }),
             logout,
         } },
-        { provide: ToastService, useValue: { showToast } },
+        { provide: ToastService, useValue: { showToast, show } },
         { provide: AnalyticsService, useValue: { track, trackErrorShown } },
         { provide: GOAL_PAGE_NOW, useValue: () => NOW },
       ],
     })
       // Ionic standalone components need their own providers; render their children as plain DOM.
       .overrideComponent(GoalPage, {
-        set: { imports: [CommonModule, KidTimelineComponent, AmountTraySlotComponent, SkeletonComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+        set: { imports: [CommonModule, KidTimelineComponent, AmountTraySlotComponent, SkeletonComponent, TallyPillsComponent], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
       })
       .compileComponents();
 
@@ -577,13 +617,15 @@ describe('GoalPage', () => {
     expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).completed).toBeTrue();
   });
 
-  it('the band for a simple goal reads saved, percent and target with the pill and the status chip at its right end; a vacation reads this year and trips', async () => {
+  it('the band for a simple goal reads saved and its part with the pill and the status chip at its right end; a vacation reads its year of trips', async () => {
     // Anchored this month: your part is $8,000 plus $500 for each month through Dec of the target year.
     const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500, planAnchoredAt: localIso(NOW) };
     const months = 5 * 12 + (12 - (NOW.getMonth() + 1));
-    const pct = Math.round((8_000 / (8_000 + 500 * months)) * 100);
+    const part = 8_000 + 500 * months;
+    const pct = Math.round((8_000 / part) * 100);
     const fixture = await create({ id: '8' }, { goals: [goal] });
-    expect(text(fixture, '.gp-band-text')).toBe(`Saved $8,000 · ${pct}% there · Target $80K by Dec ${YEAR + 5}`);
+    // No tally read yet: no Next and no Behind by.
+    expect(text(fixture, '.gp-band-text')).toBe(`Saved $8,000 · ${pct}% of your ${fmtCompact(part)}`);
     expect(text(fixture, '.gp-band .gp-band-right .fd-pill')).toBe('Invested');
     expect(text(fixture, '.gp-band .gp-band-right .gp-chip')).toBe('Plan started');
     expect(fixture.nativeElement.querySelector('.gp-zone')).toBeNull();
@@ -593,7 +635,7 @@ describe('GoalPage', () => {
     TestBed.resetTestingModule();
 
     const trips = await create({ id: '6' }, { goals: [vacationGoalFixture(6)] });
-    expect(text(trips, '.gp-band-text')).toBe('Saved $0 this year · 0% there · $6,000 for 2 trips');
+    expect(text(trips, '.gp-band-text')).toBe('Saved $0 · 0% of your $6K');
     expect(text(trips, '.gp-band .gp-band-right .fd-pill')).toBe('Cash');
     expect(text(trips, '.gp-band .gp-band-right .gp-chip')).toBe('Plan started');
     expect(trips.nativeElement.querySelector('#gp-bal-vacation')).not.toBeNull();
@@ -872,7 +914,7 @@ describe('GoalPage', () => {
     const page = fixture.componentInstance as any;
     const tones: Array<[string, string]> = [
       ['Ahead', 'good'], ['On plan', 'good'], ['Done', 'good'], ['Behind', 'warn'],
-      ['Update balance', 'info'], ['Plan started', 'muted'], ['Plan updated', 'muted'],
+      ['Plan started', 'muted'], ['Plan updated', 'muted'],
     ];
     for (const [chip, tone] of tones) expect(page.statusTone(chip)).withContext(chip).toBe(tone);
   });
@@ -1063,6 +1105,7 @@ describe('GoalPage', () => {
     expect(fixture.componentInstance.tray.open()).toBeNull();
     await fixture.componentInstance.updateBalance('current', 1_235);
     expect(updateSpy).not.toHaveBeenCalled();
+    expect(adjustSpy).not.toHaveBeenCalled();
   });
 
   it('writes savedYear on a vacation balance edit and records a preview balance in the draft for the POST', async () => {
@@ -1134,8 +1177,7 @@ describe('GoalPage', () => {
     slideTo(fixture, 95_000);
     click(fixture, '.gp-done');
     await fixture.whenStable();
-    const body = updateSpy.calls.mostRecent().args[1] as GoalWrite;
-    expect(body.currentBalance).toBe(95_000);
+    expect(adjustSpy).toHaveBeenCalledWith(8, 'goal', 'set', 95_000);
   });
 
   it('a vacation goal\'s tile reads this year and is capped at the year of trips', async () => {
@@ -1152,16 +1194,15 @@ describe('GoalPage', () => {
     expect(fixture.nativeElement.querySelector('.gp-tile .fd-tile-label').classList).toContain('gp-step');
   });
 
-  it('sliding shows the value at once and writes nothing; Done saves the draft with one PUT and the tile keeps the figure', async () => {
+  it('sliding shows the value at once and writes nothing; Done saves the draft with one set entry and the tile keeps the figure', async () => {
     reducedMotion = true;
     const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
-    echoUpdates();
     openTray(fixture);
     slideTo(fixture, 12_000);
     slideTo(fixture, 12_025);
     expect(text(fixture, '#gp-bal-current')).toBe('$12,025');
-    expect(updateSpy).not.toHaveBeenCalled();
+    expect(adjustSpy).not.toHaveBeenCalled();
     click(fixture, '.gp-done');
     expect(fixture.componentInstance.tray.open()).toBeNull();
     expect(fixture.nativeElement.querySelector('.field-tray')).toBeNull();
@@ -1169,8 +1210,9 @@ describe('GoalPage', () => {
     expect(text(fixture, '#gp-bal-current')).toBe('$12,025');
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).currentBalance).toBe(12_025);
+    expect(adjustSpy).toHaveBeenCalledTimes(1);
+    expect(adjustSpy).toHaveBeenCalledWith(8, 'goal', 'set', 12_025);
+    expect(updateSpy).not.toHaveBeenCalled();
     expect(fixture.componentInstance.existing()!.currentBalance).toBe(12_025);
     expect(fixture.componentInstance.balanceDraft()).toBeNull();
     expect(text(fixture, '#gp-bal-current')).toBe('$12,025');
@@ -1182,11 +1224,11 @@ describe('GoalPage', () => {
     const goal: Goal = { ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
     const page = fixture.componentInstance;
-    const first = new Subject<Goal>();
+    const first = new Subject<{ goal: Goal; capped: boolean }>();
     let calls = 0;
-    updateSpy.and.callFake((id: number, body: GoalWrite) => {
+    adjustSpy.and.callFake((id: number, unit: string, kind: LedgerKind, amount: number) => {
       calls++;
-      return calls === 1 ? first.asObservable() : of({ ...goal, ...body } as Goal);
+      return calls === 1 ? first.asObservable() : of({ goal: { ...goal, currentBalance: amount }, capped: false });
     });
 
     openTray(fixture);
@@ -1194,7 +1236,7 @@ describe('GoalPage', () => {
     click(fixture, '.gp-done');
     await Promise.resolve();
     await Promise.resolve();
-    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(adjustSpy).toHaveBeenCalledTimes(1);
     openTray(fixture);
     slideTo(fixture, 13_000);
     click(fixture, '.gp-done');
@@ -1202,12 +1244,12 @@ describe('GoalPage', () => {
     expect(text(fixture, '#gp-bal-current')).toBe('$13,000');
 
     // The first write lands while the second is still queued behind it: the tile holds $13,000.
-    first.next({ ...goal, currentBalance: 12_000 });
+    first.next({ goal: { ...goal, currentBalance: 12_000 }, capped: false });
     first.complete();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(updateSpy).toHaveBeenCalledTimes(2);
-    expect((updateSpy.calls.argsFor(1)[1] as GoalWrite).currentBalance).toBe(13_000);
+    expect(adjustSpy).toHaveBeenCalledTimes(2);
+    expect(adjustSpy.calls.argsFor(1)).toEqual([8, 'goal', 'set', 13_000]);
     expect(page.existing()!.currentBalance).toBe(13_000);
     expect(page.balanceDraft()).toBeNull();
     expect(text(fixture, '#gp-bal-current')).toBe('$13,000');
@@ -1218,18 +1260,18 @@ describe('GoalPage', () => {
     const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
     const page = fixture.componentInstance;
-    updateSpy.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+    adjustSpy.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
     openTray(fixture);
     slideTo(fixture, 20_000);
     press(fixture, '.ps-ends');
     press(fixture, '#gp-bal-current');
     expect(page.tray.open()).toBe('current');
-    expect(updateSpy).not.toHaveBeenCalled();
+    expect(adjustSpy).not.toHaveBeenCalled();
     press(fixture, '.fd-hero-label');
     expect(page.tray.open()).toBeNull();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(adjustSpy).toHaveBeenCalledTimes(1);
     expect(showToast).toHaveBeenCalledWith('Could not save this goal. Try again.', 'danger');
     expect(page.balanceDraft()).toBeNull();
     expect(text(fixture, '#gp-bal-current')).toBe('$8,000');
@@ -1240,11 +1282,10 @@ describe('GoalPage', () => {
     const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
     const page = fixture.componentInstance;
-    echoUpdates();
     openTray(fixture);
     click(fixture, '#gp-bal-current');
     expect(page.tray.open()).toBeNull();
-    expect(updateSpy).not.toHaveBeenCalled();
+    expect(adjustSpy).not.toHaveBeenCalled();
 
     openTray(fixture);
     slideTo(fixture, 9_000);
@@ -1253,8 +1294,8 @@ describe('GoalPage', () => {
     expect(page.tray.open()).toBeNull();
     expect(fixture.nativeElement.querySelector('.field-tray')).toBeNull();
     await fixture.whenStable();
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect((updateSpy.calls.mostRecent().args[1] as GoalWrite).currentBalance).toBe(9_000);
+    expect(adjustSpy).toHaveBeenCalledTimes(1);
+    expect(adjustSpy).toHaveBeenCalledWith(8, 'goal', 'set', 9_000);
   });
 
   // ── Errors, tier nudge, remove, analytics ──────────────────────────────────
@@ -1430,6 +1471,259 @@ describe('GoalPage', () => {
     page.ionViewWillEnter();
     fixture.detectChanges();
     expect(page.existing()).toBe(updated);
+  });
+
+  // ── Saved so far: the pills, the growth line, the band ─────────────────────
+
+  function pills(fixture: ComponentFixture<GoalPage>): HTMLButtonElement[] {
+    return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('app-tally-pills button.tp-pill'));
+  }
+
+  /** The toast request of the last show() call. */
+  function lastToast(): { severity: string; message: string; action?: { label: string; run: () => void } } {
+    return show.calls.mostRecent().args[0];
+  }
+
+  async function settle(fixture: ComponentFixture<GoalPage>): Promise<void> {
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('the assumed-growth line renders under Saved so far for an invested goal and not for a cash one', async () => {
+    const anchored = new Date(NOW.getFullYear() - 2, NOW.getMonth(), 1);
+    const goal: Goal = {
+      ...talliedHouse(8, { tally: 10_000 }), anchorBalance: 10_000, anchorMonthly: 500, planAnchoredAt: localIso(anchored),
+    };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const line = fixture.componentInstance.view().growthLine;
+    expect(line).toMatch(/^Assuming growth at 7%, worth ~\$[\d,]+ today$/);
+    const el = fixture.nativeElement.querySelector('.gp-growth') as HTMLElement;
+    expect(el.textContent!.trim()).toBe(line!);
+    // Directly under the tile, above the pills.
+    expect(el.previousElementSibling).toBe(fixture.nativeElement.querySelector('.gp-tiles'));
+    expect(el.nextElementSibling!.tagName.toLowerCase()).toBe('app-tally-pills');
+    TestBed.resetTestingModule();
+
+    const cash: Goal = {
+      ...goal, type: 'EMERGENCY_FUND', name: 'Rainy day', icon: 'savings',
+      config: { monthlyExpenses: 3_000, months: 6, targetYear: YEAR + 2 }, planRateKind: 'cash', planRate: 0.04,
+    };
+    const plain = await create({ id: '8' }, { goals: [cash] });
+    expect(plain.componentInstance.view().growthLine).toBeNull();
+    expect(plain.nativeElement.querySelector('.gp-growth')).toBeNull();
+    expect(pills(plain).length).toBe(2);
+  });
+
+  it('Missed one posts a missed entry for unit goal and shows the toast with Undo', async () => {
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8)] });
+    const page = fixture.componentInstance;
+    const [missed, doubled] = pills(fixture);
+    expect(missed.textContent!.trim()).toBe('removeMissed one−$450');
+    expect(doubled.textContent!.trim()).toBe('addDoubled up+$450');
+
+    missed.click();
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'missed');
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(page.existing()!.tally!.tally).toBe(450);
+    expect(text(fixture, '#gp-bal-current')).toBe('$450');
+    expect(show).toHaveBeenCalledOnceWith({
+      severity: 'success',
+      message: 'Saved so far is now $450.',
+      action: { label: 'Undo', run: jasmine.any(Function) },
+    });
+    expect(showToast).not.toHaveBeenCalled();
+
+    doubled.click();
+    await settle(fixture);
+    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra']);
+    expect(lastToast().message).toBe('Saved so far is now $900.');
+  });
+
+  it('Undo after Missed one posts extra', async () => {
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8)] });
+    const page = fixture.componentInstance;
+    pills(fixture)[0].click();
+    await settle(fixture);
+    expect(page.existing()!.tally!.tally).toBe(450);
+
+    lastToast().action!.run();
+    await settle(fixture);
+    expect(adjustSpy.calls.count()).toBe(2);
+    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra']);
+    expect(page.existing()!.tally!.tally).toBe(900);
+    expect(page.existing()!.tally!.net).toBe(0);
+    expect(lastToast().message).toBe('Saved so far is now $900.');
+  });
+
+  it('a capped miss shows the no-more-to-take-off toast without Undo', async () => {
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { tally: 200 })] });
+    pills(fixture)[0].click();
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'missed');
+    expect(fixture.componentInstance.existing()!.tally!.tally).toBe(0);
+    expect(show).toHaveBeenCalledOnceWith({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
+    expect(lastToast().action).toBeUndefined();
+  });
+
+  it('a unit that finished under the user refreshes the goal, shows no error toast, and the pills hide', async () => {
+    const goal = talliedHouse(8);
+    const done: Goal = { ...goal, completed: true };
+    const fixture = await create({ id: '8' }, {
+      goals: [goal],
+      adjustResult: throwError(() => new HttpErrorResponse({ status: 409, error: { code: 'UNIT_FINISHED' } })),
+    });
+    refreshSpy.and.callFake(() => {
+      goals.set([done]);
+      return of([done]);
+    });
+    pills(fixture)[1].click();
+    await settle(fixture);
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.existing()).toBe(done);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(show).not.toHaveBeenCalled();
+    expect(trackErrorShown).not.toHaveBeenCalled();
+    expect(pills(fixture).length).toBe(0);
+  });
+
+  it('closing the Saved so far tray posts a set, not a PUT', async () => {
+    reducedMotion = true;
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8)] });
+    openTray(fixture);
+    slideTo(fixture, 2_000);
+    click(fixture, '.gp-done');
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'set', 2_000);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.existing()!.tally!.tally).toBe(2_000);
+    expect(text(fixture, '#gp-bal-current')).toBe('$2,000');
+    // A set is the user's own figure: no toast.
+    expect(show).not.toHaveBeenCalled();
+
+    // Nothing moved: nothing is posted.
+    openTray(fixture);
+    click(fixture, '.gp-done');
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('band line shows Saved · part · Next · Behind by', async () => {
+    const goal = talliedHouse(8, { tally: 900, net: -450, netSince: `${YEAR}-11-15` });
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    const t = fixture.componentInstance.view().tallyLine!;
+    expect(t.saved).toBe('Saved $900');
+    expect(t.next).toBe('Next $450 Jan 1');
+    expect(t.net).toBe('Behind by $450 since Nov 15');
+    expect(text(fixture, '.gp-band-text')).toBe(`Saved $900 · ${t.part} · Next $450 Jan 1 · Behind by $450 since Nov 15`);
+    expect(t.part).toMatch(/^\d+% of your \$[\d.]+K$/);
+    expect(text(fixture, '.gp-band .gp-chip')).toBe('Behind');
+    TestBed.resetTestingModule();
+
+    // At net 0 the band stops after Next.
+    const even = await create({ id: '8' }, { goals: [talliedHouse(8)] });
+    expect(text(even, '.gp-band-text')).toBe(`Saved $900 · ${even.componentInstance.view().tallyLine!.part} · Next $450 Jan 1`);
+  });
+
+  it('no pills in preview modes', async () => {
+    const goal = talliedHouse(4);
+    const edit = await create({ id: '4', preview: '1' }, { goals: [goal], draft: { form: { ...formFromGoal(goal), price: 500_000 }, existing: goal } });
+    expect(edit.componentInstance.mode()).toBe('preview-edit');
+    expect(edit.nativeElement.querySelector('#gp-bal-current')).not.toBeNull();
+    expect(edit.nativeElement.querySelector('app-tally-pills')).toBeNull();
+    expect(edit.nativeElement.querySelector('.gp-growth')).toBeNull();
+    TestBed.resetTestingModule();
+
+    const fresh = await create({ type: 'HOUSE', preview: '1' }, { draft: { form: newDraft('HOUSE'), existing: null } });
+    expect(fresh.componentInstance.mode()).toBe('preview-new');
+    expect(fresh.nativeElement.querySelector('app-tally-pills')).toBeNull();
+  });
+
+  it('no pills on a done goal, an import, a share of 0, or a kids goal', async () => {
+    const done = await create({ id: '8' }, { goals: [{ ...talliedHouse(8), completed: true }] });
+    expect(done.nativeElement.querySelector('app-tally-pills')).toBeNull();
+    TestBed.resetTestingModule();
+
+    const imported = await create({ id: '8' }, { goals: [{ ...talliedHouse(8), clientId: 'legacy-1', anchorMonthly: 0 }] });
+    expect(imported.componentInstance.view().status.kind).toBe('imported');
+    expect(imported.nativeElement.querySelector('app-tally-pills')).toBeNull();
+    TestBed.resetTestingModule();
+
+    const noShare = await create({ id: '8' }, { goals: [talliedHouse(8, { nextCreditAmount: 0, nextCreditDate: null })] });
+    expect(pills(noShare).length).toBe(0);
+    TestBed.resetTestingModule();
+
+    const kids = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    expect(kids.nativeElement.querySelector('app-tally-pills')).toBeNull();
+  });
+
+  it('a vacation goal\'s pills post against the goal unit too', async () => {
+    const trips: Goal = { ...vacationGoalFixture(6), tally: tallyOf({ tally: 1_200, creditsUntil: null }) };
+    const fixture = await create({ id: '6' }, { goals: [trips] });
+    expect(text(fixture, '#gp-bal-vacation')).toBe('$1,200');
+    pills(fixture)[1].click();
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledOnceWith(6, 'goal', 'extra');
+    expect(lastToast().message).toBe('Saved so far is now $1,650.');
+  });
+
+  it('Update balance chip no longer exists', async () => {
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { net: -450 })] });
+    const page = fixture.componentInstance as unknown as Record<string, unknown>;
+    expect(page['onChipTap']).toBeUndefined();
+    const chip = fixture.nativeElement.querySelector('.gp-band .gp-chip') as HTMLElement;
+    expect(chip.tagName.toLowerCase()).toBe('span');
+    expect(chip.classList).not.toContain('stale');
+    expect(text(fixture)).not.toContain('Update balance');
+    TestBed.resetTestingModule();
+
+    const kids = await create({ id: '5' }, { goals: [sampleFamily(5)] });
+    expect((kids.nativeElement.querySelector('.gp-zone .gp-chip') as HTMLElement).tagName.toLowerCase()).toBe('span');
+    expect(text(kids)).not.toContain('Update balance');
+  });
+
+  it('POST and PUT bodies carry creditsUntil = Dec 31 of the target year for a house', async () => {
+    const fresh = await create({ type: 'HOUSE', preview: '1' }, { draft: { form: newDraft('HOUSE'), existing: null } });
+    await fresh.componentInstance.startPlan();
+    const posted = createSpy.calls.mostRecent().args[0] as GoalWrite;
+    expect(posted.creditsUntil).toBe(`${YEAR + 5}-12-31`);
+    expect(posted.target).toBe(80_000);
+    expect(posted.anchorMonthly).toBe(fresh.componentInstance.view().investMonthly);
+    TestBed.resetTestingModule();
+
+    const goal = houseGoal(4);
+    const form = { ...formFromGoal(goal), price: 500_000, targetYear: YEAR + 6 };
+    const edit = await create({ id: '4', preview: '1' }, { goals: [goal], draft: { form, existing: goal } });
+    await edit.componentInstance.updatePlan();
+    const put = updateSpy.calls.mostRecent().args[1] as GoalWrite;
+    expect(put.creditsUntil).toBe(`${YEAR + 6}-12-31`);
+    expect(put.target).toBe(100_000);
+  });
+
+  it('a vacation body carries the year of trips as its target and no creditsUntil; a kids body stamps each account', async () => {
+    const trips = await create({ type: 'VACATION', preview: '1' }, { draft: { form: newDraft('VACATION'), existing: null } });
+    await trips.componentInstance.startPlan();
+    const vacation = createSpy.calls.mostRecent().args[0] as GoalWrite;
+    expect(vacation.creditsUntil).toBeNull();
+    expect(vacation.target).toBe(trips.componentInstance.view().vacation!.annual);
+    TestBed.resetTestingModule();
+
+    const family = sampleFamily(5);
+    const kids = await create({ type: 'KIDS', preview: '1' }, { draft: { form: formFromGoal(family), existing: null } });
+    const view = kids.componentInstance.view();
+    await kids.componentInstance.startPlan();
+    const body = createSpy.calls.mostRecent().args[0] as GoalWrite;
+    expect(body.creditsUntil).toBeNull();
+    expect(body.target).toBeNull();
+    const cfg = body.config as KidsConfig;
+    const plan529 = view.kids!.find(a => a.account === 'plan529')!.perKid[0].plan;
+    const ellie = cfg.kids[0].accounts;
+    expect(ellie.plan529.target).toBe(plan529.milestones.at18);
+    expect(ellie.plan529.creditsUntil).toBe(`${plan529.deadline.year}-${String(plan529.deadline.month).padStart(2, '0')}-${new Date(plan529.deadline.year, plan529.deadline.month, 0).getDate()}`);
+    expect(ellie.brokerage.target).toBe(view.kids!.find(a => a.account === 'brokerage')!.perKid[0].plan.milestones.at18);
+    const fund = view.firstYear!.rows.find(r => r.kidIndex === 1)!.plan;
+    expect(cfg.kids[1].accounts.firstYear!.target).toBe(fund.target);
+    expect(cfg.kids[1].accounts.firstYear!.creditsUntil).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('has no em dash in rendered text', async () => {

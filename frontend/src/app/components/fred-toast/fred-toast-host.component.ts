@@ -149,6 +149,14 @@ export class FredToastHostComponent {
     this.restack();
   }
 
+  /** The card's action button: runs once, then the card goes like a close tap. */
+  runAction(entry: ToastEntry): void {
+    if (entry.leaving) return;
+    const run = entry.action?.run;
+    this.dismiss(entry.id);
+    run?.();
+  }
+
   /**
    * A finger on the card pauses its timer and may start a swipe up. Move and
    * release are tracked on the window so a drag that strays off the card

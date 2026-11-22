@@ -25,7 +25,7 @@ import { toAmountBand, toCountBand, toPercentBand, toYearsBand } from '../../ser
 import { GoalAction, Tier } from '../../services/analytics/analytics-events';
 import { RateAssumptionsService } from '../../services/rate-assumptions.service';
 import {
-  AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, VacationConfig,
+  AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, UnitTally, VacationConfig, unitKey,
 } from '../../models/goal.model';
 import { isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
@@ -41,9 +41,12 @@ import { KidTimelineComponent } from '../../components/kid-timeline/kid-timeline
 import { TRAY_INSIDE_SELECTOR, TrayHostField } from '../../components/plan-amount-tray/amount-tray-host';
 import { AmountTraySlotComponent } from '../../components/plan-amount-tray/amount-tray-slot.component';
 import { SkeletonComponent } from '../../components/skeleton/skeleton.component';
+import { TallyPillsComponent } from '../../components/tally-pills/tally-pills.component';
 import { buildAmountScale, capAbove } from '../../utils/plan-amount-scale';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
-import { GoalForm, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso } from './goal-form.model';
+import {
+  GoalForm, creditsUntilFor, defaultForm, formToConfig, monthYearLabel, planInputsChanged, toLocalIso,
+} from './goal-form.model';
 import {
   EverydayView, GoalPlanInput, GoalPlanView, KidAccountKey, UnitPill, buildGoalPlanView, fmtCompact, fmtMoney,
 } from './goal-plan.view-model';
@@ -94,10 +97,12 @@ const BALANCE_FINE = 25;
 
 /** A kid card's everyday line when the view carries none: nothing a month. */
 const NO_EVERYDAY: EverydayView = { monthly: 0, label: 'Everyday', subLine: '', fromLine: null, state: 'grown' };
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** The server's unit key for a simple or vacation goal's one tally. */
+const GOAL_UNIT = 'goal';
 
 /** Every word the status chip can read. A new chip word must be added here and given a tone. */
-type ChipText = 'Plan started' | 'Plan updated' | 'On plan' | 'Ahead' | 'Behind' | 'Done' | 'Update balance';
+type ChipText = 'Plan started' | 'Plan updated' | 'On plan' | 'Ahead' | 'Behind' | 'Done';
 
 /** What the menu's Edit plan row says the quiz will ask about, per goal type. */
 const EDIT_PLAN_HELPER: Record<GoalType, string> = {
@@ -113,7 +118,7 @@ const EDIT_PLAN_HELPER: Record<GoalType, string> = {
 /** The header menu's rows. Remove chains into GoalRemoveConfirmSheet as before. */
 type MenuId = 'edit' | 'rename' | 'complete' | 'remove';
 
-const STATUS_CHIP: Record<GoalPlanView['status']['kind'], Exclude<ChipText, 'Update balance'>> = {
+const STATUS_CHIP: Record<GoalPlanView['status']['kind'], ChipText> = {
   started: 'Plan started',
   imported: 'Plan updated',
   on_plan: 'On plan',
@@ -128,7 +133,6 @@ const STATUS_TONE: Record<ChipText, NonNullable<UnitDetail['status']>['tone']> =
   'On plan': 'good',
   'Done': 'good',
   'Behind': 'warn',
-  'Update balance': 'info',
   'Plan started': 'muted',
   'Plan updated': 'muted',
 };
@@ -145,7 +149,10 @@ const UNIT_ICON: Record<KidBalanceKey, KidUnitRow['icon']> = { firstYear: 'child
 @Component({
   selector: 'app-goal',
   standalone: true,
-  imports: [CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent, AmountTraySlotComponent, SkeletonComponent],
+  imports: [
+    CommonModule, IonContent, IonHeader, KeyboardAvoidDirective, KidTimelineComponent, AmountTraySlotComponent, SkeletonComponent,
+    TallyPillsComponent,
+  ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './goal.page.html',
   styleUrls: ['./goal.page.scss'],
@@ -177,6 +184,8 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
   /** True once the route resolved to a goal or a draft. */
   readonly ready = signal(false);
   readonly saving = signal(false);
+  /** A Missed one or Doubled up post is in flight: the pills wait for it. */
+  readonly tallyBusy = signal(false);
   /**
    * The one return assumption, shared app-wide and set only on the Freedom Plan page. Read live,
    * so a plan opened after a change there already shows it.
@@ -285,31 +294,32 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       .map(([icon, lead, text]) => ({ icon, lead, text }));
   });
 
-  /** Every type but KIDS: "Saved $X · Y% there · Target $T by Mon YYYY". */
-  readonly bandLine = computed<{ saved: string; target: string }>(() => {
-    const v = this.view();
-    const pct = `${Math.round(v.progressPct)}% there`;
-    if (v.vacation) {
-      const trips = (this.planInput().config as VacationConfig).tripsPerYear;
-      return {
-        saved: `Saved ${fmtMoney(v.vacation.savedThisYear)} this year · ${pct}`,
-        target: `${fmtMoney(v.vacation.annual)} for ${trips} ${trips === 1 ? 'trip' : 'trips'}`,
-      };
-    }
-    if (v.simple) {
-      const r = v.simple.reaches;
-      return {
-        saved: `Saved ${fmtMoney(this.planInput().currentBalance)} · ${pct}`,
-        target: `Target ${fmtCompact(v.simple.target)} by ${MONTH_ABBR[r.month - 1]} ${r.year}`,
-      };
-    }
-    return { saved: '', target: '' };
+  /**
+   * Every type but KIDS: "Saved $900 · 3% of your $30K", then " · Next $450 Jan 1" and
+   * " · Behind by $450 since Nov 15" when the tally has them.
+   */
+  readonly bandText = computed(() => {
+    const t = this.view().tallyLine;
+    if (!t) return '';
+    return [t.saved, t.part, t.next, t.net].filter((part): part is string => !!part).join(' · ');
   });
 
-  /** The stored balance behind the "Saved so far" tile of a simple or vacation goal. */
+  /** The tally behind the "Saved so far" tile of a simple or vacation goal, or the stored balance before one is read. */
   readonly simpleBalance = computed(() => {
     const v = this.view();
+    const tally = this.planInput().tally?.tally;
+    if (tally !== undefined && tally !== null) return tally;
     return v.vacation ? v.vacation.savedThisYear : this.planInput().currentBalance;
+  });
+
+  /**
+   * The share Missed one and Doubled up move, from the server's tally. 0 hides the pills: a preview,
+   * a kids goal (its pills live in the unit sheet), a done or imported plan, or no credit to come.
+   */
+  readonly pillShare = computed(() => {
+    const kind = this.view().status.kind;
+    if (this.mode() !== 'saved' || this.view().kids || kind === 'done' || kind === 'imported') return 0;
+    return this.existing()?.tally?.nextCreditAmount ?? 0;
   });
 
   /** Which balance the tile edits: a vacation's year of trips, else the goal's balance. */
@@ -340,9 +350,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       current: this.balanceTrayField('Saved so far'),
       vacation: this.balanceTrayField('Saved so far this year'),
     },
-    // The Update balance chip too: a second tap on it keeps the tray open rather than closing it on
-    // release (saving the draft) and re-opening it on the click.
-    insideSelector: `${TRAY_INSIDE_SELECTOR}, .gp-tile-btn, .gp-done, .gp-chip`,
+    insideSelector: `${TRAY_INSIDE_SELECTOR}, .gp-tile-btn, .gp-done`,
     labelSelector: '.fd-tile-label.active',
     doneSelector: '.gp-done',
   }, field => this.commitBalance(field));
@@ -612,11 +620,10 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
 
   /**
    * Opens the detail sheet for one kid unit or the kid's everyday line: milestones, notes, sources,
-   * per paycheck, the Saved so far balance (units only) and the info button. `openBalance` has the
-   * sheet open its Saved so far tray as it lands (the Update balance chip). Resolves with the
+   * per paycheck, the Saved so far balance (units only) and the info button. Resolves with the
    * presented modal, or null when there is nothing to open (an unpriced everyday line).
    */
-  async openUnitDetail(kidIndex: number, unit: KidBalanceKey | 'everyday', openBalance = false): Promise<HTMLIonModalElement | null> {
+  async openUnitDetail(kidIndex: number, unit: KidBalanceKey | 'everyday'): Promise<HTMLIonModalElement | null> {
     if (!this.unitDetail(kidIndex, unit)) return null;
     const detail = computed(() => this.unitDetail(kidIndex, unit));
     const modal = await this.modalCtrl.create({
@@ -627,7 +634,6 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
           ? null
           : (value: number) => this.updateBalance({ kid: kidIndex, account: unit }, value),
         notes: this.infoNotes(),
-        openBalance,
       },
       ...BOTTOM_SHEET_MODAL_OPTS,
     });
@@ -635,36 +641,53 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
     return modal;
   }
 
-  /**
-   * The status chip: "Update balance" opens the balance. A kids goal opens the sheet for the first
-   * unfinished unit of the kid card in view (or, when that card is all finished, of the first other
-   * card in order with one) with its Saved so far tray open; every other type scrolls to its
-   * inline tile and opens the tray on it.
-   */
-  async onChipTap(): Promise<void> {
-    if (this.statusChip() !== 'Update balance') return;
-    if (this.view().kids) {
-      const cards = this.kidCards();
-      const active = cards[this.activeKid()];
-      const ordered = active ? [active, ...cards.filter(c => c !== active)] : cards;
-      const card = ordered.find(c => c.units.some(u => !u.finished));
-      const unit = card?.units.find(u => !u.finished);
-      if (!card || !unit) return;
-      await this.openUnitDetail(card.index, unit.key, true);
-      return;
-    }
-    const field = this.balanceField();
-    if (!this.tray.isOpen(field)) this.tray.toggle(field);
-    this.root.nativeElement.querySelector(`#gp-bal-${field}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
   // ── Balances ────────────────────────────────────────────────────────────────
 
-  /** The simple or vacation goal's Saved so far tray closed: its draft, if any, is saved. */
+  /**
+   * Missed one or Doubled up on a saved goal: one ledger entry, queued behind the page's other
+   * writes. The toast reads the tally the server returns and offers Undo (the opposite entry); a
+   * miss the server capped at $0 says so with no Undo. A unit that finished meanwhile (409
+   * UNIT_FINISHED) refreshes the goal with no toast, and the pills go.
+   */
+  async onTally(path: BalancePath, kind: 'missed' | 'extra'): Promise<void> {
+    if (this.mode() !== 'saved' || !this.existing()) return;
+    this.tallyBusy.set(true);
+    try {
+      const result = await this.queueAdjust(path, kind);
+      if (!result) return;
+      if (result.capped) {
+        this.toastService.show({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
+        return;
+      }
+      const tally = this.tallyFor(result.goal, path)?.tally ?? 0;
+      this.toastService.show({
+        severity: 'success',
+        message: `Saved so far is now ${fmtMoney(tally)}.`,
+        action: { label: 'Undo', run: () => void this.onTally(path, kind === 'missed' ? 'extra' : 'missed') },
+      });
+    } finally {
+      this.tallyBusy.set(false);
+    }
+  }
+
+  /** The server's unit key for a balance: "goal" for a simple or vacation goal, `kid:0:plan529` for a kid account. */
+  unitFor(path: BalancePath): string {
+    return typeof path === 'string' ? GOAL_UNIT : unitKey(path.kid, path.account);
+  }
+
+  private tallyFor(goal: Goal, path: BalancePath): UnitTally | null {
+    return (typeof path === 'string' ? goal.tally : goal.unitTallies?.[this.unitFor(path)]) ?? null;
+  }
+
+  /**
+   * The simple or vacation goal's Saved so far tray closed: its draft, if any, is saved. On a saved
+   * goal that is a `set` entry on the tally; a preview records it in the draft as before.
+   */
   private commitBalance(field: BalanceField): void {
     const draft = this.balanceDraft();
     if (draft === null) return;
-    void this.updateBalance(field, draft).then(() => {
+    const saved = this.mode() === 'saved' ? this.setTally(field, draft) : this.updateBalance(field, draft);
+    void saved.then(() => {
       // The tile keeps the draft until the save settles, so it never flashes the old figure; after
       // a failed save (the page toasts) it shows the stored balance again. A tray re-opened in the
       // meantime holds a newer draft, which its own close saves; until that write lands the tile
@@ -718,6 +741,11 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       });
       return { config: { ...c, kids } };
     });
+  }
+
+  /** Posts the exact figure as a `set` entry, skipped when the tally already reads it in whole dollars. */
+  private async setTally(path: BalancePath, value: number): Promise<void> {
+    await this.queueAdjust(path, 'set', Math.max(0, Math.round(value)));
   }
 
   // ── Complete / remove ───────────────────────────────────────────────────────
@@ -1059,7 +1087,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       type: form.type,
       name: form.name.trim(),
       icon: form.icon,
-      config: this.withAccountAnchors(draft.config, view),
+      config: this.withAccountAnchors(form.type, draft.config, view),
       // KIDS balances live per account in config.
       currentBalance: form.type === 'KIDS' ? 0 : draft.currentBalance,
       completed: goal?.completed ?? false,
@@ -1067,28 +1095,46 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       anchorMonthly: view.investMonthly,
       planRate: view.rate,
       planRateKind: view.rateKind,
+      // The last day paydays credit and what the tally stops at. KIDS carry theirs per account.
+      creditsUntil: creditsUntilFor(form.type, draft.config, undefined, undefined, this.now),
+      target: view.kids ? null : view.vacation ? view.vacation.annual : view.simple?.target ?? null,
     };
   }
 
   /**
-   * KIDS: stamp each account's anchorMonthly with that account's proposed monthly. A finished
-   * baby fund asks for nothing more, so it keeps the anchor it has.
+   * KIDS: stamp each account's anchorMonthly with that account's proposed monthly, its creditsUntil
+   * and its target. A finished baby fund asks for nothing more, so it keeps the anchor it has.
    */
-  private withAccountAnchors(config: GoalConfig, view: GoalPlanView): GoalConfig {
+  private withAccountAnchors(type: GoalType, config: GoalConfig, view: GoalPlanView): GoalConfig {
     if (!view.kids) return config;
     const cfg = config as KidsConfig;
-    const monthlyFor = (account: KidAccountKey, i: number): number =>
-      view.kids?.find(a => a.account === account)?.perKid[i]?.plan.monthly ?? 0;
+    const planFor = (account: KidAccountKey, i: number) => view.kids?.find(a => a.account === account)?.perKid[i]?.plan;
+    const stamp = (state: AccountState, i: number, account: KidAccountKey): AccountState => {
+      const plan = planFor(account, i);
+      return {
+        ...state,
+        anchorMonthly: plan?.monthly ?? 0,
+        creditsUntil: creditsUntilFor(type, cfg, i, account, this.now),
+        target: plan?.milestones.at18 ?? null,
+      };
+    };
     const kids = cfg.kids.map((kid, i) => {
       const fund = kid.accounts.firstYear;
       const fundPlan = view.firstYear?.rows.find(r => r.kidIndex === i)?.plan;
       return {
         ...kid,
         accounts: {
-          plan529: { ...kid.accounts.plan529, anchorMonthly: monthlyFor('plan529', i) },
-          brokerage: { ...kid.accounts.brokerage, anchorMonthly: monthlyFor('brokerage', i) },
+          plan529: stamp(kid.accounts.plan529, i, 'plan529'),
+          brokerage: stamp(kid.accounts.brokerage, i, 'brokerage'),
           ...(fund
-            ? { firstYear: { ...fund, anchorMonthly: fundPlan && !fundPlan.finished ? fundPlan.monthly : fund.anchorMonthly } }
+            ? {
+              firstYear: {
+                ...fund,
+                anchorMonthly: fundPlan && !fundPlan.finished ? fundPlan.monthly : fund.anchorMonthly,
+                creditsUntil: creditsUntilFor(type, cfg, i, 'firstYear', this.now),
+                target: fundPlan?.target ?? null,
+              },
+            }
             : {}),
         },
       };
@@ -1104,7 +1150,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
    * chain itself never rejects; the caller still sees its own outcome.
    */
   private queueWrite(patchOf: (goal: Goal) => Partial<GoalWrite> | null): Promise<void> {
-    const run = this.pendingWrite.then(async () => {
+    return this.enqueue(async () => {
       const goal = this.existing();
       if (!goal) return;
       const patch = patchOf(goal);
@@ -1116,8 +1162,71 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
         await this.handleWriteError(err);
       }
     });
-    this.pendingWrite = run.catch(() => undefined);
+  }
+
+  /**
+   * One ledger entry on the saved goal, queued like a PUT. Resolves with the server's answer, or
+   * null when nothing was posted (a set that changes nothing) or the post failed (already handled).
+   */
+  private queueAdjust(path: BalancePath, kind: 'missed' | 'extra' | 'set', amount?: number): Promise<{ goal: Goal; capped: boolean } | null> {
+    return this.enqueue(async () => {
+      const goal = this.existing();
+      if (!goal) return null;
+      if (kind === 'set') {
+        const current = this.tallyFor(goal, path)?.tally ?? this.storedBalance(goal, path);
+        if (Math.round(current) === amount) return null;
+      }
+      try {
+        const unit = this.unitFor(path);
+        const result = await firstValueFrom(kind === 'set'
+          ? this.goalsService.adjust(goal.id, unit, kind, amount)
+          : this.goalsService.adjust(goal.id, unit, kind));
+        this.existing.set(result.goal);
+        return result;
+      } catch (err) {
+        await this.handleAdjustError(err);
+        return null;
+      }
+    });
+  }
+
+  /** Runs `job` after every write before it. The chain itself never rejects. */
+  private enqueue<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.pendingWrite.then(job);
+    this.pendingWrite = run.then(() => undefined, () => undefined);
     return run;
+  }
+
+  /** A unit's stored balance before any tally is read: the goal's, a vacation's year, or a kid account's. */
+  private storedBalance(goal: Goal, path: BalancePath): number {
+    if (path === 'current') return goal.currentBalance;
+    if (path === 'vacation') return (goal.config as VacationConfig).savedThisYear;
+    return (goal.config as KidsConfig).kids[path.kid]?.accounts[path.account]?.balance ?? 0;
+  }
+
+  /**
+   * 409 UNIT_FINISHED: the unit finished under the user (its target or its last payday came). The
+   * page picks up the stored goal and says nothing; the pills hide. Anything else is a failed save.
+   */
+  private async handleAdjustError(err: unknown): Promise<void> {
+    const code = err instanceof HttpErrorResponse ? err.error?.code : undefined;
+    if (httpStatusOf(err) !== 409 || code !== 'UNIT_FINISHED') {
+      await this.handleWriteError(err);
+      return;
+    }
+    const sent = (err as HttpErrorResponse).error?.goal as Goal | undefined;
+    const id = this.existing()?.id;
+    if (sent && sent.id === id) {
+      this.existing.set(sent);
+      return;
+    }
+    try {
+      await firstValueFrom(this.goalsService.refresh());
+      const latest = this.goalsService.goals().find(g => g.id === id);
+      if (latest) this.existing.set(latest);
+    } catch {
+      // The pills stay; the next tap reports any failure.
+    }
   }
 
   /** The saved goal as a write body, with a patch on top. Plan inputs and anchor unchanged. */

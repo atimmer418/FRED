@@ -42,10 +42,10 @@
             <div class="fd-hero-bar"><i [style.width.%]="v.progressPct"></i></div>
             <!-- The pill and the status chip sit at the right end of the band (spec). -->
             <div class="fd-hero-labels gp-band">
-              <span class="gp-band-text">{{ bandLine().saved }} · {{ bandLine().target }}</span>
+              <span class="gp-band-text">{{ bandText() }}</span>
               <span class="gp-band-right">
                 @if (v.pill) { <span class="fd-pill" [class.cash]="v.pill === 'Cash'">{{ v.pill }}</span> }
-                <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
+                <span class="gp-chip" [class.behind]="v.status.kind === 'behind'">{{ statusChip() }}</span>
               </span>
             </div>
           }
@@ -56,7 +56,7 @@
           <div class="fd-zone gp-zone">
             <span>Per kid <span class="gp-hint">Tap for details</span></span>
             <span class="gp-zone-right">
-              <button type="button" class="gp-chip" [class.behind]="v.status.kind === 'behind'" [class.stale]="statusChip() === 'Update balance'" (click)="onChipTap()">{{ statusChip() }}</button>
+              <span class="gp-chip" [class.behind]="v.status.kind === 'behind'">{{ statusChip() }}</span>
               @if (kidCards().length > 1) {
                 <span class="gp-dots" aria-hidden="true">
                   @for (card of kidCards(); track card.index) {
@@ -138,7 +138,8 @@
         } @else {
           <!-- Every other type: the one Saved so far tile (the status chip is on the band above). The
                value opens the slide tray; Done sits in the tile's label row while it is open. The tile
-               and the tray's slot share one block, so the page's gap stays as it was. -->
+               and the tray's slot share one block, so the page's gap stays as it was. A saved goal
+               adds the assumed-growth line and the Missed one / Doubled up pills under it. -->
           @if (balanceField(); as field) {
             <div class="gp-plan">
               <div class="fd-tiles gp-tiles">
@@ -158,6 +159,13 @@
               </div>
               @if (tray.shown()) {
                 <app-amount-tray-slot [tray]="tray" />
+              }
+              @if (mode() === 'saved' && v.growthLine) {
+                <p class="gp-growth">{{ v.growthLine }}</p>
+              }
+              @if (pillShare() > 0) {
+                <app-tally-pills class="gp-pills" [share]="pillShare()" [disabled]="tallyBusy()"
+                                 (missed)="onTally(field, 'missed')" (doubled)="onTally(field, 'extra')" />
               }
             </div>
           }

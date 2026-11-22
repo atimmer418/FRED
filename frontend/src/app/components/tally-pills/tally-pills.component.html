@@ -1,0 +1,12 @@
+@if (share() > 0) {
+  <button type="button" class="tp-pill" [disabled]="disabled()" (click)="onMissed()">
+    <span class="material-symbols-outlined" aria-hidden="true">remove</span>
+    <span class="tp-label">Missed one</span>
+    <span class="tp-amount">−{{ fmtMoney(share()) }}</span>
+  </button>
+  <button type="button" class="tp-pill" [disabled]="disabled()" (click)="onDoubled()">
+    <span class="material-symbols-outlined" aria-hidden="true">add</span>
+    <span class="tp-label">Doubled up</span>
+    <span class="tp-amount">+{{ fmtMoney(share()) }}</span>
+  </button>
+}

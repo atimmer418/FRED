@@ -95,6 +95,18 @@ describe('ToastService', () => {
       expect(received.map(i => i.duration)).toEqual([ERROR_TOAST_DURATION_MS, 1500]);
     });
 
+    it('passes an action through, and leaves the field off when there is none', () => {
+      const run = jasmine.createSpy('run');
+      service.show({ severity: 'success', message: 'Saved so far is now $450.', action: { label: 'Undo', run } });
+      service.show({ severity: 'success', message: 'Plain.' });
+
+      expect(received[0]).toEqual({
+        severity: 'success', message: 'Saved so far is now $450.', title: undefined, duration: TOAST_DURATION_MS,
+        action: { label: 'Undo', run },
+      });
+      expect('action' in received[1]).toBeFalse();
+    });
+
     it('fills in the default duration by severity', () => {
       service.show({ severity: 'error', message: 'Broke.' });
       service.show({ severity: 'neutral', message: 'Fine.' });

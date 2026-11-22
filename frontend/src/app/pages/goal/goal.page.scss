@@ -55,18 +55,10 @@
   border: none;
   border-radius: 7px;
   padding: 3px 8px;
-  cursor: default;
-  -webkit-tap-highlight-color: transparent;
 
   &.behind {
     color: #b45309;
     background: #fffbeb;
-  }
-
-  &.stale {
-    color: #2563eb;
-    background: #eef4ff;
-    cursor: pointer;
   }
 }
 
@@ -388,6 +380,24 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+}
+
+// The assumed-growth line, one line directly under the tile (saved mode only).
+.gp-growth {
+  margin: 6px 2px 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// Missed one / Doubled up under the tile (and under the growth line when there is one).
+.gp-pills {
+  margin-top: 10px;
 }
 
 // ── Assumptions, read-only: the Freedom Plan card with the figure where the chips were ─────

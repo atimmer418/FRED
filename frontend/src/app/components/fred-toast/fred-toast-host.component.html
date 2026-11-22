@@ -30,6 +30,9 @@
           }
           <div class="ft-message">{{ t.message }}</div>
         </div>
+        @if (t.action) {
+          <button type="button" class="ft-action" (click)="runAction(t)">{{ t.action.label }}</button>
+        }
         <button type="button" class="ft-close" aria-label="Dismiss" (click)="dismiss(t.id)">
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>

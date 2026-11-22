@@ -1,0 +1,49 @@
+// Missed one / Doubled up: a full-row pair of outline pills under a Saved so far balance. Light only.
+
+:host {
+  display: flex;
+  gap: 8px;
+}
+
+:host(.tp-hidden) {
+  display: none;
+}
+
+.tp-pill {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 34px;
+  margin: 0;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111827;
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .material-symbols-outlined {
+    font-size: 16px;
+  }
+
+  &:active {
+    background: #f3f4f6;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.tp-amount {
+  color: #6b7280;
+}

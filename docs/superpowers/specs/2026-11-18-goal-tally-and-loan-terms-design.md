@@ -210,7 +210,10 @@ says so. The response is the updated goal.
 
 **Status.** For each unit: `net` = sum of `extra` minus sum of `missed` since the later of
 `plan_anchored_at` and the last `set`; `netSince` = the date of the oldest `missed` entry not yet
-cancelled by a later `extra` (FIFO) when net is negative, else null. Status kind: completed, or
+covered by an `extra` when net is negative, else null. Covering is FIFO in entry order, and an
+`extra` written before a miss counts too: a Doubled up on Nov 2, a Missed one on Nov 3 and another
+on Nov 16 read "Behind by $450 since Nov 16", because the Nov 2 surplus paid for Nov 3 (ruling
+2026-11-21, during the build). Status kind: completed, or
 tally ≥ target, or `creditsUntil` passed with net ≥ 0 → done; imported (clientId set and
 anchorMonthly 0) → imported; no credit yet and no adjustments → started; net = 0 → on_plan;
 net > 0 → ahead; net < 0 → behind. The old expected-balance grading (`planStatus`'s futureValue

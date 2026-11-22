@@ -47,6 +47,23 @@ public class UserController {
     @Autowired
     private com.investingapp.backend.service.SubscriptionService subscriptionService;
 
+    @Autowired
+    private com.investingapp.backend.config.SelfServiceTierPolicy selfServiceTierPolicy;
+
+    /**
+     * Whether this request may set the caller's own subscription tier. Only in a development
+     * environment (see SelfServiceTierPolicy). A missing policy counts as production: locked.
+     */
+    private boolean selfServiceTierChangeAllowed() {
+        return selfServiceTierPolicy != null && selfServiceTierPolicy.isAllowed();
+    }
+
+    private static ResponseEntity<?> tierChangeRefused() {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(Map.of(
+                "code", "TIER_CHANGE_NOT_ALLOWED",
+                "message", "Your plan can only be changed through billing."));
+    }
+
     public static class UserProgressResponse {
         private boolean getStartedCompleted;
         private boolean surveyInitialCompleted;
@@ -509,6 +526,15 @@ public class UserController {
                 return ResponseEntity.notFound().build();
             }
 
+            // In production a tier is something you pay for, so it cannot be set by asking for it
+            // here. The whole request is refused, and nothing else in it is applied, so the app
+            // is never told "saved" for a plan change that did not happen.
+            if ((profileUpdate.containsKey("selectedTier") || profileUpdate.containsKey("billingPeriod"))
+                    && !selfServiceTierChangeAllowed()) {
+                logger.warn("[UserController] Refused a self-service tier change for user id {}", user.getId());
+                return tierChangeRefused();
+            }
+
             boolean changed = false;
 
             if (profileUpdate.containsKey("monthlyInvestment")) {
@@ -620,6 +646,12 @@ public class UserController {
             Authentication authentication,
             @RequestBody java.util.Map<String, String> body) {
         if (authentication == null) return ResponseEntity.status(401).build();
+        // This endpoint takes the tier on the caller's word: it does not check a receipt. Until it
+        // does, it is the same free upgrade as PUT /user/profile and is locked the same way.
+        if (!selfServiceTierChangeAllowed()) {
+            logger.warn("[UserController] Refused an unverified subscription confirm");
+            return tierChangeRefused();
+        }
         org.springframework.security.core.userdetails.UserDetails userDetails =
                 (org.springframework.security.core.userdetails.UserDetails) authentication.getPrincipal();
         String email = userDetails.getUsername();

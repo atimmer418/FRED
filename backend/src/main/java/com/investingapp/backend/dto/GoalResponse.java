@@ -38,6 +38,9 @@ public class GoalResponse {
     private boolean completed;
     private int sortOrder;
 
+    /** The unit's savings target as the client wrote it at anchor time; null when it has none. */
+    private BigDecimal target;
+
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = TIMESTAMP)
     private LocalDateTime createdAt;
 
@@ -66,6 +69,7 @@ public class GoalResponse {
         this.planAnchoredAt = goal.getPlanAnchoredAt();
         this.completed = goal.isCompleted();
         this.sortOrder = goal.getSortOrder();
+        this.target = goal.getTarget();
         this.createdAt = goal.getCreatedAt();
         this.updatedAt = goal.getUpdatedAt();
     }

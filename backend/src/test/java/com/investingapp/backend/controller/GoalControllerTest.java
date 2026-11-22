@@ -211,7 +211,9 @@ class GoalControllerTest {
 
     @Test
     void timestampsSerializeAsIsoStrings() throws Exception {
-        when(service.listForUser(user)).thenReturn(responses(goal(1L)));
+        Goal withTarget = goal(1L);
+        withTarget.setTarget(new BigDecimal("5000.00"));
+        when(service.listForUser(user)).thenReturn(responses(withTarget, goal(2L)));
         ObjectMapper wireMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .enable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -224,7 +226,9 @@ class GoalControllerTest {
                 .andExpect(jsonPath("$[0].planAnchoredAt").isString())
                 .andExpect(jsonPath("$[0].planAnchoredAt").value(Matchers.matchesPattern("^\\d{4}-\\d{2}-\\d{2}T.*")))
                 .andExpect(jsonPath("$[0].createdAt").isString())
-                .andExpect(jsonPath("$[0].config.targetYear").value(2030));
+                .andExpect(jsonPath("$[0].config.targetYear").value(2030))
+                .andExpect(jsonPath("$[0].target").value(5000.00))
+                .andExpect(jsonPath("$[1].target").value(Matchers.nullValue()));
     }
 
     @Test

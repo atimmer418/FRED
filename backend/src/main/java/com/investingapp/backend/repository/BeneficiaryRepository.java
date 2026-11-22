@@ -113,6 +113,12 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary, Long> 
                                                  @Param("dateOfBirth") java.time.LocalDate dateOfBirth,
                                                  @Param("excludeId") Long excludeId);
 
+    /**
+     * One beneficiary, only if it belongs to this user. Every lookup that starts from an id the
+     * client sent goes through here, so another user's row is simply not found.
+     */
+    Optional<Beneficiary> findByIdAndUserId(Long id, Long userId);
+
     /** User deletion: beneficiaries.user_id has no ON DELETE CASCADE (V1:40). */
     void deleteAllByUser(User user);
 }

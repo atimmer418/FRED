@@ -47,16 +47,49 @@ public class AlpacaController {
         this.kycSubmissionService = kycSubmissionService;
     }
 
+    private static final String ACCOUNT_NOT_FOUND = "{\"error\":\"Account not found\"}";
+
+    /**
+     * The signed-in user's own brokerage account. This used to return the broker's list of every
+     * FRED customer account to any logged-in user.
+     */
     @GetMapping("/account")
     public ResponseEntity<String> getAccount() {
         try {
-            String accountInfo = alpacaApiService.getAccountInfo();
+            User user = getCurrentUser();
+            if (user == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"error\":\"User not authenticated\"}");
+            }
+            String ownAccountId = ownAlpacaAccountId(user);
+            if (ownAccountId == null) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ACCOUNT_NOT_FOUND);
+            }
+            String accountInfo = alpacaApiService.getAccountStatus(ownAccountId);
             return ResponseEntity.ok(accountInfo);
         } catch (Exception e) {
             logger.error("Error getting account info: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("{\"error\":\"Failed to get account info\"}");
         }
+    }
+
+    /** The user's own broker account id, decrypted, or null when they have no brokerage account. */
+    private String ownAlpacaAccountId(User user) {
+        String stored = user.getAlpacaAccountId();
+        if (stored == null || stored.isBlank()) {
+            return null;
+        }
+        String accountId = encryptionService.decrypt(stored);
+        return (accountId == null || accountId.isBlank()) ? null : accountId;
+    }
+
+    /**
+     * True only when the account id in the URL is the signed-in user's own. The id from the client
+     * is never passed to the broker on its own: anyone else's id is treated as not found.
+     */
+    private boolean isOwnAlpacaAccount(User user, String accountId) {
+        String ownAccountId = ownAlpacaAccountId(user);
+        return ownAccountId != null && ownAccountId.equals(accountId);
     }
 
     private User getCurrentUser() {
@@ -225,6 +258,13 @@ public class AlpacaController {
     @GetMapping("/accounts/{accountId}/ach-relationships")
     public ResponseEntity<String> getAchRelationships(@PathVariable String accountId) {
         try {
+            User user = getCurrentUser();
+            if (user == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"error\":\"User not authenticated\"}");
+            }
+            if (!isOwnAlpacaAccount(user, accountId)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ACCOUNT_NOT_FOUND);
+            }
             String relationships = alpacaApiService.getAchRelationships(accountId);
             return ResponseEntity.ok(relationships);
         } catch (Exception e) {
@@ -237,6 +277,13 @@ public class AlpacaController {
     @GetMapping("/account/{accountId}/status")
     public ResponseEntity<String> getAccountStatus(@PathVariable String accountId) {
         try {
+            User user = getCurrentUser();
+            if (user == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"error\":\"User not authenticated\"}");
+            }
+            if (!isOwnAlpacaAccount(user, accountId)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ACCOUNT_NOT_FOUND);
+            }
             String status = alpacaApiService.getAccountStatus(accountId);
             return ResponseEntity.ok(status);
         } catch (Exception e) {

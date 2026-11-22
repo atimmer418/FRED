@@ -28,6 +28,7 @@ import {
   AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, UnitTally, VacationConfig, unitKey,
 } from '../../models/goal.model';
 import { isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
+import { todayYmd } from '../../utils/local-date';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { kidAgeToday, kidCostFigures, kidsAtHome } from '../../utils/kid-cost.utils';
 import { CHILDBIRTH_DOLLAR_YEAR_LABEL, COLLEGE_PRICE_YEAR_LABEL } from '../../constants/kid-costs';
@@ -659,7 +660,9 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       const result = await this.queueAdjust(path, kind, amount);
       if (!result) return;
       const tally = this.tallyFor(result.goal, path)?.tally ?? this.storedBalance(result.goal, path);
-      const moved = Math.abs(result.before - tally);
+      // In cents: a floating-point difference of two cent figures can carry noise past 2 decimals,
+      // which the server refuses.
+      const moved = Math.round(Math.abs(result.before - tally) * 100) / 100;
       if (moved === 0) {
         if (kind === 'missed') {
           this.toastService.show({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
@@ -680,17 +683,19 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
   }
 
   /**
-   * Whether a unit takes no more Missed one or Doubled up: the goal is completed, no credit is coming
-   * and the tally is at its target, or (a simple or vacation goal) the plan reads Done.
+   * Whether a unit takes no more Missed one or Doubled up, exactly as the server decides it (it
+   * answers 409 then): the goal is completed, the tally is at its target, or today is past the
+   * unit's last payday (creditsUntil).
    */
   private unitFinished(goal: Goal, path: BalancePath): boolean {
     if (goal.completed) return true;
+    const account = typeof path === 'string' ? null : (goal.config as KidsConfig).kids[path.kid]?.accounts[path.account];
     const t = this.tallyFor(goal, path);
-    const target = typeof path === 'string'
-      ? goal.target
-      : (goal.config as KidsConfig).kids[path.kid]?.accounts[path.account]?.target;
-    if (t && t.nextCreditDate === null && target != null && target > 0 && t.tally >= target) return true;
-    return typeof path === 'string' && this.existing() === goal && this.view().status.kind === 'done';
+    const target = typeof path === 'string' ? goal.target : account?.target;
+    const tally = t?.tally ?? this.storedBalance(goal, path);
+    if (target != null && target > 0 && tally >= target) return true;
+    const creditsUntil = t?.creditsUntil ?? (typeof path === 'string' ? null : account?.creditsUntil);
+    return !!creditsUntil && todayYmd(this.now) > creditsUntil;
   }
 
   /** The server's unit key for a balance: "goal" for a simple or vacation goal, `kid:0:plan529` for a kid account. */

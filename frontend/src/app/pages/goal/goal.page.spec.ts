@@ -1572,6 +1572,35 @@ describe('GoalPage', () => {
     expect(lastToast().message).toBe('Saved so far is now $200.');
   });
 
+  it('Undo sends the moved amount rounded to cents', async () => {
+    // The server takes $450.20 off $900.10 and returns $449.90; 900.10 - 449.90 in floating point is
+    // 450.20000000000005, which the server would refuse as more than 2 decimals.
+    const goal = talliedHouse(8, { tally: 900.10, nextCreditAmount: 450.20 });
+    const after: Goal = { ...goal, currentBalance: 449.90, tally: { ...goal.tally!, tally: 449.90, net: -450.20 } };
+    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: after, capped: false }) });
+    pills(fixture)[0].click();
+    await settle(fixture);
+    expect(lastToast().message).toBe('Saved so far is now $450.');
+
+    lastToast().action!.run();
+    await settle(fixture);
+    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra', 450.2]);
+  });
+
+  it('Undo is withheld once creditsUntil has passed', async () => {
+    const goal = talliedHouse(8);
+    // The server rolled the goal past its last payday: one more tap lands, the next would 409.
+    // Net below 0, so the plan reads Behind rather than Done: only creditsUntil says the unit is over.
+    const ended: Goal = {
+      ...goal, currentBalance: 1_350,
+      tally: { ...goal.tally!, tally: 1_350, net: -450, netSince: `${YEAR - 1}-12-15`, creditsUntil: `${YEAR - 1}-12-31` },
+    };
+    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: ended, capped: false }) });
+    pills(fixture)[1].click();
+    await settle(fixture);
+    expect(show).toHaveBeenCalledOnceWith({ severity: 'success', message: 'Saved so far is now $1,350.' });
+  });
+
   it('a miss cut short at $0 still took money off: Saved so far is now $0, with Undo', async () => {
     const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { tally: 200 })] });
     pills(fixture)[0].click();

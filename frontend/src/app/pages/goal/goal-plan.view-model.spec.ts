@@ -77,9 +77,11 @@ describe('buildGoalPlanView', () => {
     const brokerage = view.kids!.find(k => k.account === 'brokerage')!;
     expect(view.investMonthly).toBe(p529.totals.monthly + brokerage.totals.monthly);
 
-    // 35K saved of your part: Ada's anchors plus 194 planned months (Jan 2026 to Mar 2042); Ben has none.
+    // 35K saved against: Ada's part (anchors plus 194 planned months, Jan 2026 to Mar 2042), and
+    // Ben's targets, since his accounts plan no monthly.
     const ada = (8_000 + 200 * 194) + (15_000 + 300 * 194);
-    expect(view.progressPct).toBeCloseTo((35_000 / ada) * 100, 6);
+    const ben = 100_000 + 250_000;
+    expect(view.progressPct).toBeCloseTo((35_000 / (ada + ben)) * 100, 6);
     // No unit has a tally yet: Plan started.
     expect(view.status.kind).toBe('started');
   });
@@ -576,8 +578,9 @@ describe('buildGoalPlanView final review fixes', () => {
       } as KidsConfig,
     });
     const view = buildGoalPlanView(goal, ctx());
-    // The 529 alone: $1,000 saved of a $1,000 part. The brokerage would add $5,000 of a bigger part.
-    expect(view.progressPct).toBe(100);
+    // The 529 alone: no monthly planned, so $1,000 of its $100,000 target. The zero-target brokerage
+    // and its $5,000 are left out.
+    expect(view.progressPct).toBeCloseTo(1, 6);
   });
 });
 
@@ -1163,6 +1166,36 @@ describe('buildGoalPlanView from the tally', () => {
       tally: tally({ tally: 20_000 }),
     }), ctx());
     expect(cash.growthLine).toBeNull();
+  });
+
+  it('an imported goal with no plan measures progress against the target', () => {
+    const view = buildGoalPlanView(base({
+      clientId: 'v2-abc', config: { targetAmount: 20_000, targetYear: Y + 3 },
+      currentBalance: 5_000, anchorBalance: 5_000, anchorMonthly: 0, tally: tally({ tally: 5_000 }),
+    }), ctx());
+    expect(view.status.kind).toBe('imported');
+    expect(view.progressPct).toBe(25);
+    expect(view.tallyLine!.part).toBe('25% of your $20K');
+  });
+
+  it('a plan with money due now measures progress against the target', () => {
+    const view = buildGoalPlanView(base({
+      config: { targetAmount: 30_000, targetYear: 2026 },
+      currentBalance: 24_000, anchorBalance: 24_000, anchorMonthly: 0, planAnchoredAt: '2026-12-01T00:00:00',
+      tally: tally({ tally: 24_000, nextCreditDate: null, nextCreditAmount: 0 }),
+    }), ctx({ now: new Date(2026, 11, 5) }));
+    expect(view.heroLabel).toBe('Due now');
+    expect(view.progressPct).toBe(80);
+  });
+
+  it('an imported goal has no growth line', () => {
+    // Anchored three years ago at $10,000: a planned goal's value has grown well past the tally by now.
+    const goal = (clientId: string | null) => base({
+      clientId, anchorBalance: 10_000, anchorMonthly: clientId ? 0 : 100, planAnchoredAt: '2023-11-15T00:00:00',
+      currentBalance: 10_000, tally: tally({ tally: 10_000 }),
+    });
+    expect(buildGoalPlanView(goal('v2-abc'), ctx()).growthLine).toBeNull();
+    expect(buildGoalPlanView(goal(null), ctx()).growthLine).toMatch(/^Assuming growth at 10%/);
   });
 
   it('kids 529 and nest egg carry a growthLine, the baby fund never does', () => {

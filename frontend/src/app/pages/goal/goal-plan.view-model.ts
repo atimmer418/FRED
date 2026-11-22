@@ -251,7 +251,16 @@ function clampPct(part: number, whole: number): number {
   return Math.min(100, Math.max(0, (part / whole) * 100));
 }
 
-/** Saved so far against your part; with no part to measure against, any saving reads full. */
+/**
+ * What progress measures against. A plan with a monthly: your part (the anchor balance plus every
+ * planned monthly). No monthly (an unplanned import, or a plan re-anchored at or past its deadline
+ * with money due now): the target, so a shortfall never reads as a full bar.
+ */
+function progressBase(anchorBalance: number, monthly: number, months: number, target: number): number {
+  return monthly > 0 ? yourPart(anchorBalance, monthly, months) : target;
+}
+
+/** Saved so far against its base; with no base to measure against, any saving reads full. */
 function progressOf(saved: number, part: number): number {
   if (part > 0) return clampPct(saved, part);
   return saved > 0 ? 100 : 0;
@@ -565,8 +574,8 @@ function kidsView(
         });
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);
         const part = anchor
-          ? yourPart(account.anchorBalance, account.anchorMonthly, planMonths)
-          : yourPart(account.balance, plan.monthly, plan.n);
+          ? progressBase(account.anchorBalance, account.anchorMonthly, planMonths, def.target)
+          : progressBase(account.balance, plan.monthly, plan.n, def.target);
         score(t, saved, def.target, part);
         return {
           label: kid.label,
@@ -778,8 +787,8 @@ function firstYearRows(
       account,
       tally: t,
       part: anchor
-        ? yourPart(account.anchorBalance, account.anchorMonthly, planMonths)
-        : yourPart(account.balance, plan.monthly, plan.n),
+        ? progressBase(account.anchorBalance, account.anchorMonthly, planMonths, plan.target)
+        : progressBase(account.balance, plan.monthly, plan.n, plan.target),
     });
   });
   return out;
@@ -849,8 +858,8 @@ function simpleView(
   });
   const status = tallyStatus({ completed: goal.completed, imported, tally: t, target, today: ctx.now });
   const part = anchor
-    ? yourPart(goal.anchorBalance, goal.anchorMonthly, planMonths)
-    : yourPart(goal.currentBalance, plan.monthly, plan.n);
+    ? progressBase(goal.anchorBalance, goal.anchorMonthly, planMonths, target)
+    : progressBase(goal.currentBalance, plan.monthly, plan.n, target);
   const progressPct = progressOf(saved, part);
 
   const audience = goalAudience(goal);
@@ -875,7 +884,8 @@ function simpleView(
     status,
     progressPct,
     tallyLine: tallyLineFor(saved, progressPct, part, t),
-    growthLine: anchor ? growthLine({ rateKind: goal.planRateKind, annualRate: planRate, planValue: value, tally: saved }) : null,
+    // An unplanned import has no plan to grow, so it has no assumed growth to report.
+    growthLine: anchor && !imported ? growthLine({ rateKind: goal.planRateKind, annualRate: planRate, planValue: value, tally: saved }) : null,
     relative: false,
     simple: plan,
   };

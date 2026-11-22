@@ -259,7 +259,7 @@ export type AnalyticsEvent =
    * either, or a typed figure ('set'). Never the amount, the unit or which kid.
    */
   | {
-      name: 'goal_tally_adjusted';
+      name: 'goal_tally_changed';
       props: {
         goal_type: GoalType;
         kind: 'missed' | 'extra' | 'set';
@@ -379,7 +379,7 @@ export const CLIENT_EVENT_NAMES = [
   'strategy_viewed',
   'freedom_plan_changed',
   'goal_changed',
-  'goal_tally_adjusted',
+  'goal_tally_changed',
   'setting_changed',
   'monte_carlo_opened',
   'monte_carlo_step_completed',

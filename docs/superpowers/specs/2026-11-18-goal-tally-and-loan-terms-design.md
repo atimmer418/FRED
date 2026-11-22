@@ -280,7 +280,7 @@ Changes:
 
 ### Analytics
 
-New event `goal_tally_adjusted` with `goal_type` and `kind: 'missed' | 'extra' | 'set'`. No amounts,
+New event `goal_tally_changed` with `goal_type` and `kind: 'missed' | 'extra' | 'set'`. No amounts,
 no unit index. Declared in both taxonomies and in `FREDdocs/analytics-events.md`, or the
 events-documented script fails the build.
 
@@ -418,4 +418,4 @@ Rulings that moved during the build, one line each.
 - The loan card on the plan page is its own card, with a "Default rate" source sentence that never names the user's own rate.
 - A legacy full-price car opens in the quiz at the $25,000 slider max.
 - The payday calendar does not copy the scheduler's day 29 to 31 quirk (backlog FRED-236).
-- One analytics event, `goal_tally_adjusted`, carries goal type and kind only; an Undo emits the kind it posted.
+- One analytics event, `goal_tally_changed`, carries goal type and kind only; an Undo emits the kind it posted.

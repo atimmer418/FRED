@@ -270,6 +270,7 @@ describe('the guard keeps every legitimate declared value', () => {
     input_method: ['slider', 'typed', 'fetched', null],
     invest_changed: BOOLEANS,
     is_rerun: BOOLEANS,
+    kind: ['missed', 'extra', 'set'],
     // A deck has single digits of slides. The upper bound is deliberately absurd: if a deck ever
     // had ten million slides the number would be stripped, and that is worth knowing here.
     max_slide_reached: [0, 1, 7, 50, 9999999],

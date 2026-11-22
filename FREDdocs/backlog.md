@@ -442,7 +442,7 @@ Family plan everyday line: each kid card on the family plan page shows an Invest
 FRED now keeps each goal's "saved so far" on the server: one paycheck share is credited per payday, and the user corrects it with Missed one, Doubled up, an Undo, or a typed figure. House plans offer 5, 10 or 20 percent down with a mortgage line, and a car has a dollar down payment with a loan line. Built on develop (commits b7f8204..90b70bb); this story is the device pass.
 
 ### Summary
-Walk the new goal tally and loan terms on a real device. The server credits one paycheck share per payday; Missed one takes a share off, Doubled up adds one, Undo puts back exactly what moved. The house and car plans show the down payment as the plan and the loan that follows as its own card. One analytics event, `goal_tally_adjusted` (goal type and kind only), fires per accepted adjustment.
+Walk the new goal tally and loan terms on a real device. The server credits one paycheck share per payday; Missed one takes a share off, Doubled up adds one, Undo puts back exactly what moved. The house and car plans show the down payment as the plan and the loan that follows as its own card. One analytics event, `goal_tally_changed` (goal type and kind only), fires per accepted adjustment.
 
 ### Acceptance Criteria
 1. Missed one, Doubled up and Undo work on a simple goal; the toast reads the new saved-so-far figure, and Undo offers no second Undo.

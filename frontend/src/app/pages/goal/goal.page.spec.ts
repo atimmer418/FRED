@@ -987,13 +987,13 @@ describe('GoalPage', () => {
     expect(props.detail()!.status).toEqual({ text: 'On plan', tone: 'good' });
   });
 
-  const tallyEvents = () => track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_tally_adjusted');
+  const tallyEvents = () => track.calls.allArgs().map(a => a[0]).filter(e => e.name === 'goal_tally_changed');
 
-  it('a missed tap emits goal_tally_adjusted with goal_type and kind only', async () => {
+  it('a missed tap emits goal_tally_changed with goal_type and kind only', async () => {
     const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
     kidAdjust();
     await fixture.componentInstance.onTally({ kid: 1, account: 'brokerage' }, 'missed');
-    expect(tallyEvents()).toEqual([{ name: 'goal_tally_adjusted', props: { goal_type: 'KIDS', kind: 'missed' } }]);
+    expect(tallyEvents()).toEqual([{ name: 'goal_tally_changed', props: { goal_type: 'KIDS', kind: 'missed' } }]);
   });
 
   it('an Undo emits the kind it actually posted', async () => {
@@ -1005,7 +1005,7 @@ describe('GoalPage', () => {
     expect(tallyEvents().map(e => e.props.kind)).toEqual(['missed', 'extra']);
   });
 
-  it('a set from the tray emits goal_tally_adjusted with kind set', async () => {
+  it('a set from the tray emits goal_tally_changed with kind set', async () => {
     reducedMotion = true;
     const goal: Goal = { ...houseGoal(8), currentBalance: 90_000, anchorBalance: 90_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
@@ -1013,7 +1013,7 @@ describe('GoalPage', () => {
     slideTo(fixture, 95_000);
     click(fixture, '.gp-done');
     await fixture.whenStable();
-    expect(tallyEvents()).toEqual([{ name: 'goal_tally_adjusted', props: { goal_type: 'HOUSE', kind: 'set' } }]);
+    expect(tallyEvents()).toEqual([{ name: 'goal_tally_changed', props: { goal_type: 'HOUSE', kind: 'set' } }]);
   });
 
   it('a failed adjustment emits nothing', async () => {

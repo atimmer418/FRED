@@ -1245,7 +1245,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
           : this.goalsService.adjust(goal.id, unit, kind, amount));
         this.existing.set(result.goal);
         // Only a posted entry counts (a 409 or a failure lands in the catch). No amount, unit or kid.
-        this.analytics.track({ name: 'goal_tally_adjusted', props: { goal_type: goal.type, kind } });
+        this.analytics.track({ name: 'goal_tally_changed', props: { goal_type: goal.type, kind } });
         return { ...result, before };
       } catch (err) {
         await this.handleAdjustError(err);

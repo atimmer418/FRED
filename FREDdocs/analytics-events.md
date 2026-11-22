@@ -117,7 +117,7 @@ The four education decks are ungated. `optimal_drawdown` is Pro only.
 | Event | Properties | When |
 |---|---|---|
 | `goal_changed` | `action`, `goal_type`, `icon`, `plan_rate`, `target_band`, `years_to_target`, `progress`, `goal_count` | A goal was created, edited, completed, reopened or removed. |
-| `goal_tally_adjusted` | `goal_type`, `kind` | A saved-so-far correction posted successfully. |
+| `goal_tally_changed` | `goal_type`, `kind` | A saved-so-far correction posted successfully. |
 
 Actions: `created`, `updated`, `completed`, `reopened`, `removed`. Goal types: `KIDS`, `HOUSE`,
 `VACATION`, `CAR`, `EMERGENCY_FUND`, `WEDDING`, `CUSTOM`. Icons: `home`, `health_and_safety`,
@@ -125,7 +125,7 @@ Actions: `created`, `updated`, `completed`, `reopened`, `removed`. Goal types: `
 `plan_rate` is the return assumption the plan was proposed at: `8`, `10` or `12` (percent), or
 `cash` for short-horizon and emergency plans.
 
-`goal_tally_adjusted` fires once per ledger entry the server accepts, after the response, never on
+`goal_tally_changed` fires once per ledger entry the server accepts, after the response, never on
 a failed save or a 409. `kind` is `missed` (Missed one), `extra` (Doubled up) or `set` (the Saved
 so far tray). An Undo is an adjustment too and carries the opposite kind it posted. The event
 carries no amount, no unit and no kid index.

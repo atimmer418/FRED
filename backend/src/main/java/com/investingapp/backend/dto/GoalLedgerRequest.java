@@ -23,7 +23,7 @@ public class GoalLedgerRequest {
     @Pattern(regexp = "missed|extra|set", message = "must be missed, extra or set")
     private String kind;
 
-    /** Required for {@code set}; ignored for {@code missed} and {@code extra}. */
+    /** Required for {@code set}; optional for {@code missed} and {@code extra}, which move the share when it is absent. */
     @DecimalMin("0")
     @DecimalMax("100000000")
     @Digits(integer = 9, fraction = 2)

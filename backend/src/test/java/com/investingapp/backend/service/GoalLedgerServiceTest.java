@@ -486,7 +486,7 @@ class GoalLedgerServiceTest {
     void extraWritesPlusOneShareAndRaisesTally() {
         Goal goal = simpleGoal("1000", "900", TODAY);
 
-        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.EXTRA, bd("5"), semiMonthly(), TODAY);
+        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.EXTRA, null, semiMonthly(), TODAY);
 
         assertFalse(result.capped());
         List<GoalLedgerEntry> extra = entries("goal", LedgerKind.EXTRA);
@@ -545,7 +545,72 @@ class GoalLedgerServiceTest {
         Goal done = simpleGoal("100", "900", TODAY);
         done.setCompleted(true);
         assertThrows(IllegalStateException.class,
-                () -> service.adjust(done, "goal", LedgerKind.SET, bd("1"), semiMonthly(), TODAY));
+                () -> service.adjust(done, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY));
+        assertThrows(IllegalStateException.class,
+                () -> service.adjust(done, "goal", LedgerKind.EXTRA, bd("50"), semiMonthly(), TODAY));
+        assertTrue(ledger.isEmpty());
+    }
+
+    @Test
+    void setIsAllowedOnAFinishedUnit() {
+        Goal atTarget = simpleGoal("5000", "900", TODAY);
+        atTarget.setTarget(bd("5000"));
+        service.adjust(atTarget, "goal", LedgerKind.SET, bd("4200"), semiMonthly(), TODAY);
+        assertMoney("4200", atTarget.getCurrentBalance());
+
+        Goal ended = simpleGoal("100", "900", TODAY);
+        ended.setCreditsUntil(TODAY.minusDays(1));
+        service.adjust(ended, "goal", LedgerKind.SET, bd("300"), semiMonthly(), TODAY);
+        assertMoney("300", ended.getCurrentBalance());
+
+        Goal done = simpleGoal("100", "900", TODAY);
+        done.setCompleted(true);
+        service.adjust(done, "goal", LedgerKind.SET, bd("1"), semiMonthly(), TODAY);
+        assertMoney("1", done.getCurrentBalance());
+        assertEquals(3, entries("goal", LedgerKind.SET).size());
+    }
+
+    @Test
+    void missedWithAnExplicitAmountUsesIt() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+
+        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.MISSED, bd("200"), semiMonthly(), TODAY);
+
+        assertFalse(result.capped());
+        assertMoney("-200", entries("goal", LedgerKind.MISSED).get(0).getAmount());
+        assertMoney("800", goal.getCurrentBalance());
+
+        // Still cut short at $0.
+        GoalLedgerService.AdjustResult over = service.adjust(goal, "goal", LedgerKind.MISSED, bd("5000"), semiMonthly(), TODAY);
+        assertTrue(over.capped());
+        assertMoney("-800", entries("goal", LedgerKind.MISSED).get(1).getAmount());
+        assertMoney("0", goal.getCurrentBalance());
+    }
+
+    @Test
+    void extraWithAnExplicitAmountUsesIt() {
+        Goal goal = simpleGoal("0", "900", TODAY);
+
+        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.EXTRA, bd("200"), semiMonthly(), TODAY);
+
+        assertFalse(result.capped());
+        assertMoney("200", entries("goal", LedgerKind.EXTRA).get(0).getAmount());
+        assertMoney("200", goal.getCurrentBalance());
+        assertMoney("200", service.tallyFor(goal, "goal", semiMonthly(), TODAY).net());
+    }
+
+    @Test
+    void aMissedOrExtraAmountMustBeAboveZeroWithTwoDecimals() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+
+        assertThrows(GoalValidationException.class,
+                () -> service.adjust(goal, "goal", LedgerKind.MISSED, bd("0"), semiMonthly(), TODAY));
+        assertThrows(GoalValidationException.class,
+                () -> service.adjust(goal, "goal", LedgerKind.EXTRA, bd("-5"), semiMonthly(), TODAY));
+        assertThrows(GoalValidationException.class,
+                () -> service.adjust(goal, "goal", LedgerKind.EXTRA, bd("1.005"), semiMonthly(), TODAY));
+        assertThrows(GoalValidationException.class,
+                () -> service.adjust(goal, "goal", LedgerKind.EXTRA, bd("100000000.01"), semiMonthly(), TODAY));
         assertTrue(ledger.isEmpty());
     }
 

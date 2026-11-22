@@ -181,7 +181,8 @@ describe('GoalPage', () => {
       if (opts.adjustResult) return opts.adjustResult;
       const g = goals().find(x => x.id === id) ?? houseGoal(id);
       const t = g.tally ?? null;
-      const share = t?.nextCreditAmount ?? 0;
+      // An Undo sends the exact amount; a tap sends none and moves one share.
+      const share = kind === 'set' ? 0 : amount ?? t?.nextCreditAmount ?? 0;
       const before = t?.tally ?? g.currentBalance;
       const raw = kind === 'set' ? amount! : kind === 'missed' ? before - share : before + share;
       const tally = Math.max(0, raw);
@@ -1550,20 +1551,61 @@ describe('GoalPage', () => {
     lastToast().action!.run();
     await settle(fixture);
     expect(adjustSpy.calls.count()).toBe(2);
-    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra']);
+    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra', 450]);
     expect(page.existing()!.tally!.tally).toBe(900);
     expect(page.existing()!.tally!.net).toBe(0);
     expect(lastToast().message).toBe('Saved so far is now $900.');
+    // Undo's own toast offers no second Undo, so the two never ping-pong.
+    expect(lastToast().action).toBeUndefined();
   });
 
-  it('a capped miss shows the no-more-to-take-off toast without Undo', async () => {
+  it('Undo after a cut-short miss adds back only what was taken', async () => {
     const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { tally: 200 })] });
+    pills(fixture)[0].click();
+    await settle(fixture);
+    expect(fixture.componentInstance.existing()!.tally!.tally).toBe(0);
+
+    lastToast().action!.run();
+    await settle(fixture);
+    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra', 200]);
+    expect(fixture.componentInstance.existing()!.tally!.tally).toBe(200);
+    expect(lastToast().message).toBe('Saved so far is now $200.');
+  });
+
+  it('a miss cut short at $0 still took money off: Saved so far is now $0, with Undo', async () => {
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { tally: 200 })] });
+    pills(fixture)[0].click();
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'missed');
+    expect(fixture.componentInstance.existing()!.tally!.tally).toBe(0);
+    expect(show).toHaveBeenCalledOnceWith({
+      severity: 'success',
+      message: 'Saved so far is now $0.',
+      action: { label: 'Undo', run: jasmine.any(Function) },
+    });
+  });
+
+  it('a miss on a tally already at $0 shows the no-more-to-take-off toast without Undo', async () => {
+    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { tally: 0 })] });
     pills(fixture)[0].click();
     await settle(fixture);
     expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'missed');
     expect(fixture.componentInstance.existing()!.tally!.tally).toBe(0);
     expect(show).toHaveBeenCalledOnceWith({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
     expect(lastToast().action).toBeUndefined();
+  });
+
+  it('a Doubled up that reaches the target shows the toast without Undo', async () => {
+    // $80,000 is the house's target (20% of $400,000); one more share lands on it.
+    const goal: Goal = { ...talliedHouse(8, { tally: 79_550 }), target: 80_000 };
+    const reached: Goal = { ...goal, currentBalance: 80_000, tally: { ...goal.tally!, tally: 80_000, net: 450, nextCreditDate: null, nextCreditAmount: 0 } };
+    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: reached, capped: false }) });
+    pills(fixture)[1].click();
+    await settle(fixture);
+    expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'extra');
+    expect(show).toHaveBeenCalledOnceWith({ severity: 'success', message: 'Saved so far is now $80,000.' });
+    expect(fixture.componentInstance.view().status.kind).toBe('done');
+    expect(pills(fixture).length).toBe(0);
   });
 
   it('a unit that finished under the user refreshes the goal, shows no error toast, and the pills hide', async () => {

@@ -51,6 +51,8 @@ public class GoalLedgerService {
     private static final String FIRST_YEAR = "firstYear";
     /** How far ahead to look for the next payday; covers a monthly cadence plus holiday pushes. */
     private static final int LOOK_AHEAD_DAYS = 45;
+    /** The largest Missed one or Doubled up amount a client may send, the same cap as a set. */
+    private static final BigDecimal MAX_CORRECTION = new BigDecimal("100000000");
 
     private final GoalLedgerEntryRepository entries;
     private final GoalRepository goals;
@@ -138,10 +140,14 @@ public class GoalLedgerService {
     /**
      * Applies one correction to a unit, dated today: MISSED takes one paycheck share off the tally (never
      * below $0), EXTRA puts one share on, SET makes the tally an exact figure ({@code amount}, required).
-     * The goal should already be rolled forward so the share and the finished check are current. Throws
-     * IllegalArgumentException for a unit the goal does not have or a kind other than the three,
-     * GoalValidationException for a SET without an amount, and IllegalStateException when the unit is
-     * finished (target reached, credits window over, or the goal completed). Saves the goal.
+     * MISSED and EXTRA move {@code amount} instead of the share when it is sent (an Undo puts back
+     * exactly what moved); MISSED is still cut short at $0. The goal should already be rolled forward
+     * so the share and the finished check are current. Throws IllegalArgumentException for a unit the
+     * goal does not have or a kind other than the three, GoalValidationException for a SET without an
+     * amount or a MISSED/EXTRA amount that is not above $0 (or over the cap, or past 2 decimals), and
+     * IllegalStateException for a MISSED or EXTRA on a finished unit (target reached, credits window
+     * over, or the goal completed). SET stays allowed there, so the tally can always be corrected.
+     * Saves the goal.
      */
     public AdjustResult adjust(Goal goal, String unitKey, LedgerKind kind, BigDecimal amount,
                                Optional<InvestmentSchedule> schedule, LocalDate today) {
@@ -153,7 +159,7 @@ public class GoalLedgerService {
                 .filter(u -> u.key.equals(unitKey))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Unknown goal unit: " + unitKey));
-        if (isFinished(goal, unit, today)) {
+        if (kind != LedgerKind.SET && isFinished(goal, unit, today)) {
             throw new IllegalStateException("This goal's saving is finished.");
         }
         BigDecimal entryAmount;
@@ -164,7 +170,7 @@ public class GoalLedgerService {
             }
             entryAmount = amount.setScale(2, RoundingMode.HALF_UP);
         } else {
-            BigDecimal share = share(unit, ruleFor(goal, schedule));
+            BigDecimal share = amount == null ? share(unit, ruleFor(goal, schedule)) : correctionAmount(amount);
             if (kind == LedgerKind.MISSED) {
                 BigDecimal taken = share.min(unit.tally);
                 capped = taken.compareTo(share) < 0;
@@ -183,6 +189,14 @@ public class GoalLedgerService {
         units.writeTo(goal, codec);
         goals.save(goal);
         return new AdjustResult(goal, capped);
+    }
+
+    /** A MISSED or EXTRA amount the client sent: above $0, at most $100,000,000, at most 2 decimals. */
+    private static BigDecimal correctionAmount(BigDecimal amount) {
+        if (amount.signum() <= 0 || amount.compareTo(MAX_CORRECTION) > 0 || amount.stripTrailingZeros().scale() > 2) {
+            throw new GoalValidationException("Enter an amount above $0 and up to $100,000,000 with at most 2 decimals.");
+        }
+        return amount.setScale(2, RoundingMode.HALF_UP);
     }
 
     private static boolean isFinished(Goal goal, Unit unit, LocalDate today) {

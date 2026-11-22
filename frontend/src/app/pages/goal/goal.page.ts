@@ -645,29 +645,52 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
 
   /**
    * Missed one or Doubled up on a saved goal: one ledger entry, queued behind the page's other
-   * writes. The toast reads the tally the server returns and offers Undo (the opposite entry); a
-   * miss the server capped at $0 says so with no Undo. A unit that finished meanwhile (409
-   * UNIT_FINISHED) refreshes the goal with no toast, and the pills go.
+   * writes. The toast reads the tally the server returns and offers Undo, which posts the opposite
+   * entry for exactly what moved (a miss cut short at $0 moved less than the share). Undo's own
+   * toast offers no second Undo, and neither does a tap that finished the unit (the server refuses
+   * a Missed one or Doubled up there). A miss that moved nothing (already $0) says so. A unit that
+   * finished meanwhile (409 UNIT_FINISHED) refreshes the goal with no toast, and the pills go.
+   * `amount` is the Undo's exact figure; a tap sends none and the server moves one share.
    */
-  async onTally(path: BalancePath, kind: 'missed' | 'extra'): Promise<void> {
+  async onTally(path: BalancePath, kind: 'missed' | 'extra', amount?: number, offerUndo = true): Promise<void> {
     if (this.mode() !== 'saved' || !this.existing()) return;
     this.tallyBusy.set(true);
     try {
-      const result = await this.queueAdjust(path, kind);
+      const result = await this.queueAdjust(path, kind, amount);
       if (!result) return;
-      if (result.capped) {
-        this.toastService.show({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
+      const tally = this.tallyFor(result.goal, path)?.tally ?? this.storedBalance(result.goal, path);
+      const moved = Math.abs(result.before - tally);
+      if (moved === 0) {
+        if (kind === 'missed') {
+          this.toastService.show({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
+        }
         return;
       }
-      const tally = this.tallyFor(result.goal, path)?.tally ?? 0;
+      const undo = offerUndo && !this.unitFinished(result.goal, path)
+        ? { label: 'Undo', run: () => void this.onTally(path, kind === 'missed' ? 'extra' : 'missed', moved, false) }
+        : undefined;
       this.toastService.show({
         severity: 'success',
         message: `Saved so far is now ${fmtMoney(tally)}.`,
-        action: { label: 'Undo', run: () => void this.onTally(path, kind === 'missed' ? 'extra' : 'missed') },
+        ...(undo ? { action: undo } : {}),
       });
     } finally {
       this.tallyBusy.set(false);
     }
+  }
+
+  /**
+   * Whether a unit takes no more Missed one or Doubled up: the goal is completed, no credit is coming
+   * and the tally is at its target, or (a simple or vacation goal) the plan reads Done.
+   */
+  private unitFinished(goal: Goal, path: BalancePath): boolean {
+    if (goal.completed) return true;
+    const t = this.tallyFor(goal, path);
+    const target = typeof path === 'string'
+      ? goal.target
+      : (goal.config as KidsConfig).kids[path.kid]?.accounts[path.account]?.target;
+    if (t && t.nextCreditDate === null && target != null && target > 0 && t.tally >= target) return true;
+    return typeof path === 'string' && this.existing() === goal && this.view().status.kind === 'done';
   }
 
   /** The server's unit key for a balance: "goal" for a simple or vacation goal, `kid:0:plan529` for a kid account. */
@@ -1168,21 +1191,22 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
    * One ledger entry on the saved goal, queued like a PUT. Resolves with the server's answer, or
    * null when nothing was posted (a set that changes nothing) or the post failed (already handled).
    */
-  private queueAdjust(path: BalancePath, kind: 'missed' | 'extra' | 'set', amount?: number): Promise<{ goal: Goal; capped: boolean } | null> {
+  private queueAdjust(
+    path: BalancePath, kind: 'missed' | 'extra' | 'set', amount?: number,
+  ): Promise<{ goal: Goal; capped: boolean; before: number } | null> {
     return this.enqueue(async () => {
       const goal = this.existing();
       if (!goal) return null;
-      if (kind === 'set') {
-        const current = this.tallyFor(goal, path)?.tally ?? this.storedBalance(goal, path);
-        if (Math.round(current) === amount) return null;
-      }
+      // Read when this entry's turn comes, so it is the tally the server moves from.
+      const before = this.tallyFor(goal, path)?.tally ?? this.storedBalance(goal, path);
+      if (kind === 'set' && Math.round(before) === amount) return null;
       try {
         const unit = this.unitFor(path);
-        const result = await firstValueFrom(kind === 'set'
-          ? this.goalsService.adjust(goal.id, unit, kind, amount)
-          : this.goalsService.adjust(goal.id, unit, kind));
+        const result = await firstValueFrom(amount === undefined
+          ? this.goalsService.adjust(goal.id, unit, kind)
+          : this.goalsService.adjust(goal.id, unit, kind, amount));
         this.existing.set(result.goal);
-        return result;
+        return { ...result, before };
       } catch (err) {
         await this.handleAdjustError(err);
         return null;

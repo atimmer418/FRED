@@ -152,4 +152,46 @@ class GoalConfigCodecTest {
         assertEquals(11, kid.firstYearDueMonth());
         assertEquals(0, new java.math.BigDecimal("616").compareTo(kid.accounts().firstYear().anchorMonthly()));
     }
+
+    @Test
+    void accountStateWithoutCreditFieldsStillParses() {
+        KidsConfig cfg = (KidsConfig) codec.parse(GoalType.KIDS, KIDS_JSON);
+        AccountState brokerage = cfg.kids().get(0).accounts().brokerage();
+        assertNull(brokerage.creditedThrough());
+        assertNull(brokerage.creditsUntil());
+        assertNull(brokerage.target());
+    }
+
+    @Test
+    void accountStateRoundTripsCreditDates() {
+        String json = """
+                {"brokerageTarget":0,"plan529Target":0,"kids":[
+                  {"label":"Ava","birthYear":2020,"birthMonth":4,"accounts":{
+                    "brokerage":{"balance":10,"anchorBalance":10,"anchorMonthly":5,
+                      "creditedThrough":"2026-11-30","creditsUntil":"2026-12-15","target":900},
+                    "plan529":{"balance":0,"anchorBalance":0,"anchorMonthly":0}}}]}
+                """;
+        String written = codec.write(codec.parse(GoalType.KIDS, json));
+        assertTrue(written.contains("\"creditsUntil\":\"2026-12-15\""), written);
+        assertTrue(written.contains("\"creditedThrough\":\"2026-11-30\""), written);
+        assertEquals(codec.parse(GoalType.KIDS, json), codec.parse(GoalType.KIDS, written));
+    }
+
+    @Test
+    void houseCarConfigRoundTripsLoanRateAndDownPaymentAmount() {
+        String json = "{\"price\":30000,\"downPaymentPct\":null,\"targetYear\":2030,"
+                + "\"loanRate\":6.5,\"downPaymentAmount\":5000}";
+        HouseCarConfig cfg = (HouseCarConfig) codec.parse(GoalType.CAR, json);
+        assertEquals(0, new java.math.BigDecimal("6.5").compareTo(cfg.loanRate()));
+        assertEquals(0, new java.math.BigDecimal("5000").compareTo(cfg.downPaymentAmount()));
+        assertEquals(cfg, codec.parse(GoalType.CAR, codec.write(cfg)));
+    }
+
+    @Test
+    void houseCarConfigWithoutLoanFieldsStillParses() {
+        HouseCarConfig cfg = (HouseCarConfig) codec.parse(GoalType.HOUSE,
+                "{\"price\":400000,\"downPaymentPct\":20,\"targetYear\":2030}");
+        assertNull(cfg.loanRate());
+        assertNull(cfg.downPaymentAmount());
+    }
 }

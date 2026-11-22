@@ -5,6 +5,7 @@ import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.BeneficiaryRepository;
 import com.investingapp.backend.repository.DripExecutionRepository;
+import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -59,6 +60,7 @@ public class UserDeletionService {
     private final EncryptionService encryptionService;
     private final AnalyticsPersonDeletionService analyticsPersonDeletionService;
     private final GoalRepository goalRepository;
+    private final GoalLedgerEntryRepository goalLedgerEntryRepository;
     private final TransactionTemplate deleteTx;
 
     public UserDeletionService(
@@ -76,9 +78,11 @@ public class UserDeletionService {
             EncryptionService encryptionService,
             AnalyticsPersonDeletionService analyticsPersonDeletionService,
             GoalRepository goalRepository,
+            GoalLedgerEntryRepository goalLedgerEntryRepository,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.goalRepository = goalRepository;
+        this.goalLedgerEntryRepository = goalLedgerEntryRepository;
         this.executionRepository = executionRepository;
         this.tradeRepository = tradeRepository;
         this.dripExecutionRepository = dripExecutionRepository;
@@ -160,6 +164,7 @@ public class UserDeletionService {
             investmentScheduleRepository.deleteAllByUser(user);
             userSessionRepository.deleteAllByUserId(userId);
             portfolioRepository.findByUser(user).ifPresent(portfolioRepository::delete);
+            goalLedgerEntryRepository.deleteAllByGoalIn(goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user));
             goalRepository.deleteAllByUser(user);
             userRepository.delete(user);
         });

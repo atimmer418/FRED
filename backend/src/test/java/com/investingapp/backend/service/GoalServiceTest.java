@@ -79,11 +79,11 @@ class GoalServiceTest {
     }
 
     private GoalRequest houseRequest(String price, String balance, String monthly) {
-        return request(GoalType.HOUSE, "home", new HouseCarConfig(bd(price), 20, year + 5), balance, monthly);
+        return request(GoalType.HOUSE, "home", new HouseCarConfig(bd(price), 20, year + 5, null, null), balance, monthly);
     }
 
     private static AccountState acct(String balance, String monthly) {
-        return new AccountState(bd(balance), null, null, monthly == null ? null : bd(monthly));
+        return new AccountState(bd(balance), null, null, monthly == null ? null : bd(monthly), null, null, null);
     }
 
     private static KidsConfig.Kid kid(String label, Integer birthYear, AccountState brokerage, AccountState plan529) {
@@ -307,7 +307,7 @@ class GoalServiceTest {
 
     @Test
     void rejectsIconNotInAllowlistForType() {
-        GoalRequest r = request(GoalType.HOUSE, "flight", new HouseCarConfig(bd("400000"), 20, year + 5), "0", "0");
+        GoalRequest r = request(GoalType.HOUSE, "flight", new HouseCarConfig(bd("400000"), 20, year + 5, null, null), "0", "0");
 
         assertThrows(GoalValidationException.class, () -> service.create(user, r));
     }
@@ -369,7 +369,7 @@ class GoalServiceTest {
         Goal imported = new Goal();
         imported.setId(9L);
         imported.setType(GoalType.HOUSE);
-        imported.setConfigJson(codec.write(new HouseCarConfig(bd("400000"), 20, year + 5)));
+        imported.setConfigJson(codec.write(new HouseCarConfig(bd("400000"), 20, year + 5, null, null)));
         imported.setCurrentBalance(bd("800"));
         imported.setAnchorBalance(bd("800"));
         imported.setAnchorMonthly(BigDecimal.ZERO);
@@ -625,7 +625,7 @@ class GoalServiceTest {
     @Test
     void storedFirstYearAccountSurvivesTheNewYear() {
         stubSave();
-        AccountState storedFund = new AccountState(bd("1000"), null, bd("1000"), bd("100"));
+        AccountState storedFund = new AccountState(bd("1000"), null, bd("1000"), bd("100"), null, null, null);
         KidsConfig storedConfig = fundGoal("0", "30000", true,
                 new KidsConfig.Kid("Sam", year - 1, 6,
                         new KidsConfig.Accounts(acct("0", "0"), acct("0", "0"), storedFund),
@@ -886,7 +886,7 @@ class GoalServiceTest {
         Goal done = service.update(user, 12L, requestWith(GoalType.CUSTOM, "flag", past, "1500", true));
         assertTrue(done.isCompleted());
 
-        HouseCarConfig house = new HouseCarConfig(bd("30000"), 20, year - 1);
+        HouseCarConfig house = new HouseCarConfig(bd("30000"), 20, year - 1, null, null);
         rawStoredGoal(13L, GoalType.HOUSE, "home", house, "1000");
         assertNotNull(service.update(user, 13L, requestWith(GoalType.HOUSE, "home", house, "2000", false)));
     }
@@ -1005,5 +1005,89 @@ class GoalServiceTest {
         KidsConfig config = kids("50000", "30000",
                 kid("Sam", year - 3, acct("0", "100000000"), acct("0", "0")));
         assertThrows(GoalValidationException.class, () -> service.create(user, kidsRequest(config, "0", "0")));
+    }
+
+    // ---- loan terms and credits window ----
+
+    private GoalRequest carRequest(String price, Integer pct, String loanRate, String downPayment) {
+        HouseCarConfig config = new HouseCarConfig(bd(price), pct, year + 3,
+                loanRate == null ? null : bd(loanRate), downPayment == null ? null : bd(downPayment));
+        return request(GoalType.CAR, "directions_car", config, "0", "100");
+    }
+
+    @Test
+    void loanRateAbove30IsRejected() {
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, carRequest("30000", null, "30.5", "5000")));
+        assertEquals("Enter a loan rate from 0% to 30%.", e.getMessage());
+    }
+
+    @Test
+    void downPaymentAmountAbovePriceIsRejected() {
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, carRequest("30000", null, "6.5", "30000.01")));
+        assertEquals("Enter a down payment from $0 up to the price.", e.getMessage());
+    }
+
+    @Test
+    void carWithZeroDownPaymentIsRejected() {
+        GoalValidationException e = assertThrows(GoalValidationException.class,
+                () -> service.create(user, carRequest("30000", null, "6.5", "0")));
+        assertEquals("With $0 down there is nothing to save.", e.getMessage());
+    }
+
+    @Test
+    void changingLoanRateDoesNotReanchor() {
+        stubSave();
+        HouseCarConfig before = new HouseCarConfig(bd("30000"), null, year + 3, bd("6.5"), bd("5000"));
+        Goal stored = rawStoredGoal(30L, GoalType.CAR, "directions_car", before, "1000");
+        var anchoredAt = stored.getPlanAnchoredAt();
+
+        Goal updated = service.update(user, 30L, carRequest("30000", null, "7.25", "5000"));
+
+        assertEquals(anchoredAt, updated.getPlanAnchoredAt());
+    }
+
+    @Test
+    void changingDownPaymentAmountReanchors() {
+        stubSave();
+        HouseCarConfig before = new HouseCarConfig(bd("30000"), null, year + 3, bd("6.5"), bd("5000"));
+        Goal stored = rawStoredGoal(31L, GoalType.CAR, "directions_car", before, "1000");
+        stored.setPlanAnchoredAt(stored.getPlanAnchoredAt().minusDays(30));
+        var anchoredAt = stored.getPlanAnchoredAt();
+
+        Goal updated = service.update(user, 31L, carRequest("30000", null, "6.5", "6000"));
+
+        assertNotEquals(anchoredAt, updated.getPlanAnchoredAt());
+    }
+
+    @Test
+    void reanchorStoresCreditsUntilPerAccount() {
+        stubSave();
+        java.time.LocalDate until = java.time.LocalDate.of(year + 2, 6, 15);
+        KidsConfig config = kids("50000", "30000", kid("Sam", year - 3,
+                new AccountState(bd("0"), null, null, bd("100"), null, until, bd("50000")),
+                acct("0", "200")));
+        GoalRequest r = kidsRequest(config, "0", "300");
+        r.setCreditsUntil(until);
+        r.setTarget(bd("80000"));
+
+        Goal goal = service.create(user, r);
+
+        assertEquals(until, goal.getCreditsUntil());
+        assertEquals(0, bd("80000").compareTo(goal.getTarget()));
+        AccountState brokerage = storedConfigOf(goal).kids().get(0).accounts().brokerage();
+        assertEquals(until, brokerage.creditsUntil());
+        assertEquals(0, bd("50000").compareTo(brokerage.target()));
+        assertNull(storedConfigOf(goal).kids().get(0).accounts().plan529().creditsUntil());
+    }
+
+    @Test
+    void targetOutOfRangeIsRejected() {
+        GoalRequest r = houseRequest("400000", "0", "0");
+        r.setTarget(bd("100000000.01"));
+        assertThrows(GoalValidationException.class, () -> service.create(user, r));
+        r.setTarget(bd("-1"));
+        assertThrows(GoalValidationException.class, () -> service.create(user, r));
     }
 }

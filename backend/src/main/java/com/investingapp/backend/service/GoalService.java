@@ -39,6 +39,7 @@ public class GoalService {
     private static final BigDecimal MAX_AMOUNT = new BigDecimal("100000000");
     /** The anchor_monthly column is DECIMAL(10,2). */
     private static final BigDecimal MAX_MONTHLY = new BigDecimal("99999999.99");
+    private static final BigDecimal MAX_LOAN_RATE = new BigDecimal("30");
     private static final int MAX_IMPORTED_GOALS = 50;
     private static final BigDecimal IMPORT_PLAN_RATE = new BigDecimal("0.1000");
     private static final BigDecimal IMPORT_CASH_RATE = new BigDecimal("0.0400");
@@ -154,6 +155,8 @@ public class GoalService {
     private void reanchor(Goal goal, GoalRequest request, Object config, LocalDateTime now) {
         goal.setAnchorBalance(request.getCurrentBalance());
         goal.setAnchorMonthly(request.getAnchorMonthly());
+        goal.setCreditsUntil(request.getCreditsUntil());
+        goal.setTarget(request.getTarget());
         goal.setPlanRate(request.getPlanRate());
         goal.setPlanRateKind(request.getPlanRateKind());
         goal.setPlanAnchoredAt(now);
@@ -171,6 +174,9 @@ public class GoalService {
         if (request.getCurrentBalance().compareTo(previousBalance) != 0) {
             goal.setBalanceUpdatedAt(now);
         }
+        if (request.getCreditsUntil() != null) {
+            goal.setCreditsUntil(request.getCreditsUntil());
+        }
         Object toStore = config;
         if (config instanceof KidsConfig kids && stored instanceof KidsConfig old) {
             toStore = mapAccounts(kids, (sent, index, slot) -> {
@@ -181,7 +187,10 @@ public class GoalService {
                 boolean changed = sent.balance().compareTo(before.balance()) != 0;
                 return new AccountState(sent.balance(),
                         changed ? now : before.balanceUpdatedAt(),
-                        before.anchorBalance(), before.anchorMonthly());
+                        before.anchorBalance(), before.anchorMonthly(),
+                        before.creditedThrough(),
+                        sent.creditsUntil() != null ? sent.creditsUntil() : before.creditsUntil(),
+                        before.target());
             });
         }
         goal.setConfigJson(codec.write(toStore));
@@ -189,7 +198,8 @@ public class GoalService {
 
     /** A fresh anchor: the plan starts from this balance and the monthly amount sent. */
     private static AccountState anchored(AccountState sent) {
-        return new AccountState(sent.balance(), null, sent.balance(), orZero(sent.anchorMonthly()));
+        return new AccountState(sent.balance(), null, sent.balance(), orZero(sent.anchorMonthly()),
+                null, sent.creditsUntil(), sent.target());
     }
 
     private boolean planInputsChanged(GoalType type, Object stored, Object incoming) {
@@ -200,7 +210,8 @@ public class GoalService {
                 HouseCarConfig b = (HouseCarConfig) incoming;
                 yield differs(a.price(), b.price())
                         || !Objects.equals(a.downPaymentPct(), b.downPaymentPct())
-                        || !Objects.equals(a.targetYear(), b.targetYear());
+                        || !Objects.equals(a.targetYear(), b.targetYear())
+                        || differs(a.downPaymentAmount(), b.downPaymentAmount());
             }
             case VACATION -> {
                 VacationConfig a = (VacationConfig) stored;
@@ -306,12 +317,17 @@ public class GoalService {
         }
         requireScale(balance, "Enter a balance with at most 2 decimals.");
         requireMonthly(request.getAnchorMonthly(), "Enter a monthly amount from $0 to $99,999,999.99 with at most 2 decimals.");
+        BigDecimal target = request.getTarget();
+        if (target != null && (target.signum() < 0 || target.compareTo(MAX_AMOUNT) > 0
+                || target.stripTrailingZeros().scale() > 2)) {
+            throw new GoalValidationException("Enter a target from $0 to $100,000,000 with at most 2 decimals.");
+        }
         Object config = codec.parse(request.getType(), request.getConfig());
         // Date lower bounds apply only to values that are new or changed: a stored date that the
         // calendar has since passed is still accepted, so balance logs and completion keep working.
         return switch (request.getType()) {
             case KIDS -> validateKids((KidsConfig) config, (KidsConfig) storedOrNull, year);
-            case HOUSE, CAR -> validateHouseCar((HouseCarConfig) config, year,
+            case HOUSE, CAR -> validateHouseCar(request.getType(), (HouseCarConfig) config, year,
                     storedOrNull == null ? null : ((HouseCarConfig) storedOrNull).targetYear());
             case VACATION -> validateVacation((VacationConfig) config, year,
                     storedOrNull == null ? null : ((VacationConfig) storedOrNull).savedYear());
@@ -434,12 +450,27 @@ public class GoalService {
                 target, dueYear, dueMonth);
     }
 
-    private HouseCarConfig validateHouseCar(HouseCarConfig config, int year, Integer storedTargetYear) {
+    private HouseCarConfig validateHouseCar(GoalType type, HouseCarConfig config, int year, Integer storedTargetYear) {
         requireAmount(config.price(), "price");
         requireTargetYear(config.targetYear(), year, storedTargetYear);
         Integer pct = config.downPaymentPct();
         if (pct != null && (pct < 1 || pct > 100)) {
             throw new GoalValidationException("Enter a down payment between 1% and 100%.");
+        }
+        BigDecimal rate = config.loanRate();
+        if (rate != null && (rate.signum() < 0 || rate.compareTo(MAX_LOAN_RATE) > 0
+                || rate.stripTrailingZeros().scale() > 3)) {
+            throw new GoalValidationException("Enter a loan rate from 0% to 30%.");
+        }
+        BigDecimal down = config.downPaymentAmount();
+        if (down != null) {
+            if (down.signum() < 0 || down.compareTo(config.price()) > 0
+                    || down.stripTrailingZeros().scale() > 2) {
+                throw new GoalValidationException("Enter a down payment from $0 up to the price.");
+            }
+            if (type == GoalType.CAR && down.signum() == 0) {
+                throw new GoalValidationException("With $0 down there is nothing to save.");
+            }
         }
         return config;
     }

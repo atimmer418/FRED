@@ -6,6 +6,7 @@ import com.investingapp.backend.model.Portfolio;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.BeneficiaryRepository;
 import com.investingapp.backend.repository.DripExecutionRepository;
+import com.investingapp.backend.repository.GoalLedgerEntryRepository;
 import com.investingapp.backend.repository.GoalRepository;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -57,6 +58,7 @@ class UserDeletionServiceTest {
     private DripExecutionRepository dripExecutionRepository;
     private BeneficiaryRepository beneficiaryRepository;
     private GoalRepository goalRepository;
+    private GoalLedgerEntryRepository goalLedgerEntryRepository;
     private InvestmentScheduleRepository investmentScheduleRepository;
     private UserSessionRepository userSessionRepository;
     private PortfolioRepository portfolioRepository;
@@ -77,6 +79,7 @@ class UserDeletionServiceTest {
         dripExecutionRepository = mock(DripExecutionRepository.class);
         beneficiaryRepository = mock(BeneficiaryRepository.class);
         goalRepository = mock(GoalRepository.class);
+        goalLedgerEntryRepository = mock(GoalLedgerEntryRepository.class);
         investmentScheduleRepository = mock(InvestmentScheduleRepository.class);
         userSessionRepository = mock(UserSessionRepository.class);
         portfolioRepository = mock(PortfolioRepository.class);
@@ -99,7 +102,7 @@ class UserDeletionServiceTest {
                 dripExecutionRepository, beneficiaryRepository, investmentScheduleRepository,
                 userSessionRepository, portfolioRepository, plaidWebhookEventRepository,
                 plaidItemLifecycleService, alpacaApiService, encryptionService,
-                analyticsPersonDeletionService, goalRepository, transactionManager);
+                analyticsPersonDeletionService, goalRepository, goalLedgerEntryRepository, transactionManager);
 
         user = new User("delete-me@fredvested.com");
         user.setId(42L);
@@ -111,6 +114,18 @@ class UserDeletionServiceTest {
         execution.setStatus(ExecutionStatus.COMPLETED);
         execution.setFundingCompletedAt(at);
         return execution;
+    }
+
+    @Test
+    @DisplayName("ledger entries are deleted before goals")
+    void deletesLedgerEntriesBeforeGoals() {
+        java.util.List<com.investingapp.backend.model.Goal> goals =
+                java.util.List.of(new com.investingapp.backend.model.Goal());
+        when(goalRepository.findByUserOrderBySortOrderAscCreatedAtAsc(user)).thenReturn(goals);
+        service.delete(user, DeletionReason.ACCOUNT_CLOSED);
+        InOrder order = inOrder(goalLedgerEntryRepository, goalRepository);
+        order.verify(goalLedgerEntryRepository).deleteAllByGoalIn(goals);
+        order.verify(goalRepository).deleteAllByUser(user);
     }
 
     @Test

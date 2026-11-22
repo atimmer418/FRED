@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -55,6 +56,18 @@ public class Goal {
 
     @Column(name = "anchor_monthly", precision = 10, scale = 2, nullable = false)
     private BigDecimal anchorMonthly = BigDecimal.ZERO;
+
+    /** Last payday already credited to the tally; null until the first roll-forward. */
+    @Column(name = "credited_through")
+    private LocalDate creditedThrough;
+
+    /** The last day paydays still credit (the plan's end); null means no end. */
+    @Column(name = "credits_until")
+    private LocalDate creditsUntil;
+
+    /** The unit's savings target as the client computed it at anchor time. The server has no plan math. */
+    @Column(precision = 12, scale = 2)
+    private BigDecimal target;
 
     @Column(name = "plan_rate", precision = 5, scale = 4, nullable = false)
     private BigDecimal planRate;

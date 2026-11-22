@@ -3,6 +3,7 @@ package com.investingapp.backend.model.goals;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 public record AccountState(
@@ -10,5 +11,10 @@ public record AccountState(
         @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime balanceUpdatedAt,
         BigDecimal anchorBalance,
-        BigDecimal anchorMonthly) {
+        BigDecimal anchorMonthly,
+        @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+        LocalDate creditedThrough,
+        @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+        LocalDate creditsUntil,
+        BigDecimal target) {
 }

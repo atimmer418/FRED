@@ -561,8 +561,9 @@ describe('GoalPage', () => {
     const goal: Goal = {
       ...houseGoal(8), type: 'CUSTOM', icon: 'flag', name: 'Boat',
       config: { targetAmount: 30_000, targetYear: YEAR - 1 },
-      currentBalance: 24_000, anchorBalance: 1_000, anchorMonthly: 500,
-      planAnchoredAt: localIso(new Date(YEAR - 2, 0, 15)), balanceUpdatedAt: localIso(new Date(YEAR - 1, 5, 15)),
+      // Re-anchored at $24,000 in the target year's last month: the plan's value is $24,000.
+      currentBalance: 24_000, anchorBalance: 24_000, anchorMonthly: 0,
+      planAnchoredAt: localIso(new Date(YEAR - 1, 11, 15)), balanceUpdatedAt: localIso(new Date(YEAR - 1, 11, 15)),
     };
     const fixture = await create({ id: '8' }, { goals: [goal] });
     finishCountUp(fixture);
@@ -577,9 +578,12 @@ describe('GoalPage', () => {
   });
 
   it('the band for a simple goal reads saved, percent and target with the pill and the status chip at its right end; a vacation reads this year and trips', async () => {
-    const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500 };
+    // Anchored this month: your part is $8,000 plus $500 for each month through Dec of the target year.
+    const goal: Goal = { ...houseGoal(8), currentBalance: 8_000, anchorBalance: 8_000, anchorMonthly: 500, planAnchoredAt: localIso(NOW) };
+    const months = 5 * 12 + (12 - (NOW.getMonth() + 1));
+    const pct = Math.round((8_000 / (8_000 + 500 * months)) * 100);
     const fixture = await create({ id: '8' }, { goals: [goal] });
-    expect(text(fixture, '.gp-band-text')).toBe(`Saved $8,000 · 10% there · Target $80K by Dec ${YEAR + 5}`);
+    expect(text(fixture, '.gp-band-text')).toBe(`Saved $8,000 · ${pct}% there · Target $80K by Dec ${YEAR + 5}`);
     expect(text(fixture, '.gp-band .gp-band-right .fd-pill')).toBe('Invested');
     expect(text(fixture, '.gp-band .gp-band-right .gp-chip')).toBe('Plan started');
     expect(fixture.nativeElement.querySelector('.gp-zone')).toBeNull();
@@ -916,120 +920,6 @@ describe('GoalPage', () => {
     expect(detail.sourcesSheetKids).toBe(1);
   });
 
-  it('the Update balance chip opens the sheet for the first unfinished unit of the active kid', async () => {
-    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
-    const born = new Date(NOW.getFullYear(), NOW.getMonth() - 8, 1);
-    const due = new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1);
-    const config: KidsConfig = {
-      plan529Target: 47_800,
-      brokerageTarget: 100_000,
-      firstYearFund: true,
-      kids: [
-        {
-          label: 'Ellie', birthYear: YEAR - 2, birthMonth: 5,
-          accounts: {
-            plan529: { balance: 5_000, balanceUpdatedAt: logged, anchorBalance: 5_000, anchorMonthly: 150 },
-            brokerage: { balance: 5_000, balanceUpdatedAt: logged, anchorBalance: 5_000, anchorMonthly: 150 },
-          },
-        },
-        {
-          // Theo's baby fund ran its course last month, so his first unfinished unit is College.
-          label: 'Theo', birthYear: born.getFullYear(), birthMonth: born.getMonth() + 1,
-          firstYearTarget: 20_800, firstYearDueYear: due.getFullYear(), firstYearDueMonth: due.getMonth() + 1,
-          accounts: { plan529: fresh(), brokerage: fresh(), firstYear: fresh(20_800) },
-        },
-      ],
-    };
-    const goal: Goal = { ...kidsGoalFixture(5), config, planAnchoredAt: logged, anchorMonthly: 300 };
-    const fixture = await create({ id: '5' }, { goals: [goal] });
-    const page = fixture.componentInstance;
-    expect(page.statusChip()).toBe('Update balance');
-    expect(page.kidCards()[1].units.map(u => [u.key, u.finished])).toEqual([['firstYear', true], ['plan529', false], ['brokerage', false]]);
-
-    let presented = false;
-    modalCtrl.create.and.resolveTo({ present: async () => { presented = true; }, onDidDismiss: async () => ({}) } as unknown as HTMLIonModalElement);
-    page.activeKid.set(1);
-    fixture.detectChanges();
-    await page.onChipTap();
-    expect(presented).toBeTrue();
-    const props = sheetProps();
-    const detail = props.detail()!;
-    expect(detail.kidLabel).toBe('Theo');
-    expect(detail.title).toBe('College');
-    // The sheet opens its Saved so far tray as it lands; a row tap does not ask for that.
-    expect(props.openBalance).toBeTrue();
-    await page.openUnitDetail(1, 'plan529');
-    expect(sheetProps().openBalance).toBeFalse();
-  });
-
-  it('the Update balance chip falls through to the next kid card with an unfinished unit when the active card is all finished', async () => {
-    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
-    const born = new Date(NOW.getFullYear(), NOW.getMonth() - 8, 1);
-    const pastDue = new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1);
-    const due = new Date(NOW.getFullYear(), NOW.getMonth() + 10, 1);
-    const config: KidsConfig = {
-      // A baby-fund-only family: Theo's fund ran its course, Ivy's is still saving.
-      plan529Target: 0,
-      brokerageTarget: 0,
-      firstYearFund: true,
-      kids: [
-        {
-          label: 'Theo', birthYear: born.getFullYear(), birthMonth: born.getMonth() + 1,
-          firstYearTarget: 20_800, firstYearDueYear: pastDue.getFullYear(), firstYearDueMonth: pastDue.getMonth() + 1,
-          accounts: { plan529: fresh(), brokerage: fresh(), firstYear: fresh(20_800, logged) },
-        },
-        {
-          label: 'Ivy', birthYear: due.getFullYear(), birthMonth: due.getMonth() + 1,
-          firstYearTarget: 16_500, firstYearDueYear: due.getFullYear() + 1, firstYearDueMonth: due.getMonth() + 1,
-          accounts: {
-            plan529: fresh(), brokerage: fresh(),
-            firstYear: { balance: 2_000, balanceUpdatedAt: logged, anchorBalance: 2_000, anchorMonthly: 700 },
-          },
-        },
-      ],
-    };
-    const goal: Goal = { ...kidsGoalFixture(5), config, planAnchoredAt: logged, anchorMonthly: 700 };
-    const fixture = await create({ id: '5' }, { goals: [goal] });
-    const page = fixture.componentInstance;
-    expect(page.statusChip()).toBe('Update balance');
-    expect(page.kidCards()[0].units.map(u => [u.key, u.finished])).toEqual([['firstYear', true]]);
-    expect(page.kidCards()[1].units.map(u => [u.key, u.finished])).toEqual([['firstYear', false]]);
-
-    page.activeKid.set(0);
-    await page.onChipTap();
-    expect(modalCtrl.create).toHaveBeenCalledTimes(1);
-    const props = sheetProps();
-    const detail = props.detail()!;
-    expect(detail.kidLabel).toBe('Ivy');
-    expect(detail.title).toBe('Baby fund');
-    expect(props.openBalance).toBeTrue();
-  });
-
-  it('a house goal\'s chip scrolls to its inline Saved so far tile and opens the tray on it', async () => {
-    reducedMotion = true;
-    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
-    const goal: Goal = {
-      ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500,
-      planAnchoredAt: logged, balanceUpdatedAt: logged,
-    };
-    const fixture = await create({ id: '8' }, { goals: [goal] });
-    const tile = fixture.nativeElement.querySelector('#gp-bal-current') as HTMLButtonElement;
-    const scroll = spyOn(tile, 'scrollIntoView');
-    click(fixture, '.gp-chip');
-    expect(scroll).toHaveBeenCalled();
-    expect(fixture.componentInstance.tray.open()).toBe('current');
-    expect(fixture.nativeElement.querySelector('.gp-plan .field-tray')).not.toBeNull();
-    // A second tap, as a device sends it (press, release, click), keeps it open rather than closing
-    // it on the release (saving the draft) and re-opening it on the click.
-    slideTo(fixture, 12_000);
-    press(fixture, '.gp-chip');
-    click(fixture, '.gp-chip');
-    expect(fixture.componentInstance.tray.open()).toBe('current');
-    expect(fixture.componentInstance.balanceDraft()).toBe(12_000);
-    expect(updateSpy).not.toHaveBeenCalled();
-    expect(modalCtrl.create).not.toHaveBeenCalled();
-  });
-
   it('the three info cards are gone from a kids plan and still shown on a house plan', async () => {
     const kids = await create({ id: '5' }, { goals: [sampleFamily(5)] });
     expect(kids.componentInstance.view().coversLine).not.toBeNull();
@@ -1087,22 +977,6 @@ describe('GoalPage', () => {
     await page.startPlan();
     const body = createSpy.calls.mostRecent().args[0] as GoalWrite;
     expect((body.config as KidsConfig).kids[0].label).toBe('Ellie Mae');
-  });
-
-  it('shows Update balance on the chip when the last log is over 60 days old', async () => {
-    const logged = localIso(new Date(NOW.getTime() - 90 * 86_400_000));
-    const goal: Goal = {
-      ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500,
-      planAnchoredAt: logged, balanceUpdatedAt: logged,
-    };
-    const fixture = await create({ id: '8' }, { goals: [goal] });
-    expect(['ahead', 'on_plan', 'behind']).toContain(fixture.componentInstance.view().status.kind);
-    expect(text(fixture, '.gp-chip')).toBe('Update balance');
-    TestBed.resetTestingModule();
-
-    const fresh = localIso(NOW);
-    const fixture2 = await create({ id: '8' }, { goals: [{ ...goal, planAnchoredAt: fresh, balanceUpdatedAt: fresh }] });
-    expect(text(fixture2, '.gp-chip')).not.toBe('Update balance');
   });
 
   // ── Balances: serialization and sanitizing ─────────────────────────────────

@@ -269,13 +269,8 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
   /** The hero figure: the count-up value while it runs, else the live monthly. */
   readonly heroAmount = computed(() => this.heroCounting() ?? this.view().monthlyTotal);
 
-  /** Plan started / On plan / Ahead / Behind / Done, or Update balance once a graded log is over 60 days old. */
-  readonly statusChip = computed<ChipText>(() => {
-    const s = this.view().status;
-    const graded = s.kind === 'ahead' || s.kind === 'on_plan' || s.kind === 'behind';
-    if (this.mode() === 'saved' && s.stale && graded) return 'Update balance';
-    return STATUS_CHIP[s.kind];
-  });
+  /** Plan started / On plan / Ahead / Behind / Done, from the tally (which is never stale). */
+  readonly statusChip = computed<ChipText>(() => STATUS_CHIP[this.view().status.kind]);
 
   /** The "How FRED plans this" notes a unit sheet's info button opens, skipping the lines a plan lacks. */
   readonly infoNotes = computed<InfoNote[]>(() => {

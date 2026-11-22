@@ -15,9 +15,11 @@ import {
   HouseCarConfig,
   RateKind,
   TargetConfig,
+  UnitTally,
   VacationConfig,
 } from '../models/goal.model';
 import { CASH_RATE } from '../services/rate-assumptions.service';
+import { todayYmd } from './local-date';
 
 // ---------------------------------------------------------------------------
 // Core
@@ -27,7 +29,6 @@ export const CASH_HORIZON_MONTHS = 36;
 /** Gift days: a flat amount per kid every January, offered from a 24-month horizon. */
 export const GIFT_DAY_LUMP = 1000;
 export const GIFT_MIN_MONTHS = 24;
-export const STALE_BALANCE_DAYS = 60;
 
 export interface LumpOccurrence {
   /** 1..n, the month the lump is posted (after that month's growth). */
@@ -83,6 +84,50 @@ export function futureValue(
     v = v * (1 + r) + monthly + (lumpsByMonth.get(i) ?? 0);
   }
   return v;
+}
+
+/** Whole dollars with thousands separators: 1310 -> "$1,310". */
+export function fmtMoney(n: number): string {
+  const v = Number.isFinite(n) ? Math.round(n) : 0;
+  return '$' + v.toLocaleString('en-US');
+}
+
+/**
+ * What the anchored plan says a unit is worth now: the anchor balance grown with the anchored monthly
+ * for the months since the anchor, at the plan's rate, plus the net of Missed one and Doubled up taps.
+ * On plan (net 0) it reproduces the anchored path, so re-solving from it returns the anchored monthly.
+ */
+export function planValue(
+  anchorBalance: number,
+  anchorMonthly: number,
+  monthsSinceAnchor: number,
+  annualRate: number,
+  net: number,
+): number {
+  return futureValue(anchorBalance, anchorMonthly, monthsSinceAnchor, annualRate, []) + net;
+}
+
+/** What the plan asks the user to put in: the anchor balance plus every planned monthly. */
+export function yourPart(anchorBalance: number, anchorMonthly: number, planMonths: number): number {
+  return anchorBalance + anchorMonthly * planMonths;
+}
+
+/** Below this gap between the plan's value and the tally, the assumed-growth line stays hidden. */
+const GROWTH_LINE_MIN_GAP = 50;
+
+/**
+ * "Assuming growth at 10%, worth ~$14,200 today" for an invested unit: a plan figure, never a
+ * balance, so the word Assuming is always there. Null for cash, and while growth adds under $50.
+ */
+export function growthLine(input: {
+  rateKind: RateKind;
+  annualRate: number;
+  planValue: number;
+  tally: number;
+}): string | null {
+  if (input.rateKind === 'cash') return null;
+  if (!(input.planValue - input.tally >= GROWTH_LINE_MIN_GAP)) return null;
+  return `Assuming growth at ${Math.round(input.annualRate * 100)}%, worth ~${fmtMoney(input.planValue)} today`;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,67 +432,58 @@ export type PlanStatusKind = 'started' | 'imported' | 'ahead' | 'on_plan' | 'beh
 
 export interface PlanStatus {
   kind: PlanStatusKind;
-  delta: number;
-  asOf: string | null;
-  stale: boolean;
-}
-
-function kindForDelta(delta: number, target: number): 'ahead' | 'on_plan' | 'behind' {
-  const tolerance = Math.max(50, 0.01 * target);
-  if (delta > tolerance) return 'ahead';
-  if (delta < -tolerance) return 'behind';
-  return 'on_plan';
-}
-
-export function planStatus(args: {
-  completed: boolean;
-  imported: boolean;
-  target: number;
-  balance: number;
-  anchorBalance: number;
-  anchorMonthly: number;
-  planAnchoredAt: string;
-  balanceUpdatedAt: string | null;
-  rate: number;
-  lumps: LumpOccurrence[];
-  /** Expected balance of accounts graded on their own path (first-year funds), added to this plan's. Default 0. */
-  extraExpected?: number;
-  /** The plan's horizon from its anchor: no contributions are expected past the deadline. */
-  maxMonths?: number;
-  now: Date;
-}): PlanStatus {
-  const { balanceUpdatedAt } = args;
-  const stale =
-    balanceUpdatedAt !== null &&
-    args.now.getTime() - new Date(balanceUpdatedAt).getTime() > STALE_BALANCE_DAYS * 86_400_000;
-  const base = { asOf: balanceUpdatedAt, stale };
-
-  if (args.completed || args.balance >= args.target) return { kind: 'done', delta: 0, ...base };
-  if (args.imported) return { kind: 'imported', delta: 0, ...base };
-  if (balanceUpdatedAt === null) return { kind: 'started', delta: 0, ...base };
-
-  const logged = monthsBetween(args.planAnchoredAt, balanceUpdatedAt);
-  const months = args.maxMonths !== undefined ? Math.min(logged, args.maxMonths) : logged;
-  const expected =
-    futureValue(
-      args.anchorBalance,
-      args.anchorMonthly,
-      months,
-      args.rate,
-      args.lumps.filter((l) => l.monthIndex <= months),
-    ) + (args.extraExpected ?? 0);
-  const delta = args.balance - expected;
-  return { kind: kindForDelta(delta, args.target), delta, ...base };
+  /** Doubled up minus Missed one since the anchor or the last exact figure; 0 when no tally. */
+  net: number;
+  /** When behind, the oldest missed payday not yet made up (yyyy-MM-dd). */
+  netSince: string | null;
 }
 
 /**
- * Vacation never reads done: the year resets, so the goal is always in progress. Until an amount
- * is logged for the current year it reads Plan started, never Behind.
+ * One saving unit's status from the server's tally. No tolerance and no expected balance: the
+ * net of the user's taps decides. Done wins (completed, at the target, or past the last credit
+ * day with nothing owed); then an unplanned import stays imported; a unit with no credit and no
+ * taps has just started. A null tally (not read since the tally shipped, or a preview) reads started.
  */
-export function vacationStatus(plan: VacationPlan, _now: Date): PlanStatus {
-  if (plan.resetNeeded || plan.savedThisYear === 0) {
-    return { kind: 'started', delta: 0, asOf: null, stale: false };
-  }
-  const delta = plan.savedThisYear - plan.expectedSoFar;
-  return { kind: kindForDelta(delta, plan.annual), delta, asOf: null, stale: false };
+export function tallyStatus(input: {
+  completed: boolean;
+  imported: boolean;
+  tally: UnitTally | null;
+  target: number;
+  today: Date;
+}): PlanStatus {
+  const t = input.tally;
+  const net = t?.net ?? 0;
+  const netSince = t?.netSince ?? null;
+  if (input.completed) return { kind: 'done', net, netSince };
+  if (t && input.target > 0 && t.tally >= input.target) return { kind: 'done', net, netSince };
+  // yyyy-MM-dd strings compare as dates.
+  if (t && t.creditsUntil !== null && todayYmd(input.today) > t.creditsUntil && net >= 0) return { kind: 'done', net, netSince };
+  if (input.imported) return { kind: 'imported', net, netSince };
+  if (!t) return { kind: 'started', net: 0, netSince: null };
+  if (!t.startedCrediting && net === 0) return { kind: 'started', net, netSince };
+  if (net === 0) return { kind: 'on_plan', net, netSince };
+  return { kind: net > 0 ? 'ahead' : 'behind', net, netSince };
+}
+
+const STATUS_RANK: Record<PlanStatusKind, number> = {
+  behind: 5,
+  ahead: 4,
+  on_plan: 3,
+  started: 2,
+  imported: 1,
+  done: 0,
+};
+
+/**
+ * The goal's status over its units: any Behind reads Behind, else any Ahead, else On plan, else
+ * Plan started, else Done. Imported comes through only when every unit is imported. The net is the
+ * sum over the units of that kind, with the oldest netSince among them. No units reads started.
+ */
+export function worstOf(statuses: PlanStatus[]): PlanStatus {
+  if (statuses.length === 0) return { kind: 'started', net: 0, netSince: null };
+  const kind = statuses.reduce<PlanStatusKind>(
+    (worst, s) => (STATUS_RANK[s.kind] > STATUS_RANK[worst] ? s.kind : worst), 'done');
+  const same = statuses.filter(s => s.kind === kind);
+  const since = same.map(s => s.netSince).filter((d): d is string => d !== null).sort();
+  return { kind, net: same.reduce((sum, s) => sum + s.net, 0), netSince: since[0] ?? null };
 }

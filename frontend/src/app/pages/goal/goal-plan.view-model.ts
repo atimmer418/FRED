@@ -4,7 +4,9 @@
  *
  * Two different rates meet here:
  *   - the LIVE plan uses `ctx.marketRate` (the chip) through the proposals, and
- *   - the STATUS uses the goal's stored plan rate, so a chip tap never moves it.
+ *   - the plan's VALUE (what the live plan re-solves from) uses the goal's stored plan rate, so a
+ *     chip tap never moves it.
+ * Status and progress read the server's tally ("Saved so far"); this file does no payday math.
  */
 
 import {
@@ -16,7 +18,9 @@ import {
   RateKind,
   TargetConfig,
   EmergencyFundConfig,
+  UnitTally,
   VacationConfig,
+  unitKey,
 } from '../../models/goal.model';
 import {
   AccountPlan,
@@ -25,19 +29,22 @@ import {
   SimplePlan,
   VacationPlan,
   firstYearDue,
-  futureValue,
+  fmtMoney,
+  growthLine,
   horizonMonths,
   kidAccountRateKind,
   kidDeadline,
-  monthsBetween,
-  planStatus,
+  planValue,
   proposeFirstYearPlan,
   proposeKidAccountPlan,
   proposeSimplePlan,
   proposeVacationPlan,
   simpleTarget,
-  vacationStatus,
+  tallyStatus,
+  worstOf,
+  yourPart,
 } from '../../utils/goal-plan.utils';
+import { formatMonthDay } from '../../utils/local-date';
 import { audienceLabel } from '../../utils/goal-quiz.utils';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
@@ -63,6 +70,8 @@ export type GoalPlanInput = Pick<
   | 'planRateKind'
   | 'planAnchoredAt'
   | 'balanceUpdatedAt'
+  | 'tally'
+  | 'unitTallies'
 > & {
   /** The audience of a CUSTOM goal. A draft without one reads "My goal". */
   name?: string;
@@ -88,9 +97,14 @@ export type KidAccountKey = 'plan529' | 'brokerage';
 export interface KidPlanRow {
   label: string;
   plan: AccountPlan;
+  /** Saved so far: the unit's tally (the draft balance in a preview). */
   balance: number;
+  /** What the plan re-solves from: the anchored plan's value now, or the draft balance in a preview. */
+  planValue: number;
   relative: boolean;
   pill: UnitPill;
+  /** "Assuming growth at 10%, worth ~$X today" for an invested unit; null for cash and in a preview. */
+  growthLine: string | null;
 }
 
 export interface KidAccountView {
@@ -104,10 +118,26 @@ export interface FirstYearRow {
   kidIndex: number;
   label: string;
   plan: FirstYearPlan;
+  /** Saved so far: the fund's tally (the draft balance in a preview). */
   balance: number;
+  /** What the plan re-solves from, as on KidPlanRow. */
+  planValue: number;
   /** A finished fund stays visible for 12 months after its end month, then hides. */
   hidden: boolean;
   pill: UnitPill;
+  /** Always null: a baby fund is cash, so there is no assumed growth to report. */
+  growthLine: null;
+}
+
+/** The band's fragments, joined with " · " by the page: Saved $900 · 3% of your $30K · Next $450 Jan 1. */
+export interface TallyLine {
+  saved: string;
+  /** "3% of your $30K", or "First $450 lands Dec 1" before the first credit. */
+  part: string;
+  /** "Next $450 Jan 1"; null when no credit is coming (or before the first, which part names). */
+  next: string | null;
+  /** "Behind by $450 since Nov 15" / "Ahead by $450"; null at net 0. */
+  net: string | null;
 }
 
 /**
@@ -164,7 +194,12 @@ export interface GoalPlanView {
   headline: string;
   subtitle: string;
   status: PlanStatus;
+  /** Saved so far against your part (what the plan asks you to put in), 0 to 100. */
   progressPct: number;
+  /** Every type but KIDS: the band line from the tally. Null for KIDS (each unit sheet reads its own tally). */
+  tallyLine: TallyLine | null;
+  /** Every type but KIDS: the assumed-growth line; null for cash, in a preview, or under $50 of growth. KIDS carry one per row. */
+  growthLine: string | null;
   relative: boolean;
   kids?: KidAccountView[];
   /** KIDS only: the family timeline under the hero. */
@@ -186,11 +221,11 @@ const IMPORTED_SUBTITLE = 'Plan updated, take a look';
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 
-/** Whole dollars with thousands separators: 1310 -> "$1,310". */
-export function fmtMoney(n: number): string {
-  const v = Number.isFinite(n) ? Math.round(n) : 0;
-  return '$' + v.toLocaleString('en-US');
-}
+// fmtMoney lives with the plan math so growthLine can use it; re-exported for existing callers.
+export { fmtMoney };
+
+/** "Jan 1" / "Nov 15" from a local yyyy-MM-dd string (never through `new Date(str)`). */
+export const fmtMonthDay = formatMonthDay;
 
 /** Short money: 950 -> "$950", 1500 -> "$1.5K", 372338 -> "$372K", 1180000 -> "$1.18M". */
 export function fmtCompact(n: number): string {
@@ -214,6 +249,61 @@ export function fmtMonthYear(iso: string | null): string {
 function clampPct(part: number, whole: number): number {
   if (!(whole > 0)) return 0;
   return Math.min(100, Math.max(0, (part / whole) * 100));
+}
+
+/** Saved so far against your part; with no part to measure against, any saving reads full. */
+function progressOf(saved: number, part: number): number {
+  if (part > 0) return clampPct(saved, part);
+  return saved > 0 ? 100 : 0;
+}
+
+/** The band fragments from a unit's tally. A null tally (a preview, or not read yet) has no next or net. */
+function tallyLineFor(saved: number, pct: number, part: number, t: UnitTally | null): TallyLine {
+  const upcoming = t?.nextCreditDate ? `${fmtMoney(t.nextCreditAmount)} ${fmtMonthDay(t.nextCreditDate)}` : null;
+  const beforeFirst = !!t && !t.startedCrediting && upcoming !== null;
+  let net: string | null = null;
+  if (t && t.net < 0) net = `Behind by ${fmtMoney(-t.net)}${t.netSince ? ` since ${fmtMonthDay(t.netSince)}` : ''}`;
+  else if (t && t.net > 0) net = `Ahead by ${fmtMoney(t.net)}`;
+  return {
+    saved: `Saved ${fmtMoney(saved)}`,
+    part: beforeFirst
+      ? `First ${fmtMoney(t!.nextCreditAmount)} lands ${fmtMonthDay(t!.nextCreditDate!)}`
+      : `${Math.round(pct)}% of your ${fmtCompact(part)}`,
+    next: beforeFirst || upcoming === null ? null : `Next ${upcoming}`,
+    net,
+  };
+}
+
+/**
+ * The date the stored plan was anchored, or null when there is none to grow from: a setup draft, an
+ * edit draft whose plan inputs changed (both re-anchor at save), or an unreadable date. Null means a
+ * preview: the plan solves from the draft balance, as before the tally.
+ */
+function planAnchor(goal: GoalPlanInput, ctx: GoalPlanContext): Date | null {
+  if (ctx.reanchorPending) return null;
+  const parsed = new Date(goal.planAnchoredAt);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+/** Whole months from the anchor's month to now's month, floored at 0 (the horizonMonths convention). */
+function monthsSince(anchor: Date, now: Date): number {
+  return Math.max(0, (now.getFullYear() - anchor.getFullYear()) * 12 + (now.getMonth() - anchor.getMonth()));
+}
+
+/**
+ * One unit's plan value: the anchored plan grown for the months since the anchor (never past the
+ * unit's own deadline, where contributions stop) plus the net of taps. A preview uses the draft balance.
+ */
+function unitPlanValue(
+  anchor: Date | null,
+  now: Date,
+  planMonths: number,
+  state: { anchorBalance: number; anchorMonthly: number; draftBalance: number },
+  rate: number,
+  t: UnitTally | null,
+): number {
+  if (!anchor) return state.draftBalance;
+  return planValue(state.anchorBalance, state.anchorMonthly, Math.min(monthsSince(anchor, now), planMonths), rate, t?.net ?? 0);
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -377,16 +467,16 @@ function whyInvestLineFor(reaches: number, fromYouRaw: number, fromGrowthRaw: nu
 
 export function buildGoalPlanView(goal: GoalPlanInput, ctx: GoalPlanContext): GoalPlanView {
   const imported = goal.clientId !== null && goal.anchorMonthly === 0;
-  // The status always grades against the stored anchor rate, never the live chip.
-  const statusRate = goal.planRateKind === 'cash' ? CASH_RATE : goal.planRate;
+  // The plan's value always grows at the stored anchor rate, never the live chip.
+  const planRate = goal.planRateKind === 'cash' ? CASH_RATE : goal.planRate;
 
   let view: SubView;
   if (goal.type === 'KIDS') {
-    view = kidsView(goal, ctx, imported, statusRate);
+    view = kidsView(goal, ctx, imported);
   } else if (goal.type === 'VACATION') {
-    view = vacationView(goal, ctx);
+    view = vacationView(goal, ctx, imported);
   } else {
-    view = simpleView(goal, ctx, imported, statusRate);
+    view = simpleView(goal, ctx, imported, planRate);
   }
 
   // Due now reads the invested units only: a kid's everyday cost never makes a plan due.
@@ -406,7 +496,6 @@ function kidsView(
   goal: GoalPlanInput,
   ctx: GoalPlanContext,
   imported: boolean,
-  statusRate: number,
 ): SubView {
   const cfg = goal.config as KidsConfig;
   const kids = cfg.kids ?? [];
@@ -418,9 +507,19 @@ function kidsView(
   ];
 
   // The plan was anchored here. A setup draft, or an edit draft whose plan inputs changed,
-  // re-anchors at "now".
-  const parsedAnchor = new Date(goal.planAnchoredAt);
-  const anchorDate = ctx.reanchorPending || !Number.isFinite(parsedAnchor.getTime()) ? ctx.now : parsedAnchor;
+  // re-anchors at "now" and solves from the draft balances.
+  const anchor = planAnchor(goal, ctx);
+  const anchorDate = anchor ?? ctx.now;
+  const tallyOf = (kidIndex: number, account: 'plan529' | 'brokerage' | 'firstYear'): UnitTally | null =>
+    goal.unitTallies?.[unitKey(kidIndex, account)] ?? null;
+
+  /** Each saving unit's status and its Saved so far against its part, for the goal's chip and bar. */
+  const scores: Array<{ status: PlanStatus; saved: number; part: number }> = [];
+  const score = (t: UnitTally | null, saved: number, target: number, part: number) => scores.push({
+    status: tallyStatus({ completed: goal.completed, imported, tally: t, target, today: ctx.now }),
+    saved,
+    part,
+  });
 
   /**
    * Each kid account has its own rate kind, fixed at the anchor: cash when the account had under
@@ -432,7 +531,7 @@ function kidsView(
     return kidAccountRateKind(anchorDate, dl.year, dl.month);
   };
 
-  const fundRows = firstYearRows(kids, goal, ctx, anchorDate);
+  const fundRows = firstYearRows(kids, ctx, anchor, anchorDate, tallyOf);
   const unfinishedFunds = fundRows.filter(r => !r.row.plan.finished);
 
   // Kids plans are monthly only. The New Year gift lump (gift days) left the plan page on
@@ -444,13 +543,19 @@ function kidsView(
   const accounts: KidAccountView[] = accountDefs
     .filter(def => def.target > 0)
     .map(def => {
-      const perKid = kids.map(kid => {
+      const perKid = kids.map((kid, kidIndex): KidPlanRow => {
         const account = kid.accounts[def.account];
-        const balance = account.balance;
+        const t = tallyOf(kidIndex, def.account);
+        const saved = t?.tally ?? account.balance;
         const kind = accountKind(kid.birthYear, kid.birthMonth);
+        const unitRate = kind === 'cash' ? CASH_RATE : goal.planRate;
+        const dl = kidDeadline(anchorDate, kid.birthYear, kid.birthMonth);
+        const planMonths = horizonMonths(anchorDate, dl.year, dl.month);
+        const value = unitPlanValue(anchor, ctx.now, planMonths,
+          { anchorBalance: account.anchorBalance, anchorMonthly: account.anchorMonthly, draftBalance: account.balance }, unitRate, t);
         const plan = proposeKidAccountPlan({
           target: def.target,
-          balance,
+          balance: value,
           birthYear: kid.birthYear,
           birthMonth: kid.birthMonth,
           marketRate: ctx.marketRate,
@@ -459,7 +564,19 @@ function kidsView(
           giftDays: false,
         });
         const relative = plan.assumedBirthYear || (kid.birthYear != null && kid.birthYear > thisYear);
-        return { label: kid.label, plan, balance, relative, pill: pillOf(plan.rateKind) };
+        const part = anchor
+          ? yourPart(account.anchorBalance, account.anchorMonthly, planMonths)
+          : yourPart(account.balance, plan.monthly, plan.n);
+        score(t, saved, def.target, part);
+        return {
+          label: kid.label,
+          plan,
+          balance: saved,
+          planValue: value,
+          relative,
+          pill: pillOf(plan.rateKind),
+          growthLine: anchor ? growthLine({ rateKind: kind, annualRate: unitRate, planValue: value, tally: saved }) : null,
+        };
       });
       const totals = perKid.reduce((t, k) => ({ monthly: t.monthly + k.plan.monthly }), { monthly: 0 });
       return { account: def.account, label: def.label, totals, perKid };
@@ -477,63 +594,15 @@ function kidsView(
   const rateKind: RateKind = unfinishedKinds.length > 0 && unfinishedKinds.every(k => k === 'cash') ? 'cash' : 'market';
   const rate = rateKind === 'cash' ? CASH_RATE : ctx.marketRate;
 
-  // Status: one family plan over the sums of every 529 and brokerage account, plus unfinished
-  // first-year funds, which are graded on their own path and added to the expected balance.
-  // An account with no target is left out, the same as on the plan cards.
-  const plannedKeys = accountDefs.filter(def => def.target > 0).map(def => def.account);
-  let balance = 0;
-  let anchorBalance = 0;
-  let anchorMonthly = 0;
-  const loggedAt: string[] = [];
-  for (const kid of kids) {
-    for (const key of plannedKeys) {
-      const a = kid.accounts[key];
-      balance += a.balance;
-      anchorBalance += a.anchorBalance;
-      anchorMonthly += a.anchorMonthly;
-      if (a.balanceUpdatedAt) loggedAt.push(a.balanceUpdatedAt);
-    }
-  }
-  let target = kids.length * ((cfg.plan529Target || 0) + (cfg.brokerageTarget || 0));
-  for (const f of unfinishedFunds) {
-    balance += f.account.balance;
-    target += f.row.plan.target;
-    if (f.account.balanceUpdatedAt) loggedAt.push(f.account.balanceUpdatedAt);
-  }
-  const latest: string | null = loggedAt.reduce<string | null>(
-    (best, iso) => (best === null || new Date(iso).getTime() > new Date(best).getTime() ? iso : best), null);
-  const monthsLogged = latest ? monthsBetween(goal.planAnchoredAt, latest) : 0;
-  const extraExpected = unfinishedFunds.reduce((sum, f) => {
-    const fundRate = f.row.plan.rateKind === 'cash' ? CASH_RATE : goal.planRate;
-    const months = Math.min(monthsLogged, horizonMonths(anchorDate, f.row.plan.due.year, f.row.plan.due.month));
-    return sum + futureValue(f.account.anchorBalance, f.account.anchorMonthly, months, fundRate, []);
-  }, 0);
-  // No contributions are expected past the last 529 or brokerage deadline, counted from the anchor.
-  const accountHorizons = plannedKeys.length > 0
-    ? kids.map(kid => {
-        const dl = kidDeadline(anchorDate, kid.birthYear, kid.birthMonth);
-        return horizonMonths(anchorDate, dl.year, dl.month);
-      })
-    : [];
-  const maxMonths = accountHorizons.length > 0 ? Math.max(...accountHorizons) : undefined;
-  // A 0 target (every fund finished, no 529 or brokerage target) is never "done".
-  const status: PlanStatus = target > 0 || goal.completed
-    ? planStatus({
-        completed: goal.completed,
-        imported,
-        target,
-        balance,
-        anchorBalance,
-        anchorMonthly,
-        planAnchoredAt: goal.planAnchoredAt,
-        balanceUpdatedAt: latest,
-        rate: statusRate,
-        lumps: [],
-        extraExpected,
-        maxMonths,
-        now: ctx.now,
-      })
-    : { kind: 'started', delta: 0, asOf: null, stale: false };
+  // Status: the worst of the saving units (every 529 and brokerage with a target, and every
+  // unfinished baby fund; a finished fund no longer counts). Progress pools their Saved so far
+  // against their parts. No unit left reads started, unless the goal is marked complete.
+  for (const f of unfinishedFunds) score(f.tally, f.row.balance, f.row.plan.target, f.part);
+  const status: PlanStatus = goal.completed && scores.length === 0
+    ? { kind: 'done', net: 0, netSince: null }
+    : worstOf(scores.map(u => u.status));
+  const savedTotal = scores.reduce((sum, u) => sum + u.saved, 0);
+  const partTotal = scores.reduce((sum, u) => sum + u.part, 0);
 
   const perKidRelative = kids.map((kid, i) =>
     accounts[0]?.perKid[i]?.relative ?? (kid.birthYear == null || kid.birthYear > thisYear));
@@ -560,7 +629,7 @@ function kidsView(
       .map(k => ({
         account: a.account,
         target: a.account === 'plan529' ? cfg.plan529Target : cfg.brokerageTarget,
-        balance: k.balance,
+        balance: k.planValue,
         fromYou: k.plan.monthly * k.plan.n
           + k.plan.lumps.filter(l => l.monthIndex <= k.plan.n).reduce((sum, l) => sum + l.amount, 0),
       }))),
@@ -568,7 +637,7 @@ function kidsView(
   );
   const investedFunds = unfinishedFunds
     .filter(f => f.row.plan.rateKind === 'market' && f.row.plan.n > 0)
-    .map(f => ({ target: f.row.plan.target, balance: f.row.balance, fromYou: f.row.plan.monthly * f.row.plan.n }));
+    .map(f => ({ target: f.row.plan.target, balance: f.row.planValue, fromYou: f.row.plan.monthly * f.row.plan.n }));
   const invested = [...investedAccounts, ...investedFunds];
   const investedTotal = (key: 'target' | 'balance' | 'fromYou') => invested.reduce((total, u) => total + u[key], 0);
   const reaches = investedTotal('target');
@@ -604,7 +673,9 @@ function kidsView(
     audience,
     howFredHelps: howFredHelpsLine(units, coveredUnits),
     status,
-    progressPct: clampPct(balance, target),
+    progressPct: progressOf(savedTotal, partTotal),
+    tallyLine: null,
+    growthLine: null,
     relative: perKidRelative.some(Boolean),
     kids: accounts,
     timeline: buildKidTimeline(kids, ctx.now),
@@ -656,15 +727,17 @@ function everydayViews(kids: ReadonlyArray<KidInput>, now: Date): EverydayView[]
 
 /**
  * One row per kid with a first-year fund account. The end month is the stored one; a kid saved
- * without it falls back to the firstYearDue rule. Every baby fund is planned as cash.
+ * without it falls back to the firstYearDue rule. Every baby fund is planned as cash. Each row
+ * carries its tally and its part, for the goal's status and progress.
  */
 function firstYearRows(
   kids: KidInput[],
-  goal: GoalPlanInput,
   ctx: GoalPlanContext,
+  anchor: Date | null,
   anchorDate: Date,
-): Array<{ row: FirstYearRow; account: AccountState }> {
-  const out: Array<{ row: FirstYearRow; account: AccountState }> = [];
+  tallyOf: (kidIndex: number, account: 'firstYear') => UnitTally | null,
+): Array<{ row: FirstYearRow; account: AccountState; tally: UnitTally | null; part: number }> {
+  const out: Array<{ row: FirstYearRow; account: AccountState; tally: UnitTally | null; part: number }> = [];
   kids.forEach((kid, kidIndex) => {
     const account = kid.accounts.firstYear;
     if (!account) return;
@@ -675,14 +748,18 @@ function firstYearRows(
     // year with no month ends in December even on a goal anchored last year (spec decision 3).
     // An undated kid's 36 months still count from the anchor.
     const due = stored ?? firstYearDue(kid.birthYear, kid.birthMonth, kid.birthYear === null ? anchorDate : ctx.now);
+    const t = tallyOf(kidIndex, 'firstYear');
+    const planMonths = horizonMonths(anchorDate, due.year, due.month);
+    // Andy, 2026-11-10: money with a date on it stays out of the market, so a baby fund is cash
+    // however far out its end month is. kidAccountRateKind still decides the 529 and nest egg.
+    const value = unitPlanValue(anchor, ctx.now, planMonths,
+      { anchorBalance: account.anchorBalance, anchorMonthly: account.anchorMonthly, draftBalance: account.balance }, CASH_RATE, t);
     const plan = proposeFirstYearPlan({
       target: kid.firstYearTarget ?? 0,
-      balance: account.balance,
+      balance: value,
       due,
       undecided: kid.birthYear == null,
       marketRate: ctx.marketRate,
-      // Andy, 2026-11-10: money with a date on it stays out of the market, so a baby fund is cash
-      // however far out its end month is. kidAccountRateKind still decides the 529 and nest egg.
       rateKind: 'cash',
       now: ctx.now,
     });
@@ -692,20 +769,33 @@ function firstYearRows(
         kidIndex,
         label: kid.label,
         plan,
-        balance: account.balance,
+        balance: t?.tally ?? account.balance,
+        planValue: value,
         hidden: plan.finished && monthsSinceDue > 12,
         pill: pillOf(plan.rateKind),
+        growthLine: null,
       },
       account,
+      tally: t,
+      part: anchor
+        ? yourPart(account.anchorBalance, account.anchorMonthly, planMonths)
+        : yourPart(account.balance, plan.monthly, plan.n),
     });
   });
   return out;
 }
 
-function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): SubView {
+/**
+ * The tally is this year's Saved so far (the server resets it on January 1), measured against the
+ * year's budget; once the budget is in, the year reads Done.
+ */
+function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext, imported: boolean): SubView {
   const cfg = goal.config as VacationConfig;
   const plan = proposeVacationPlan(cfg, ctx.now, goal.planAnchoredAt);
   const audience = goalAudience(goal);
+  const t = goal.tally ?? null;
+  const saved = t?.tally ?? plan.savedThisYear;
+  const progressPct = progressOf(saved, plan.annual);
   return {
     monthlyTotal: plan.monthly,
     investMonthly: plan.monthly,
@@ -720,17 +810,13 @@ function vacationView(goal: GoalPlanInput, ctx: GoalPlanContext): SubView {
     coversLine: null,
     whyInvestLine: null,
     pill: 'Cash',
-    status: vacationStatus(plan, ctx.now),
-    progressPct: clampPct(plan.savedThisYear, plan.annual),
+    status: tallyStatus({ completed: goal.completed, imported, tally: t, target: plan.annual, today: ctx.now }),
+    progressPct,
+    tallyLine: tallyLineFor(saved, progressPct, plan.annual, t),
+    growthLine: null,
     relative: false,
     vacation: plan,
   };
-}
-
-/** The date a simple goal's plan was anchored, or `now` for a pending re-anchor or an unreadable date. */
-function statusAnchorDate(goal: GoalPlanInput, ctx: GoalPlanContext): Date {
-  const parsed = new Date(goal.planAnchoredAt);
-  return ctx.reanchorPending || !Number.isFinite(parsed.getTime()) ? ctx.now : parsed;
 }
 
 function targetYearOf(goal: GoalPlanInput): number {
@@ -741,34 +827,31 @@ function simpleView(
   goal: GoalPlanInput,
   ctx: GoalPlanContext,
   imported: boolean,
-  statusRate: number,
+  planRate: number,
 ): SubView {
   const target = simpleTarget(goal.type, goal.config);
   const targetYear = targetYearOf(goal);
+  const anchor = planAnchor(goal, ctx);
+  const t = goal.tally ?? null;
+  const saved = t?.tally ?? goal.currentBalance;
+  // No contributions are planned after the target month, counted from the anchor.
+  const planMonths = anchor ? horizonMonths(anchor, targetYear, 12) : 0;
+  const value = unitPlanValue(anchor, ctx.now, planMonths,
+    { anchorBalance: goal.anchorBalance, anchorMonthly: goal.anchorMonthly, draftBalance: goal.currentBalance }, planRate, t);
   const plan = proposeSimplePlan({
     target,
-    balance: goal.currentBalance,
+    balance: value,
     targetYear,
     marketRate: ctx.marketRate,
     forceCash: goal.type === 'EMERGENCY_FUND',
     rateKindOverride: ctx.rateKindOverride,
     now: ctx.now,
   });
-  const status = planStatus({
-    completed: goal.completed,
-    imported,
-    target,
-    balance: goal.currentBalance,
-    anchorBalance: goal.anchorBalance,
-    anchorMonthly: goal.anchorMonthly,
-    planAnchoredAt: goal.planAnchoredAt,
-    balanceUpdatedAt: goal.balanceUpdatedAt,
-    rate: statusRate,
-    lumps: [],
-    // No contributions are expected after the target month, counted from the anchor.
-    maxMonths: horizonMonths(statusAnchorDate(goal, ctx), targetYear, 12),
-    now: ctx.now,
-  });
+  const status = tallyStatus({ completed: goal.completed, imported, tally: t, target, today: ctx.now });
+  const part = anchor
+    ? yourPart(goal.anchorBalance, goal.anchorMonthly, planMonths)
+    : yourPart(goal.currentBalance, plan.monthly, plan.n);
+  const progressPct = progressOf(saved, part);
 
   const audience = goalAudience(goal);
 
@@ -786,11 +869,13 @@ function simpleView(
     howFredHelps: howFredHelpsLine([{ kind: plan.rateKind, babyFund: false }], null),
     coversLine: null,
     whyInvestLine: plan.rateKind === 'market' && plan.n > 0
-      ? whyInvestLineFor(target, plan.fromYou + goal.currentBalance, plan.fromGrowth, null)
+      ? whyInvestLineFor(target, plan.fromYou + value, plan.fromGrowth, null)
       : null,
     pill: pillOf(plan.rateKind),
     status,
-    progressPct: clampPct(goal.currentBalance, target),
+    progressPct,
+    tallyLine: tallyLineFor(saved, progressPct, part, t),
+    growthLine: anchor ? growthLine({ rateKind: goal.planRateKind, annualRate: planRate, planValue: value, tally: saved }) : null,
     relative: false,
     simple: plan,
   };

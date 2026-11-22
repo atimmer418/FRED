@@ -1,6 +1,6 @@
 import { AccountState, Goal, KidInput, KidsConfig } from '../../models/goal.model';
 import {
-  GoalForm, MAX_KIDS, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, planInputsChanged,
+  GoalForm, MAX_KIDS, creditsUntilFor, defaultFirstYearFund, defaultForm, formFromGoal, formToConfig, planInputsChanged,
   validateForm,
 } from './goal-form.model';
 
@@ -388,5 +388,45 @@ describe('goal-form.model', () => {
     const errors = validateForm(form, NOW);
     expect(errors['plan529Target']).toBe('That is more than we can plan for. Try a smaller amount.');
     expect(errors['kidsTargets']).toBeUndefined();
+  });
+});
+
+describe('creditsUntilFor', () => {
+  const acct = (): AccountState => ({ balance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 });
+  const kids: KidsConfig = {
+    plan529Target: 47_800, brokerageTarget: 100_000,
+    kids: [
+      { label: 'Ada', birthYear: 2020, birthMonth: 2, accounts: { plan529: acct(), brokerage: acct() } },
+      { label: 'Ben', birthYear: 2022, birthMonth: null, accounts: { plan529: acct(), brokerage: acct() } },
+      { label: 'Kid 3', birthYear: null, birthMonth: null, accounts: { plan529: acct(), brokerage: acct(), firstYear: acct() } },
+      { label: 'Theo', birthYear: 2027, birthMonth: 4, firstYearDueYear: 2027, firstYearDueMonth: 4, firstYearTarget: 20_800, accounts: { plan529: acct(), brokerage: acct(), firstYear: acct() } },
+    ],
+  };
+
+  it('is Dec 31 of the target year for a simple goal', () => {
+    expect(creditsUntilFor('HOUSE', { price: 500_000, downPaymentPct: 20, targetYear: 2031 })).toBe('2031-12-31');
+    expect(creditsUntilFor('EMERGENCY_FUND', { monthlyExpenses: 4_000, months: 6, targetYear: 2028 })).toBe('2028-12-31');
+    expect(creditsUntilFor('CUSTOM', { targetAmount: 9_000, targetYear: 2029 })).toBe('2029-12-31');
+  });
+
+  it('is null for vacation', () =>
+    expect(creditsUntilFor('VACATION', { tripsPerYear: 1, budgetPerTrip: 1_200, savedThisYear: 0, savedYear: 2026 })).toBeNull());
+
+  it('is the last day of the 18th-birthday month for a kid account, July when the month is unknown', () => {
+    expect(creditsUntilFor('KIDS', kids, 0, 'plan529', NOW)).toBe('2038-02-28');
+    expect(creditsUntilFor('KIDS', kids, 1, 'brokerage', NOW)).toBe('2040-07-31');
+    // Undecided plans as born this year.
+    expect(creditsUntilFor('KIDS', kids, 2, 'plan529', NOW)).toBe('2044-07-31');
+  });
+
+  it('is the last day of the baby fund due month', () => {
+    expect(creditsUntilFor('KIDS', kids, 3, 'firstYear', NOW)).toBe('2027-04-30');
+    // Undecided with no stored month: 36 months from now.
+    expect(creditsUntilFor('KIDS', kids, 2, 'firstYear', NOW)).toBe('2029-06-30');
+  });
+
+  it('is null for a kids goal without a kid and account to name', () => {
+    expect(creditsUntilFor('KIDS', kids)).toBeNull();
+    expect(creditsUntilFor('KIDS', kids, 9, 'plan529', NOW)).toBeNull();
   });
 });

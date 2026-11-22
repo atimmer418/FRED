@@ -15,8 +15,9 @@
  * It is a READ overlay only: load() and refresh() return these goals with no HTTP request.
  * Writes (create, update, remove, importLegacy) still go to the real backend.
  */
-import { AccountState, Goal, KidInput } from '../../models/goal.model';
+import { AccountState, Goal, KidInput, UnitTally, unitKey } from '../../models/goal.model';
 import { firstYearDue } from '../../utils/goal-plan.utils';
+import { addDays, fromLocalDate } from '../../utils/local-date';
 
 export type MockGoalsChoice = 'one_of_each' | 'kids_only';
 
@@ -64,6 +65,20 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
 
   const fundDue = firstYearDue(null, null, addMonths(now, -4));
 
+  // The server's Saved so far figures. Status reads the net of taps: 0 on plan, + ahead, - behind.
+  const today = fromLocalDate(now);
+  const tally = (amount: number, share: number, extra: Partial<UnitTally> = {}): UnitTally => ({
+    tally: amount,
+    creditedThrough: addDays(today, -6),
+    creditsUntil: null,
+    nextCreditDate: addDays(today, 8),
+    nextCreditAmount: share,
+    net: 0,
+    netSince: null,
+    startedCrediting: true,
+    ...extra,
+  });
+
   const kids: KidInput[] = [
     {
       label: 'Maya',
@@ -105,6 +120,13 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
     planRate: 0.07,
     planRateKind: 'market',
     sortOrder: 0,
+    unitTallies: {
+      [unitKey(0, 'brokerage')]: tally(2400, 69),
+      [unitKey(0, 'plan529')]: tally(3100, 92),
+      [unitKey(1, 'brokerage')]: tally(0, 46, { startedCrediting: false, creditedThrough: null }),
+      [unitKey(1, 'plan529')]: tally(0, 46, { startedCrediting: false, creditedThrough: null }),
+      [unitKey(1, 'firstYear')]: tally(0, 231, { startedCrediting: false, creditedThrough: null }),
+    },
   };
 
   if (choice === 'kids_only') return [kidsGoal];
@@ -112,7 +134,7 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
   return [
     kidsGoal,
     {
-      // Balance never updated: reads as Started.
+      // No payday has credited yet: reads as Started.
       ...base,
       id: 9002,
       type: 'HOUSE',
@@ -126,9 +148,10 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       planRate: 0.07,
       planRateKind: 'market',
       sortOrder: 1,
+      tally: tally(0, 554, { startedCrediting: false, creditedThrough: null }),
     },
     {
-      // Balance well above the plan path: Ahead.
+      // A Doubled up: Ahead.
       ...base,
       id: 9003,
       type: 'CAR',
@@ -142,6 +165,7 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       planRate: 0.07,
       planRateKind: 'market',
       sortOrder: 2,
+      tally: tally(4200, 185, { net: 185 }),
     },
     {
       ...base,
@@ -157,9 +181,10 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       planRate: 0.04,
       planRateKind: 'cash',
       sortOrder: 3,
+      tally: tally(1800, 138),
     },
     {
-      // Balance below the plan path: Behind.
+      // A Missed one: Behind.
       ...base,
       id: 9005,
       type: 'EMERGENCY_FUND',
@@ -173,9 +198,10 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       planRate: 0.04,
       planRateKind: 'cash',
       sortOrder: 4,
+      tally: tally(3000, 415, { net: -415, netSince: addDays(today, -20) }),
     },
     {
-      // Balance close to the plan path: On plan.
+      // Nothing missed: On plan.
       ...base,
       id: 9006,
       type: 'WEDDING',
@@ -189,6 +215,7 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       planRate: 0.04,
       planRateKind: 'cash',
       sortOrder: 5,
+      tally: tally(8300, 346),
     },
     {
       // Marked complete: Done.
@@ -206,6 +233,7 @@ export function buildMockGoals(choice: MockGoalsChoice, now: Date): Goal[] {
       planRateKind: 'cash',
       completed: true,
       sortOrder: 6,
+      tally: tally(2400, 138, { nextCreditDate: null, nextCreditAmount: 0 }),
     },
   ];
 }

@@ -2,11 +2,12 @@
 
 import {
   AccountState, EmergencyFundConfig, Goal, GoalConfig, GoalIcon, GoalType, HouseCarConfig,
-  KidInput, KidsConfig, TargetConfig, VacationConfig,
+  KidInput, KidsConfig, KidUnitAccount, TargetConfig, VacationConfig,
 } from '../../models/goal.model';
 import { AT_18_PRESETS } from '../../constants/kid-costs';
 import { collegePresets, firstYearTargetForRank, kidRanks } from '../../utils/kid-cost.utils';
-import { firstYearDue, isKidNotYetBorn } from '../../utils/goal-plan.utils';
+import { firstYearDue, isKidNotYetBorn, kidDeadline } from '../../utils/goal-plan.utils';
+import { daysInMonth, ymd } from '../../utils/local-date';
 
 export interface KidFormRow {
   label: string;
@@ -488,4 +489,43 @@ export function monthYearLabel(due: { year: number; month: number }): string {
 export function toLocalIso(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** The last day of a month (1..12) as yyyy-MM-dd. */
+function lastDayOf(year: number, month: number): string {
+  return ymd(year, month, daysInMonth(year, month));
+}
+
+/**
+ * The last day paydays credit a unit (yyyy-MM-dd), written beside anchorMonthly whenever the plan
+ * anchors: Dec 31 of the target year for a simple goal; the last day of the 18th-birthday month for
+ * a kid's 529 or brokerage (July when the month is unknown, born this year when undecided); the last
+ * day of the baby fund's due month; null for vacation (it stops at its target and resets each year),
+ * and null for a kids goal without a kid and account to name.
+ */
+export function creditsUntilFor(
+  type: GoalType,
+  config: GoalConfig,
+  kidIndex?: number,
+  account?: KidUnitAccount,
+  now: Date = new Date(),
+): string | null {
+  switch (type) {
+    case 'VACATION':
+      return null;
+    case 'KIDS': {
+      const kid = kidIndex === undefined ? undefined : (config as KidsConfig).kids?.[kidIndex];
+      if (!kid || !account) return null;
+      if (account === 'firstYear') {
+        const due = kid.firstYearDueYear != null && kid.firstYearDueMonth != null
+          ? { year: kid.firstYearDueYear, month: kid.firstYearDueMonth }
+          : firstYearDue(kid.birthYear, kid.birthMonth, now);
+        return lastDayOf(due.year, due.month);
+      }
+      const dl = kidDeadline(now, kid.birthYear, kid.birthMonth);
+      return lastDayOf(dl.year, dl.month);
+    }
+    default:
+      return `${(config as HouseCarConfig | EmergencyFundConfig | TargetConfig).targetYear}-12-31`;
+  }
 }

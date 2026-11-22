@@ -541,7 +541,11 @@ describe('MyProfilePage: goals card', () => {
   });
 
   it('starts the subtitle with what is due now in the target month', () => {
-    const due: Goal = { ...ACTIVE, config: { targetAmount: 30_000, targetYear: YEAR - 1 }, currentBalance: 24_000 };
+    // Anchored after the target year at $24,000: no months of growth, so $6,000 is due now.
+    const due: Goal = {
+      ...ACTIVE, config: { targetAmount: 30_000, targetYear: YEAR - 1 }, currentBalance: 24_000,
+      anchorBalance: 24_000, anchorMonthly: 0, planAnchoredAt: `${YEAR}-01-01T00:00:00`,
+    };
     const h = setupGoals({ goals: [due] });
     expect(h.page.goalSummaries()[0].view.subtitle.startsWith('$6,000 due now')).toBeTrue();
   });

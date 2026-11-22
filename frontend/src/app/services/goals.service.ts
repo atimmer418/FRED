@@ -1,12 +1,12 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { finalize, shareReplay, tap } from 'rxjs/operators';
+import { finalize, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
 import { DeviceIdService } from './device-id.service';
 import { AuthService } from './auth.service';
-import { Goal, GoalWrite, LegacyGoalV2 } from '../models/goal.model';
+import { Goal, GoalWrite, LedgerKind, LegacyGoalV2 } from '../models/goal.model';
 import { ACTIVE_GOALS_MOCK, mockGoals } from './dev/goals-mock';
 
 // Existing imports of Goal, GoalIcon and friends from this file keep resolving.
@@ -105,6 +105,25 @@ export class GoalsService {
       tap(updated => {
         this.invalidate();
         this.goals.update(list => list.map(g => g.id === updated.id ? updated : g));
+      })
+    );
+  }
+
+  /**
+   * One Saved so far correction on a unit (`goal`, or `kid:<index>:<account>`): Missed one, Doubled up,
+   * or an exact figure (`set`, with `amount`). The server computes the share. `capped` is true when a
+   * Missed one stopped at $0 (header X-Fred-Capped).
+   */
+  adjust(id: number, unit: string, kind: LedgerKind, amount?: number): Observable<{ goal: Goal; capped: boolean }> {
+    const body = amount === undefined ? { unit, kind } : { unit, kind, amount };
+    return this.http.post<Goal>(`${this.apiUrl}/${id}/ledger`, body, {
+      headers: this.getAuthHeaders(),
+      observe: 'response',
+    }).pipe(
+      map(res => ({ goal: res.body as Goal, capped: res.headers.get('X-Fred-Capped') === 'true' })),
+      tap(({ goal }) => {
+        this.invalidate();
+        this.goals.update(list => list.map(g => g.id === goal.id ? goal : g));
       })
     );
   }

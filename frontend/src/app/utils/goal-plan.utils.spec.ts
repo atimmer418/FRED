@@ -8,16 +8,20 @@ import {
   kidAccountRateKind,
   kidDeadline,
   kidLumpSchedule,
+  growthLine,
   monthsBetween,
-  planStatus,
+  planValue,
   proposeFirstYearPlan,
   proposeKidAccountPlan,
   proposeSimplePlan,
   proposeVacationPlan,
   requiredMonthly,
   simpleTarget,
-  vacationStatus,
+  tallyStatus,
+  worstOf,
+  yourPart,
 } from './goal-plan.utils';
+import { UnitTally } from '../models/goal.model';
 
 const NOW = new Date(2026, 10, 15);
 const JAN = new Date(2027, 0, 15);
@@ -157,36 +161,94 @@ describe('proposeVacationPlan', () => {
   it('resets saved so far in a new year', () => { const p = proposeVacationPlan({ tripsPerYear: 1, budgetPerTrip: 1200, savedThisYear: 900, savedYear: 2025 }, NOW); expect(p.resetNeeded).toBeTrue(); expect(p.savedThisYear).toBe(0); });
 });
 
-describe('planStatus', () => {
-  const A = { completed: false, imported: false, target: 250000, balance: 0, anchorBalance: 0, anchorMonthly: 417, planAnchoredAt: '2026-11-15T10:00:00', balanceUpdatedAt: null as string | null, rate: 0.10, lumps: [], now: new Date(2027, 10, 20) };
-  it('is started until a balance is logged', () => expect(planStatus(A).kind).toBe('started'));
-  it('is imported for a never-planned import', () => expect(planStatus({ ...A, imported: true }).kind).toBe('imported'));
-  it('is on plan at the anchor date with the anchor balance', () => expect(planStatus({ ...A, balanceUpdatedAt: A.planAnchoredAt }).kind).toBe('on_plan'));
-  it('is behind when the logged balance trails the plan', () => { const r = planStatus({ ...A, balanceUpdatedAt: '2027-11-15T10:00:00' }); expect(r.kind).toBe('behind'); expect(r.delta).toBeLessThan(-5000); });
-  it('uses one symmetric tolerance', () => {
-    // rate 0, 100 a month, 12 months: expected 1200; tolerance = max(50, 1% of 10000) = 100
-    const B = { ...A, target: 10000, anchorMonthly: 100, rate: 0, balanceUpdatedAt: '2027-11-15T10:00:00' };
-    expect(planStatus({ ...B, balance: 1300 }).kind).toBe('on_plan');
-    expect(planStatus({ ...B, balance: 1301 }).kind).toBe('ahead');
-    expect(planStatus({ ...B, balance: 1100 }).kind).toBe('on_plan');
-    expect(planStatus({ ...B, balance: 1099 }).kind).toBe('behind');
+function tally(extra: Partial<UnitTally> = {}): UnitTally {
+  return {
+    tally: 900, creditedThrough: '2026-11-15', creditsUntil: '2028-12-31', nextCreditDate: '2026-12-01',
+    nextCreditAmount: 450, net: 0, netSince: null, startedCrediting: true, ...extra,
+  };
+}
+
+describe('tallyStatus', () => {
+  const S = (t: UnitTally | null, extra: { completed?: boolean; imported?: boolean; target?: number; today?: Date } = {}) =>
+    tallyStatus({ completed: false, imported: false, tally: t, target: 30_000, today: NOW, ...extra });
+
+  it('started before the first credit with no taps', () => {
+    expect(S(tally({ tally: 0, startedCrediting: false, creditedThrough: null })).kind).toBe('started');
+    expect(S(null).kind).toBe('started');
   });
-  it('is done at the target', () => expect(planStatus({ ...A, balance: 250000 }).kind).toBe('done'));
-  it('is done when completed, ahead of imported', () => expect(planStatus({ ...A, completed: true, imported: true }).kind).toBe('done'));
-  it('flags a stale balance after 60 days', () => expect(planStatus({ ...A, balanceUpdatedAt: '2027-08-01T10:00:00' }).stale).toBeTrue());
-  it('is not stale when recent', () => expect(planStatus({ ...A, balanceUpdatedAt: '2027-11-10T10:00:00' }).stale).toBeFalse());
+  it('on plan at net 0 once credited', () => expect(S(tally()).kind).toBe('on_plan'));
+  it('behind by one share after one missed tap, no tolerance', () => {
+    const s = S(tally({ tally: 450, net: -450, netSince: '2026-11-15' }));
+    expect(s.kind).toBe('behind');
+    expect(s.net).toBe(-450);
+    expect(s.netSince).toBe('2026-11-15');
+  });
+  it('ahead after a doubled up', () => {
+    const s = S(tally({ tally: 1350, net: 450 }));
+    expect(s.kind).toBe('ahead');
+    expect(s.net).toBe(450);
+  });
+  it('done at the target, and at creditsUntil with net >= 0', () => {
+    expect(S(tally({ tally: 30_000 })).kind).toBe('done');
+    expect(S(tally({ creditsUntil: '2026-11-14' })).kind).toBe('done');
+    expect(S(tally({ creditsUntil: '2026-11-14', net: 450 })).kind).toBe('done');
+    // The last credit day itself is not past yet.
+    expect(S(tally({ creditsUntil: '2026-11-15' })).kind).toBe('on_plan');
+    expect(S(tally(), { completed: true }).kind).toBe('done');
+  });
+  it('not done at creditsUntil with net < 0', () =>
+    expect(S(tally({ creditsUntil: '2026-11-14', net: -450, netSince: '2026-10-15' })).kind).toBe('behind'));
+  it('imported stays imported', () => {
+    expect(S(tally({ net: -450 }), { imported: true }).kind).toBe('imported');
+    expect(S(null, { imported: true }).kind).toBe('imported');
+    expect(S(tally(), { imported: true, completed: true }).kind).toBe('done');
+  });
 });
 
-describe('vacationStatus', () => {
-  it('never reads done', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 10000, expectedSoFar: 8340, resetNeeded: false }, NOW).kind).toBe('ahead'));
-  it('uses annual as the tolerance base (100 on 10000), symmetric', () => {
-    const v = (saved: number) => vacationStatus({ annual: 10000, monthly: 834, savedThisYear: saved, expectedSoFar: 8340, resetNeeded: false }, NOW).kind;
-    expect(v(8340 + 100)).toBe('on_plan');
-    expect(v(8340 + 101)).toBe('ahead');
-    expect(v(8340 - 100)).toBe('on_plan');
-    expect(v(8340 - 101)).toBe('behind');
+describe('planValue', () => {
+  it('equals the anchored plan when net is 0, so the re-solved monthly matches anchorMonthly within $1', () => {
+    const anchoredAt = new Date(2025, 10, 15);
+    const anchored = proposeSimplePlan({ target: 200_000, balance: 5_000, targetYear: 2032, marketRate: 0.10, forceCash: false, rateKindOverride: null, now: anchoredAt });
+    const value = planValue(5_000, anchored.monthly, 12, 0.10, 0);
+    expect(value).toBeCloseTo(futureValue(5_000, anchored.monthly, 12, 0.10, []), 6);
+    const resolved = proposeSimplePlan({ target: 200_000, balance: value, targetYear: 2032, marketRate: 0.10, forceCash: false, rateKindOverride: null, now: NOW });
+    expect(Math.abs(resolved.monthly - anchored.monthly)).toBeLessThanOrEqual(1);
   });
-  it('is started at the top of the year', () => expect(vacationStatus({ annual: 10000, monthly: 834, savedThisYear: 0, expectedSoFar: 0, resetNeeded: false }, new Date(2027, 0, 5)).kind).toBe('started'));
+  it('adds the net on top of the anchored plan', () =>
+    expect(planValue(1_000, 100, 3, 0, -450)).toBe(850));
+});
+
+describe('yourPart', () => {
+  it('is the anchor balance plus every planned monthly', () => expect(yourPart(1_000, 1_200, 24)).toBe(29_800));
+});
+
+describe('worstOf', () => {
+  const st = (kind: 'started' | 'imported' | 'ahead' | 'on_plan' | 'behind' | 'done', net = 0, netSince: string | null = null) => ({ kind, net, netSince });
+  it('behind beats ahead beats on plan beats started', () => {
+    expect(worstOf([st('done'), st('started'), st('on_plan'), st('ahead', 450), st('behind', -450, '2026-11-15')]).kind).toBe('behind');
+    expect(worstOf([st('done'), st('started'), st('on_plan'), st('ahead', 450)]).kind).toBe('ahead');
+    expect(worstOf([st('done'), st('started'), st('on_plan')]).kind).toBe('on_plan');
+    expect(worstOf([st('done'), st('started')]).kind).toBe('started');
+    expect(worstOf([st('done'), st('done')]).kind).toBe('done');
+  });
+  it('sums the nets of the worst units and keeps the oldest netSince', () => {
+    const s = worstOf([st('behind', -450, '2026-11-15'), st('on_plan'), st('behind', -200, '2026-10-01')]);
+    expect(s).toEqual({ kind: 'behind', net: -650, netSince: '2026-10-01' });
+  });
+  it('passes imported through when every unit is imported', () => expect(worstOf([st('imported'), st('imported')]).kind).toBe('imported'));
+});
+
+describe('growthLine', () => {
+  it('reads Assuming growth at 10%, worth ~$14,200 today for a market unit', () =>
+    expect(growthLine({ rateKind: 'market', annualRate: 0.10, planValue: 14200, tally: 12000 })).toBe('Assuming growth at 10%, worth ~$14,200 today'));
+  it('is null for a cash unit', () =>
+    expect(growthLine({ rateKind: 'cash', annualRate: 0.04, planValue: 14200, tally: 12000 })).toBeNull());
+  it('is null while planValue is under $50 above the tally', () => {
+    expect(growthLine({ rateKind: 'market', annualRate: 0.10, planValue: 949, tally: 900 })).toBeNull();
+    expect(growthLine({ rateKind: 'market', annualRate: 0.10, planValue: 950, tally: 900 })).toBe('Assuming growth at 10%, worth ~$950 today');
+  });
+  it('never omits the word Assuming', () =>
+    expect(growthLine({ rateKind: 'market', annualRate: 0.08, planValue: 5000, tally: 4000 })).toMatch(/^Assuming /));
 });
 
 describe('isKidNotYetBorn', () => {
@@ -256,41 +318,5 @@ describe('final review: deadline month, vacation start, status cap', () => {
     expect(proposeVacationPlan(cfg, NOW, '2025-06-02T10:00:00').expectedSoFar).toBe(500 * 10);
     // Never negative.
     expect(proposeVacationPlan(cfg, new Date(2026, 3, 1), '2026-06-02T10:00:00').expectedSoFar).toBe(0);
-  });
-
-  it('reads Plan started for a vacation created in November with nothing saved', () => {
-    const p = proposeVacationPlan({ tripsPerYear: 2, budgetPerTrip: 3000, savedThisYear: 0, savedYear: 2026 }, NOW, '2026-11-15T10:00:00');
-    expect(vacationStatus(p, NOW).kind).toBe('started');
-  });
-
-  it('reads Plan started in February of a new year before any log', () => {
-    const feb = new Date(2027, 1, 10);
-    const p = proposeVacationPlan({ tripsPerYear: 2, budgetPerTrip: 3000, savedThisYear: 2500, savedYear: 2026 }, feb, '2026-03-01T10:00:00');
-    expect(p.resetNeeded).toBeTrue();
-    expect(vacationStatus(p, feb).kind).toBe('started');
-  });
-
-  it('reads On plan when the logged amount equals the expected amount', () => {
-    const p = proposeVacationPlan({ tripsPerYear: 2, budgetPerTrip: 3000, savedThisYear: 2500, savedYear: 2026 }, NOW, '2026-06-02T10:00:00');
-    expect(p.expectedSoFar).toBe(2500);
-    expect(vacationStatus(p, NOW).kind).toBe('on_plan');
-  });
-
-  it('stops the expected balance at maxMonths', () => {
-    // rate 0, 100 a month, logged 18 months after the anchor, plan ran 12 months.
-    const args = { completed: false, imported: false, target: 1250, balance: 1200, anchorBalance: 0, anchorMonthly: 100, planAnchoredAt: '2026-01-15T10:00:00', balanceUpdatedAt: '2027-07-15T10:00:00' as string | null, rate: 0, lumps: [], now: new Date(2027, 6, 20) };
-    expect(planStatus(args).kind).toBe('behind');
-    const capped = planStatus({ ...args, maxMonths: 12 });
-    expect(capped.kind).toBe('on_plan');
-    expect(capped.delta).toBe(0);
-  });
-});
-
-describe('planStatus extraExpected', () => {
-  it('adds to the expected balance, lowering the delta by exactly that amount', () => {
-    const args = { completed: false, imported: false, target: 250000, balance: 3000, anchorBalance: 0, anchorMonthly: 417, planAnchoredAt: '2026-11-15T10:00:00', balanceUpdatedAt: '2027-05-15T10:00:00' as string | null, rate: 0.10, lumps: [], now: new Date(2027, 10, 20) };
-    const without = planStatus(args);
-    const withExtra = planStatus({ ...args, extraExpected: 5000 });
-    expect(without.delta - withExtra.delta).toBeCloseTo(5000, 6);
   });
 });

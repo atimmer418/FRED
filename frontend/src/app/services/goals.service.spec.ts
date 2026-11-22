@@ -134,6 +134,35 @@ describe('GoalsService', () => {
     expect(service.goals().map(g => g.name)).toEqual(['Goal 1', 'Renamed']);
   });
 
+  it('adjust POSTs a ledger entry, patches the signal and reports an uncapped miss', () => {
+    service.goals.set([goal(1), goal(2)]);
+    let result: { goal: Goal; capped: boolean } | undefined;
+    service.adjust(2, 'goal', 'missed').subscribe(r => (result = r));
+
+    const req = http.expectOne(`${url}/2/ledger`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.headers.get('Authorization')).toMatch(/^Bearer /);
+    expect(req.request.body).toEqual({ unit: 'goal', kind: 'missed' });
+    req.flush(goal(2, 'Adjusted'));
+
+    expect(result?.goal.name).toBe('Adjusted');
+    expect(result?.capped).toBeFalse();
+    expect(service.goals().map(g => g.name)).toEqual(['Goal 1', 'Adjusted']);
+  });
+
+  it('adjust reads X-Fred-Capped and sends the amount of a set', () => {
+    service.goals.set([goal(1)]);
+    let capped: boolean | undefined;
+    service.adjust(1, 'kid:0:plan529', 'missed').subscribe(r => (capped = r.capped));
+    http.expectOne(`${url}/1/ledger`).flush(goal(1), { headers: { 'X-Fred-Capped': 'true' } });
+    expect(capped).toBeTrue();
+
+    service.adjust(1, 'goal', 'set', 1_200).subscribe();
+    const set = http.expectOne(`${url}/1/ledger`);
+    expect(set.request.body).toEqual({ unit: 'goal', kind: 'set', amount: 1_200 });
+    set.flush(goal(1));
+  });
+
   it('remove DELETEs and drops the goal', () => {
     service.goals.set([goal(1), goal(2)]);
     service.remove(1).subscribe();

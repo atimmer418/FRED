@@ -1,13 +1,20 @@
 import { buildGoalPlanView, fmtCompact, fmtMoney, GoalPlanContext, GoalPlanInput } from './goal-plan.view-model';
 import { buildKidTimeline } from './kid-timeline.model';
-import { AccountState, KidInput, KidsConfig } from '../../models/goal.model';
-import { futureValue, proposeKidAccountPlan } from '../../utils/goal-plan.utils';
+import { AccountState, KidInput, KidsConfig, UnitTally } from '../../models/goal.model';
+import { futureValue, proposeKidAccountPlan, proposeSimplePlan } from '../../utils/goal-plan.utils';
 import { CASH_RATE } from '../../services/rate-assumptions.service';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { everydayMonthlyForKid } from '../../utils/kid-cost.utils';
 
 const NOW = new Date(2026, 10, 15); // 15 Nov 2026
 const Y = NOW.getFullYear();
+
+function tally(extra: Partial<UnitTally> = {}): UnitTally {
+  return {
+    tally: 0, creditedThrough: '2026-11-15', creditsUntil: null, nextCreditDate: '2026-12-01',
+    nextCreditAmount: 450, net: 0, netSince: null, startedCrediting: true, ...extra,
+  };
+}
 
 function account(balance = 0, extra: Partial<AccountState> = {}): AccountState {
   return { balance, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0, ...extra };
@@ -45,7 +52,7 @@ function kidsGoal(kids: KidsConfig['kids'], extra: Partial<GoalPlanInput> = {}):
 }
 
 describe('buildGoalPlanView', () => {
-  it('aggregates kids accounts into one status and progress; the accounts sum to investMonthly, not the hero', () => {
+  it('aggregates kids accounts into one status and progress against your part; the accounts sum to investMonthly, not the hero', () => {
     const goal = kidsGoal([
       {
         label: 'Ada', birthYear: Y - 2, birthMonth: 3,
@@ -70,11 +77,11 @@ describe('buildGoalPlanView', () => {
     const brokerage = view.kids!.find(k => k.account === 'brokerage')!;
     expect(view.investMonthly).toBe(p529.totals.monthly + brokerage.totals.monthly);
 
-    // balance 35K of a 2 × 350K family target
-    expect(view.progressPct).toBeCloseTo((35_000 / 700_000) * 100, 6);
-    // graded at the latest account log, as one family plan
-    expect(['ahead', 'on_plan', 'behind']).toContain(view.status.kind);
-    expect(view.status.asOf).toBe('2026-09-01T00:00:00');
+    // 35K saved of your part: Ada's anchors plus 194 planned months (Jan 2026 to Mar 2042); Ben has none.
+    const ada = (8_000 + 200 * 194) + (15_000 + 300 * 194);
+    expect(view.progressPct).toBeCloseTo((35_000 / ada) * 100, 6);
+    // No unit has a tally yet: Plan started.
+    expect(view.status.kind).toBe('started');
   });
 
   it('grades status with the stored plan rate, not the live chip', () => {
@@ -172,7 +179,7 @@ describe('buildGoalPlanView', () => {
     expect(at12.status).toEqual(at8.status);
   });
 
-  it('reads on_plan when a kid account matches the anchor-time plan; a stored giftDays flag adds no lump to the expected balance', () => {
+  it('reads on_plan from a credited kid unit with nothing missed; a stored giftDays flag adds no lump to the plan value', () => {
     const anchoredAt = '2025-11-01T00:00:00';
     const loggedAt = '2026-02-01T00:00:00'; // 3 months after the anchor, one January inside the window
     const anchorPlan = proposeKidAccountPlan({
@@ -194,9 +201,13 @@ describe('buildGoalPlanView', () => {
         },
       }],
     };
-    const view = buildGoalPlanView(base({ type: 'KIDS', config, planAnchoredAt: anchoredAt }), ctx({ marketRate: 0.12 }));
+    const view = buildGoalPlanView(base({
+      type: 'KIDS', config, planAnchoredAt: anchoredAt,
+      unitTallies: { 'kid:0:plan529': tally({ tally: anchorPlan.monthly * 12 }) },
+    }), ctx({ marketRate: 0.12, now: new Date(2026, 1, 15) }));
     expect(view.status.kind).toBe('on_plan');
-    expect(view.status.delta).toBeCloseTo(0, 6);
+    expect(view.status.net).toBe(0);
+    expect(view.kids![0].perKid[0].planValue).toBeCloseTo(expected, 6);
   });
 
   it('resolves a rate kind per kid account from the anchor date', () => {
@@ -346,7 +357,7 @@ describe('buildGoalPlanView first-year fund', () => {
     expect((flagged as any).giftDays).toBeUndefined();
   });
 
-  it('grades a cash fund beside a market 529 at the cash rate', () => {
+  it('values a cash fund beside a market 529 at the cash rate', () => {
     const anchoredAt = '2026-11-15T00:00:00';
     const loggedAt = '2028-10-10T00:00:00';
     const anchor529 = proposeKidAccountPlan({
@@ -360,10 +371,14 @@ describe('buildGoalPlanView first-year fund', () => {
       fundKid('A', 2028, 11, [2028, 11], 20800,
         account(balFund, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: 834 }),
         account(bal529, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: anchor529.monthly })),
-    ], { plan529Target: 47_800, brokerageTarget: 0 }, { planAnchoredAt: anchoredAt });
+    ], { plan529Target: 47_800, brokerageTarget: 0 }, {
+      planAnchoredAt: anchoredAt,
+      unitTallies: { 'kid:0:plan529': tally({ tally: bal529 }), 'kid:0:firstYear': tally({ tally: balFund }) },
+    });
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2028, 9, 15) }));
     expect(view.status.kind).toBe('on_plan');
-    expect(view.status.delta).toBeCloseTo(0, 0);
+    expect(view.firstYear!.rows[0].planValue).toBeCloseTo(balFund, 6);
+    expect(view.kids![0].perKid[0].planValue).toBeCloseTo(bal529, 6);
   });
 
   it('is not behind six months after a fully funded fund ended, beside a 529 that is on plan', () => {
@@ -378,11 +393,17 @@ describe('buildGoalPlanView first-year fund', () => {
       fundKid('A', 2028, 11, [2027, 11], 20800,
         account(20_800, { balanceUpdatedAt: '2027-10-10T00:00:00', anchorBalance: 0, anchorMonthly: 1702 }),
         account(bal529, { balanceUpdatedAt: loggedAt, anchorBalance: 0, anchorMonthly: anchor529.monthly })),
-    ], { plan529Target: 47_800, brokerageTarget: 0 }, { planAnchoredAt: anchoredAt });
+    ], { plan529Target: 47_800, brokerageTarget: 0 }, {
+      planAnchoredAt: anchoredAt,
+      // The finished fund's own figures would read Behind; a finished fund no longer counts.
+      unitTallies: {
+        'kid:0:plan529': tally({ tally: bal529 }),
+        'kid:0:firstYear': tally({ tally: 20_000, net: -800, netSince: '2027-10-01', creditsUntil: '2027-11-30' }),
+      },
+    });
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2028, 4, 15) }));
     expect(view.firstYear!.rows[0].plan.finished).toBeTrue();
     expect(view.status.kind).toBe('on_plan');
-    expect(view.status.delta).toBeCloseTo(0, 0);
   });
 
   it('drops a finished fund from the hero total, status and progress and hides it after 12 months', () => {
@@ -398,7 +419,7 @@ describe('buildGoalPlanView first-year fund', () => {
     expect(withFund.monthlyTotal).toBe(noFund.monthlyTotal);
     expect(withFund.firstYear!.totalMonthly).toBe(0);
     expect(withFund.firstYear!.endsLabel).toBeNull();
-    expect(withFund.progressPct).toBeCloseTo((10_000 / 300_000) * 100, 6);
+    expect(withFund.progressPct).toBe(noFund.progressPct);
     expect(withFund.status).toEqual(noFund.status);
     expect(withFund.firstYear!.rows.map(r => r.plan.finished)).toEqual([true, true, true]);
     expect(withFund.firstYear!.rows.map(r => r.hidden)).toEqual([false, true, false]);
@@ -462,19 +483,19 @@ describe('buildGoalPlanView first-year fund', () => {
 });
 
 describe('buildGoalPlanView final review fixes', () => {
-  it('is not Behind for a simple goal logged six months after its deadline at the planned amount', () => {
-    // Rate 0, $1,100 a month for the 11 months to Dec 2026 plans $12,100 against a $12,000 target.
+  it('reads Done for a simple goal past its last credit day with nothing missed', () => {
     const goal = base({
       config: { targetAmount: 12_000, targetYear: 2026 },
       currentBalance: 11_990, anchorBalance: 0, anchorMonthly: 1_100, planRate: 0,
-      planAnchoredAt: '2026-01-15T00:00:00', balanceUpdatedAt: '2027-06-15T00:00:00',
+      planAnchoredAt: '2026-01-15T00:00:00',
+      tally: tally({ tally: 11_990, creditsUntil: '2026-12-31', nextCreditDate: null, nextCreditAmount: 0 }),
     });
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2027, 5, 20) }));
-    expect(view.status.kind).toBe('on_plan');
+    expect(view.status.kind).toBe('done');
   });
 
-  it('stops a kids goal expected balance at the latest account deadline', () => {
-    // One account, rate 0, $100 a month for the 12 months to the 18th birthday in Jan 2027.
+  it('stops a kid account plan value at its deadline', () => {
+    // One account, $100 a month for the 12 months to the 18th birthday in Jan 2027, viewed 18 months in.
     const goal = base({
       type: 'KIDS',
       config: {
@@ -490,11 +511,13 @@ describe('buildGoalPlanView final review fixes', () => {
       planRate: 0, planAnchoredAt: '2026-01-15T00:00:00',
     });
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2027, 6, 20) }));
-    expect(view.status.kind).toBe('on_plan');
+    // Under 36 months to go at the anchor, so the account is cash and grows at the cash rate.
+    expect(view.kids![0].perKid[0].planValue).toBeCloseTo(futureValue(0, 100, 12, CASH_RATE, []), 6);
+    expect(view.kids![0].perKid[0].planValue).toBeLessThan(futureValue(0, 100, 18, CASH_RATE, []));
   });
 
   it('shows what is due in the deadline month for a simple goal', () => {
-    const goal = base({ config: { targetAmount: 30_000, targetYear: 2026 }, currentBalance: 24_000 });
+    const goal = base({ config: { targetAmount: 30_000, targetYear: 2026 }, currentBalance: 24_000, anchorBalance: 24_000, planAnchoredAt: '2026-12-01T00:00:00' });
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2026, 11, 5) }));
     expect(view.monthlyTotal).toBe(0);
     expect(view.dueNow).toBe(6_000);
@@ -509,8 +532,9 @@ describe('buildGoalPlanView final review fixes', () => {
       type: 'KIDS',
       config: {
         plan529Target: 50_000, brokerageTarget: 0,
-        kids: [{ label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000), brokerage: account(0) } }],
+        kids: [{ label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000, { anchorBalance: 30_000 }), brokerage: account(0) } }],
       } as KidsConfig,
+      planAnchoredAt: '2026-12-01T00:00:00',
     });
     const view = buildGoalPlanView(goal, ctx({ now: new Date(2026, 11, 5) }));
     expect(view.monthlyTotal).toBe(0);
@@ -552,8 +576,8 @@ describe('buildGoalPlanView final review fixes', () => {
       } as KidsConfig,
     });
     const view = buildGoalPlanView(goal, ctx());
-    expect(view.progressPct).toBeCloseTo(1, 6);
-    expect(view.status.asOf).toBe('2026-06-01T00:00:00');
+    // The 529 alone: $1,000 saved of a $1,000 part. The brokerage would add $5,000 of a bigger part.
+    expect(view.progressPct).toBe(100);
   });
 });
 
@@ -824,7 +848,7 @@ describe('buildGoalPlanView one-screen page', () => {
 
   it('whyInvestLine counts a saved balance as from you, so the shares still add up', () => {
     const one = kid('A', 2020, 3);
-    one.accounts.brokerage = account(25_000);
+    one.accounts.brokerage = account(25_000, { anchorBalance: 25_000 });
     const saved = buildGoalPlanView(family([one]), ctx());
     expect(saved.whyInvestLine).not.toBeNull();
     const m = saved.whyInvestLine!.match(KIDS_WHY);
@@ -850,8 +874,9 @@ describe('buildGoalPlanView one-screen page', () => {
       type: 'KIDS',
       config: {
         plan529Target: 50_000, brokerageTarget: 0,
-        kids: [{ label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000), brokerage: account(0) } }],
+        kids: [{ label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000, { anchorBalance: 30_000 }), brokerage: account(0) } }],
       } as KidsConfig,
+      planAnchoredAt: '2026-12-01T00:00:00',
     });
     const k = buildGoalPlanView(kids, ctx({ now: new Date(2026, 11, 5) }));
     expect(k.heroLabel).toBe('Due now');
@@ -859,7 +884,7 @@ describe('buildGoalPlanView one-screen page', () => {
     expect(k.whyInvestLine).toBeNull();
 
     const simple = buildGoalPlanView(
-      base({ config: { targetAmount: 30_000, targetYear: 2026 }, currentBalance: 24_000 }),
+      base({ config: { targetAmount: 30_000, targetYear: 2026 }, currentBalance: 24_000, anchorBalance: 24_000, planAnchoredAt: '2026-12-01T00:00:00' }),
       ctx({ now: new Date(2026, 11, 5) }),
     );
     expect(simple.heroLabel).toBe('Due now');
@@ -869,7 +894,7 @@ describe('buildGoalPlanView one-screen page', () => {
 
   it('a HOUSE plan at the market rate reads the simple-plan first sentence and has no coversLine', () => {
     const view = buildGoalPlanView(
-      base({ type: 'HOUSE', currentBalance: 12_000, config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }),
+      base({ type: 'HOUSE', currentBalance: 12_000, anchorBalance: 12_000, planAnchoredAt: '2026-11-01T00:00:00', config: { price: 500_000, downPaymentPct: 20, targetYear: Y + 6 } }),
       ctx(),
     );
     expect(view.coversLine).toBeNull();
@@ -996,11 +1021,12 @@ describe('buildGoalPlanView one-screen page', () => {
       const config: KidsConfig = {
         plan529Target: 50_000, brokerageTarget: 0,
         kids: [
-          { label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000), brokerage: account(0) } },
-          { label: 'B', birthYear: 2020, birthMonth: 3, accounts: { plan529: account(50_000), brokerage: account(0) } },
+          { label: 'Teen', birthYear: 2008, birthMonth: 12, accounts: { plan529: account(30_000, { anchorBalance: 30_000 }), brokerage: account(0) } },
+          { label: 'B', birthYear: 2020, birthMonth: 3, accounts: { plan529: account(50_000, { anchorBalance: 50_000 }), brokerage: account(0) } },
         ],
       };
-      const view = buildGoalPlanView(base({ type: 'KIDS', config }), ctx({ now: new Date(2026, 11, 5) }));
+      // Anchored this month, so the plan's value is the anchor balance with no growth yet.
+      const view = buildGoalPlanView(base({ type: 'KIDS', config, planAnchoredAt: '2026-12-01T00:00:00' }), ctx({ now: new Date(2026, 11, 5) }));
       expect(view.investMonthly).toBe(0);
       expect(view.everyday![1].monthly).toBeGreaterThan(0);
       expect(view.heroLabel).toBe('Due now');
@@ -1027,5 +1053,134 @@ describe('buildGoalPlanView one-screen page', () => {
       expect(vacation.investMonthly).toBe(vacation.monthlyTotal);
       expect(vacation.everyday).toBeUndefined();
     });
+  });
+});
+
+// ── Saved so far: the server's tally drives status, progress and the band ────
+
+describe('buildGoalPlanView from the tally', () => {
+  it('simple view re-solves from planValue, not the tally', () => {
+    const anchoredAt = new Date(2025, 10, 15);
+    const anchorPlan = proposeSimplePlan({ target: 200_000, balance: 0, targetYear: Y + 6, marketRate: 0.10, forceCash: false, rateKindOverride: null, now: anchoredAt });
+    const saved = anchorPlan.monthly * 12;
+    const goal = base({
+      anchorMonthly: anchorPlan.monthly, planAnchoredAt: '2025-11-15T00:00:00', currentBalance: saved,
+      tally: tally({ tally: saved }),
+    });
+    const view = buildGoalPlanView(goal, ctx({ rateKindOverride: 'market' }));
+    expect(Math.abs(view.investMonthly - anchorPlan.monthly)).toBeLessThanOrEqual(1);
+    // Solving from the money put in (no growth) would ask for more every month.
+    const fromTally = proposeSimplePlan({ target: 200_000, balance: saved, targetYear: Y + 6, marketRate: 0.10, forceCash: false, rateKindOverride: 'market', now: NOW });
+    expect(fromTally.monthly).toBeGreaterThan(anchorPlan.monthly + 1);
+  });
+
+  it('a missed tap raises the re-solved monthly', () => {
+    const anchorPlan = proposeSimplePlan({ target: 200_000, balance: 0, targetYear: Y + 6, marketRate: 0.10, forceCash: false, rateKindOverride: null, now: new Date(2025, 10, 15) });
+    const goal = (net: number) => base({ anchorMonthly: anchorPlan.monthly, planAnchoredAt: '2025-11-15T00:00:00', tally: tally({ tally: 5_000, net }) });
+    expect(buildGoalPlanView(goal(-450), ctx()).investMonthly).toBeGreaterThan(buildGoalPlanView(goal(0), ctx()).investMonthly);
+  });
+
+  it('keeps the draft balance in a preview with no anchor yet', () => {
+    const goal = base({ currentBalance: 24_000, anchorBalance: 0 });
+    const preview = buildGoalPlanView(goal, ctx({ reanchorPending: true }));
+    const plan = proposeSimplePlan({ target: 200_000, balance: 24_000, targetYear: Y + 6, marketRate: 0.10, forceCash: false, rateKindOverride: null, now: NOW });
+    expect(preview.investMonthly).toBe(plan.monthly);
+    expect(preview.growthLine).toBeNull();
+  });
+
+  describe('tallyLine', () => {
+    // $1,200 a month for the 25 months from Nov 2026 through Dec 2028: your part is $30,000.
+    const goal = (t: Partial<UnitTally>) => base({
+      config: { targetAmount: 40_000, targetYear: 2028 },
+      anchorMonthly: 1_200, planAnchoredAt: '2026-11-01T00:00:00',
+      tally: tally({ tally: 900, nextCreditDate: '2027-01-01', ...t }),
+    });
+
+    it('tallyLine reads Saved $900 · 3% of your $30K · Next $450 Jan 1', () => {
+      const view = buildGoalPlanView(goal({}), ctx());
+      expect(view.tallyLine).toEqual({ saved: 'Saved $900', part: '3% of your $30K', next: 'Next $450 Jan 1', net: null });
+      expect(view.progressPct).toBeCloseTo(3, 6);
+      expect(view.status.kind).toBe('on_plan');
+    });
+
+    it('reads Behind by $450 since Nov 15 after a missed tap, and Ahead by $450 after a doubled up', () => {
+      const behind = buildGoalPlanView(goal({ tally: 450, net: -450, netSince: '2026-11-15' }), ctx());
+      expect(behind.tallyLine!.net).toBe('Behind by $450 since Nov 15');
+      expect(behind.status.kind).toBe('behind');
+      expect(buildGoalPlanView(goal({ tally: 1_350, net: 450 }), ctx()).tallyLine!.net).toBe('Ahead by $450');
+    });
+
+    it('reads Saved $0 · First $450 lands Dec 1 before the first credit', () => {
+      const view = buildGoalPlanView(goal({ tally: 0, startedCrediting: false, creditedThrough: null, nextCreditDate: '2026-12-01' }), ctx());
+      expect(view.tallyLine).toEqual({ saved: 'Saved $0', part: 'First $450 lands Dec 1', next: null, net: null });
+      expect(view.status.kind).toBe('started');
+    });
+
+    it('has no next fragment once credits have stopped', () =>
+      expect(buildGoalPlanView(goal({ nextCreditDate: null, nextCreditAmount: 0 }), ctx()).tallyLine!.next).toBeNull());
+
+    it('kids carry no goal-level tallyLine', () =>
+      expect(buildGoalPlanView(kidsGoal([{ label: 'A', birthYear: Y - 2, birthMonth: 3, accounts: { plan529: account(), brokerage: account() } }]), ctx()).tallyLine).toBeNull());
+  });
+
+  it('kids status is the worst unit', () => {
+    const kid: KidInput = { label: 'Ada', birthYear: Y - 2, birthMonth: 3, accounts: { plan529: account(0, { anchorMonthly: 200 }), brokerage: account(0, { anchorMonthly: 300 }) } };
+    const view = (brokerage: Partial<UnitTally>) => buildGoalPlanView(kidsGoal([kid], {
+      unitTallies: { 'kid:0:plan529': tally({ tally: 400, nextCreditAmount: 100 }), 'kid:0:brokerage': tally({ tally: 600, ...brokerage }) },
+    }), ctx());
+    const behind = view({ net: -150, netSince: '2026-11-15' }).status;
+    expect(behind).toEqual({ kind: 'behind', net: -150, netSince: '2026-11-15' });
+    expect(view({ net: 150 }).status.kind).toBe('ahead');
+    expect(view({}).status.kind).toBe('on_plan');
+    expect(view({ tally: 0, startedCrediting: false }).status.kind).toBe('on_plan');
+  });
+
+  it("vacation reads Done when the year's budget is in", () => {
+    const vacation = (saved: number) => buildGoalPlanView(base({
+      type: 'VACATION',
+      config: { tripsPerYear: 2, budgetPerTrip: 3_000, savedThisYear: saved, savedYear: Y },
+      anchorMonthly: 500,
+      tally: tally({ tally: saved, nextCreditDate: saved >= 6_000 ? null : '2026-12-01' }),
+    }), ctx());
+    const done = vacation(6_000);
+    expect(done.status.kind).toBe('done');
+    expect(done.progressPct).toBe(100);
+    expect(done.tallyLine).toEqual({ saved: 'Saved $6,000', part: '100% of your $6K', next: null, net: null });
+    expect(vacation(2_500).status.kind).toBe('on_plan');
+    expect(vacation(2_500).growthLine).toBeNull();
+  });
+
+  it('growthLine is set on an invested simple goal years in and null on a cash one', () => {
+    // Anchored Nov 2023 at $1,000 a month: 36 months in, the plan values $36,000 put in at the 10% plan rate.
+    const invested = buildGoalPlanView(base({
+      anchorMonthly: 1_000, planAnchoredAt: '2023-11-15T00:00:00', tally: tally({ tally: 36_000 }),
+    }), ctx());
+    expect(invested.growthLine).toBe(`Assuming growth at 10%, worth ~${fmtMoney(futureValue(0, 1_000, 36, 0.10, []))} today`);
+
+    const cash = buildGoalPlanView(base({
+      type: 'EMERGENCY_FUND', config: { monthlyExpenses: 4_000, months: 6, targetYear: Y + 1 },
+      anchorMonthly: 1_000, planRate: CASH_RATE, planRateKind: 'cash', planAnchoredAt: '2023-11-15T00:00:00',
+      tally: tally({ tally: 20_000 }),
+    }), ctx());
+    expect(cash.growthLine).toBeNull();
+  });
+
+  it('kids 529 and nest egg carry a growthLine, the baby fund never does', () => {
+    const goal = fundGoal([
+      { label: 'Ada', birthYear: Y - 3, birthMonth: 3, accounts: { plan529: account(0, { anchorMonthly: 200 }), brokerage: account(0, { anchorMonthly: 300 }) } },
+      fundKid('Theo', Y + 5, 6, [Y + 5, 6], 20_800, account(0, { anchorMonthly: 500 })),
+    ], { plan529Target: 100_000, brokerageTarget: 250_000 }, {
+      planAnchoredAt: '2023-11-15T00:00:00',
+      unitTallies: {
+        'kid:0:plan529': tally({ tally: 7_200 }),
+        'kid:0:brokerage': tally({ tally: 10_800 }),
+        'kid:1:firstYear': tally({ tally: 18_000 }),
+      },
+    });
+    const view = buildGoalPlanView(goal, ctx());
+    const row = (account: 'plan529' | 'brokerage') => view.kids!.find(a => a.account === account)!.perKid[0];
+    expect(row('plan529').growthLine).toBe(`Assuming growth at 10%, worth ~${fmtMoney(futureValue(0, 200, 36, 0.10, []))} today`);
+    expect(row('brokerage').growthLine).toBe(`Assuming growth at 10%, worth ~${fmtMoney(futureValue(0, 300, 36, 0.10, []))} today`);
+    expect(view.firstYear!.rows[0].growthLine).toBeNull();
   });
 });

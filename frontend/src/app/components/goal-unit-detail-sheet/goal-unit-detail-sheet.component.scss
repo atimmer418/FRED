@@ -86,6 +86,23 @@ h3 {
   margin-top: 9px;
 }
 
+// The assumed-growth line and the pills under the Saved so far and Status tiles.
+.ud-growth {
+  margin: 8px 2px 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ud-pills {
+  margin-top: 10px;
+}
+
 // The Saved so far tile: a label row (the label, and Done while the tray is open) over a value
 // button that opens the tray. The lit tile follows the plan pages: blue border, white face.
 .ud-bal {

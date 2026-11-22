@@ -1,6 +1,6 @@
 import { Component, DestroyRef, ElementRef, Input, Signal, computed, effect, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { ModalController, ViewDidEnter, ViewWillLeave } from '@ionic/angular/standalone';
+import { ModalController, ViewWillLeave } from '@ionic/angular/standalone';
 
 import { SheetDragDismissDirective } from '../../directives/sheet-drag-dismiss.directive';
 import { BOTTOM_SHEET_MODAL_OPTS } from '../../utils/bottom-sheet.utils';
@@ -10,6 +10,7 @@ import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.co
 import { KidCostSourcesSheetComponent } from '../kid-cost-sources-sheet/kid-cost-sources-sheet.component';
 import { GoalPlanInfoSheetComponent } from '../goal-plan-info-sheet/goal-plan-info-sheet.component';
 import { InfoNote } from '../goal-plan-info-sheet/info-note';
+import { TallyPillsComponent } from '../tally-pills/tally-pills.component';
 import { UnitPill, fmtMoney } from '../../pages/goal/goal-plan.view-model';
 
 export type UnitTitle = 'Baby fund' | 'College' | 'Nest egg' | 'Everyday';
@@ -31,7 +32,11 @@ export interface UnitDetail {
   balance: number | null;
   /** What the unit saves toward, in dollars: the Saved so far tray's cap. Null when it has none. */
   target: number | null;
-  /** The unit's Status word and its tone ("On plan", good). Null for the everyday line. */
+  /** What Missed one and Doubled up move: the server's next credit for the unit. 0 for a finished or imported unit, a preview, and the everyday line. */
+  share: number;
+  /** "Assuming growth at 10%, worth ~$X today" for an invested unit; null for cash, the baby fund, a preview and the everyday line. */
+  growthLine: string | null;
+  /** The unit's Status ("On plan", "Behind by $450") and its tone. Null for the everyday line. */
   status: { text: string; tone: 'good' | 'warn' | 'info' | 'muted' } | null;
   /** Empty for a baby fund; At 18 / At 22 / At 30 for a 529 or nest egg. Years only for a dated, born kid. */
   milestones: Array<{ label: string; year: number | null; value: string }>;
@@ -77,25 +82,28 @@ export class SavingTrayHost<F extends string> extends AmountTrayHost<F> {
 @Component({
   selector: 'app-goal-unit-detail-sheet',
   standalone: true,
-  imports: [DecimalPipe, AmountTraySlotComponent],
+  imports: [DecimalPipe, AmountTraySlotComponent, TallyPillsComponent],
   templateUrl: './goal-unit-detail-sheet.component.html',
   styleUrls: ['./goal-unit-detail-sheet.component.scss'],
   host: { class: 'ion-content-scroll-host' },
   hostDirectives: [SheetDragDismissDirective],
 })
-export class GoalUnitDetailSheetComponent implements ViewDidEnter, ViewWillLeave {
+export class GoalUnitDetailSheetComponent implements ViewWillLeave {
   /** The unit, live. Null once the unit no longer exists, which closes the sheet. */
   @Input({ required: true }) detail!: Signal<UnitDetail | null>;
   /** Saves a new Saved so far balance. Null leaves the balance read-only. */
   @Input() onBalance: ((value: number) => Promise<void>) | null = null;
   /** The "How FRED plans this" notes behind the info button. Empty hides the button. */
   @Input() notes: InfoNote[] = [];
-  /** True when opened from the Update balance chip: the Saved so far tray opens as the sheet lands. */
-  @Input() openBalance = false;
+  /** Posts a Missed one ('missed') or Doubled up ('extra') for this unit; the page owns the write and the toast. Null hides the pills. */
+  @Input() onTally: ((kind: 'missed' | 'extra') => Promise<void>) | null = null;
 
   private readonly modalCtrl = inject(ModalController);
 
   readonly fmtMoney = fmtMoney;
+
+  /** True while a Missed one or Doubled up is posting, so a second tap cannot overlap it. */
+  readonly tallyBusy = signal(false);
 
   /** The slider's value while the tray is open, saved when it closes; null when nothing is pending. */
   readonly balanceDraft = signal<number | null>(null);
@@ -131,11 +139,6 @@ export class GoalUnitDetailSheetComponent implements ViewDidEnter, ViewWillLeave
     return !!this.onBalance && !!d && d.balance !== null && !d.finished;
   }
 
-  /** The sheet has landed: opened from the Update balance chip, the tray opens straight away. */
-  ionViewDidEnter(): void {
-    if (this.openBalance && this.canEditBalance()) this.tray.toggle('balance');
-  }
-
   /** The sheet is going (Done, a drag, the backdrop): the tray snaps shut and a pending balance saves. */
   ionViewWillLeave(): void {
     this.tray.close(true);
@@ -152,6 +155,17 @@ export class GoalUnitDetailSheetComponent implements ViewDidEnter, ViewWillLeave
       // keeps showing it until that write lands, whatever order the writes settle in.
       if (this.tray.open() === null && this.balanceDraft() === draft) this.balanceDraft.set(null);
     });
+  }
+
+  /** A pill tap: the page posts it and shows the toast; the detail then refreshes by itself. */
+  async tally(kind: 'missed' | 'extra'): Promise<void> {
+    if (!this.onTally || this.tallyBusy()) return;
+    this.tallyBusy.set(true);
+    try {
+      await this.onTally(kind);
+    } finally {
+      this.tallyBusy.set(false);
+    }
   }
 
   async openInfo(): Promise<void> {

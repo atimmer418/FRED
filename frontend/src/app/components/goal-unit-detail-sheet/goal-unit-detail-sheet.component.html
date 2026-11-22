@@ -65,6 +65,14 @@
       }
     }
 
+    @if (d.growthLine) {
+      <p class="ud-growth">{{ d.growthLine }}</p>
+    }
+    @if (onTally && !d.finished) {
+      <app-tally-pills class="ud-pills" [share]="d.share" [disabled]="tallyBusy()"
+                       (missed)="tally('missed')" (doubled)="tally('extra')" />
+    }
+
     @if (d.milestones.length) {
       <p class="fd-zone ud-zone">What it grows to</p>
       <div class="ud-ms">

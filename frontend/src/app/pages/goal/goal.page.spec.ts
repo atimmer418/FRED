@@ -846,8 +846,35 @@ describe('GoalPage', () => {
 
   // ── Kids: groups, rows open the sheet, the hint ────────────────────────────
 
+  /** The ledger fake for a kids goal: each entry moves that unit's tally, as the server would. */
+  function kidAdjust(): void {
+    adjustSpy.and.callFake((id: number, unit: string, kind: LedgerKind, amount?: number) => {
+      const g = goals().find(x => x.id === id) as Goal;
+      const t = g.unitTallies?.[unit] ?? tallyOf({ tally: 0, nextCreditAmount: 0 });
+      const share = amount ?? t.nextCreditAmount;
+      const tally = Math.max(0, kind === 'set' ? amount! : kind === 'missed' ? t.tally - share : t.tally + share);
+      const net = kind === 'missed' ? -share : kind === 'extra' ? share : 0;
+      const updated: Goal = { ...g, unitTallies: { ...g.unitTallies, [unit]: { ...t, tally, net: t.net + net } } };
+      goals.update(list => list.map(x => (x.id === id ? updated : x)));
+      return of({ goal: updated, capped: false });
+    });
+  }
+
+  /** The sample family with a server tally on every saving unit: $900 each, $450 a payday. */
+  function talliedFamily(id: number): Goal {
+    const g = sampleFamily(id);
+    const unitTallies: Record<string, UnitTally> = {};
+    (g.config as KidsConfig).kids.forEach((k, i) => {
+      for (const account of Object.keys(k.accounts)) unitTallies[`kid:${i}:${account}`] = tallyOf();
+    });
+    return { ...g, anchorBalance: 0, anchorMonthly: 900, unitTallies };
+  }
+
   /** The sheet's props from the last modalCtrl.create call. */
-  function sheetProps(): { detail: () => UnitDetail | null; onBalance: ((v: number) => Promise<void>) | null; notes: InfoNote[]; openBalance: boolean } {
+  function sheetProps(): {
+    detail: () => UnitDetail | null; onBalance: ((v: number) => Promise<void>) | null;
+    onTally: ((kind: 'missed' | 'extra') => Promise<void>) | null; notes: InfoNote[];
+  } {
     const args = modalCtrl.create.calls.mostRecent().args[0];
     expect(args.component).toBe(GoalUnitDetailSheetComponent);
     return args.componentProps as ReturnType<typeof sheetProps>;
@@ -897,17 +924,55 @@ describe('GoalPage', () => {
     expect(props.notes[1].text).toBe(page.view().coversLine!);
 
     // The hook writes the balance through the page's queue, and the live detail follows.
-    echoUpdates();
+    kidAdjust();
     expect(props.onBalance).toEqual(jasmine.any(Function));
     await props.onBalance!(4_200);
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(((updateSpy.calls.mostRecent().args[1] as GoalWrite).config as KidsConfig).kids[0].accounts.brokerage.balance).toBe(4_200);
+    // A set entry on the unit's tally, not a PUT of the goal.
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(adjustSpy).toHaveBeenCalledOnceWith(5, 'kid:0:brokerage', 'set', 4_200);
     expect(props.detail()!.balance).toBe(4_200);
 
     expect(fixture.nativeElement.querySelector('.gp-bal-input')).toBeNull();
     expect(fixture.nativeElement.querySelector('.gp-bal')).toBeNull();
     expect((page as any).toggleBalance).toBeUndefined();
     expect((page as any).balanceOpen).toBeUndefined();
+  });
+
+  it('page passes onTally that posts for kid:1:brokerage', async () => {
+    const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
+    const page = fixture.componentInstance;
+    kidAdjust();
+    await page.openUnitDetail(1, 'brokerage');
+    const props = sheetProps();
+    expect(props.detail()!.share).toBe(450);
+    expect(props.detail()!.status).toEqual({ text: 'On plan', tone: 'good' });
+    expect(props.onTally).toEqual(jasmine.any(Function));
+
+    await props.onTally!('missed');
+    expect(adjustSpy).toHaveBeenCalledOnceWith(5, 'kid:1:brokerage', 'missed');
+    expect(updateSpy).not.toHaveBeenCalled();
+    // The sheet's live detail follows, and the page owns the toast with its Undo.
+    expect(props.detail()!.balance).toBe(450);
+    expect(props.detail()!.status).toEqual({ text: 'Behind by $450', tone: 'warn' });
+    expect(lastToast().message).toBe('Saved so far is now $450.');
+    expect(lastToast().action!.label).toBe('Undo');
+    await props.onTally!('extra');
+    expect(adjustSpy.calls.mostRecent().args).toEqual([5, 'kid:1:brokerage', 'extra']);
+    expect(props.detail()!.status).toEqual({ text: 'On plan', tone: 'good' });
+  });
+
+  it('the kid sheet detail carries the unit growth line (none for the baby fund) and no share for everyday or a finished unit', async () => {
+    const fixture = await create({ id: '5' }, { goals: [talliedFamily(5)] });
+    const page = fixture.componentInstance;
+    await page.openUnitDetail(0, 'plan529');
+    expect(sheetProps().detail()!.growthLine).toBe(page.view().kids![0].perKid[0].growthLine);
+    expect(sheetProps().onTally).not.toBeNull();
+    await page.openUnitDetail(1, 'firstYear');
+    expect(sheetProps().detail()!.growthLine).toBeNull();
+    expect(sheetProps().detail()!.share).toBe(450);
+    await page.openUnitDetail(0, 'everyday');
+    expect(sheetProps().onTally).toBeNull();
+    expect(sheetProps().detail()!.share).toBe(0);
   });
 
   it('maps the status chip to the sheet\'s tone', async () => {

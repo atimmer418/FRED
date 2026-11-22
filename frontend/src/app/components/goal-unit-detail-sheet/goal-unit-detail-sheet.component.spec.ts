@@ -31,6 +31,8 @@ function detail(partial: Partial<UnitDetail> = {}): UnitDetail {
     notes: [],
     sourcesLine: 'Four years at 2025-26 College Board prices, which tend to rise.',
     sourcesSheetKids: null,
+    share: 0,
+    growthLine: null,
     ...partial,
   };
 }
@@ -52,7 +54,7 @@ describe('GoalUnitDetailSheetComponent', () => {
 
   function mount(
     d: Signal<UnitDetail | null>,
-    inputs: { onBalance?: ((value: number) => Promise<void>) | null; notes?: InfoNote[]; openBalance?: boolean } = {},
+    inputs: { onBalance?: ((value: number) => Promise<void>) | null; notes?: InfoNote[]; onTally?: ((kind: 'missed' | 'extra') => Promise<void>) | null } = {},
   ): Fixture {
     modal = jasmine.createSpyObj('ModalController', ['dismiss', 'create']);
     modal.create.and.resolveTo({ present: async () => {} } as unknown as HTMLIonModalElement);
@@ -70,7 +72,7 @@ describe('GoalUnitDetailSheetComponent', () => {
     fixture.componentInstance.detail = d;
     if (inputs.onBalance !== undefined) fixture.componentInstance.onBalance = inputs.onBalance;
     if (inputs.notes !== undefined) fixture.componentInstance.notes = inputs.notes;
-    if (inputs.openBalance !== undefined) fixture.componentInstance.openBalance = inputs.openBalance;
+    if (inputs.onTally !== undefined) fixture.componentInstance.onTally = inputs.onTally;
     fixture.detectChanges();
     return fixture;
   }
@@ -296,20 +298,6 @@ describe('GoalUnitDetailSheetComponent', () => {
     expect(text(fixture, '.ud-bal .fd-tile-label')).toBe('Saved so far');
   });
 
-  it('opened from the Update balance chip, the tray opens as the sheet lands; not for a finished unit', () => {
-    const fixture = mount(signal({ ...nestEgg, balance: 4200 }), { onBalance: () => Promise.resolve(), openBalance: true });
-    expect(fixture.componentInstance.tray.open()).toBeNull();
-    fixture.componentInstance.ionViewDidEnter();
-    fixture.detectChanges();
-    expect(fixture.componentInstance.tray.open()).toBe('balance');
-    expect(slot(fixture)).not.toBeNull();
-
-    const finished = mount(signal({ ...nestEgg, balance: 4200, finished: true }), { onBalance: () => Promise.resolve(), openBalance: true });
-    finished.componentInstance.ionViewDidEnter();
-    finished.detectChanges();
-    expect(finished.componentInstance.tray.open()).toBeNull();
-  });
-
   it('each status tone sets its class', () => {
     const d = signal<UnitDetail | null>({ ...nestEgg, status: { text: 'Behind', tone: 'warn' } });
     const fixture = mount(d);
@@ -387,5 +375,74 @@ describe('GoalUnitDetailSheetComponent', () => {
     const fixture = mount(signal({ ...nestEgg, balance: 4200 }));
     expect(balanceBtn(fixture)).toBeNull();
     expect(text(fixture, '.ud-bal')).toContain('$4,200');
+  });
+
+  // ── Missed one / Doubled up ────────────────────────────────────────────────
+
+  const pillButtons = (fixture: Fixture) => Array.from(fixture.nativeElement.querySelectorAll('.tp-pill')) as HTMLButtonElement[];
+
+  it("pills show for a saving unit with the unit's share", () => {
+    const fixture = mount(signal({ ...nestEgg, balance: 4200, share: 450 }), { onTally: () => Promise.resolve() });
+    const pills = pillButtons(fixture);
+    expect(pills.map(p => p.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['removeMissed one−$450', 'addDoubled up+$450']);
+    // Under the tiles.
+    expect(el(fixture, 'app-tally-pills').previousElementSibling!.className).toContain('ud-tiles');
+  });
+
+  it('no pills without a handler, for a finished unit, or at share 0', () => {
+    expect(pillButtons(mount(signal({ ...nestEgg, balance: 4200, share: 450 })))).toEqual([]);
+    expect(pillButtons(mount(signal({ ...nestEgg, balance: 4200, share: 450, finished: true }), { onTally: () => Promise.resolve() }))).toEqual([]);
+    expect(pillButtons(mount(signal({ ...nestEgg, balance: 4200, share: 0 }), { onTally: () => Promise.resolve() }))).toEqual([]);
+  });
+
+  it("Missed one calls onTally('missed') and Doubled up calls onTally('extra')", async () => {
+    const onTally = jasmine.createSpy('onTally').and.resolveTo();
+    const fixture = mount(signal({ ...nestEgg, balance: 4200, share: 450 }), { onTally });
+    pillButtons(fixture)[0].click();
+    expect(onTally).toHaveBeenCalledOnceWith('missed');
+    await fixture.whenStable();
+    pillButtons(fixture)[1].click();
+    expect(onTally.calls.mostRecent().args).toEqual(['extra']);
+  });
+
+  it('the pills are disabled while a tap is in flight', fakeAsync(() => {
+    let release!: () => void;
+    const onTally = jasmine.createSpy('onTally').and.returnValue(new Promise<void>(r => (release = r)));
+    const fixture = mount(signal({ ...nestEgg, balance: 4200, share: 450 }), { onTally });
+    pillButtons(fixture)[0].click();
+    fixture.detectChanges();
+    expect(pillButtons(fixture).every(p => p.disabled)).toBeTrue();
+    release();
+    flushMicrotasks();
+    fixture.detectChanges();
+    expect(pillButtons(fixture).every(p => !p.disabled)).toBeTrue();
+  }));
+
+  it('Status tile reads Behind by $450 after a missed tap', async () => {
+    const d = signal<UnitDetail | null>({ ...nestEgg, balance: 4200, share: 450, status: { text: 'On plan', tone: 'good' } });
+    const fixture = mount(d, {
+      onTally: async () => d.update(x => ({ ...x!, balance: 3750, status: { text: 'Behind by $450', tone: 'warn' } })),
+    });
+    pillButtons(fixture)[0].click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(text(fixture, '.ud-status')).toBe('Behind by $450');
+    expect(el(fixture, '.ud-status').classList).toContain('warn');
+    expect(text(fixture, '.ud-bal')).toContain('$3,750');
+  });
+
+  it('the nest egg sheet shows the Assuming growth line and the baby fund sheet does not', () => {
+    const line = 'Assuming growth at 10%, worth ~$4,900 today';
+    const nest = mount(signal({ ...nestEgg, balance: 4200, share: 450, growthLine: line }), { onTally: () => Promise.resolve() });
+    expect(text(nest, '.ud-growth')).toBe(line);
+    // Above the pills, under the Saved so far and Status tiles.
+    expect(el(nest, '.ud-growth').nextElementSibling!.tagName.toLowerCase()).toBe('app-tally-pills');
+    const fund = mount(signal({ ...nestEgg, title: 'Baby fund' as const, kind: 'fund' as const, balance: 800, share: 200 }), { onTally: () => Promise.resolve() });
+    expect(el(fund, '.ud-growth')).toBeNull();
+  });
+
+  it('everyday has no pills', () => {
+    const everyday = detail({ title: 'Everyday', kind: 'everyday', pill: 'Cash', balance: null, share: 0 });
+    expect(pillButtons(mount(signal(everyday), { onTally: () => Promise.resolve() }))).toEqual([]);
   });
 });

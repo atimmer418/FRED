@@ -27,7 +27,7 @@ import { RateAssumptionsService } from '../../services/rate-assumptions.service'
 import {
   AccountState, Goal, GoalConfig, GoalType, GoalWrite, KidInput, KidsConfig, TargetConfig, UnitTally, VacationConfig, unitKey,
 } from '../../models/goal.model';
-import { isKidNotYetBorn, kidDeadline, simpleTarget } from '../../utils/goal-plan.utils';
+import { isKidNotYetBorn, kidDeadline, simpleTarget, tallyStatus } from '../../utils/goal-plan.utils';
 import { todayYmd } from '../../utils/local-date';
 import { InvestmentFrequencyUtils } from '../../utils/investment-frequency.utils';
 import { kidAgeToday, kidCostFigures, kidsAtHome } from '../../utils/kid-cost.utils';
@@ -631,9 +631,15 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       component: GoalUnitDetailSheetComponent,
       componentProps: {
         detail,
+        // A saved goal logs the figure as a `set` on the unit's tally; a preview keeps it in the draft.
         onBalance: unit === 'everyday'
           ? null
-          : (value: number) => this.updateBalance({ kid: kidIndex, account: unit }, value),
+          : (value: number) => this.mode() === 'saved'
+            ? this.setTally({ kid: kidIndex, account: unit }, value)
+            : this.updateBalance({ kid: kidIndex, account: unit }, value),
+        onTally: unit === 'everyday'
+          ? null
+          : (kind: 'missed' | 'extra') => this.onTally({ kid: kidIndex, account: unit }, kind),
         notes: this.infoNotes(),
       },
       ...BOTTOM_SHEET_MODAL_OPTS,
@@ -878,6 +884,29 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
     return `Born ${kid.birthYear} · ${age === 0 ? 'under 1' : `age ${age}`}`;
   }
 
+  /**
+   * The unit's own Status from its tally: "Behind by $450" / "Ahead by $450" when it is off plan,
+   * else the chip word. A preview has no tally and reads the goal's chip.
+   */
+  private unitStatus(path: BalancePath, target: number | null): NonNullable<UnitDetail['status']> {
+    const goal = this.existing();
+    if (this.mode() !== 'saved' || !goal) return { text: this.statusChip(), tone: this.statusTone(this.statusChip()) };
+    const status = tallyStatus({
+      completed: goal.completed, imported: this.isImported(), tally: this.tallyFor(goal, path), target: target ?? 0, today: this.now,
+    });
+    const chip = STATUS_CHIP[status.kind];
+    const text = status.kind === 'behind' ? `${chip} by ${fmtMoney(-status.net)}`
+      : status.kind === 'ahead' ? `${chip} by ${fmtMoney(status.net)}` : chip;
+    return { text, tone: this.statusTone(chip) };
+  }
+
+  /** What the pills move for one unit: the server's next credit, 0 in a preview, when imported, or once the unit is finished. */
+  private unitShare(path: BalancePath): number {
+    const goal = this.existing();
+    if (this.mode() !== 'saved' || !goal || this.isImported() || this.unitFinished(goal, path)) return 0;
+    return this.tallyFor(goal, path)?.nextCreditAmount ?? 0;
+  }
+
   /** The unit sheet's Status tone for a chip word: Ahead / On plan / Done good, Behind warn, and so on. */
   private statusTone(chip: ChipText): NonNullable<UnitDetail['status']>['tone'] {
     return STATUS_TONE[chip];
@@ -903,6 +932,8 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       balance: null,
       target: null,
       status: null,
+      share: 0,
+      growthLine: null,
       milestones: [],
       notes: [`${e.subLine}.`, 'Steps up on its own at 3, 6, 9, 12 and 15, the ages where the USDA figures change.'],
       sourcesLine: `FRED estimate: USDA 2015 figures for a middle-income family, adjusted to ${kidCostFigures(atHome).asOfLabel} dollars and to ${atHome} kid${atHome === 1 ? '' : 's'} at home.`,
@@ -966,7 +997,9 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       finished: row.finished,
       balance: row.balance,
       target: row.target,
-      status: { text: this.statusChip(), tone: this.statusTone(this.statusChip()) },
+      share: this.unitShare({ kid: kidIndex, account: unit }),
+      growthLine: unit === 'firstYear' ? null : (v.kids?.find(a => a.account === unit)?.perKid[kidIndex]?.growthLine ?? null),
+      status: this.unitStatus({ kid: kidIndex, account: unit }, row.target),
       milestones,
       notes,
       sourcesLine,

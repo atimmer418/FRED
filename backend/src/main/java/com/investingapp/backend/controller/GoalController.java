@@ -2,6 +2,7 @@ package com.investingapp.backend.controller;
 
 import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.dto.GoalImportRequest;
+import com.investingapp.backend.dto.GoalLedgerRequest;
 import com.investingapp.backend.dto.GoalRequest;
 import com.investingapp.backend.dto.MessageResponse;
 import com.investingapp.backend.model.User;
@@ -75,6 +76,27 @@ public class GoalController {
     @PostMapping("/import")
     public ResponseEntity<?> importLegacy(@Valid @RequestBody GoalImportRequest request) {
         return withUser(user -> ResponseEntity.ok(goalService.importLegacy(user, request)));
+    }
+
+    /** One Missed one / Doubled up / set entry on a goal unit; the response is the goal after it. */
+    @PostMapping("/{id}/ledger")
+    public ResponseEntity<?> adjustLedger(@PathVariable Long id, @Valid @RequestBody GoalLedgerRequest request) {
+        return withUser(user -> {
+            try {
+                GoalService.AdjustedGoal adjusted = goalService.adjust(user, id, request);
+                ResponseEntity.BodyBuilder ok = ResponseEntity.ok();
+                if (adjusted.capped()) {
+                    ok.header("X-Fred-Capped", "true");
+                }
+                return ok.body(adjusted.goal());
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest()
+                        .body(new ErrorCodeResponse("INVALID_UNIT", "That saving line is not on this goal."));
+            } catch (IllegalStateException e) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(new ErrorCodeResponse("UNIT_FINISHED", "This saving line is finished."));
+            }
+        });
     }
 
     /** Rejects bodies that fail bean validation with a 400 and the first field message. */

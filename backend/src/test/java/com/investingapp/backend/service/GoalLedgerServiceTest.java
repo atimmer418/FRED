@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -459,5 +460,111 @@ class GoalLedgerServiceTest {
 
         assertMoney("-450", tally.net());
         assertEquals(LocalDate.of(2026, 11, 16), tally.netSince());
+    }
+
+    // ---- adjustments ----
+
+    @Test
+    void missedWritesMinusOneShareAndLowersTally() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+
+        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
+
+        assertFalse(result.capped());
+        List<GoalLedgerEntry> missed = entries("goal", LedgerKind.MISSED);
+        assertEquals(1, missed.size());
+        assertMoney("-450", missed.get(0).getAmount());
+        assertEquals(TODAY, missed.get(0).getEntryDate());
+        assertMoney("550", goal.getCurrentBalance());
+        assertNotNull(goal.getBalanceUpdatedAt());
+        UnitTally tally = service.tallyFor(goal, "goal", semiMonthly(), TODAY);
+        assertMoney("550", tally.tally());
+        assertMoney("-450", tally.net());
+    }
+
+    @Test
+    void extraWritesPlusOneShareAndRaisesTally() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+
+        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.EXTRA, bd("5"), semiMonthly(), TODAY);
+
+        assertFalse(result.capped());
+        List<GoalLedgerEntry> extra = entries("goal", LedgerKind.EXTRA);
+        assertEquals(1, extra.size());
+        assertMoney("450", extra.get(0).getAmount());
+        assertMoney("1450", goal.getCurrentBalance());
+        assertMoney("450", service.tallyFor(goal, "goal", semiMonthly(), TODAY).net());
+    }
+
+    @Test
+    void missedNeverTakesTallyBelowZero() {
+        Goal goal = simpleGoal("200", "900", TODAY);
+
+        GoalLedgerService.AdjustResult first = service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
+
+        assertTrue(first.capped());
+        assertEquals(1, entries("goal", LedgerKind.MISSED).size());
+        assertMoney("-200", entries("goal", LedgerKind.MISSED).get(0).getAmount());
+        assertMoney("0", goal.getCurrentBalance());
+
+        GoalLedgerService.AdjustResult again = service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
+
+        assertTrue(again.capped());
+        assertEquals(1, entries("goal", LedgerKind.MISSED).size());
+        assertMoney("0", goal.getCurrentBalance());
+    }
+
+    @Test
+    void setRebasesTallyAndResetsNet() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+        service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
+
+        service.adjust(goal, "goal", LedgerKind.SET, bd("2500.50"), semiMonthly(), TODAY);
+
+        List<GoalLedgerEntry> sets = entries("goal", LedgerKind.SET);
+        assertMoney("2500.50", sets.get(sets.size() - 1).getAmount());
+        assertMoney("2500.50", goal.getCurrentBalance());
+        UnitTally tally = service.tallyFor(goal, "goal", semiMonthly(), TODAY);
+        assertMoney("2500.50", tally.tally());
+        assertMoney("0", tally.net());
+        assertNull(tally.netSince());
+    }
+
+    @Test
+    void adjustOnFinishedUnitIsRejected() {
+        Goal atTarget = simpleGoal("5000", "900", TODAY);
+        atTarget.setTarget(bd("5000"));
+        assertThrows(IllegalStateException.class,
+                () -> service.adjust(atTarget, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY));
+
+        Goal ended = simpleGoal("100", "900", TODAY);
+        ended.setCreditsUntil(TODAY.minusDays(1));
+        assertThrows(IllegalStateException.class,
+                () -> service.adjust(ended, "goal", LedgerKind.EXTRA, null, semiMonthly(), TODAY));
+
+        Goal done = simpleGoal("100", "900", TODAY);
+        done.setCompleted(true);
+        assertThrows(IllegalStateException.class,
+                () -> service.adjust(done, "goal", LedgerKind.SET, bd("1"), semiMonthly(), TODAY));
+        assertTrue(ledger.isEmpty());
+    }
+
+    @Test
+    void adjustOnUnknownUnitIsRejected() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.adjust(goal, "kid:0:plan529", LedgerKind.MISSED, null, semiMonthly(), TODAY));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.adjust(goal, "goal", LedgerKind.CREDIT, bd("5"), semiMonthly(), TODAY));
+        assertTrue(ledger.isEmpty());
+    }
+
+    @Test
+    void setWithoutAmountIsRejected() {
+        Goal goal = simpleGoal("1000", "900", TODAY);
+
+        assertThrows(GoalValidationException.class,
+                () -> service.adjust(goal, "goal", LedgerKind.SET, null, semiMonthly(), TODAY));
     }
 }

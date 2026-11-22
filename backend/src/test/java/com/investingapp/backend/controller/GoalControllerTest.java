@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.dto.GoalImportRequest;
+import com.investingapp.backend.dto.GoalLedgerRequest;
 import com.investingapp.backend.dto.GoalRequest;
 import com.investingapp.backend.dto.GoalResponse;
 import com.investingapp.backend.dto.MessageResponse;
@@ -47,6 +48,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -260,5 +262,73 @@ class GoalControllerTest {
                                 + "\"planRateKind\":\"market\",\"config\":" + kidsConfig + "}"))
                 .andExpect(status().isCreated());
         verify(service).create(any(User.class), any(GoalRequest.class));
+    }
+
+    private static final String LEDGER_BODY = "{\"unit\":\"goal\",\"kind\":\"missed\"}";
+
+    @Test
+    void ledgerPostReturnsUpdatedGoal() throws Exception {
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), true));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Fred-Capped", "true"))
+                .andExpect(jsonPath("$.id").value(3));
+    }
+
+    @Test
+    void ledgerPostOmitsCappedHeaderWhenNotCapped() throws Exception {
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), false));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"unit\":\"goal\",\"kind\":\"set\",\"amount\":120.50}"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("X-Fred-Capped"));
+    }
+
+    @Test
+    void ledgerPostUnknownUnitIs400() throws Exception {
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenThrow(new IllegalArgumentException("Unknown goal unit: nope"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_UNIT"));
+    }
+
+    @Test
+    void ledgerPostOtherUsersGoalIs404() throws Exception {
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenThrow(new NoSuchElementException("Goal not found"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals/99/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ledgerPostFinishedUnitIs409() throws Exception {
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenThrow(new IllegalStateException("finished"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("UNIT_FINISHED"));
+    }
+
+    @Test
+    void ledgerPostCreditKindIs400() throws Exception {
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"unit\":\"goal\",\"kind\":\"credit\",\"amount\":5}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
     }
 }

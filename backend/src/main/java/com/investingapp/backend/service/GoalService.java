@@ -1,6 +1,7 @@
 package com.investingapp.backend.service;
 
 import com.investingapp.backend.dto.GoalImportRequest;
+import com.investingapp.backend.dto.GoalLedgerRequest;
 import com.investingapp.backend.dto.GoalRequest;
 import com.investingapp.backend.dto.GoalResponse;
 import com.investingapp.backend.dto.UnitTally;
@@ -125,6 +126,26 @@ public class GoalService {
             responses.add(respond(goal, schedule, today));
         }
         return responses;
+    }
+
+    /** A goal after an adjustment, and whether a Missed one was capped at $0. */
+    public record AdjustedGoal(GoalResponse goal, boolean capped) {
+    }
+
+    /**
+     * Applies a Missed one / Doubled up / set entry to one unit of the user's goal. Rolls the goal
+     * forward first so the share and the finished check are current, and answers inside the same
+     * transaction. Throws NoSuchElementException when the goal is not the user's.
+     */
+    public AdjustedGoal adjust(User user, Long id, GoalLedgerRequest request) {
+        Goal goal = goalRepository.findByIdAndUser(id, user)
+                .orElseThrow(() -> new NoSuchElementException("Goal not found"));
+        Optional<InvestmentSchedule> schedule = scheduleOf(user);
+        LocalDate today = EasternTime.today();
+        ledgerService.rollForward(goal, schedule, today);
+        GoalLedgerService.AdjustResult result = ledgerService.adjust(
+                goal, request.getUnit(), request.toLedgerKind(), request.getAmount(), schedule, today);
+        return new AdjustedGoal(respond(result.goal(), schedule, today), result.capped());
     }
 
     private GoalResponse respondNow(User user, Goal goal) {

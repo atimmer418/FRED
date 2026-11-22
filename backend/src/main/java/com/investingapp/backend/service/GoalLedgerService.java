@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
@@ -128,6 +129,66 @@ public class GoalLedgerService {
             out.put(unit.key, tally(goal, unit, rule, today));
         }
         return out;
+    }
+
+    /** The goal after an adjustment, and whether a Missed one was cut short at $0 (or not written at all). */
+    public record AdjustResult(Goal goal, boolean capped) {
+    }
+
+    /**
+     * Applies one correction to a unit, dated today: MISSED takes one paycheck share off the tally (never
+     * below $0), EXTRA puts one share on, SET makes the tally an exact figure ({@code amount}, required).
+     * The goal should already be rolled forward so the share and the finished check are current. Throws
+     * IllegalArgumentException for a unit the goal does not have or a kind other than the three,
+     * GoalValidationException for a SET without an amount, and IllegalStateException when the unit is
+     * finished (target reached, credits window over, or the goal completed). Saves the goal.
+     */
+    public AdjustResult adjust(Goal goal, String unitKey, LedgerKind kind, BigDecimal amount,
+                               Optional<InvestmentSchedule> schedule, LocalDate today) {
+        if (kind == null || kind == LedgerKind.CREDIT) {
+            throw new IllegalArgumentException("Unsupported adjustment: " + kind);
+        }
+        Units units = Units.of(goal, codec);
+        Unit unit = units.all.stream()
+                .filter(u -> u.key.equals(unitKey))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown goal unit: " + unitKey));
+        if (isFinished(goal, unit, today)) {
+            throw new IllegalStateException("This goal's saving is finished.");
+        }
+        BigDecimal entryAmount;
+        boolean capped = false;
+        if (kind == LedgerKind.SET) {
+            if (amount == null) {
+                throw new GoalValidationException("amount is required to set the tally.");
+            }
+            entryAmount = amount.setScale(2, RoundingMode.HALF_UP);
+        } else {
+            BigDecimal share = share(unit, ruleFor(goal, schedule));
+            if (kind == LedgerKind.MISSED) {
+                BigDecimal taken = share.min(unit.tally);
+                capped = taken.compareTo(share) < 0;
+                entryAmount = taken.negate();
+            } else {
+                entryAmount = share;
+            }
+        }
+        if (kind != LedgerKind.SET && entryAmount.signum() == 0) {
+            // Nothing to take off, or no plan share to double: no entry and no change.
+            return new AdjustResult(goal, capped);
+        }
+        write(goal, unit.key, today, kind, entryAmount);
+        unit.tally = kind == LedgerKind.SET ? entryAmount : unit.tally.add(entryAmount);
+        unit.balanceUpdatedAt = EasternTime.now();
+        units.writeTo(goal, codec);
+        goals.save(goal);
+        return new AdjustResult(goal, capped);
+    }
+
+    private static boolean isFinished(Goal goal, Unit unit, LocalDate today) {
+        return goal.isCompleted()
+                || (unit.target != null && unit.tally.compareTo(unit.target) >= 0)
+                || (unit.creditsUntil != null && today.isAfter(unit.creditsUntil));
     }
 
     // ---- the walk ----

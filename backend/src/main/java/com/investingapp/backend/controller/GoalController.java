@@ -31,6 +31,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.NoSuchElementException;
 import java.util.function.Function;
 
@@ -88,6 +90,9 @@ public class GoalController {
                 if (adjusted.capped()) {
                     ok.header("X-Fred-Capped", "true");
                 }
+                // What the entry moved, so the toast and the Undo never work it out from two tallies.
+                BigDecimal moved = adjusted.moved() == null ? BigDecimal.ZERO : adjusted.moved();
+                ok.header("X-Fred-Moved", moved.setScale(2, RoundingMode.HALF_UP).toPlainString());
                 return ok.body(adjusted.goal());
             } catch (IllegalArgumentException e) {
                 return ResponseEntity.badRequest()

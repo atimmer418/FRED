@@ -128,8 +128,8 @@ public class GoalService {
         return responses;
     }
 
-    /** A goal after an adjustment, and whether a Missed one was capped at $0. */
-    public record AdjustedGoal(GoalResponse goal, boolean capped) {
+    /** A goal after an adjustment, whether a Missed one was capped at $0, and how far the tally moved. */
+    public record AdjustedGoal(GoalResponse goal, boolean capped, BigDecimal moved) {
     }
 
     /**
@@ -145,7 +145,7 @@ public class GoalService {
         ledgerService.rollForward(goal, schedule, today);
         GoalLedgerService.AdjustResult result = ledgerService.adjust(
                 goal, request.getUnit(), request.toLedgerKind(), request.getAmount(), schedule, today);
-        return new AdjustedGoal(respond(result.goal(), schedule, today), result.capped());
+        return new AdjustedGoal(respond(result.goal(), schedule, today), result.capped(), result.moved());
     }
 
     private GoalResponse respondNow(User user, Goal goal) {
@@ -288,11 +288,15 @@ public class GoalService {
 
     /**
      * An edit that changes no plan input: the plan stays exactly as anchored and the stored tallies
-     * stay as they are. Only a sent creditsUntil is taken.
+     * stay as they are. Only a sent creditsUntil and a sent target are taken, so a goal saved before
+     * either existed gets its window, its cap and Done-at-target on the next plain save.
      */
     private void keepAnchors(Goal goal, GoalRequest request, Object stored, Object config) {
         if (request.getCreditsUntil() != null) {
             goal.setCreditsUntil(request.getCreditsUntil());
+        }
+        if (request.getTarget() != null) {
+            goal.setTarget(request.getTarget());
         }
         Object toStore = config;
         if (config instanceof KidsConfig kids && stored instanceof KidsConfig old) {
@@ -305,7 +309,7 @@ public class GoalService {
                         before.anchorBalance(), before.anchorMonthly(),
                         before.creditedThrough(),
                         sent.creditsUntil() != null ? sent.creditsUntil() : before.creditsUntil(),
-                        before.target());
+                        sent.target() != null ? sent.target() : before.target());
             });
         }
         goal.setConfigJson(codec.write(toStore));

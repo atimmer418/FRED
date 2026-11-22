@@ -53,6 +53,7 @@ public class GoalLedgerService {
     private static final int LOOK_AHEAD_DAYS = 45;
     /** The largest Missed one or Doubled up amount a client may send, the same cap as a set. */
     private static final BigDecimal MAX_CORRECTION = new BigDecimal("100000000");
+    private static final BigDecimal ZERO_MOVED = new BigDecimal("0.00");
 
     private final GoalLedgerEntryRepository entries;
     private final GoalRepository goals;
@@ -133,21 +134,26 @@ public class GoalLedgerService {
         return out;
     }
 
-    /** The goal after an adjustment, and whether a Missed one was cut short at $0 (or not written at all). */
-    public record AdjustResult(Goal goal, boolean capped) {
+    /**
+     * The goal after an adjustment, whether a Missed one was cut short at $0 (or not written at all), and
+     * how far the tally moved (always 0 or more, 2 decimals; 0.00 when nothing was written).
+     */
+    public record AdjustResult(Goal goal, boolean capped, BigDecimal moved) {
     }
 
     /**
      * Applies one correction to a unit, dated today: MISSED takes one paycheck share off the tally (never
-     * below $0), EXTRA puts one share on, SET makes the tally an exact figure ({@code amount}, required).
-     * MISSED and EXTRA move {@code amount} instead of the share when it is sent (an Undo puts back
-     * exactly what moved); MISSED is still cut short at $0. The goal should already be rolled forward
-     * so the share and the finished check are current. Throws IllegalArgumentException for a unit the
-     * goal does not have or a kind other than the three, GoalValidationException for a SET without an
-     * amount or a MISSED/EXTRA amount that is not above $0 (or over the cap, or past 2 decimals), and
-     * IllegalStateException for a MISSED or EXTRA on a finished unit (target reached, credits window
-     * over, or the goal completed). SET stays allowed there, so the tally can always be corrected.
-     * Saves the goal.
+     * below $0), EXTRA puts one share on, SET makes the tally an exact figure ({@code amount}, required)
+     * and, on a simple or vacation goal, re-bases the plan's anchor balance and anchor date on it. With no {@code amount} the share is
+     * capped so the tally lands on the target, the same figure the pills show (nextCreditAmount).
+     * MISSED and EXTRA move {@code amount} instead when it is sent (an Undo puts back exactly what
+     * moved); MISSED is still cut short at $0. The result says how far the tally moved. The goal
+     * should already be rolled forward so the share and the finished check are current. Throws
+     * IllegalArgumentException for a unit the goal does not have or a kind other than the three,
+     * GoalValidationException for a SET without an amount or a MISSED/EXTRA amount that is not above
+     * $0 (or over the cap, or past 2 decimals), and IllegalStateException for a MISSED or EXTRA on a
+     * finished unit (target reached, credits window over, or the goal completed). SET stays allowed
+     * there, so the tally can always be corrected. Saves the goal.
      */
     public AdjustResult adjust(Goal goal, String unitKey, LedgerKind kind, BigDecimal amount,
                                Optional<InvestmentSchedule> schedule, LocalDate today) {
@@ -170,7 +176,11 @@ public class GoalLedgerService {
             }
             entryAmount = amount.setScale(2, RoundingMode.HALF_UP);
         } else {
-            BigDecimal share = amount == null ? share(unit, ruleFor(goal, schedule)) : correctionAmount(amount);
+            // A plain tap moves exactly what the pills show: the share, capped so the tally lands on the
+            // target. An explicit amount (the Undo) is honoured as sent.
+            BigDecimal share = amount == null
+                    ? creditAmount(unit, unit.tally, share(unit, ruleFor(goal, schedule))).max(BigDecimal.ZERO)
+                    : correctionAmount(amount);
             if (kind == LedgerKind.MISSED) {
                 BigDecimal taken = share.min(unit.tally);
                 capped = taken.compareTo(share) < 0;
@@ -181,14 +191,24 @@ public class GoalLedgerService {
         }
         if (kind != LedgerKind.SET && entryAmount.signum() == 0) {
             // Nothing to take off, or no plan share to double: no entry and no change.
-            return new AdjustResult(goal, capped);
+            return new AdjustResult(goal, capped, ZERO_MOVED);
         }
         write(goal, unit.key, today, kind, entryAmount);
+        BigDecimal before = unit.tally;
         unit.tally = kind == LedgerKind.SET ? entryAmount : unit.tally.add(entryAmount);
-        unit.balanceUpdatedAt = EasternTime.now();
+        LocalDateTime now = EasternTime.now();
+        unit.balanceUpdatedAt = now;
+        if (kind == LedgerKind.SET && unit.source == null) {
+            // A simple or vacation plan grows again from the typed figure: it becomes the anchor balance
+            // as of now. The monthly, creditsUntil, target and creditedThrough stay as they are. A kid
+            // account re-bases nothing: the anchor date is goal-level, so moving it would restart every
+            // sibling account's plan (a per-account anchor date is backlog FRED-238).
+            goal.setAnchorBalance(entryAmount);
+            goal.setPlanAnchoredAt(now);
+        }
         units.writeTo(goal, codec);
         goals.save(goal);
-        return new AdjustResult(goal, capped);
+        return new AdjustResult(goal, capped, unit.tally.subtract(before).abs().setScale(2, RoundingMode.HALF_UP));
     }
 
     /** A MISSED or EXTRA amount the client sent: above $0, at most $100,000,000, at most 2 decimals. */
@@ -276,7 +296,10 @@ public class GoalLedgerService {
         LocalDate nextDate = null;
         BigDecimal nextAmount = BigDecimal.ZERO;
         BigDecimal share = share(unit, rule);
-        if (!goal.isCompleted() && share.signum() > 0) {
+        if (!isFinished(goal, unit, today) && share.signum() > 0) {
+            // The pills stay until the unit is finished, even after the last payday in the window; only
+            // the date needs a payday ahead.
+            nextAmount = creditAmount(unit, unit.tally, share).max(BigDecimal.ZERO);
             LocalDate from = unit.creditedThrough == null ? today : later(today, unit.creditedThrough);
             List<LocalDate> ahead = PaydayCalendar.paydays(rule, from, from.plusDays(LOOK_AHEAD_DAYS));
             if (!ahead.isEmpty()) {

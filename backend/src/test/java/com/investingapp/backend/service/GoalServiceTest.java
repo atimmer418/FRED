@@ -1218,7 +1218,7 @@ class GoalServiceTest {
     }
 
     @Test
-    void keepAnchorsCopiesCreditsUntilOnlyWhenSentAndKeepsCreditedThroughAndTarget() {
+    void keepAnchorsCopiesCreditsUntilAndTargetOnlyWhenSentAndKeepsCreditedThrough() {
         stubSave();
         java.time.LocalDate through = EasternTime.today();
         java.time.LocalDate until = java.time.LocalDate.of(year + 2, 12, 31);
@@ -1235,11 +1235,14 @@ class GoalServiceTest {
         Goal updated = service.updateGoal(user, 54L, sent);
         assertEquals(newUntil, updated.getCreditsUntil());
         assertEquals(through, updated.getCreditedThrough());
-        assertEquals(bd("5000"), updated.getTarget());
+        // A sent target is taken, so a goal saved before targets existed gets its cap on a plain save.
+        assertEquals(0, bd("7000").compareTo(updated.getTarget()));
 
         sent.setCreditsUntil(null);
+        sent.setTarget(null);
         updated = service.updateGoal(user, 54L, sent);
         assertEquals(newUntil, updated.getCreditsUntil());
+        assertEquals(0, bd("7000").compareTo(updated.getTarget()));
 
         // The same rules per kid account.
         KidsConfig storedKids = kids("50000", "30000", kid("Sam", year - 3,
@@ -1247,15 +1250,15 @@ class GoalServiceTest {
                 new AccountState(bd("2000"), null, bd("2000"), bd("200"), through, until, bd("30000"))));
         rawStoredKidsGoal(55L, codec.write(storedKids));
         KidsConfig sentKids = kids("50000", "30000", kid("Sam", year - 3,
-                new AccountState(bd("1000"), null, null, bd("100"), null, newUntil, bd("1")),
-                new AccountState(bd("2000"), null, null, bd("200"), null, null, bd("1"))));
+                new AccountState(bd("1000"), null, null, bd("100"), null, newUntil, bd("60000")),
+                new AccountState(bd("2000"), null, null, bd("200"), null, null, null)));
         KidsConfig.Accounts accounts = storedConfigOf(service.updateGoal(user, 55L, kidsRequest(sentKids, "3000", "300")))
                 .kids().get(0).accounts();
         assertEquals(newUntil, accounts.brokerage().creditsUntil());
         assertEquals(until, accounts.plan529().creditsUntil());
         assertEquals(through, accounts.brokerage().creditedThrough());
         assertEquals(through, accounts.plan529().creditedThrough());
-        assertEquals(0, bd("50000").compareTo(accounts.brokerage().target()));
+        assertEquals(0, bd("60000").compareTo(accounts.brokerage().target()));
         assertEquals(0, bd("30000").compareTo(accounts.plan529().target()));
     }
 

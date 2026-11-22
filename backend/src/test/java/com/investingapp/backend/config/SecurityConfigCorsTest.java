@@ -22,7 +22,7 @@ class SecurityConfigCorsTest {
     }
 
     @Test
-    @DisplayName("a cross-origin ledger POST exposes X-Fred-Capped to the app")
+    @DisplayName("a cross-origin ledger POST exposes X-Fred-Capped and X-Fred-Moved to the app")
     void ledgerPostExposesCappedHeader() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/goals/1/ledger");
         request.addHeader("Origin", "capacitor://localhost");
@@ -31,6 +31,7 @@ class SecurityConfigCorsTest {
 
         assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("capacitor://localhost");
         assertThat(response.getHeader("Access-Control-Expose-Headers")).contains("X-Fred-Capped");
+        assertThat(response.getHeader("Access-Control-Expose-Headers")).contains("X-Fred-Moved");
     }
 
     @Test

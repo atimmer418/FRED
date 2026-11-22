@@ -398,7 +398,7 @@ class GoalLedgerServiceTest {
         assertNull(service.tallyFor(atTarget, "goal", semiMonthly(), TODAY).nextCreditDate());
 
         Goal pastEnd = simpleGoal("100", "900", TODAY);
-        pastEnd.setCreditsUntil(LocalDate.of(2026, 11, 30));
+        pastEnd.setCreditsUntil(LocalDate.of(2026, 11, 19));
         UnitTally ended = service.tallyFor(pastEnd, "goal", semiMonthly(), TODAY);
         assertNull(ended.nextCreditDate());
         assertMoney("0", ended.nextCreditAmount());
@@ -471,6 +471,7 @@ class GoalLedgerServiceTest {
         GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
 
         assertFalse(result.capped());
+        assertEquals(bd("450.00"), result.moved());
         List<GoalLedgerEntry> missed = entries("goal", LedgerKind.MISSED);
         assertEquals(1, missed.size());
         assertMoney("-450", missed.get(0).getAmount());
@@ -503,6 +504,7 @@ class GoalLedgerServiceTest {
         GoalLedgerService.AdjustResult first = service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
 
         assertTrue(first.capped());
+        assertEquals(bd("200.00"), first.moved());
         assertEquals(1, entries("goal", LedgerKind.MISSED).size());
         assertMoney("-200", entries("goal", LedgerKind.MISSED).get(0).getAmount());
         assertMoney("0", goal.getCurrentBalance());
@@ -510,6 +512,7 @@ class GoalLedgerServiceTest {
         GoalLedgerService.AdjustResult again = service.adjust(goal, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
 
         assertTrue(again.capped());
+        assertEquals(bd("0.00"), again.moved());
         assertEquals(1, entries("goal", LedgerKind.MISSED).size());
         assertMoney("0", goal.getCurrentBalance());
     }
@@ -623,6 +626,103 @@ class GoalLedgerServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> service.adjust(goal, "goal", LedgerKind.CREDIT, bd("5"), semiMonthly(), TODAY));
         assertTrue(ledger.isEmpty());
+    }
+
+    @Test
+    void aTapWithNoAmountMovesTheCappedShareNearTheTarget() {
+        Goal extra = simpleGoal("29800", "900", TODAY);
+        extra.setTarget(bd("30000"));
+        assertMoney("200", service.tallyFor(extra, "goal", semiMonthly(), TODAY).nextCreditAmount());
+
+        GoalLedgerService.AdjustResult up = service.adjust(extra, "goal", LedgerKind.EXTRA, null, semiMonthly(), TODAY);
+
+        assertEquals(bd("200.00"), up.moved());
+        assertMoney("200", entries("goal", LedgerKind.EXTRA).get(0).getAmount());
+        assertMoney("30000", extra.getCurrentBalance());
+        UnitTally finished = service.tallyFor(extra, "goal", semiMonthly(), TODAY);
+        assertNull(finished.nextCreditDate());
+        assertMoney("0", finished.nextCreditAmount());
+        assertThrows(IllegalStateException.class,
+                () -> service.adjust(extra, "goal", LedgerKind.EXTRA, null, semiMonthly(), TODAY));
+
+        Goal missed = simpleGoal("29800", "900", TODAY);
+        missed.setId(2L);
+        missed.setTarget(bd("30000"));
+
+        GoalLedgerService.AdjustResult down = service.adjust(missed, "goal", LedgerKind.MISSED, null, semiMonthly(), TODAY);
+
+        assertFalse(down.capped());
+        assertEquals(bd("200.00"), down.moved());
+        assertMoney("-200", entries("goal", LedgerKind.MISSED).get(0).getAmount());
+        assertMoney("29600", missed.getCurrentBalance());
+    }
+
+    @Test
+    void pillsKeepTheShareAfterTheLastPaydayUntilFinished() {
+        LocalDate today = LocalDate.of(2026, 12, 20);
+        Goal goal = simpleGoal("1000", "900", today);
+        goal.setCreditsUntil(LocalDate.of(2026, 12, 31));
+
+        UnitTally tally = service.tallyFor(goal, "goal", semiMonthly(), today);
+
+        assertNull(tally.nextCreditDate());
+        assertMoney("450", tally.nextCreditAmount());
+    }
+
+    @Test
+    void setRebasesTheAnchorBalanceAndAnchorDate() {
+        LocalDate until = LocalDate.of(2028, 12, 31);
+        Goal goal = simpleGoal("1000", "900", TODAY);
+        goal.setTarget(bd("30000"));
+        goal.setCreditsUntil(until);
+        LocalDateTime oldAnchor = goal.getPlanAnchoredAt();
+
+        GoalLedgerService.AdjustResult result = service.adjust(goal, "goal", LedgerKind.SET, bd("2500.50"), semiMonthly(), TODAY);
+
+        assertMoney("2500.50", goal.getAnchorBalance());
+        assertTrue(goal.getPlanAnchoredAt().isAfter(oldAnchor));
+        assertEquals(com.investingapp.backend.util.EasternTime.today(), goal.getPlanAnchoredAt().toLocalDate());
+        assertMoney("900", goal.getAnchorMonthly());
+        assertMoney("30000", goal.getTarget());
+        assertEquals(until, goal.getCreditsUntil());
+        assertEquals(TODAY, goal.getCreditedThrough());
+        assertEquals(bd("1500.50"), result.moved());
+
+        // A vacation keeps its anchor on the goal too.
+        Goal trip = simpleGoal("0", "500", TODAY);
+        trip.setId(2L);
+        trip.setType(GoalType.VACATION);
+        trip.setIcon("flight");
+        trip.setConfigJson(codec.write(new VacationConfig(2, bd("3000"), bd("400"), 2026)));
+        trip.setAnchorBalance(bd("400"));
+
+        service.adjust(trip, "goal", LedgerKind.SET, bd("1200"), semiMonthly(), TODAY);
+
+        assertMoney("1200", trip.getAnchorBalance());
+        assertTrue(trip.getPlanAnchoredAt().isAfter(oldAnchor));
+        assertMoney("500", trip.getAnchorMonthly());
+    }
+
+    @Test
+    void aKidsSetRebasesNothing() {
+        AccountState brokerage = new AccountState(bd("1000"), null, bd("800"), bd("100"), TODAY, null, null);
+        AccountState plan529 = new AccountState(bd("2000"), null, bd("1500"), bd("200"), TODAY, null, null);
+        KidsConfig config = new KidsConfig(bd("50000"), bd("80000"), List.of(new KidsConfig.Kid("Ava", 2020, 3,
+                new KidsConfig.Accounts(brokerage, plan529, null), null, null, null)), false, false);
+        Goal goal = simpleGoal("0", "300", null);
+        goal.setType(GoalType.KIDS);
+        goal.setIcon("child_care");
+        goal.setConfigJson(codec.write(config));
+        LocalDateTime anchoredAt = goal.getPlanAnchoredAt();
+
+        service.adjust(goal, "kid:0:brokerage", LedgerKind.SET, bd("4200"), semiMonthly(), TODAY);
+
+        KidsConfig.Accounts after = ((KidsConfig) codec.parse(GoalType.KIDS, goal.getConfigJson())).kids().get(0).accounts();
+        assertMoney("4200", after.brokerage().balance());
+        assertMoney("800", after.brokerage().anchorBalance());
+        assertMoney("1500", after.plan529().anchorBalance());
+        assertEquals(anchoredAt, goal.getPlanAnchoredAt());
+        assertMoney("0", goal.getAnchorBalance());
     }
 
     @Test

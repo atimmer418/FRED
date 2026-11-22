@@ -273,7 +273,7 @@ class GoalControllerTest {
     @Test
     void ledgerPostReturnsUpdatedGoal() throws Exception {
         when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
-                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), true));
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), true, new java.math.BigDecimal("200.00")));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
@@ -285,13 +285,37 @@ class GoalControllerTest {
     @Test
     void ledgerPostOmitsCappedHeaderWhenNotCapped() throws Exception {
         when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
-                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), false));
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), false, new java.math.BigDecimal("120.50")));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"unit\":\"goal\",\"kind\":\"set\",\"amount\":120.50}"))
                 .andExpect(status().isOk())
                 .andExpect(header().doesNotExist("X-Fred-Capped"));
+    }
+
+    @Test
+    void ledgerPostReportsTheMovedAmount() throws Exception {
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), false, new java.math.BigDecimal("450")));
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Fred-Moved", "450.00"));
+
+        // A miss cut short on a $200 tally reports what it took.
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), true, new java.math.BigDecimal("200.00")));
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(header().string("X-Fred-Moved", "200.00"))
+                .andExpect(header().string("X-Fred-Capped", "true"));
+
+        // A miss at $0 writes nothing and says so.
+        when(service.adjust(any(User.class), anyLong(), any(GoalLedgerRequest.class)))
+                .thenReturn(new GoalService.AdjustedGoal(new GoalResponse(goal(3L), codec), true, java.math.BigDecimal.ZERO));
+        mvc.perform(post("/api/goals/3/ledger").contentType(MediaType.APPLICATION_JSON).content(LEDGER_BODY))
+                .andExpect(header().string("X-Fred-Moved", "0.00"));
     }
 
     @Test

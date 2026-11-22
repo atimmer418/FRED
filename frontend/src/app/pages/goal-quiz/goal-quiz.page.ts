@@ -208,13 +208,15 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
   readonly carDownMax = computed(() => Math.min(CAR_DOWN_MAX, this.form().price ?? 0));
   readonly carDownEnds = computed<[string, string]>(() => ['$0', fmtMoney(this.carDownMax())]);
   /**
-   * The rate sliders hold eighths of a percent as integers (58 is 7.25%). The stored loanRate is
-   * the slider's value / 8, so a never-touched slider stores the sourced default at the nearest
-   * eighth (7.25 for the 7.28 mortgage rate, 7.5 for the 7.54 car rate), and the line says so.
+   * The rate sliders hold eighths of a percent as integers (58 is 7.25%). A never-touched slider
+   * sits at the nearest eighth but keeps the exact sourced default (7.28 for a mortgage, 7.54 for a
+   * car loan), which the readout and the line show and the goal saves; only sliding it writes
+   * the slider's value / 8.
    */
-  readonly rateEighths = computed(() =>
-    Math.round((this.form().loanRate ?? defaultLoanRate(this.form().type) ?? 0) * 8));
-  readonly fmtRateEighths = (v: number): string => `${trimPct(v / 8)}%`;
+  private readonly loanRate = computed(() => this.form().loanRate ?? defaultLoanRate(this.form().type) ?? 0);
+  readonly rateEighths = computed(() => Math.round(this.loanRate() * 8));
+  readonly fmtRateEighths = (v: number): string =>
+    `${trimPct(v === this.rateEighths() ? this.loanRate() : v / 8)}%`;
 
   /** The down payment FRED plans for a house or car: a percent of the price, or the car's dollars. */
   private readonly termsDown = computed(() => {
@@ -228,10 +230,11 @@ export class GoalQuizPage implements OnInit, OnDestroy, ViewWillEnter, ViewDidEn
     const f = this.form();
     const down = this.termsDown();
     const kind = f.type === 'CAR' ? 'CAR' : 'HOUSE';
+    const price = f.price ?? 0;
     return [
       `${fmtMoney(down)} down · ~${fmtMoney(this.simpleMonthly(down))} a month to get there`,
-      // The rate that will be saved (the quiz only ever writes eighths, so it matches the slider).
-      loanLine(kind, f.price ?? 0, down, f.loanRate ?? defaultLoanRate(f.type) ?? 0),
+      // The rate that will be saved, as the readout shows it. Nothing left to borrow: no loan line.
+      price <= down ? 'No loan needed.' : loanLine(kind, price, down, this.loanRate()),
     ];
   });
   /** A car with $0 down: the hint that stands in for the two lines while Continue is off. */

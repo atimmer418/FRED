@@ -657,7 +657,8 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
    * toast offers no second Undo, and neither does a tap that finished the unit (the server refuses
    * a Missed one or Doubled up there). A miss that moved nothing (already $0) says so. A unit that
    * finished meanwhile (409 UNIT_FINISHED) refreshes the goal with no toast, and the pills go.
-   * `amount` is the Undo's exact figure; a tap sends none and the server moves one share.
+   * `amount` is the Undo's exact figure (the server's X-Fred-Moved); a tap sends none and the
+   * server moves the pill figure (one share, capped near the target).
    */
   async onTally(path: BalancePath, kind: 'missed' | 'extra', amount?: number, offerUndo = true): Promise<void> {
     if (this.mode() !== 'saved' || !this.existing()) return;
@@ -666,9 +667,9 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       const result = await this.queueAdjust(path, kind, amount);
       if (!result) return;
       const tally = this.tallyFor(result.goal, path)?.tally ?? this.storedBalance(result.goal, path);
-      // In cents: a floating-point difference of two cent figures can carry noise past 2 decimals,
-      // which the server refuses.
-      const moved = Math.round(Math.abs(result.before - tally) * 100) / 100;
+      // What moved comes from the server (X-Fred-Moved), never from two tallies: a payday rolled
+      // under an open page changes the tally too. In cents, since the server refuses more decimals.
+      const moved = Math.round(result.moved * 100) / 100;
       if (moved === 0) {
         if (kind === 'missed') {
           this.toastService.show({ severity: 'info', message: 'Saved so far is at $0; nothing more to take off.' });
@@ -1231,13 +1232,13 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
    */
   private queueAdjust(
     path: BalancePath, kind: 'missed' | 'extra' | 'set', amount?: number,
-  ): Promise<{ goal: Goal; capped: boolean; before: number } | null> {
+  ): Promise<{ goal: Goal; capped: boolean; moved: number } | null> {
     return this.enqueue(async () => {
       const goal = this.existing();
       if (!goal) return null;
-      // Read when this entry's turn comes, so it is the tally the server moves from.
-      const before = this.tallyFor(goal, path)?.tally ?? this.storedBalance(goal, path);
-      if (kind === 'set' && Math.round(before) === amount) return null;
+      // Read when this entry's turn comes: a set to the figure already there posts nothing.
+      const current = this.tallyFor(goal, path)?.tally ?? this.storedBalance(goal, path);
+      if (kind === 'set' && Math.round(current) === amount) return null;
       try {
         const unit = this.unitFor(path);
         const result = await firstValueFrom(amount === undefined
@@ -1246,7 +1247,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
         this.existing.set(result.goal);
         // Only a posted entry counts (a 409 or a failure lands in the catch). No amount, unit or kid.
         this.analytics.track({ name: 'goal_tally_changed', props: { goal_type: goal.type, kind } });
-        return { ...result, before };
+        return result;
       } catch (err) {
         await this.handleAdjustError(err);
         return null;
@@ -1278,12 +1279,7 @@ export class GoalPage implements OnInit, ViewWillEnter, ViewWillLeave {
       await this.handleWriteError(err);
       return;
     }
-    const sent = (err as HttpErrorResponse).error?.goal as Goal | undefined;
     const id = this.existing()?.id;
-    if (sent && sent.id === id) {
-      this.existing.set(sent);
-      return;
-    }
     try {
       await firstValueFrom(this.goalsService.refresh());
       const latest = this.goalsService.goals().find(g => g.id === id);

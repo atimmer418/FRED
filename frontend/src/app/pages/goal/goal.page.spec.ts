@@ -156,7 +156,7 @@ describe('GoalPage', () => {
     dismissRole?: string; menuPick?: string; promptRole?: string; promptValue?: string;
     createResult?: Observable<Goal>; updateResult?: Observable<Goal>; loadError?: unknown;
     /** What a ledger post returns instead of the echo below. */
-    adjustResult?: Observable<{ goal: Goal; capped: boolean }>;
+    adjustResult?: Observable<{ goal: Goal; capped: boolean; moved: number }>;
     /** What the goals load returns instead of the fixtures, e.g. a Subject the spec completes later. */
     loadResult?: Observable<Goal[]>;
     /** The quiz's draft, set before the page opens. */
@@ -189,7 +189,8 @@ describe('GoalPage', () => {
       const net = kind === 'missed' ? -share : kind === 'extra' ? share : 0;
       const updated: Goal = { ...g, currentBalance: tally, tally: t ? { ...t, tally, net: t.net + net } : t };
       goals.update(list => list.map(x => (x.id === id ? updated : x)));
-      return of({ goal: updated, capped: raw < 0 });
+      // The server reports what moved (X-Fred-Moved); the service hands it over as `moved`.
+      return of({ goal: updated, capped: raw < 0, moved: Math.abs(tally - before) });
     });
     refreshSpy = jasmine.createSpy('refresh').and.callFake(() => of(goals()));
     showToast = jasmine.createSpy('showToast');
@@ -856,7 +857,7 @@ describe('GoalPage', () => {
       const net = kind === 'missed' ? -share : kind === 'extra' ? share : 0;
       const updated: Goal = { ...g, unitTallies: { ...g.unitTallies, [unit]: { ...t, tally, net: t.net + net } } };
       goals.update(list => list.map(x => (x.id === id ? updated : x)));
-      return of({ goal: updated, capped: false });
+      return of({ goal: updated, capped: false, moved: Math.abs(tally - t.tally) });
     });
   }
 
@@ -1354,11 +1355,11 @@ describe('GoalPage', () => {
     const goal: Goal = { ...houseGoal(8), currentBalance: 10_000, anchorBalance: 10_000, anchorMonthly: 500 };
     const fixture = await create({ id: '8' }, { goals: [goal] });
     const page = fixture.componentInstance;
-    const first = new Subject<{ goal: Goal; capped: boolean }>();
+    const first = new Subject<{ goal: Goal; capped: boolean; moved: number }>();
     let calls = 0;
     adjustSpy.and.callFake((id: number, unit: string, kind: LedgerKind, amount: number) => {
       calls++;
-      return calls === 1 ? first.asObservable() : of({ goal: { ...goal, currentBalance: amount }, capped: false });
+      return calls === 1 ? first.asObservable() : of({ goal: { ...goal, currentBalance: amount }, capped: false, moved: 0 });
     });
 
     openTray(fixture);
@@ -1374,7 +1375,7 @@ describe('GoalPage', () => {
     expect(text(fixture, '#gp-bal-current')).toBe('$13,000');
 
     // The first write lands while the second is still queued behind it: the tile holds $13,000.
-    first.next({ goal: { ...goal, currentBalance: 12_000 }, capped: false });
+    first.next({ goal: { ...goal, currentBalance: 12_000 }, capped: false, moved: 2_000 });
     first.complete();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -1689,7 +1690,15 @@ describe('GoalPage', () => {
   });
 
   it('Undo after a cut-short miss adds back only what was taken', async () => {
-    const fixture = await create({ id: '8' }, { goals: [talliedHouse(8, { tally: 200 })] });
+    const goal = talliedHouse(8, { tally: 200 });
+    const emptied: Goal = { ...goal, currentBalance: 0, tally: { ...goal.tally!, tally: 0, net: -200 } };
+    const restored: Goal = { ...goal, tally: { ...goal.tally!, net: 0 } };
+    const fixture = await create({ id: '8' }, { goals: [goal] });
+    // The server says it took $200 (X-Fred-Moved), not the $450 share.
+    adjustSpy.and.returnValues(
+      of({ goal: emptied, capped: true, moved: 200 }),
+      of({ goal: restored, capped: false, moved: 200 }),
+    );
     pills(fixture)[0].click();
     await settle(fixture);
     expect(fixture.componentInstance.existing()!.tally!.tally).toBe(0);
@@ -1702,11 +1711,13 @@ describe('GoalPage', () => {
   });
 
   it('Undo sends the moved amount rounded to cents', async () => {
-    // The server takes $450.20 off $900.10 and returns $449.90; 900.10 - 449.90 in floating point is
-    // 450.20000000000005, which the server would refuse as more than 2 decimals.
+    // The server takes $450.20 off $900.10 and returns $449.90. A moved figure carrying floating-point
+    // noise past 2 decimals would be refused, so the page rounds it to cents before the Undo posts it.
     const goal = talliedHouse(8, { tally: 900.10, nextCreditAmount: 450.20 });
     const after: Goal = { ...goal, currentBalance: 449.90, tally: { ...goal.tally!, tally: 449.90, net: -450.20 } };
-    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: after, capped: false }) });
+    const fixture = await create({ id: '8' }, {
+      goals: [goal], adjustResult: of({ goal: after, capped: false, moved: 450.20000000000005 }),
+    });
     pills(fixture)[0].click();
     await settle(fixture);
     expect(lastToast().message).toBe('Saved so far is now $450.');
@@ -1714,6 +1725,25 @@ describe('GoalPage', () => {
     lastToast().action!.run();
     await settle(fixture);
     expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra', 450.2]);
+  });
+
+  it('a payday rolled under an open page does not confuse Undo', async () => {
+    // The cached tally is $900. A payday credited $450 before the miss took $450 off, so the server
+    // answers with $900 again and X-Fred-Moved 450.00: the two tallies alone would say nothing moved.
+    const goal = talliedHouse(8);
+    const same: Goal = { ...goal, tally: { ...goal.tally!, net: -450 } };
+    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: same, capped: false, moved: 450 }) });
+    pills(fixture)[0].click();
+    await settle(fixture);
+    expect(show).toHaveBeenCalledOnceWith({
+      severity: 'success',
+      message: 'Saved so far is now $900.',
+      action: { label: 'Undo', run: jasmine.any(Function) },
+    });
+
+    lastToast().action!.run();
+    await settle(fixture);
+    expect(adjustSpy.calls.mostRecent().args).toEqual([8, 'goal', 'extra', 450]);
   });
 
   it('Undo is withheld once creditsUntil has passed', async () => {
@@ -1724,7 +1754,7 @@ describe('GoalPage', () => {
       ...goal, currentBalance: 1_350,
       tally: { ...goal.tally!, tally: 1_350, net: -450, netSince: `${YEAR - 1}-12-15`, creditsUntil: `${YEAR - 1}-12-31` },
     };
-    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: ended, capped: false }) });
+    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: ended, capped: false, moved: 450 }) });
     pills(fixture)[1].click();
     await settle(fixture);
     expect(show).toHaveBeenCalledOnceWith({ severity: 'success', message: 'Saved so far is now $1,350.' });
@@ -1757,7 +1787,7 @@ describe('GoalPage', () => {
     // $80,000 is the house's target (20% of $400,000); one more share lands on it.
     const goal: Goal = { ...talliedHouse(8, { tally: 79_550 }), target: 80_000 };
     const reached: Goal = { ...goal, currentBalance: 80_000, tally: { ...goal.tally!, tally: 80_000, net: 450, nextCreditDate: null, nextCreditAmount: 0 } };
-    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: reached, capped: false }) });
+    const fixture = await create({ id: '8' }, { goals: [goal], adjustResult: of({ goal: reached, capped: false, moved: 450 }) });
     pills(fixture)[1].click();
     await settle(fixture);
     expect(adjustSpy).toHaveBeenCalledOnceWith(8, 'goal', 'extra');

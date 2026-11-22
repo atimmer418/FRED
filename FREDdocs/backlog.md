@@ -453,6 +453,7 @@ Walk the new goal tally and loan terms on a real device. The server credits one 
 6. A car saved before this change opens cleanly (a full-price car opens in the quiz at the $25,000 slider max).
 7. The growth line ellipsis reads cleanly at narrow widths.
 8. The terms screens keep a steady height with 2 or 3 stacked readouts.
+9. A kid added later at a reused index inherits the old unit's ledger history (units are keyed by position, `kid:<index>:<account>`; only trailing kids are ever dropped). Decide whether that is acceptable or whether a removed kid's entries must be cleared.
 
 ## FRED-236 — Scheduler: MONTHLY day 29-31 skips a month after a weekend push
 Found during the goal tally build. `InvestmentSchedule.calculateNextInvestmentDate` adds a month to the already-adjusted payday, so a payday on Sat Oct 31 2026 is pushed to Mon Nov 2, and the next payday becomes Dec 31, skipping Nov 30. The goal ledger's `PaydayCalendar` deliberately does not copy this. The scheduler moves real money, so it was left alone.
@@ -465,6 +466,30 @@ Fix the scheduler so a MONTHLY schedule on day 29 to 31 computes the next date f
 2. A schedule on day 31 whose Oct 31 2026 payday lands on a Saturday yields Mon Nov 2, then Mon Nov 30, then Dec 31, with no month skipped.
 3. The parity test in `PaydayCalendarTest` drops its exclusion for this case and passes.
 4. Existing scheduler tests stay green; no change to non-MONTHLY frequencies.
+
+## FRED-237 — Goal ledger: two devices adjusting at once can lose an update
+Found in the goal tally review. `Goal` has no `@Version` and the ledger POST takes no row lock, so two devices that tap Missed one, Doubled up or a typed figure at the same moment can each read the same tally and the later save overwrites the earlier one. The ledger keeps both entries, but the stored tally is never recomputed from the ledger, so the two drift apart.
+
+### Summary
+Make concurrent adjustments on one goal safe. Done means two adjustments that race both land in the stored tally, or the later one is refused and retried, and the stored tally always equals what the ledger says.
+
+### Acceptance Criteria
+1. `Goal` carries `@Version` (optimistic lock, with a migration for the column), or `GoalService.adjust` and `update` load the goal with `SELECT ... FOR UPDATE`.
+2. Two adjustments on the same goal in parallel (a test with two transactions) end with both entries in the ledger and the stored tally equal to the sum they imply.
+3. A refused write (optimistic lock) answers 409 and the app refreshes the goal with no error toast, the same way UNIT_FINISHED does.
+4. The read path's roll-forward (`rollForwardAlone`) still recovers from a duplicate credit as it does today.
+
+## FRED-238 — Goal tally: a typed figure re-bases a kid account's plan
+Found in the goal tally review. On simple and vacation goals a typed "Saved so far" figure re-bases the plan, so the line grows again from that figure. Kid accounts cannot do this yet: each account has its own anchor balance but the anchor date (`planAnchoredAt`) is goal-level, so moving it for one account would restart every sibling account's plan and clear its "behind by" figure. Today a kids set changes the tally only.
+
+### Summary
+Give each kid account its own anchor date so a typed figure re-bases only that account. Done means a kids set re-bases the set account's plan and leaves every sibling's plan line and net exactly as they were.
+
+### Acceptance Criteria
+1. Each kid account carries a per-account anchor date (in `AccountState`), defaulting to the goal's `planAnchoredAt` for accounts stored before the change.
+2. A kids set writes that account's anchor balance (the typed figure) and anchor date (now, Eastern); the goal-level `planAnchoredAt` and every sibling account stay unchanged.
+3. The account's net and the plan page's planValue and growth line read the account's own anchor date.
+4. A test pins that a sibling's planValue and net are identical before and after another account's set.
 
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._

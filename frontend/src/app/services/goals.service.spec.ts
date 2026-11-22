@@ -136,7 +136,7 @@ describe('GoalsService', () => {
 
   it('adjust POSTs a ledger entry, patches the signal and reports an uncapped miss', () => {
     service.goals.set([goal(1), goal(2)]);
-    let result: { goal: Goal; capped: boolean } | undefined;
+    let result: { goal: Goal; capped: boolean; moved: number } | undefined;
     service.adjust(2, 'goal', 'missed').subscribe(r => (result = r));
 
     const req = http.expectOne(`${url}/2/ledger`);
@@ -161,6 +161,23 @@ describe('GoalsService', () => {
     const set = http.expectOne(`${url}/1/ledger`);
     expect(set.request.body).toEqual({ unit: 'goal', kind: 'set', amount: 1_200 });
     set.flush(goal(1));
+  });
+
+  it('adjust reads X-Fred-Moved', () => {
+    service.goals.set([goal(1)]);
+    let moved: number | undefined;
+    service.adjust(1, 'goal', 'missed').subscribe(r => (moved = r.moved));
+    http.expectOne(`${url}/1/ledger`).flush(goal(1), { headers: { 'X-Fred-Moved': '450.00', 'X-Fred-Capped': 'true' } });
+    expect(moved).toBe(450);
+
+    service.adjust(1, 'goal', 'missed').subscribe(r => (moved = r.moved));
+    http.expectOne(`${url}/1/ledger`).flush(goal(1), { headers: { 'X-Fred-Moved': '0.00' } });
+    expect(moved).toBe(0);
+
+    // An older server sends no header: nothing is known to have moved.
+    service.adjust(1, 'goal', 'extra').subscribe(r => (moved = r.moved));
+    http.expectOne(`${url}/1/ledger`).flush(goal(1));
+    expect(moved).toBe(0);
   });
 
   it('remove DELETEs and drops the goal', () => {

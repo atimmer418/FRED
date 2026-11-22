@@ -112,15 +112,20 @@ export class GoalsService {
   /**
    * One Saved so far correction on a unit (`goal`, or `kid:<index>:<account>`): Missed one, Doubled up,
    * or an exact figure (`set`, with `amount`). The server computes the share. `capped` is true when a
-   * Missed one stopped at $0 (header X-Fred-Capped).
+   * Missed one stopped at $0 (header X-Fred-Capped). `moved` is how far the entry moved the tally
+   * (header X-Fred-Moved; 0 when absent or nothing was written).
    */
-  adjust(id: number, unit: string, kind: LedgerKind, amount?: number): Observable<{ goal: Goal; capped: boolean }> {
+  adjust(id: number, unit: string, kind: LedgerKind, amount?: number): Observable<{ goal: Goal; capped: boolean; moved: number }> {
     const body = amount === undefined ? { unit, kind } : { unit, kind, amount };
     return this.http.post<Goal>(`${this.apiUrl}/${id}/ledger`, body, {
       headers: this.getAuthHeaders(),
       observe: 'response',
     }).pipe(
-      map(res => ({ goal: res.body as Goal, capped: res.headers.get('X-Fred-Capped') === 'true' })),
+      map(res => ({
+        goal: res.body as Goal,
+        capped: res.headers.get('X-Fred-Capped') === 'true',
+        moved: movedOf(res.headers.get('X-Fred-Moved')),
+      })),
       tap(({ goal }) => {
         this.invalidate();
         this.goals.update(list => list.map(g => g.id === goal.id ? goal : g));
@@ -295,4 +300,10 @@ export class GoalsService {
       ['Quarterly', 'Semi-annual', 'Annual'].includes(p.rebalanceSchedule)
     );
   }
+}
+
+/** The X-Fred-Moved header as a number of dollars; 0 when it is absent or not a number. */
+function movedOf(header: string | null): number {
+  const value = header === null ? NaN : Number(header);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }

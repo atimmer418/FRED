@@ -419,3 +419,9 @@ Rulings that moved during the build, one line each.
 - A legacy full-price car opens in the quiz at the $25,000 slider max.
 - The payday calendar does not copy the scheduler's day 29 to 31 quirk (backlog FRED-236).
 - One analytics event, `goal_tally_changed`, carries goal type and kind only; an Undo emits the kind it posted.
+- A tap with no amount moves exactly the pill figure: one share, capped so the tally lands on the target (a $29,800 tally on a $30,000 target moves $200 either way). An Undo's explicit amount is honoured as sent; a miss still never crosses $0.
+- The server reports what moved: every ledger POST answers with `X-Fred-Moved` (2 decimals, `0.00` when nothing was written), exposed through CORS beside `X-Fred-Capped`. The toast's "$0" copy shows only when nothing moved, and Undo posts exactly that figure, so a payday rolled under an open page cannot confuse it.
+- A plain save takes a sent `target` (goal level and per kid account), as it already took `creditsUntil`, so a goal saved before targets existed gets its cap and Done-at-target on the next save.
+- A typed figure (`set`) re-bases the plan on simple and vacation goals: the anchor balance becomes the typed figure and the plan is anchored now, so the line grows again from that figure (monthly, creditsUntil, target and creditedThrough unchanged). Simple and vacation goals only; kids units would need a per-account anchor date (backlog FRED-238), so a kids `set` re-bases nothing.
+- The pills stay until a unit is finished, even after the last payday inside its window; only the band's "Next" fragment needs a payday ahead.
+- An untouched loan rate slider keeps the exact published default (7.28 for a mortgage, 7.54 for a car loan): the slider sits at the nearest eighth and its readout shows the exact rate; only sliding it writes an eighth. The quiz says "No loan needed." when the down payment covers the price.

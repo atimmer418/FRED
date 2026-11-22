@@ -11,7 +11,7 @@ import { GoalDraftService } from '../../services/goal-draft.service';
 import { GoalsService } from '../../services/goals.service';
 import { RateAssumptionsService } from '../../services/rate-assumptions.service';
 import { defaultFirstYearFund, formFromGoal, formToConfig } from '../goal/goal-form.model';
-import { Goal, GoalConfig, GoalType, KidsConfig } from '../../models/goal.model';
+import { Goal, GoalConfig, GoalType, HouseCarConfig, KidsConfig } from '../../models/goal.model';
 import { kidYearBounds } from '../../utils/goal-quiz.utils';
 
 /** 15 Nov 2026: the spec's sample family (born 2024, expected 2028, undated) reads against this clock. */
@@ -848,16 +848,30 @@ describe('GoalQuizPage', () => {
     const fixture = await create({ type: 'HOUSE' });
     const page = fixture.componentInstance;
     goTo(fixture, 1);
-    // 7.28% (Freddie Mac PMMS) starts the slider at the nearest eighth: 58 / 8 = 7.25%.
-    expect(page.form().loanRate).toBe(7.25);
-    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.25%');
+    // 7.28% (Freddie Mac PMMS): the slider sits at the nearest eighth (58) but keeps the exact rate.
+    expect(page.form().loanRate).toBe(7.28);
+    expect(rateSlider(fixture).querySelector<HTMLInputElement>('input.sim-range')!.value).toBe('58');
+    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.28%');
     // $650,000 × 20% = $130,000 down; the mortgage is the other $520,000 over 360 months.
     expect(termsLines(fixture)).toEqual([
       '$130,000 down · ~$1,644 a month to get there',
-      'Then the mortgage: ~$3,547 a month at 7.25% over 30 years, before taxes and insurance.',
+      'Then the mortgage: ~$3,558 a month at 7.28% over 30 years, before taxes and insurance.',
     ]);
     expect(page.termsLines()).toEqual(termsLines(fixture) as [string, string]);
   });
+
+  it('an untouched rate slider saves the exact default (7.28)', fakeAsync(async () => {
+    const fixture = await create({ type: 'HOUSE' });
+    const page = fixture.componentInstance;
+    goTo(fixture, 1);
+    page.next();
+    fixture.detectChanges();
+    const saved = draft.draft()!.form;
+    expect(saved.loanRate).toBe(7.28);
+    expect((formToConfig(saved, null, NOW) as HouseCarConfig).loanRate).toBe(7.28);
+    tick(2500);
+    discardPeriodicTasks();
+  }));
 
   it('moving the mortgage rate slider to 7.125% updates the line and the form', async () => {
     const fixture = await create({ type: 'HOUSE' });
@@ -871,6 +885,7 @@ describe('GoalQuizPage', () => {
     expect(slider.querySelector('button.big-readout')).toBeNull();
 
     slide(slider, 57, fixture);
+    // Only a slide writes an eighth.
     expect(page.form().loanRate).toBe(7.125);
     expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.125%');
     expect(termsLines(fixture)[1]).toBe('Then the mortgage: ~$3,503 a month at 7.125% over 30 years, before taxes and insurance.');
@@ -893,18 +908,18 @@ describe('GoalQuizPage', () => {
 
     const rate = rateSlider(fixture).querySelector('input.sim-range') as HTMLInputElement;
     expect([rate.min, rate.max, rate.value]).toEqual(['24', '120', '60']);
-    // 7.54% (Fed G.19) starts at 60 / 8 = 7.5%.
-    expect(page.form().loanRate).toBe(7.5);
-    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.5%');
+    // 7.54% (Fed G.19): the slider sits at 60 (7.5%) but keeps the exact rate until it is slid.
+    expect(page.form().loanRate).toBe(7.54);
+    expect(text(fixture, '.fscreen.on app-quiz-slider.rate-slider .big-readout')).toBe('7.54%');
     expect(termsLines(fixture)).toEqual([
       '$5,000 down · ~$116 a month to get there',
-      'Then the loan: ~$601 a month at 7.5% over 60 months.',
+      'Then the loan: ~$602 a month at 7.54% over 60 months.',
     ]);
 
     slide(down, 10_000, fixture);
     expect(page.form().downPaymentAmount).toBe(10_000);
-    // $25,000 left to borrow at 7.5% over 60 months.
-    expect(termsLines(fixture)[1]).toBe('Then the loan: ~$501 a month at 7.5% over 60 months.');
+    // $25,000 left to borrow at 7.54% over 60 months.
+    expect(termsLines(fixture)[1]).toBe('Then the loan: ~$501 a month at 7.54% over 60 months.');
   });
 
   it('car down payment clamps to the price and $0 blocks Continue', async () => {
@@ -917,7 +932,7 @@ describe('GoalQuizPage', () => {
     const downInput = onScreen(fixture).querySelector('app-quiz-slider.down-slider input.sim-range') as HTMLInputElement;
     expect(downInput.max).toBe('8000');
     expect(termsLines(fixture)[0]).toMatch(/^\$8,000 down · /);
-    expect(termsLines(fixture)[1]).toBe('Then the loan: ~$0 a month at 7.5% over 60 months.');
+    expect(termsLines(fixture)[1]).toBe('No loan needed.');
 
     const cta = () => onScreen(fixture).querySelector('.fs-cta') as HTMLButtonElement;
     expect(cta().disabled).toBeFalse();
@@ -936,6 +951,17 @@ describe('GoalQuizPage', () => {
     fixture.detectChanges();
     expect(cta().disabled).toBeFalse();
     expect(fixture.nativeElement.querySelector('.fscreen.on .terms-hint')).toBeNull();
+  });
+
+  it('a car fully paid down shows No loan needed', async () => {
+    const fixture = await create({ type: 'CAR' });
+    const page = fixture.componentInstance;
+    page.setPrice(20_000);
+    page.setCarDown(20_000);
+    goTo(fixture, 1);
+    expect(termsLines(fixture)[0]).toMatch(/^\$20,000 down · /);
+    expect(termsLines(fixture)[1]).toBe('No loan needed.');
+    expect(onScreen(fixture).textContent).not.toContain('~$0 a month');
   });
 
   it('edit: a stored car opens its terms at the stored down payment and rate', async () => {

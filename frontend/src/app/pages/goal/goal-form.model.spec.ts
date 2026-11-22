@@ -403,9 +403,9 @@ describe('goal-form.model: house and car terms', () => {
     expect(house.loanRate).toBeNull();
   });
 
-  it('defaultLoanRate is the sourced rate at the nearest eighth of a percent', () => {
-    expect(defaultLoanRate('HOUSE')).toBe(7.25); // 7.28 × 8 = 58.24 → 58 / 8
-    expect(defaultLoanRate('CAR')).toBe(7.5); // 7.54 × 8 = 60.32 → 60 / 8
+  it('defaultLoanRate is the exact sourced rate', () => {
+    expect(defaultLoanRate('HOUSE')).toBe(7.28);
+    expect(defaultLoanRate('CAR')).toBe(7.54);
     expect(defaultLoanRate('WEDDING')).toBeNull();
   });
 
@@ -419,8 +419,8 @@ describe('goal-form.model: house and car terms', () => {
     const form = formFromGoal(legacy);
     expect(form.downPaymentPct).toBe(20);
     expect(form.downPaymentAmount).toBeNull();
-    // No stored rate: the slider opens at the sourced default.
-    expect(form.loanRate).toBe(7.25);
+    // No stored rate: the slider opens at the exact sourced default.
+    expect(form.loanRate).toBe(7.28);
     expect('fullPrice' in form).toBeFalse();
 
     const stored = goalOf({ type: 'HOUSE', config: { price: 500_000, downPaymentPct: 10, targetYear: 2031, loanRate: 6.125 } });
@@ -432,7 +432,7 @@ describe('goal-form.model: house and car terms', () => {
     // $32,300 × 25% = $8,075 → $8,000.
     const legacy = goalOf({ type: 'CAR', config: { price: 32_300, downPaymentPct: 25, targetYear: 2029 } });
     expect(formFromGoal(legacy).downPaymentAmount).toBe(8_000);
-    expect(formFromGoal(legacy).loanRate).toBe(7.5);
+    expect(formFromGoal(legacy).loanRate).toBe(7.54);
     // $33,800 × 25% = $8,450 → $8,500.
     const up = goalOf({ type: 'CAR', config: { price: 33_800, downPaymentPct: 25, targetYear: 2029 } });
     expect(formFromGoal(up).downPaymentAmount).toBe(8_500);

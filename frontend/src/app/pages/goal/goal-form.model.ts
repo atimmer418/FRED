@@ -138,12 +138,13 @@ export function at18ChoiceFor(target: number): At18Choice {
 }
 
 /**
- * The rate a house or car loan slider starts from: the type's sourced default at the nearest eighth
- * of a percent, the slider's own step (7.28 becomes 7.25, 7.54 becomes 7.5). Null for other types.
+ * The rate a house or car loan starts from: the type's exact sourced default (7.28 for a mortgage,
+ * 7.54 for a car loan), so a user who never moves the slider saves the published figure. The slider
+ * sits at the nearest eighth; only sliding it writes an eighth. Null for other types.
  */
 export function defaultLoanRate(type: GoalType): number | null {
-  if (type === 'HOUSE') return Math.round(MORTGAGE_RATE_DEFAULT_PCT * 8) / 8;
-  if (type === 'CAR') return Math.round(CAR_LOAN_RATE_DEFAULT_PCT * 8) / 8;
+  if (type === 'HOUSE') return MORTGAGE_RATE_DEFAULT_PCT;
+  if (type === 'CAR') return CAR_LOAN_RATE_DEFAULT_PCT;
   return null;
 }
 

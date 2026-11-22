@@ -1217,6 +1217,23 @@ describe('buildGoalPlanView from the tally', () => {
     expect(cash.growthLine).toBeNull();
   });
 
+  it('after a set the growth line grows from the typed figure', () => {
+    // Anchored Nov 2023 at $1,000 a month; the user types $12,000 today. The server re-bases the
+    // anchor on the typed figure (anchorBalance $12,000, planAnchoredAt today) and net restarts at 0.
+    const afterSet = buildGoalPlanView(base({
+      anchorBalance: 12_000, anchorMonthly: 1_000, planAnchoredAt: '2026-11-15T00:00:00',
+      currentBalance: 12_000, tally: tally({ tally: 12_000, net: 0 }),
+    }), ctx());
+    // No growth yet since the new anchor (under $50), so no line.
+    expect(afterSet.growthLine).toBeNull();
+    // The plan re-solves from the typed figure itself: planValue equals $12,000.
+    const fromTyped = proposeSimplePlan({
+      target: 200_000, balance: 12_000, targetYear: Y + 6, marketRate: 0.10, forceCash: false,
+      rateKindOverride: null, now: NOW,
+    });
+    expect(afterSet.simple).toEqual(fromTyped);
+  });
+
   it('an imported goal with no plan measures progress against the target', () => {
     const view = buildGoalPlanView(base({
       clientId: 'v2-abc', config: { targetAmount: 20_000, targetYear: Y + 3 },

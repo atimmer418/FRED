@@ -36,7 +36,8 @@ line at a rate the user can slide.
 
 - Reading any account (Plaid, Alpaca, screenshots). The tally is contributions FRED assumed plus
   the user's corrections, nothing else.
-- Market value. The tally counts money put in. "What it grows to" keeps running off the plan.
+- Market value. The tally counts money put in. "What it grows to" keeps running off the plan, and
+  the one grown figure the page shows is labelled as assumed (see "The assumed-growth line").
 - Changing the Freedom Plan, its return assumption, or the rule that the return assumption is set
   only on the Freedom Plan page. A mortgage or car loan rate is a cost of borrowing, a different
   number, and lives with the goal.
@@ -109,6 +110,22 @@ every month the assumed growth is missing from it.
 The chip word stays one word (Ahead / Behind / On plan / Plan started / Done); the amount lives in
 the band line (simple goals) and in the one-line Status tile of the unit sheet (kids). The 60-day
 "Update balance" prompt goes away everywhere: the tally is never stale.
+
+**The assumed-growth line** (Andy, 2026-11-21). Saved so far is money put in, because that is all
+FRED can know. For an invested unit (plan rate kind `market`: a house, car, wedding or custom goal
+with a 3+ year runway, a kid's 529 or nest egg) the page also shows what the plan says that money
+is worth now, as one line under the Saved so far tile:
+
+`Assuming growth at 10%, worth ~$14,200 today`
+
+The figure is `planValue` (the anchored plan grown at the plan's rate, plus the net of taps), the
+same number the hero re-solves from, so the two never disagree. The rate is the plan's anchored
+rate as a whole percent. The line hides while `planValue` is less than $50 above the tally, so the
+first months never read "$900 saved, worth ~$905", and it never shows on a cash unit (baby fund,
+emergency fund, vacation, short house or car): there is no assumed growth to report. It is a plan
+figure, never a balance: the word "Assuming" is required in the copy. Typing a real balance into
+the Saved so far tile still re-bases the tally, so a parent who checks the actual 529 can correct
+FRED any time; the line then grows again from that figure.
 
 **Typing an exact figure.** The Saved so far tile still opens the amount tray. Closing the tray
 with a new value writes a `set` entry: the tally becomes that figure, the net resets to 0, status
@@ -367,6 +384,8 @@ rulings, all made by the assistant under Andy's "answer what you can" instructio
 6. Worst-of-units for the kids chip is a deliberate change, not existing behaviour.
 7. Imported goals keep "Plan updated" with no pills until saved; vacation reads Done when the
    year's budget is in and resets on January 1.
+8. The assumed-growth line (Andy asked for returns to be visible, 2026-11-21): shown for market
+   units only, from `planValue`, with "Assuming" in the copy; the $50 hide threshold is my call.
 
 ## Calls I made (Andy can veto any of these)
 

@@ -35,4 +35,8 @@ run_curl "POST /api/chat (legacy)" POST /api/chat '{"message":"Hello FRED","sess
 
 run_curl "GET /api/chat/history" GET "/api/chat/history?sessionId=verifier-c-test"
 
+# A userId in the query is ignored: the suggestions follow the signed-in user.
+run_curl "GET /api/chat/suggestions" GET "/api/chat/suggestions"
+run_curl "GET /api/chat/suggestions (client userId ignored)" GET "/api/chat/suggestions?userId=999999"
+
 finish_suite "Chat"

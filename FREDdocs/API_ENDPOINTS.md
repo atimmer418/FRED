@@ -197,7 +197,7 @@ All available API endpoints in the backend. Keep this file updated when adding n
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/chat` | Send message to AI assistant | Yes | `ChatRequest` | `ChatResponse` |
 | `GET` | `/api/chat/history` | Get chat history | Yes | Query: `sessionId?`, `userId?` | `List<ChatMessage>` |
-| `GET` | `/api/chat/suggestions` | Get personalized question suggestions | Yes | Query: `userId` | `List<String>` (3 suggestions) |
+| `GET` | `/api/chat/suggestions` | Get personalized question suggestions for the signed-in user | Yes | None (any `userId` query param is ignored) | `List<String>` (3 suggestions) |
 
 ---
 

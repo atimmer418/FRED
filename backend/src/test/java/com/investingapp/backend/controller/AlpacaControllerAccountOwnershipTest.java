@@ -22,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -86,7 +87,8 @@ class AlpacaControllerAccountOwnershipTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).contains(ACCOUNT_A);
         verify(alpacaApiService).getAccountStatus(ACCOUNT_A);
-        verify(alpacaApiService, never()).getAccountInfo();
+        // Only the caller's own account was asked for. Nothing else went to the broker.
+        verifyNoMoreInteractions(alpacaApiService);
     }
 
     @Test

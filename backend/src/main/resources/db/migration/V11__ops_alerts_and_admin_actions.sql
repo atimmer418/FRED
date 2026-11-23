@@ -4,8 +4,8 @@
 -- tables come from section 12, the ops tooling, which V6 never built: OpsAlertService needs a
 -- ledger to dedupe on, and the prod-registered /api/admin/** surface needs one row per call.
 --
--- Numbered V10, not V9: the Goals v3 branch owns version 9 (goals.sql). Two files with one version number
--- merge cleanly in git and then stop Flyway at boot.
+-- Numbered V11: Goals v3 owns version 9 (goals.sql) and version 10 (goal_ledger.sql). Two files with one
+-- version number merge cleanly in git and then stop Flyway at boot.
 --
 -- Shape, per V6 and V8: CREATE TABLE IF NOT EXISTS, so a re-run is a no-op. There is no ALTER, so
 -- no information_schema guard is needed. No view changes. No foreign keys: both tables outlive the

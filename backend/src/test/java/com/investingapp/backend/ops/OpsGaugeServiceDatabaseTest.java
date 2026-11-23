@@ -28,7 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The gauge SQL against the migrated schema (V1 to V10 under ddl-auto=validate).
+ * The gauge SQL against the migrated schema (V1 to V11 under ddl-auto=validate).
  *
  * Two isolation tricks, because every gauge aggregates a whole table. Window tests bind a clock
  * in 2020, years before any real row, and bound every window on both sides, so their counts are

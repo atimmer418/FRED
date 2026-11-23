@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
  * error body. The ledger is read by people and forwarded to a third-party receiver.
  *
  * <p>occurrences and deliveryStatus are initialised here because Hibernate binds every mapped
- * column on insert, so the V10 DEFAULTs never apply to a row the application writes.
+ * column on insert, so the V11 DEFAULTs never apply to a row the application writes.
  * firstRaisedAt and lastRaisedAt are Eastern wall time, set by the service.
  *
  * <p>@DynamicUpdate: the delivery thread writes deliveryStatus after the raising thread may have

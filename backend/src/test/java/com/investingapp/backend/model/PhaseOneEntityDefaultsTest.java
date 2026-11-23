@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PhaseOneEntityDefaultsTest {
 
     @Test
-    void opsAlertDefaultsMatchV10() {
+    void opsAlertDefaultsMatchV11() {
         OpsAlert alert = new OpsAlert();
         assertThat(alert.getOccurrences()).isEqualTo(1);
         assertThat(alert.getDeliveryStatus()).isEqualTo("PENDING");
@@ -47,7 +47,7 @@ class PhaseOneEntityDefaultsTest {
     }
 
     @Test
-    void columnsMirrorV10WidthsAndNullability() throws NoSuchFieldException {
+    void columnsMirrorV11WidthsAndNullability() throws NoSuchFieldException {
         string(OpsAlert.class, "alertType", "alert_type", 64, false);
         string(OpsAlert.class, "subjectId", "subject_id", 80, false);
         plain(OpsAlert.class, "alertDay", "alert_day", LocalDate.class, false);

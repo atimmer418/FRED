@@ -22,15 +22,15 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Pins the shape of V10 without a database: exactly two CREATE TABLE IF NOT EXISTS, nothing that
+ * Pins the shape of V11 without a database: exactly two CREATE TABLE IF NOT EXISTS, nothing that
  * alters, drops or references an existing table, every column and key exactly as the Phase 1
  * design states it, and one file per Flyway version in db/migration (two branches choosing the
  * same number merge cleanly and then stop Flyway at boot, ruling R15). The validate gate
  * (BackendApplicationTests under ci) proves the SQL runs and the entities match it.
  */
-class V10OpsAlertsAndAdminActionsMigrationTest {
+class V11OpsAlertsAndAdminActionsMigrationTest {
 
-    private static final String FILE = "db/migration/V10__ops_alerts_and_admin_actions.sql";
+    private static final String FILE = "db/migration/V11__ops_alerts_and_admin_actions.sql";
     private static final String ENGINE = ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;";
     private static final Pattern VERSIONED = Pattern.compile("^V(\\d+)__.+\\.sql$");
     private static final char EM_DASH = (char) 0x2014;
@@ -109,12 +109,12 @@ class V10OpsAlertsAndAdminActionsMigrationTest {
                 }
             });
         }
-        assertThat(byVersion).containsKey(10);
+        assertThat(byVersion).containsKey(11);
         byVersion.forEach((version, names) -> assertThat(names).as("Flyway version " + version).hasSize(1));
     }
 
     private static String sql() throws IOException {
-        try (InputStream in = V10OpsAlertsAndAdminActionsMigrationTest.class.getClassLoader().getResourceAsStream(FILE)) {
+        try (InputStream in = V11OpsAlertsAndAdminActionsMigrationTest.class.getClassLoader().getResourceAsStream(FILE)) {
             assertThat(in).as(FILE + " must exist on the classpath").isNotNull();
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }

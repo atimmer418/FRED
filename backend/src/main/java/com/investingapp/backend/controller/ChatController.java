@@ -108,7 +108,14 @@ public class ChatController {
      * first-time users).
      */
     @GetMapping("/suggestions")
-    public ResponseEntity<List<String>> getSuggestions(@RequestParam Long userId) {
-        return ResponseEntity.ok(dailyQuestionService.getTodayQuestionsForUser(userId));
+    public ResponseEntity<List<String>> getSuggestions() {
+        // SECURITY: this takes no userId on purpose. Older clients still send one in the query;
+        // it is not bound, so whatever they send is ignored. The suggestions are personalized,
+        // so they always follow the authenticated principal, never client input.
+        Long authenticatedUserId = authenticatedUserId();
+        if (authenticatedUserId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(dailyQuestionService.getTodayQuestionsForUser(authenticatedUserId));
     }
 }

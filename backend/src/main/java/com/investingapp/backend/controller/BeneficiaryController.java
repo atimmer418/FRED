@@ -8,12 +8,14 @@ import com.investingapp.backend.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 /**
@@ -124,6 +126,11 @@ public class BeneficiaryController {
             logger.info("Updated beneficiary {} for user: {}", beneficiaryId, user.getEmail());
             return ResponseEntity.ok(updatedBeneficiary);
             
+        } catch (NoSuchElementException e) {
+            // Not this user's beneficiary, or no such beneficiary. Same answer for both.
+            logger.warn("Beneficiary {} not found for the signed-in user", beneficiaryId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Beneficiary not found"));
+
         } catch (RuntimeException e) {
             logger.warn("Error updating beneficiary {}: {}", beneficiaryId, e.getMessage());
             return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
@@ -148,6 +155,11 @@ public class BeneficiaryController {
             logger.info("Deleted beneficiary {} for user: {}", beneficiaryId, user.getEmail());
             return ResponseEntity.ok().build();
             
+        } catch (NoSuchElementException e) {
+            // Not this user's beneficiary, or no such beneficiary. Same answer for both.
+            logger.warn("Beneficiary {} not found for the signed-in user", beneficiaryId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Beneficiary not found"));
+
         } catch (RuntimeException e) {
             logger.warn("Error deleting beneficiary {}: {}", beneficiaryId, e.getMessage());
             return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
@@ -167,11 +179,16 @@ public class BeneficiaryController {
             Authentication authentication) {
         try {
             User user = getCurrentUser(authentication);
-            beneficiaryService.submitToAlpaca(beneficiaryId);
+            beneficiaryService.submitToAlpaca(user, beneficiaryId);
             
             logger.info("Submitted beneficiary {} to Alpaca for user: {}", beneficiaryId, user.getEmail());
             return ResponseEntity.ok().body(new SuccessResponse("Beneficiary submitted to Alpaca successfully"));
             
+        } catch (NoSuchElementException e) {
+            // Not this user's beneficiary, or no such beneficiary. Same answer for both.
+            logger.warn("Beneficiary {} not found for the signed-in user", beneficiaryId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Beneficiary not found"));
+
         } catch (RuntimeException e) {
             logger.warn("Error submitting beneficiary {} to Alpaca: {}", beneficiaryId, e.getMessage());
             return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));

@@ -62,21 +62,80 @@
 }
 
 /* =============================================================================
-   LOADING AND ERROR STATES
+   SKELETON (first load, nothing on screen yet)
+   Every block sits where the real card or row lands, so the swap to data does not jump.
    ============================================================================= */
 
-.loading-container {
+.portfolio-skeleton {
+  margin-top: 0;
+}
+
+// The gradient hero's footprint (190px, 22px corners) as a quiet white card.
+.sk-hero {
+  height: 190px;
+  box-sizing: border-box;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 200px;
+}
 
-  ion-spinner {
-    --color: var(--portfolio-primary);
-    transform: scale(1.2);
+.sk-hero-number { margin-top: 8px; }
+.sk-hero-badge { margin-top: 14px; }
+
+// Five chips in the real .chips footprint (3px padding, 32px buttons, 14px below) without its
+// grey track, which would hide blocks of the same colour.
+.sk-chips {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0;
+  margin-bottom: 14px;
+
+  app-skeleton {
+    flex: 1 1 0;
+    min-width: 0;
   }
 }
+
+.sk-readout-date { margin-top: 4px; }
+
+// A bar inline in a line of text. The wrapper carries the real text class, so the row's height is
+// the text's line box and the bar rides inside it; no row changes height when the text arrives.
+.sk-inline app-skeleton {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+// Holding rows keep the real row's geometry; nothing here is tappable. Doubled selector: .hold-row
+// (cursor, :active dim) is declared later in this file and would otherwise win the cascade.
+.hold-row.sk-hold-row {
+  cursor: default;
+
+  &:active { opacity: 1; }
+}
+
+// The .perf-toggle row's box: its padding around the 16px icon, which sets the row's height.
+.sk-perf-toggle {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 2px;
+}
+
+.sk-hold-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+// Same gap as the real .hold-pill.
+.sk-hold-pill { margin-top: 3px; }
+
+/* =============================================================================
+   ERROR STATE
+   ============================================================================= */
 
 .error-icon {
   font-size: 48px;

@@ -3,13 +3,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/auth.sh" || exit 1
-source "$SCRIPT_DIR/lib/helpers.sh"
+source "$SCRIPT_DIR/lib/helpers.sh" || { echo "ERROR: could not load lib/helpers.sh"; exit 1; }
 
-PASS=0; FAIL=0
+run_curl_expect "GET /api/trading/positions" 404 GET /api/trading/positions
+run_curl_expect "GET /api/trading/account/balance" 404 GET /api/trading/account/balance
 
-run_curl "GET /api/trading/positions"       GET /api/trading/positions
-run_curl "GET /api/trading/account/balance" GET /api/trading/account/balance
-
-echo "---"
-echo "Trading tests: $PASS passed, $FAIL failed"
-exit $FAIL
+finish_suite "Trading"

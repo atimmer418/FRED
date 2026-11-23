@@ -42,10 +42,6 @@ describe('MonteCarloFlowComponent — analytics', () => {
     return { target: { value: String(value) } } as unknown as Event;
   }
 
-  function textEvent(value: string): Event {
-    return { target: { value } } as unknown as Event;
-  }
-
   function makeModal() {
     return {
       present: jasmine.createSpy('present').and.returnValue(Promise.resolve()),
@@ -159,14 +155,17 @@ describe('MonteCarloFlowComponent — analytics', () => {
       });
     });
 
-    it('reports the outside-accounts step as typed, and nothing per keystroke', () => {
+    it('reports the outside-accounts step as slider, and nothing per tray detent', () => {
       const { cmp, analytics } = build();
       cmp.includeOutside = true;
       cmp.buildStepOrder();
       cmp.showStep('outside');
 
-      cmp.onK401Input(textEvent('250000'));
-      cmp.onRothInput(textEvent('85000'));
+      // The balances come from the slide tray: open on the 401(k), a detent lands, then the Roth.
+      cmp.tray.toggle('k401');
+      cmp.tray.onValue(250_000);
+      cmp.tray.toggle('roth');
+      cmp.tray.onValue(85_000);
       expect(analytics.track).not.toHaveBeenCalled();
 
       cmp.onContinueClick();
@@ -174,8 +173,9 @@ describe('MonteCarloFlowComponent — analytics', () => {
       expect(analytics.track).toHaveBeenCalledTimes(1);
       expect(analytics.track).toHaveBeenCalledWith({
         name: 'monte_carlo_step_completed',
-        props: { step: 'outside', input_method: 'typed' },
+        props: { step: 'outside', input_method: 'slider' },
       });
+      cmp.ngOnDestroy(); // hands the tray's document listener back
     });
 
     it('reports the spend step', () => {

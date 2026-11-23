@@ -111,6 +111,35 @@ export const routes: Routes = [
     redirectTo: 'get-started',
     pathMatch: 'full'
   },
+  // Goals: the quiz builds or edits a plan; the goal page shows it. The two `plan` routes preview
+  // the quiz's draft (data.preview) with a Start / Update CTA; `goals/:id` is the saved plan.
+  {
+    path: 'goals/new/:type/plan',
+    data: { preview: true },
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+  },
+  {
+    path: 'goals/new/:type',
+    loadComponent: () => import('./pages/goal-quiz/goal-quiz.page').then(m => m.GoalQuizPage)
+  },
+  {
+    path: 'goals/:id/edit/plan',
+    data: { preview: true },
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+  },
+  {
+    path: 'goals/:id/edit',
+    loadComponent: () => import('./pages/goal-quiz/goal-quiz.page').then(m => m.GoalQuizPage)
+  },
+  {
+    path: 'goals/:id',
+    loadComponent: () => import('./pages/goal/goal.page').then(m => m.GoalPage)
+  },
+  // The Freedom Plan, pushed from the my-profile Freedom Date row.
+  {
+    path: 'freedom',
+    loadComponent: () => import('./pages/freedom-plan/freedom-plan.page').then(m => m.FreedomPlanPage)
+  },
   {
     path: 'my-profile',
     loadComponent: () => import('./pages/my-profile/my-profile.page').then( m => m.MyProfilePage)

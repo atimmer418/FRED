@@ -1,0 +1,23 @@
+<div class="src-body">
+  <div class="src-handle"></div>
+  <h3>Where these numbers come from</h3>
+  <p class="src-sub">National averages for a middle-income, two-parent family, in {{ asOfLabel }} dollars. Your costs will differ.</p>
+
+  <ul class="src-list">
+    @for (s of sources; track s.url) {
+      <li>
+        <span class="src-name">{{ s.name }}</span>
+        <span class="src-year">{{ s.year }}</span>
+      </li>
+    }
+  </ul>
+
+  @if (estimateNote) {
+    <div class="src-estimate">
+      <span class="src-tag">FRED estimate</span>
+      <span>{{ estimateNote }}</span>
+    </div>
+  }
+
+  <button type="button" class="src-done" (click)="close()">Done</button>
+</div>

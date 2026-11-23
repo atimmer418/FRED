@@ -25,10 +25,90 @@
     <ion-refresher-content refreshingSpinner="crescent" pullingIcon="chevron-down-circle-outline"></ion-refresher-content>
   </ion-refresher>
 
-  <!-- Loading State -->
-  <div *ngIf="loading" class="loading-container mobile-container">
-    <ion-spinner name="crescent"></ion-spinner>
-    <p class="text-center text-gray m-md">Loading your portfolio...</p>
+  <!-- Loading State: the layout's shapes while nothing is on screen yet. Each block sits where the
+       real card or row lands, so the swap to data does not jump. This is NOT .portfolio-dashboard:
+       the launch cover waits for .portfolio-dashboard[data-fresh] and must never lift onto this. -->
+  <div *ngIf="loading" class="portfolio-skeleton mobile-container" aria-busy="true">
+
+    <!-- Hero: the gradient card's footprint with its eyebrow, number and badge. -->
+    <div class="sk-hero">
+      <app-skeleton width="84px" height="10px" radius="5px" />
+      <app-skeleton class="sk-hero-number" width="190px" height="46px" radius="10px" />
+      <app-skeleton class="sk-hero-badge" width="180px" height="28px" radius="pill" />
+    </div>
+
+    <!-- Overview: the performance card (chips, readout, chart, return row). -->
+    <div *ngIf="selectedTab === 'overview'" class="tab-content-area">
+      <p class="zone-label">Performance</p>
+      <div class="zone-card sk-perf">
+        <div class="sk-chips">
+          <app-skeleton *ngFor="let p of periodOptions" height="32px" radius="9px" />
+        </div>
+        <div class="scrub-readout">
+          <app-skeleton width="120px" height="17px" radius="6px" />
+          <app-skeleton class="sk-readout-date" width="150px" height="10px" radius="5px" />
+        </div>
+        <app-skeleton height="170px" radius="12px" />
+        <!-- The bars ride inline in the real text classes, so the row is as tall as its text will be. -->
+        <div class="return-row">
+          <span class="rr-label sk-inline"><app-skeleton width="180px" height="12px" radius="6px" /></span>
+          <span class="rr-value sk-inline"><app-skeleton width="56px" height="15px" radius="6px" /></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics: the two always-visible performance rows and the show-more toggle, then three
+         holding rows. -->
+    <div *ngIf="selectedTab === 'analytics'" class="tab-content-area">
+      <p class="zone-label">Performance Analytics</p>
+      <div class="zone-card">
+        <div *ngFor="let i of [0, 1]; let last = last" class="perf-row sk-perf-row" [class.perf-row-nob]="last">
+          <div class="perf-top">
+            <span class="perf-period sk-inline"><app-skeleton width="48px" height="13px" radius="6px" /></span>
+            <span class="perf-pct sk-inline"><app-skeleton width="56px" height="15px" radius="6px" /></span>
+          </div>
+          <div class="perf-bar"></div>
+          <div class="perf-sub">
+            <span class="sk-inline"><app-skeleton width="128px" height="10px" radius="5px" /></span>
+            <span class="perf-sub-gl sk-inline"><app-skeleton width="52px" height="10px" radius="5px" /></span>
+          </div>
+        </div>
+        <!-- The show-more toggle stands in too. The real card has it once the history is a week old
+             (a shorter history carries only Today and All Time): the common case wins, so an
+             account in its first week sees this card settle ~30px shorter when the data lands. -->
+        <div class="sk-perf-toggle">
+          <app-skeleton width="150px" height="16px" radius="6px" />
+        </div>
+      </div>
+
+      <p class="zone-label">
+        Holdings
+        <span class="zone-label-hint">Tap for details</span>
+      </p>
+      <div class="zone-card">
+        <div *ngFor="let i of [0, 1, 2]; let last = last" class="hold-row sk-hold-row" [class.hold-row-last]="last">
+          <app-skeleton width="38px" height="38px" radius="11px" />
+          <div class="hold-mid">
+            <div class="hold-sym sk-inline"><app-skeleton width="55%" height="13px" radius="6px" /></div>
+            <div class="hold-name sk-inline"><app-skeleton width="80%" height="10px" radius="5px" /></div>
+          </div>
+          <div class="hold-right sk-hold-right">
+            <div class="hold-val sk-inline"><app-skeleton width="72px" height="13px" radius="6px" /></div>
+            <!-- The pill's box: its 10px line plus 2.5px padding each side. -->
+            <app-skeleton class="sk-hold-pill" width="44px" height="19px" radius="pill" />
+          </div>
+        </div>
+        <!-- The totals footer: the real card always has it when there are positions. -->
+        <div class="hold-total">
+          <span class="t-label sk-inline"><app-skeleton width="140px" height="11px" radius="5px" /></span>
+          <div class="t-right">
+            <div class="t-val sk-inline"><app-skeleton width="84px" height="14px" radius="6px" /></div>
+            <div class="t-gl sk-inline"><app-skeleton width="110px" height="11px" radius="5px" /></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- Error State -->

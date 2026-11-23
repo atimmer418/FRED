@@ -1,0 +1,113 @@
+// Kid cost sources sheet. The ion-modal shell (mc-bottom-sheet-modal in global.scss) provides the
+// rounded white chrome; this styles the content inside it.
+
+:host {
+  display: block;
+}
+
+.src-body {
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  font-family: 'Manrope', sans-serif;
+}
+
+.src-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 16px;
+}
+
+h3 {
+  font-family: 'Manrope', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0 0 5px;
+}
+
+.src-sub {
+  font-size: 12.5px;
+  color: #6b7280;
+  font-weight: 500;
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.src-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  overflow: hidden;
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 13px;
+    border-bottom: 1px solid #f1f5f9;
+
+    &:last-child { border-bottom: none; }
+  }
+
+  .src-name {
+    font-size: 12.5px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.35;
+  }
+
+  .src-year {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #6b7280;
+  }
+}
+
+.src-estimate {
+  margin-top: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 11px 13px;
+  font-size: 11.5px;
+  color: #6b7280;
+  font-weight: 600;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .src-tag {
+    align-self: flex-start;
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #2563eb;
+    background: #eef4ff;
+    border-radius: 6px;
+    padding: 2px 7px;
+  }
+}
+
+.src-done {
+  display: block;
+  width: 100%;
+  height: 50px;
+  margin-top: 16px;
+  border: none;
+  border-radius: 13px;
+  cursor: pointer;
+  background: #111827;
+  color: #fff;
+  font-family: 'Manrope', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { opacity: 0.9; }
+}

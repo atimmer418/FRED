@@ -10,6 +10,7 @@ import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analyti
 import { addIcons } from 'ionicons';
 import { documentTextOutline, documentAttachOutline, downloadOutline, chevronDownOutline, chevronForwardOutline } from 'ionicons/icons';
 import { PdfViewerModalComponent } from '../../components/pdf-viewer-modal/pdf-viewer-modal.component';
+import { SkeletonComponent } from '../../components/skeleton/skeleton.component';
 
 interface TaxDocument {
   id: string;
@@ -29,7 +30,7 @@ interface StatementYear {
   templateUrl: './tax-documents.page.html',
   styleUrls: ['./tax-documents.page.scss'],
   standalone: true,
-  imports: [CommonModule, IonicModule]
+  imports: [CommonModule, IonicModule, SkeletonComponent]
 })
 export class TaxDocumentsPage implements OnInit {
   loading = true;

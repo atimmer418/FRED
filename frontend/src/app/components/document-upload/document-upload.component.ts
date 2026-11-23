@@ -3,10 +3,11 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import {
-  IonHeader, IonToolbar, IonContent, IonFooter, IonSpinner, NavController, ToastController
+  IonHeader, IonToolbar, IonContent, IonFooter, IonSpinner, NavController
 } from '@ionic/angular/standalone';
 import { AlpacaService } from '../../services/alpaca.service';
 import { AccountStatusService } from '../../services/account-status.service';
+import { ToastService } from '../../services/toast.service';
 
 interface DocumentTypeOption {
   value: string;
@@ -46,7 +47,7 @@ export class DocumentUploadComponent implements OnDestroy {
     private navCtrl: NavController,
     private alpacaService: AlpacaService,
     private accountStatusService: AccountStatusService,
-    private toastController: ToastController
+    private toastService: ToastService
   ) {}
 
   get canUpload(): boolean {
@@ -111,39 +112,21 @@ export class DocumentUploadComponent implements OnDestroy {
       this.alpacaService.uploadDocument(request)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
-          next: async () => {
+          next: () => {
             this.isLoading = false;
             this.accountStatusService.clearActionRequired();
-            const toast = await this.toastController.create({
-              message: 'Document uploaded successfully!',
-              duration: 3000,
-              color: 'success',
-              position: 'bottom'
-            });
-            await toast.present();
+            this.toastService.showToast('Document uploaded successfully!', 'success');
             this.router.navigateByUrl('/my-profile', { replaceUrl: true });
           },
-          error: async (err) => {
+          error: (err) => {
             this.isLoading = false;
             const msg = err.error?.message || err.message || 'Upload failed. Please try again.';
-            const toast = await this.toastController.create({
-              message: msg,
-              duration: 4000,
-              color: 'danger',
-              position: 'bottom'
-            });
-            await toast.present();
+            this.toastService.showToast(msg, 'danger');
           }
         });
     } catch (err) {
       this.isLoading = false;
-      const toast = await this.toastController.create({
-        message: 'Failed to read file. Please try again.',
-        duration: 4000,
-        color: 'danger',
-        position: 'bottom'
-      });
-      await toast.present();
+      this.toastService.showToast('Failed to read file. Please try again.', 'danger');
     }
   }
 

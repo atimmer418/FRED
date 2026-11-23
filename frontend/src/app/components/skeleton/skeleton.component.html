@@ -1,0 +1,10 @@
+@for (i of blocks(); track i) {
+  <div
+    class="sk-block"
+    [class.sk-block--short]="blockCount() > 1 && i === blockCount() - 1"
+    [style.height]="height()"
+    [style.border-radius]="borderRadius()"
+  >
+    <div class="sk-shimmer" #shimmer></div>
+  </div>
+}

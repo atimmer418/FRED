@@ -77,15 +77,17 @@ public class DailyQuestionService {
         // Check if we have base questions for today
         Optional<DailyQuestion> existing = repository.findByDate(today);
 
-        if (existing.isEmpty()) {
-            // Generate base questions first (includes 1 popular + 1 LLM-generated)
-            logger.info("No daily questions found for {}. Generating now...", today);
-            generateAndSaveQuestions(today, null);
-            existing = repository.findByDate(today);
-        }
-
         // Get all 3 base questions
-        List<String> baseQuestions = new ArrayList<>(existing.get().getQuestions());
+        List<String> baseQuestions;
+        if (existing.isPresent()) {
+            baseQuestions = new ArrayList<>(existing.get().getQuestions());
+        } else {
+            // Generate base questions first. Use what the generator hands back instead of reading
+            // the row again: if the save failed there is no row, and the generator has already
+            // fallen back to a safe list.
+            logger.info("No daily questions found for {}. Generating now...", today);
+            baseQuestions = new ArrayList<>(generateAndSaveQuestions(today, null));
+        }
 
         // Check if user has ever asked "What's your story FRED?"
         List<String> userTopics = analyticsService.getUserTopics(userId);

@@ -1,0 +1,144 @@
+<ion-header class="ion-no-border">
+  <div class="blue-hero-header">
+    <div class="hero-nav">
+      <button type="button" class="back-btn" (click)="goBack()" aria-label="Back">
+        <span class="material-symbols-outlined">arrow_back_ios_new</span>
+      </button>
+      <h2 class="header-title">Freedom Plan</h2>
+      <div class="back-btn-spacer"></div>
+    </div>
+  </div>
+</ion-header>
+
+<!-- No keyboard on this page: the tiles open the slide tray, so no keyboard-avoid directive. -->
+<ion-content class="shell-content">
+  <div class="shell-inner fp-inner">
+    <!-- Hero: the date, front and center -->
+    <section class="fd-hero">
+      <p class="fd-hero-label">Freedom date</p>
+      <div class="fd-hero-year" *ngIf="heroYear() as year; else fdHeroEmpty">{{ year }}</div>
+      <ng-template #fdHeroEmpty><div class="fd-hero-year fd-hero-year--empty">—</div></ng-template>
+      <div class="fd-hero-meta">
+        <span *ngIf="heroAge() !== null">Age {{ heroAge() }}</span>
+        <span class="fd-dot" *ngIf="heroAge() !== null && timeAwayLabel() !== null">·</span>
+        <span *ngIf="timeAwayLabel() as away">{{ away }}</span>
+        <span *ngIf="freedomYear() === null">Set your plan below to see your freedom date</span>
+      </div>
+      <div class="fd-hero-bar"><i [style.width.%]="progressPct()"></i></div>
+      <div class="fd-hero-labels">
+        <span>Now {{ equity() | currency:'USD':'symbol':'1.0-0' }}</span>
+        <span>{{ progressPct() }}% there</span>
+        <span>Goal {{ portfolioGoal() | currency:'USD':'symbol':'1.0-0' }}</span>
+      </div>
+    </section>
+
+    <!-- Editable plan: Done lives up here while the tray is open, so closing never needs a scroll. -->
+    <p class="fd-zone fp-zone">
+      Your plan
+      <button
+        *ngIf="trayShown()"
+        #doneBtn
+        type="button"
+        class="fd-reset fp-done"
+        (click)="closeTray()"
+      >Done</button>
+    </p>
+    <!-- Tiles plus the tray's slot, one block, so the page's flex gap stays as it was. -->
+    <div class="fd-plan">
+      <div class="fd-tiles">
+        <button
+          type="button"
+          class="fd-tile fp-tile"
+          [class.active]="trayField() === 'income'"
+          [attr.aria-expanded]="trayField() === 'income'"
+          (click)="toggleTray('income')"
+        >
+          <span class="fd-tile-label" [class.fp-step]="showsStep('income')">{{ tileLabel('income') }}</span>
+          <span class="fd-tile-edit">
+            <span class="fd-pre">$</span>
+            <span class="fd-tile-value" [class.fp-empty]="!incomeSig()">{{ incomeSig() ? (incomeSig() | number:'1.0-0') : '5,000' }}</span>
+            <span class="fd-suf">/mo</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="fd-tile fp-tile"
+          [class.active]="trayField() === 'invest'"
+          [attr.aria-expanded]="trayField() === 'invest'"
+          (click)="toggleTray('invest')"
+        >
+          <span class="fd-tile-label" [class.fp-step]="showsStep('invest')">{{ tileLabel('invest') }}</span>
+          <span class="fd-tile-edit">
+            <span class="fd-pre">$</span>
+            <span class="fd-tile-value" [class.fp-empty]="!investSig()">{{ investSig() ? (investSig() | number:'1.0-0') : '500' }}</span>
+            <span class="fd-suf">/mo</span>
+          </span>
+        </button>
+      </div>
+      <!-- The tray grows out of this wrapper (height, WAAPI) and collapses back into it. -->
+      <div class="fp-tray" #trayBox *ngIf="trayShown() as field">
+        <div class="fp-tray-in" #trayIn>
+          <app-plan-amount-tray
+            [field]="field"
+            [value]="trayValue()"
+            [scale]="trayScale()"
+            (valueChange)="onTrayValue($event)"
+            (dragging)="onTrayDragging($event)"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- Insights -->
+    <p class="fd-zone fp-zone">Insights</p>
+    <div class="fd-insights">
+      <div class="fd-insight" *ngIf="plus100Months() as sooner">
+        <div class="fd-insight-icon"><span class="material-symbols-outlined">trending_up</span></div>
+        <div class="fd-insight-text">
+          <strong>+$100/mo</strong> would bring your freedom date
+          <strong>~{{ sooner }} {{ sooner === 1 ? 'month' : 'months' }} closer</strong>
+        </div>
+      </div>
+      <div class="fd-insight" *ngIf="portfolioGoal() > 0">
+        <div class="fd-insight-icon"><span class="material-symbols-outlined">account_balance</span></div>
+        <div class="fd-insight-text">
+          A <strong>{{ portfolioGoal() | currency:'USD':'symbol':'1.0-0' }}</strong> portfolio pays you
+          <strong>{{ incomeSig() | currency:'USD':'symbol':'1.0-0' }}/mo</strong> at a
+          {{ pct(withdrawalRate()) }}% withdrawal rate
+        </div>
+      </div>
+    </div>
+
+    <!-- Assumptions -->
+    <p class="fd-zone fp-zone">Assumptions</p>
+    <div class="fd-assume">
+      <div class="fd-assume-name">
+        Avg annual return
+        <span class="fd-assume-sub">what your portfolio grows by</span>
+      </div>
+      <div class="fd-scenario-chips fd-assume-chips">
+        <button
+          *ngFor="let s of RETURN_SCENARIOS"
+          [class.on]="annualReturn() === s.rate"
+          [attr.aria-pressed]="annualReturn() === s.rate"
+          (click)="selectReturn(s.rate)"
+          type="button"
+        >{{ s.label }}</button>
+      </div>
+    </div>
+    <p class="fd-note">
+      <span>Withdrawals follow the industry-standard 4% rule.</span>
+      <span>Past performance is not indicative of future results.</span>
+    </p>
+
+    <!-- Starts hidden; the page's isDirty effect reveals it (fade up and in) once the plan differs from what is saved. -->
+    <button
+      class="fd-cta fp-cta fp-cta--hidden"
+      aria-hidden="true"
+      tabindex="-1"
+      (click)="save()"
+      [disabled]="!canSave() || saving()"
+      type="button"
+    >Save plan</button>
+  </div>
+</ion-content>

@@ -57,49 +57,80 @@
     </div>
 
     <!-- Your Allocation Card -->
-    <div class="section-card">
+    <div class="section-card" [attr.aria-busy]="isLoading ? 'true' : null">
       <div class="card-header-row">
         <span class="material-symbols-outlined card-icon">pie_chart</span>
         <h3 class="card-title">Your Allocation</h3>
         <span class="alloc-total">{{ getTotalAllocation() }}%</span>
+        <!-- The rows have no label row of their own, so Done lives up here while a row's tray is open. -->
+        @if (tray.shown()) {
+          <button type="button" class="field-tray-done" (click)="tray.close()">Done</button>
+        }
       </div>
 
-      <div *ngIf="isLoading" class="loading-state">
-        <ion-spinner name="crescent" class="loading-spinner"></ion-spinner>
-        <span class="loading-text">Loading portfolio...</span>
-      </div>
-
-      <ion-list class="portfolio-list" *ngIf="!isLoading">
-        <ion-reorder-group [disabled]="false" (ionItemReorder)="reorderStocks($event)">
-          <ion-item-sliding *ngFor="let stock of portfolio" class="portfolio-sliding" @deleteAnimation>
-            <ion-item lines="full" class="portfolio-item">
-              <div class="stock-info">
-                <div class="stock-header-row">
-                  <span class="stock-symbol">{{ stock.symbol }}</span>
-                  <ion-badge [color]="stock.assetType === 'ETF' ? 'light' : 'light'" class="stock-badge">{{ stock.assetType }}</ion-badge>
+      @if (isLoading) {
+        <!-- Five rows in the list's own frame, each shaped like a real row (symbol and badge, name, value),
+             so the saved rows land in place without a jump. -->
+        <div class="portfolio-list">
+          @for (i of [0, 1, 2, 3, 4]; track i) {
+            <div class="skeleton-row">
+              <div class="skeleton-row__text">
+                <div class="skeleton-row__head">
+                  <app-skeleton width="44px" height="14px" radius="4px" />
+                  <app-skeleton width="30px" height="14px" radius="pill" />
                 </div>
-                <div class="stock-name">{{ stock.name }}</div>
+                <app-skeleton width="150px" height="12px" radius="4px" />
               </div>
-              <div class="alloc-input-wrap" slot="end">
-                <input
-                  class="field-input alloc-input"
-                  type="number"
-                  [value]="stock.percentage"
-                  (input)="updateAllocation(stock, $event)"
-                  min="0"
-                  max="100">
-                <span class="percent-sign">%</span>
-              </div>
-            </ion-item>
+              <app-skeleton width="44px" height="16px" radius="4px" />
+            </div>
+          }
+        </div>
+      } @else {
+      <ion-list class="portfolio-list">
+        <ion-reorder-group [disabled]="false" (ionItemReorder)="reorderStocks($event)">
+          <ng-container *ngFor="let stock of portfolio">
+            <ion-item-sliding class="portfolio-sliding" @deleteAnimation>
+              <ion-item lines="full" class="portfolio-item" [class.active]="tray.isOpen(stock.symbol)">
+                <div class="stock-info">
+                  <div class="stock-header-row">
+                    <span class="stock-symbol">{{ stock.symbol }}</span>
+                    <ion-badge [color]="stock.assetType === 'ETF' ? 'light' : 'light'" class="stock-badge">{{ stock.assetType }}</ion-badge>
+                  </div>
+                  <div class="stock-name">{{ stock.name }}</div>
+                </div>
+                <!-- The allocation opens the slide tray, not the keyboard. -->
+                <button
+                  type="button"
+                  class="field-value-btn alloc-btn"
+                  slot="end"
+                  [class.active]="tray.isOpen(stock.symbol)"
+                  [attr.aria-expanded]="tray.isOpen(stock.symbol)"
+                  [attr.aria-label]="stock.symbol + ' allocation'"
+                  (click)="toggleRow(stock)">
+                  @if (stock.percentage !== null) {
+                    {{ stock.percentage | number:'1.0-2' }}
+                  } @else {
+                    <span class="field-placeholder">0</span>
+                  }
+                  <span class="field-affix">%</span>
+                </button>
+              </ion-item>
 
-            <ion-item-options side="end" (ionSwipe)="removeStock(stock)">
-              <ion-item-option color="danger" expandable="true" (click)="removeStock(stock)">
-                <ion-icon name="trash-outline" slot="icon-only"></ion-icon>
-              </ion-item-option>
-            </ion-item-options>
-          </ion-item-sliding>
+              <ion-item-options side="end" (ionSwipe)="removeStock(stock)">
+                <ion-item-option color="danger" expandable="true" (click)="removeStock(stock)">
+                  <ion-icon name="trash-outline" slot="icon-only"></ion-icon>
+                </ion-item-option>
+              </ion-item-options>
+            </ion-item-sliding>
+            <!-- The tray's slot, under the open row and outside the sliding row, so a drag on the slider never swipes the row.
+                 Named for its row: a switch collapses this slot and grows the other row's, so the rows between never snap. -->
+            @if (tray.shown() === stock.symbol) {
+              <app-amount-tray-slot [tray]="tray" [field]="stock.symbol" />
+            }
+          </ng-container>
         </ion-reorder-group>
       </ion-list>
+      }
     </div>
 
     <!-- Add Assets Card -->

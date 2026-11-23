@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goals redesign: round 4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,0,0" rel="stylesheet">
+<style>
+  :root { --ink:#111827; --muted:#6b7280; --line:#eef1f6; --soft:#f8fafc; --blue:#2563eb; --deep:#0e3a96; --mid:#1e60e3; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Manrope',sans-serif; background:#eef1f6; color:var(--ink); }
+  .page { max-width: 1900px; margin: 0 auto; padding: 28px 28px 80px; }
+  h1.pt { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 4px; }
+  p.ps { margin: 0 0 6px; color: var(--muted); font-size: 14px; font-weight: 600; max-width: 860px; line-height: 1.5; }
+  h2.sec { font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color:#9aa6ba; margin: 38px 0 4px; }
+  p.secsub { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; font-weight: 600; max-width: 860px; line-height: 1.5; }
+  .ms { font-family:'Material Symbols Outlined'; font-weight: normal; font-style: normal; line-height:1; display:inline-block; white-space:nowrap; direction:ltr; -webkit-font-smoothing:antialiased; }
+  .rail { display:flex; gap: 22px; overflow-x:auto; padding: 4px 4px 18px; }
+  .col { flex: 0 0 auto; }
+  .cap { font-size: 12px; font-weight: 800; color:#4b5563; margin: 0 0 8px 6px; }
+  .cap span { color:#9aa6ba; font-weight: 700; }
+
+  .phone { width: 344px; height: 716px; border-radius: 40px; padding: 9px; background:#0b1220; box-shadow: 0 24px 50px -20px rgba(15,23,42,.45); }
+  .scr { width:100%; height:100%; border-radius: 32px; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+  .scr.blue { background: radial-gradient(120% 70% at 85% 0%, rgba(96,165,250,.55), transparent 60%), linear-gradient(165deg, var(--mid), var(--deep)); color:#fff; padding: 16px 22px 20px; }
+  .scr.white { background:#fff; padding: 12px 16px 16px; }
+  .scr.white > * { flex-shrink: 0; }
+  .top { display:flex; align-items:center; justify-content:space-between; height: 34px; flex-shrink:0; }
+  .top .ib { width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,.12); border:none; color:#fff; display:flex; align-items:center; justify-content:center; }
+  .top .ib .ms { font-size:17px; }
+  .dots { display:flex; gap:6px; }
+  .dots i { width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.28); display:block; }
+  .dots i.on { width:18px; border-radius:3px; background:#fff; }
+  .eyebrow { font-size:10px; font-weight:800; letter-spacing:.22em; text-transform:uppercase; color:rgba(255,255,255,.55); margin-top: 14px; }
+  .h1 { font-size: 27px; font-weight:800; letter-spacing:-.03em; line-height:1.12; margin: 8px 0 0; }
+  .sub { font-size: 13px; color: rgba(255,255,255,.65); font-weight:500; margin: 8px 0 0; line-height:1.45; }
+  .center { flex:1; display:flex; flex-direction:column; justify-content:center; min-height:0; }
+  .readout { font-size: 52px; font-weight:800; letter-spacing:-.04em; text-align:center; line-height:1; text-shadow: 0 6px 30px rgba(8,28,78,.45); }
+  .readout .unit { font-size:20px; font-weight:700; opacity:.7; }
+  .xfade { position:relative; height:96px; cursor:pointer; }
+  .xfade .stat { position:absolute; inset:0; opacity:0; transition: opacity .5s ease; }
+  .xfade .stat.on { opacity:1; }
+  .hint { text-align:center; font-size:10.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:rgba(255,255,255,.45); margin-top:10px; }
+  .plain { text-align:center; font-size:14.5px; font-weight:700; color:rgba(255,255,255,.88); margin-top: 14px; line-height:1.45; }
+  .plain small { display:block; font-size:12.5px; font-weight:600; color:rgba(255,255,255,.62); }
+  .cta { flex-shrink:0; height: 52px; border:none; border-radius:14px; background:#fff; color:#1d4ed8; font-family:inherit; font-size:15px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow: 0 10px 24px -10px rgba(8,28,78,.6); }
+  .cta .ms { font-size:18px; }
+  input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:32px; background:transparent; margin:0; cursor:pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height:5px; border-radius:3px; background: rgba(255,255,255,.24); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:26px; height:26px; border-radius:50%; background:#fff; margin-top:-10.5px; box-shadow: 0 4px 14px rgba(8,28,78,.45); }
+  .ends { display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; color:rgba(255,255,255,.42); letter-spacing:.04em; margin-top: 2px; }
+  .glass { background: rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.16); border-radius:16px; }
+  .chip { margin: 22px auto 0; display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); color:#fff; font-size:12.5px; font-weight:700; padding:9px 16px; border-radius:24px; width:max-content; }
+  .chip .ms { font-size:16px; }
+  .chips { display:flex; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.16); border-radius:12px; padding:3px; gap:2px; margin-top: 12px; }
+  .chips span { flex:1; text-align:center; font-size:12.5px; font-weight:800; color:rgba(255,255,255,.7); padding:8px 0; border-radius:9px; cursor:pointer; }
+  .chips span.on { background:#fff; color:#1d4ed8; }
+  .lab { font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,255,255,.5); margin-top: 22px; }
+
+  .wrow { display:flex; align-items:center; gap:8px; padding: 4px 8px 4px 10px; height: 50px; }
+  .wrow + .wrow { margin-top: 8px; }
+  .wrow .av { width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .wrow .av .ms { font-size:15px; }
+  .wrow b { font-size:12px; font-weight:800; width: 52px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wrow .pen { width:22px; height:22px; border-radius:50%; border:none; background:transparent; color:rgba(255,255,255,.55); display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; padding:0; }
+  .wrow .pen .ms { font-size:14px; }
+  .wrow input[type=range] { flex:1; height: 28px; }
+  .wrow input[type=range]::-webkit-slider-thumb { width:22px; height:22px; margin-top:-8.5px; }
+  .wrow em { font-style:normal; font-size:12.5px; font-weight:800; width: 60px; text-align:right; flex-shrink:0; white-space:nowrap; }
+
+  .fam { display:flex; align-items:center; justify-content:space-between; padding: 11px 14px; margin-top: 16px; }
+  .fam b { font-size:12.5px; font-weight:800; }
+  .fam span { font-size:12.5px; font-weight:700; color:rgba(255,255,255,.8); white-space:nowrap; }
+  .fam small { display:block; font-size:10.5px; font-weight:600; color:rgba(255,255,255,.5); margin-top:2px; }
+  .tog { display:flex; align-items:center; gap:11px; padding: 12px 13px; margin-top: 10px; }
+  .tog.off { background: rgba(255,255,255,.04); }
+  .tog.off .ic, .tog.off b { opacity:.5; }
+  .tog.off .tx span { color:#34d399; }
+  .tog .ic { width:34px; height:34px; border-radius:11px; background:rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .tog .ic .ms { font-size:19px; }
+  .tog .tx { flex:1; min-width:0; }
+  .tog .tx b { display:block; font-size:13.5px; font-weight:800; white-space:nowrap; }
+  .tog .tx span { display:block; font-size:11.5px; font-weight:600; color:rgba(255,255,255,.68); margin-top:3px; line-height:1.4; white-space:nowrap; }
+  .tog .amt { font-size:12px; font-weight:800; color:rgba(255,255,255,.85); white-space:nowrap; margin-right:4px; }
+  .sw { width:46px; height:28px; border-radius:14px; background:rgba(255,255,255,.22); position:relative; border:none; cursor:pointer; flex-shrink:0; transition: background .2s; }
+  .sw::after { content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition: transform .2s; }
+  .sw.on { background:#34d399; }
+  .sw.on::after { transform: translateX(18px); }
+  .total { text-align:center; margin-top: 18px; }
+  .total .readout { font-size:40px; }
+  .total .hint { margin-top:6px; }
+
+  .stepper { display:flex; align-items:center; justify-content:center; gap: 26px; }
+  .stepper button { width:54px; height:54px; border-radius:50%; border:1px solid rgba(255,255,255,.24); background:rgba(255,255,255,.12); color:#fff; font-size:26px; font-weight:700; font-family:inherit; cursor:pointer; }
+  .stepper .readout { width: 70px; font-size: 64px; }
+
+  /* sheet mock */
+  .sheetwrap { position:absolute; inset:0; background: rgba(8,28,78,.45); display:flex; align-items:flex-end; }
+  .sheet { background:#fff; border-radius: 22px 22px 0 0; padding: 10px 20px 24px; width:100%; color:var(--ink); }
+  .sheet .hd { width:38px; height:4.5px; border-radius:3px; background:#e2e6ee; margin: 0 auto 14px; }
+  .sheet h3 { margin:0; font-size:17px; font-weight:800; }
+  .sheet p { margin:4px 0 0; font-size:12px; font-weight:600; color:var(--muted); }
+  .sheet .fld { margin-top: 14px; }
+  .sheet .fld label { display:block; font-size:9.5px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:#9aa6ba; margin-bottom:6px; }
+  .sheet .fld .in { height:46px; border-radius:13px; border:1.5px solid var(--blue); background:#fff; display:flex; align-items:center; padding:0 14px; font-size:15px; font-weight:800; }
+  .sheet .fld .in.ph { border-color:#e5e7eb; color:#9aa6ba; font-weight:700; }
+  .sheet .row2 { display:flex; gap:10px; }
+  .sheet .row2 .fld { flex:1; }
+  .sheet .save { margin-top:16px; height:48px; border-radius:13px; background:#111827; color:#fff; font-size:14.5px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+
+  /* plan page */
+  .wtop { display:flex; align-items:center; justify-content:space-between; height:32px; }
+  .wtop .ms { font-size:19px; color:#374151; }
+  .wtop b { font-size:15px; font-weight:800; }
+  .hero { background: linear-gradient(160deg, var(--mid), var(--deep)); border-radius:20px; padding: 16px 18px 12px; text-align:center; color:#fff; box-shadow: 0 14px 30px -12px rgba(22,48,155,.55); margin-top: 8px; }
+  .hero .lab { font-size:9.5px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:rgba(255,255,255,.6); margin:0; }
+  .hero .big { font-size:42px; font-weight:800; letter-spacing:-.03em; line-height:1; margin-top:6px; }
+  .hero .big span { font-size:17px; font-weight:700; opacity:.7; }
+  .hero .meta { margin-top:7px; font-size:12px; font-weight:700; color:rgba(255,255,255,.8); }
+  .tlw { position:relative; margin-top: 30px; margin-bottom: 26px; }
+  .tl { position:relative; height:6px; border-radius:3px; background:rgba(255,255,255,.22); }
+  .tl .done { position:absolute; left:0; top:0; height:100%; background:#34d399; border-radius:3px; }
+  .tl i { position:absolute; top:-4px; width:14px; height:14px; border-radius:50%; background:#fff; border:3px solid #1e60e3; margin-left:-7px; }
+  .tl i.past { background:#34d399; }
+  .tl i.now { background:#1e60e3; border-color:#fff; }
+  .tl i.unsure { background:transparent; border:2px dashed #fff; }
+  .lb { position:absolute; font-size:9.5px; font-weight:700; color:rgba(255,255,255,.72); white-space:nowrap; line-height:1.15; text-align:center; transform:translateX(-50%); }
+  .lb b { display:block; color:#fff; font-weight:800; }
+  .lb.up { bottom: 14px; } .lb.dn { top: 14px; } .lb.l { transform:none; } .lb.r { transform:translateX(-100%); }
+  .zone { display:flex; justify-content:space-between; align-items:center; font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:#9aa6ba; margin: 14px 0 7px; }
+  .zone .pd { display:flex; gap:4px; }
+  .zone .pd i { width:5px; height:5px; border-radius:50%; background:#d5dbe6; display:block; }
+  .zone .pd i.on { background: var(--blue); width:14px; border-radius:3px; }
+  .swipe { display:flex; gap:10px; margin-right:-16px; overflow:hidden; }
+  .kcard { flex-basis: 236px !important; }
+  .kcard { flex: 0 0 272px; background: var(--soft); border:1px solid var(--line); border-radius:15px; padding: 11px 12px 6px; }
+  .kcard .kh { display:flex; align-items:center; gap:9px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .kcard .kh .av { width:30px; height:30px; border-radius:50%; background:#eef4ff; color:var(--blue); display:flex; align-items:center; justify-content:center; }
+  .kcard .kh .av .ms { font-size:17px; }
+  .kcard .kh b { font-size:13.5px; font-weight:800; display:flex; align-items:center; gap:5px; }
+  .kcard .kh span { font-size:10.5px; font-weight:700; color:#8a94a6; display:block; }
+  .kcard .kh em { margin-left:auto; font-style:normal; font-size:13.5px; font-weight:800; color:var(--blue); }
+  .krow { display:flex; align-items:center; gap:9px; padding: 7px 0; }
+  .krow .ic { width:28px; height:28px; border-radius:9px; background:#fff; border:1px solid var(--line); color:var(--blue); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .krow .ic .ms { font-size:16px; }
+  .krow .tx { flex:1; min-width:0; }
+  .krow .tx b { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; }
+  .krow .tx b .pill { margin-left:0; }
+  .krow .tx span { display:block; font-size:10.5px; font-weight:600; color:#8a94a6; }
+  .krow em { font-style:normal; font-size:12px; font-weight:800; }
+  .pill { display:inline-block; font-size:8.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; padding:2px 6px; border-radius:6px; margin-left:6px; vertical-align:1px; }
+  .pill.inv { background:#eef4ff; color:#2563eb; }
+  .pill.cash { background:#ecfdf5; color:#059669; }
+  .ins { display:flex; align-items:center; gap:10px; background:var(--soft); border:1px solid var(--line); border-radius:13px; padding: 9px 11px; margin-top: 10px; }
+  .ins .ic { width:32px; height:32px; border-radius:10px; background:#eef4ff; color:var(--blue); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .ins .ic .ms { font-size:17px; }
+  .ins .tx { font-size:11.5px; font-weight:600; color:#4b5563; line-height:1.4; flex:1; }
+  .ins .tx strong { color:var(--ink); font-weight:800; }
+  .ins .sw { background:#dbe1ec; } .ins .sw.on { background: var(--blue); }
+  .seg { display:flex; align-items:center; gap:10px; margin-top:10px; }
+  .seg label { font-size:11.5px; font-weight:800; color:#4b5563; }
+  .seg .chips { flex:1; display:flex; background:#eef1f6; border:none; border-radius:11px; padding:3px; gap:2px; margin:0; }
+  .seg .chips span { flex:1; text-align:center; font-size:12px; font-weight:800; color:#6b7280; padding:6px 0; border-radius:9px; }
+  .seg .chips span.on { background:#fff; color:var(--ink); box-shadow: 0 1px 3px rgba(15,23,42,.12); }
+  .how { display:flex; gap:10px; align-items:flex-start; margin-top: 10px; padding: 9px 11px; border-radius:13px; background:#eef4ff; }
+  .how .ms { font-size:18px; color:var(--blue); flex-shrink:0; margin-top:1px; }
+  .how p { margin:0; font-size:11.5px; font-weight:600; color:#1e3a8a; line-height:1.45; }
+  .how p strong { font-weight:800; }
+  .dcta { margin-top:auto; height:48px; border-radius:13px; background:#111827; color:#fff; font-size:14.5px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .note { font-size:12px; color:#9aa6ba; font-weight:600; margin-top: 26px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1 class="pt">Round 10: step 3 crossfades</h1>
+  <p class="ps">Step 3 shows "$252K / From birth to 18", holds for two seconds, then crossfades to "$3,510/mo / For all 3 kids" in the same styling. Tap the number to flip between the two. Everything else is as approved.</p>
+
+  <h2 class="sec">1. The changed quiz screens</h2>
+  <div class="rail">
+    <div class="col">
+      <p class="cap">Step 2 <span>no pen, no keyboard</span></p>
+      <div class="phone"><div class="scr blue">
+        <div class="top"><button class="ib"><span class="ms">arrow_back_ios_new</span></button><div class="dots"><i></i><i class="on"></i><i></i><i></i><i></i><i></i></div><button class="ib"><span class="ms">close</span></button></div>
+        <div class="eyebrow">Timing</div>
+        <div class="h1">When do you think they'll arrive?</div>
+        <p class="sub">A rough guess is fine.</p>
+        <div class="center">
+          <div class="glass wrow"><div class="av"><span class="ms">child_care</span></div><b>Kid 1</b><input type="range" min="2009" max="2037" value="2024"><em>Born 2024</em></div>
+          <div class="glass wrow"><div class="av"><span class="ms">child_care</span></div><b>Kid 2</b><input type="range" min="2009" max="2037" value="2028"><em>2028</em></div>
+          <div class="glass wrow"><div class="av"><span class="ms">child_care</span></div><b>Kid 3</b><input type="range" min="2009" max="2037" value="2037"><em>Not sure</em></div>
+          <div class="ends" style="margin-top:10px;padding:0 10px"><span>Already here</span><span>Soon</span><span>Not sure</span></div>
+        </div>
+        <button class="cta">Continue</button>
+      </div></div>
+    </div>
+
+    <div class="col">
+      <p class="cap">Step 3 <span>general stat, then the one that matters</span></p>
+      <div class="phone"><div class="scr blue">
+        <div class="top"><button class="ib"><span class="ms">arrow_back_ios_new</span></button><div class="dots"><i></i><i></i><i class="on"></i><i></i><i></i><i></i></div><button class="ib"><span class="ms">info</span></button></div>
+        <div class="eyebrow">The real number</div>
+        <div class="h1">What one kid costs</div>
+        <p class="sub">The U.S. average, adjusted to today's prices.</p>
+        <div class="center">
+          <div class="xfade" id="xf" onclick="flipStat()">
+            <div class="stat on" id="statA"><div class="readout">$252K</div><div class="hint">From birth to 18</div></div>
+            <div class="stat" id="statB"><div class="readout">$3,510<span class="unit">/mo</span></div><div class="hint">For all 3 kids</div></div>
+          </div>
+        </div>
+        <button class="cta">Continue</button>
+      </div></div>
+    </div>
+
+    <div class="col">
+      <p class="cap">Step 4 <span>"saves you" as a range, in K</span></p>
+      <div class="phone"><div class="scr blue">
+        <div class="top"><button class="ib"><span class="ms">arrow_back_ios_new</span></button><div class="dots"><i></i><i></i><i></i><i class="on"></i><i></i><i></i></div><button class="ib"><span class="ms">info</span></button></div>
+        <div class="eyebrow">Your plan</div>
+        <div class="h1">Choose what to fund</div>
+        <p class="sub">Turn one off to see what it would save you.</p>
+        <div class="center">
+          <div class="glass tog" id="tBaby">
+            <div class="ic"><span class="ms">child_care</span></div>
+            <div class="tx"><b>Baby fund</b><span id="sBaby">$20,800 ready on day one.</span></div>
+                        <button class="sw on" onclick="flip('baby', this)" aria-label="Baby fund"></button>
+          </div>
+          <div class="glass tog" id="tCol">
+            <div class="ic"><span class="ms">school</span></div>
+            <div class="tx"><b>College</b><span id="sCol">4 years of tuition, in a 529.</span></div>
+                        <button class="sw on" onclick="flip('col', this)" aria-label="College"></button>
+          </div>
+          <div class="glass tog" id="tNest">
+            <div class="ic"><span class="ms">savings</span></div>
+            <div class="tx"><b>A nest egg at 18</b><span id="sNest">Invested now, theirs at 18.</span></div>
+                        <button class="sw on" onclick="flip('nest', this)" aria-label="A nest egg at 18"></button>
+          </div>
+        </div>
+        <button class="cta" id="cta4"><span class="ms" id="cta4i" style="display:none">auto_awesome</span><span id="cta4t">Continue</span></button>
+      </div></div>
+    </div>
+  </div>
+  <p class="secsub" style="margin-top:4px">Baby fund shows only when at least one kid is not born yet (Kid 1, born 2024, gets none). College and the nest egg each get their amount screen only while switched on, so the dots shrink as you turn things off. "Saves you" is what you would put in over the whole plan: the baby fund is the two rank targets added ($37K); college runs from the in-state preset to the out-of-state preset for all three kids ($55K to $135K); the nest egg runs from $50K to $250K per kid ($55K to $275K). Rounded to $5K.</p>
+
+  <h2 class="sec">2. The plan page: Cash or Invested on every row</h2>
+  <p class="secsub">Swipe to Kid 2 (shown mid-rename) to see the baby fund row with its Cash pill. The excerpt names the cash part when a plan has one.</p>
+
+  <div class="rail">
+    <div class="col">
+      <p class="cap">Plan page <span>offer off, as it starts</span></p>
+      <div class="phone"><div class="scr white">
+        <div class="wtop"><span class="ms">arrow_back_ios_new</span><b>Kids</b><span class="ms">more_horiz</span></div>
+        <div class="hero">
+          <div class="lab">Save this month</div>
+          <div class="big" id="heroBig">$2,830<span>/mo</span></div>
+          <div class="meta" id="heroMeta">for all 3 kids · ~$1,306 a paycheck</div>
+          <div class="tlw">
+            <div class="tl"><div class="done" style="width:16%"></div><i class="past" style="left:0%"></i><i class="now" style="left:16%"></i><i class="unsure" style="left:26%"></i><i style="left:36%"></i><i style="left:100%"></i></div>
+            <span class="lb up l" style="left:0%"><b>Ellie</b>2024</span>
+            <span class="lb dn" style="left:16%"><b>Now</b>2026</span>
+            <span class="lb up" style="left:30%"><b>Kid 3</b>not yet</span>
+            <span class="lb dn" style="left:42%"><b>Kid 2</b>2028</span>
+            <span class="lb up r" style="left:100%"><b>All 18</b>2046</span>
+          </div>
+        </div>
+        <div class="zone"><span>Per kid</span><span class="pd"><i class="on"></i><i></i><i></i></span></div>
+        <div class="swipe">
+          <div class="kcard">
+            <div class="kh"><div class="av"><span class="ms">child_care</span></div><div><b>Ellie <span class="ms" style="font-size:13px;color:#9aa6ba;vertical-align:-1px">edit</span></b><span>Born 2024</span></div><em>$646/mo</em></div>
+            <div class="krow"><div class="ic"><span class="ms">school</span></div><div class="tx"><b>College<span class="pill inv">Invested</span></b><span>$47,800 by 2042</span></div><em>$104</em></div>
+            <div class="krow"><div class="ic"><span class="ms">savings</span></div><div class="tx"><b>Nest egg<span class="pill inv">Invested</span></b><span>$250,000 by 2042</span></div><em>$542</em></div>
+          </div>
+          <div class="kcard"><div class="kh"><div class="av"><span class="ms">child_care</span></div><div><b><span style="border-bottom:2px solid #2563eb;padding:0 1px">Theo</span><span class="ms" style="font-size:15px;color:#2563eb">check</span></b><span>Arrives 2028</span></div><em>$1,257/mo</em></div><div class="krow"><div class="ic"><span class="ms">child_care</span></div><div class="tx"><b>Baby fund<span class="pill cash">Cash</span></b><span>$20,800 by Jun 2028</span></div><em>$850</em></div></div>
+        </div>
+        <div class="ins">
+          <div class="ic"><span class="ms">cake</span></div>
+          <div class="tx" id="giftTx"><strong>Lighten the monthly.</strong> Put in $1,000 per kid every New Year, and this drops to ~$2,580.</div>
+          <button class="sw" onclick="gift(this)" aria-label="Gift days"></button>
+        </div>
+        <div class="seg"><label>Return</label><div class="chips"><span>8%</span><span class="on">10%</span><span>12%</span></div></div>
+        <div class="how">
+          <span class="ms">account_balance_wallet</span>
+          <p><strong>How FRED helps.</strong> Already investing $2,830 or more a month? FRED sets this plan's share aside inside your portfolio, keeps the baby funds in cash, and handles where it goes.</p>
+        </div>
+        <div class="dcta">Start this plan</div>
+      </div></div>
+    </div>
+    <div class="col" style="max-width:420px;padding-top:30px">
+      <p class="ps"><strong>When the offer is on</strong>, the hero drops to $2,580 and the row becomes the reminder: "Next up: New Year, $1,000 for each kid."</p>
+      <p class="ps"><strong>A flat $1,000 per kid</strong>, every January, for every kid with a nest egg or college fund. Three kids, so the monthly drops by about $250.</p>
+      <p class="ps"><strong>Names edit in place.</strong> Tap the pen and the name becomes a field on the card; tap the check or anywhere else to save.</p>
+      <p class="ps"><strong>The excerpt by plan type.</strong> All invested: "FRED sets this plan's share aside inside your portfolio and handles where it goes." Mixed, like this one: "... inside your portfolio, keeps the baby funds in cash, and handles where it goes." All cash (vacation, emergency fund, anything under three years): "FRED keeps this in cash, ready the day you need it."</p>
+    </div>
+  </div>
+
+  <h2 class="sec">3. Two other goals in the same shell</h2>
+  <p class="secsub">Every other goal type is one or two slider screens, each with a title and a one-line subtitle. House here is two; Vacation is one. Car matches House; Emergency fund, Wedding and Something else match Vacation's shape.</p>
+  <div class="rail">
+    <div class="col">
+      <p class="cap">House 1 of 2 <span>price</span></p>
+      <div class="phone"><div class="scr blue">
+        <div class="top"><span style="width:32px"></span><div class="dots"><i class="on"></i><i></i></div><button class="ib"><span class="ms">close</span></button></div>
+        <div class="eyebrow">Your home</div>
+        <div class="h1">What will it cost?</div>
+        <p class="sub">A rough price for the home you have in mind.</p>
+        <div class="center">
+          <div class="readout" id="hp">$650,000</div>
+          <div class="hint">Tap to type</div>
+          <input type="range" min="0" max="1000" value="520" oninput="housePrice(this.value)" style="margin-top:26px">
+          <div class="ends"><span>$100K</span><span>$3M</span></div>
+        </div>
+        <button class="cta">Continue</button>
+      </div></div>
+    </div>
+    <div class="col">
+      <p class="cap">House 2 of 2 <span>down payment and when</span></p>
+      <div class="phone"><div class="scr blue">
+        <div class="top"><button class="ib"><span class="ms">arrow_back_ios_new</span></button><div class="dots"><i></i><i class="on"></i></div><button class="ib"><span class="ms">close</span></button></div>
+        <div class="eyebrow">Your home</div>
+        <div class="h1">How much, and when?</div>
+        <p class="sub">More down now, less each month.</p>
+        <div class="center">
+          <div class="lab">Down payment</div>
+          <div class="chips" id="dp"><span onclick="dpPick(this,10)">10%</span><span class="on" onclick="dpPick(this,20)">20%</span><span onclick="dpPick(this,100)">Full price</span></div>
+          <div class="lab">Buy in</div>
+          <div class="readout" id="hy" style="margin-top:10px">2032</div>
+          <input type="range" min="2027" max="2046" value="2032" oninput="houseYear(this.value)" style="margin-top:14px">
+          <div class="ends"><span>2027</span><span>2046</span></div>
+          <div class="chip"><span class="ms">trending_up</span><span id="hm">$130K down · ~$1,310 a month</span></div>
+        </div>
+        <button class="cta"><span class="ms">auto_awesome</span>Show my plan</button>
+      </div></div>
+    </div>
+    <div class="col">
+      <p class="cap">Vacation <span>one screen</span></p>
+      <div class="phone"><div class="scr blue">
+        <div class="top"><span style="width:32px"></span><div class="dots"><i class="on"></i></div><button class="ib"><span class="ms">close</span></button></div>
+        <div class="eyebrow">Vacation</div>
+        <div class="h1">Trips and budget</div>
+        <p class="sub">Kept in cash, ready to spend.</p>
+        <div class="center">
+          <div class="lab" style="margin-top:0">Trips a year</div>
+          <div class="stepper" style="margin-top:8px"><button onclick="trips(-1)">−</button><div class="readout" id="tr" style="font-size:52px;width:60px">2</div><button onclick="trips(1)">+</button></div>
+          <div class="lab">Budget per trip</div>
+          <div class="readout" id="tb" style="font-size:40px;margin-top:10px">$5,000</div>
+          <input type="range" min="500" max="15000" step="250" value="5000" oninput="tripBudget(this.value)" style="margin-top:14px">
+          <div class="ends"><span>$500</span><span>$15K</span></div>
+          <div class="chip"><span class="ms">payments</span><span id="vm">~$834 a month, kept in cash</span></div>
+        </div>
+        <button class="cta"><span class="ms">auto_awesome</span>Show my plan</button>
+      </div></div>
+    </div>
+  </div>
+
+  <p class="note">Mockups only. Nothing in the app has changed.</p>
+</div>
+
+<script>
+  var parts = {baby:1280, col:250, nest:1300}, saves = {baby:'$37K', col:'$55K to $135K', nest:'$55K to $275K'}, on = {baby:true, col:true, nest:true};
+  function fmt(n){ return '$' + Math.round(n).toLocaleString('en-US'); }
+  function r10(n){ return Math.round(n/10)*10; }
+  var subs = {baby:'$20,800 ready on day one.', col:'4 years of tuition, in a 529.', nest:'Invested now, theirs at 18.'};
+  function flip(k, el){
+    on[k] = !on[k]; el.classList.toggle('on');
+    var row = document.getElementById(k==='baby'?'tBaby':k==='col'?'tCol':'tNest');
+    row.classList.toggle('off', !on[k]);
+    var sp = document.getElementById(k==='baby'?'sBaby':k==='col'?'sCol':'sNest');
+    sp.textContent = on[k] ? subs[k] : 'Saves you ' + saves[k] + '.';
+    var last = !(on.col || on.nest);
+    document.getElementById('cta4t').textContent = last ? 'Show my plan' : 'Continue';
+    document.getElementById('cta4i').style.display = last ? '' : 'none';
+  }
+  function gift(el){
+    el.classList.toggle('on'); var g = el.classList.contains('on');
+    document.getElementById('heroBig').innerHTML = (g ? '$2,580' : '$2,830') + '<span>/mo</span>';
+    document.getElementById('heroMeta').textContent = g ? 'for all 3 kids · ~$1,191 a paycheck' : 'for all 3 kids · ~$1,306 a paycheck';
+    document.getElementById('giftTx').innerHTML = g
+      ? '<strong>Next up:</strong> New Year, $1,000 for each kid. FRED reminds you in December.'
+      : '<strong>Lighten the monthly.</strong> Put in $1,000 per kid every New Year, and this drops to ~$2,580.';
+  }
+  var hp = 650000, dp = 20, hy = 2032;
+  function housePrice(v){ hp = Math.round(100000 * Math.pow(30, v/1000) / 5000) * 5000; document.getElementById('hp').textContent = fmt(hp); houseCalc(); }
+  function dpPick(el, p){ var a = document.querySelectorAll('#dp span'); for (var i=0;i<a.length;i++) a[i].classList.remove('on'); el.classList.add('on'); dp = p; houseCalc(); }
+  function houseYear(v){ hy = +v; document.getElementById('hy').textContent = hy; houseCalc(); }
+  function houseCalc(){
+    var target = hp * dp / 100, n = (hy - 2026) * 12 - 10; if (n < 1) n = 1;
+    var rate = n < 36 ? 0.04 : 0.10, r = rate/12, m = target * r / (Math.pow(1+r, n) - 1);
+    document.getElementById('hm').textContent = (dp === 100 ? fmt(target) + ' in full' : '$' + Math.round(target/1000) + 'K down') + ' · ~' + fmt(Math.ceil(m)) + ' a month' ;
+  }
+  var tr = 2, tb = 5000;
+  function trips(d){ tr = Math.max(1, Math.min(10, tr + d)); document.getElementById('tr').textContent = tr; vac(); }
+  function tripBudget(v){ tb = +v; document.getElementById('tb').textContent = fmt(tb); vac(); }
+  function vac(){ document.getElementById('vm').textContent = '~' + fmt(Math.ceil(tr * tb / 12)) + ' a month, kept in cash'; }
+  var statOn = 'A';
+  function flipStat(){ statOn = statOn === 'A' ? 'B' : 'A'; document.getElementById('statA').classList.toggle('on', statOn === 'A'); document.getElementById('statB').classList.toggle('on', statOn === 'B'); }
+  setTimeout(flipStat, 2200);
+</script>
+</body>
+</html>

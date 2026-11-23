@@ -5,10 +5,13 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import {
   IonHeader, IonToolbar, IonContent,
-  IonFooter, IonSpinner, NavController, ToastController
+  IonFooter, IonSpinner, ModalController, NavController
 } from '@ionic/angular/standalone';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
+import { presentDateSheet } from '../fred-date-sheet/fred-date-sheet.component';
+import { formatLong, parseYmd, todayYmd, ymd } from '../../utils/local-date';
 import { AuthService } from '../../services/auth.service';
+import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { AlpacaService, CreateAlpacaAccountRequest, UpdateKycRequest } from '../../services/alpaca.service';
@@ -69,6 +72,26 @@ function dateOfBirthValidator(control: AbstractControl): ValidationErrors | null
   const date = new Date(year, month - 1, day);
   if (date.getMonth() !== month - 1 || date.getDate() !== day) return { invalidDate: true };
   return null;
+}
+
+// The control keeps its MM/DD/YYYY string (the validator and the Alpaca payload read it); the date
+// sheet speaks YYYY-MM-DD. These two adapt at that boundary.
+// Null for anything the sheet could not open on: empty, a half-typed draft, an impossible date.
+function mmddyyyyToYmd(value: string | null | undefined): string | null {
+  const match = (value ?? '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
+  const candidate = ymd(+match[3], +match[1], +match[2]);
+  try {
+    parseYmd(candidate);
+  } catch {
+    return null;
+  }
+  return candidate;
+}
+
+function ymdToMmddyyyy(value: string): string {
+  const { y, m, d } = parseYmd(value);
+  return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}/${y}`;
 }
 
 @Component({
@@ -137,9 +160,10 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     private navCtrl: NavController,
     private authService: AuthService,
     private alpacaService: AlpacaService,
-    private toastController: ToastController,
+    private toastService: ToastService,
     private cdr: ChangeDetectorRef,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    private modalCtrl: ModalController
   ) {}
 
   ngOnInit() {
@@ -182,19 +206,13 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
           this.step1Snapshot = JSON.stringify(this.step1Form.value);
           this.cdr.detectChanges();
         },
-        error: async () => {
+        error: () => {
           this.isLoadingKycData = false;
           // Fall back to local data if fetch fails; set prefillFailed so
           // the user is never permanently stuck on the part-1 gate
           this.prefillFailed = true;
           this.prefillUserData();
-          const toast = await this.toastController.create({
-            message: 'Could not load current KYC data. Please fill in your information.',
-            duration: 3000,
-            color: 'warning',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast('Could not load current KYC data. Please fill in your information.', 'warning');
           this.cdr.detectChanges();
         }
       });
@@ -324,7 +342,8 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
 
   onFamilyNameInput(event: Event) {
     if (this.isLikelyAutofill(event)) {
-      setTimeout(() => (document.getElementById('dateOfBirthInput') as HTMLInputElement)?.focus(), 100);
+      // The next field is a tap, not a keyboard: landing on the button drops the keyboard.
+      setTimeout(() => (document.getElementById('dateOfBirthBtn') as HTMLButtonElement)?.focus(), 100);
     }
   }
 
@@ -351,22 +370,33 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     this.step1Form.get('taxId')?.markAsTouched();
   }
 
-  onDateOfBirthInput(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const digits = input.value.replace(/\D/g, '').slice(0, 8);
-    let formatted = digits;
-    if (digits.length > 4) {
-      formatted = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
-    } else if (digits.length > 2) {
-      formatted = digits.slice(0, 2) + '/' + digits.slice(2);
-    }
-    input.value = formatted;
-    this.step1Form.patchValue({ dateOfBirth: formatted });
-    this.step1Form.get('dateOfBirth')?.markAsTouched();
+  /** What the date of birth button shows: 'Mar 14, 1991', or '' for the placeholder. */
+  get dateOfBirthText(): string {
+    const value = mmddyyyyToYmd(this.step1Form.controls.dateOfBirth.value);
+    return value ? formatLong(value) : '';
+  }
 
-    if (digits.length === 8) {
-      setTimeout(() => (document.getElementById('phoneNumberInput') as HTMLInputElement)?.focus(), 50);
-    }
+  get dateOfBirthAriaLabel(): string {
+    const shown = this.dateOfBirthText;
+    return `Date of birth, ${shown || 'not set'}. Opens a date picker`;
+  }
+
+  /** The date of birth is picked on the FRED date sheet; Done writes the control and moves on to the phone. */
+  async openDateOfBirth(): Promise<void> {
+    // A focused input would hold the keyboard up under the sheet.
+    (document.activeElement as HTMLElement | null)?.blur();
+    const control = this.step1Form.controls.dateOfBirth;
+    const date = await presentDateSheet(this.modalCtrl, {
+      title: 'Date of birth',
+      mode: 'birthday',
+      value: mmddyyyyToYmd(control.value),
+      max: todayYmd(),
+    });
+    if (date === null) return;
+    control.setValue(ymdToMmddyyyy(date));
+    control.markAsTouched();
+    // The typed field used to hand off to the phone once its eight digits were in; Done does the same.
+    (document.getElementById('phoneNumberInput') as HTMLInputElement | null)?.focus();
   }
 
   // Parses autofilled full addresses like "6110 Rosemont Cir, Rockville MD 20852"
@@ -492,7 +522,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
             error: () => this.navCtrl.navigateForward('/link-bank', { replaceUrl: true })
           });
         },
-        error: async (err) => {
+        error: (err) => {
           this.isLoading = false;
           // Category and status only: this toast interpolates the server's own message.
           this.analytics.trackErrorShown(
@@ -503,13 +533,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
             true,
           );
           const msg = err.error?.message || err.message || 'Account creation failed. Please try again.';
-          const toast = await this.toastController.create({
-            message: msg,
-            duration: 4000,
-            color: 'danger',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast(msg, 'danger');
         }
       });
   }
@@ -534,27 +558,15 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     this.alpacaService.updateKyc(request)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: async () => {
+        next: () => {
           this.isLoading = false;
-          const toast = await this.toastController.create({
-            message: 'Your identity information has been updated.',
-            duration: 3000,
-            color: 'success',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast('Your identity information has been updated.', 'success');
           this.navCtrl.navigateBack('/security-settings');
         },
-        error: async (err) => {
+        error: (err) => {
           this.isLoading = false;
           const msg = err.error?.error || err.error?.message || err.message || 'Update failed. Please try again.';
-          const toast = await this.toastController.create({
-            message: msg,
-            duration: 4000,
-            color: 'danger',
-            position: 'bottom'
-          });
-          await toast.present();
+          this.toastService.showToast(msg, 'danger');
         }
       });
   }

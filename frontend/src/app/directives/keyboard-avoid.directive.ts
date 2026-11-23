@@ -1,5 +1,6 @@
 import { Directive, ElementRef, HostListener, Input, OnDestroy, OnInit, Optional } from '@angular/core';
 import { IonContent } from '@ionic/angular/standalone';
+import { Capacitor } from '@capacitor/core';
 import { Keyboard } from '@capacitor/keyboard';
 
 /**
@@ -72,6 +73,11 @@ export class KeyboardAvoidDirective implements OnInit, OnDestroy {
       }
     }
 
+    // The Keyboard plugin has no web implementation: registering a listener there rejects inside
+    // Capacitor's own promise chain, which nothing can catch from here. Web keeps the focusin
+    // fallback in app.component.ts; the listeners below are native only.
+    if (!Capacitor.isNativePlatform()) return;
+
     this.kbShow = Keyboard.addListener('keyboardWillShow', info => {
       this.keyboardHeight = info.keyboardHeight;
       if (this.content) {
@@ -128,7 +134,8 @@ export class KeyboardAvoidDirective implements OnInit, OnDestroy {
       this.elementRef.nativeElement.removeEventListener(type, this.blockGesture);
     }
     if (this.modalEl) this.modalEl.style.transform = '';
-    this.kbShow?.then(h => h.remove());
-    this.kbHide?.then(h => h.remove());
+    // On web the Keyboard plugin rejects ("not implemented on web"); there is nothing to remove.
+    this.kbShow?.then(h => h.remove()).catch(() => {});
+    this.kbHide?.then(h => h.remove()).catch(() => {});
   }
 }

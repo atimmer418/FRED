@@ -73,4 +73,21 @@ describe('InvestmentFrequencyUtils', () => {
     expect(InvestmentFrequencyUtils.toMonthlyEquivalent(500, undefined)).toBe(500);
     expect(InvestmentFrequencyUtils.toMonthlyEquivalent(500, null)).toBe(500);
   });
+
+  it('converts monthly to per paycheck with backend parity', () => {
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(433, 'WEEKLY')).toBe(100);
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(217, 'biweekly')).toBe(100);
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(500, 'SEMI_MONTHLY')).toBe(250);
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(500, 'monthly')).toBe(500);
+  });
+
+  it('rounds per paycheck to cents HALF_UP', () => {
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(417, 'BIWEEKLY')).toBe(192.17);
+  });
+
+  it('returns null for an unknown or empty frequency', () => {
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(417, '')).toBeNull();
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(417, null)).toBeNull();
+    expect(InvestmentFrequencyUtils.toPerPaycheckEquivalent(417, 'QUARTERLY')).toBeNull();
+  });
 });

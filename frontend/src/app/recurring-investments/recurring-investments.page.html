@@ -76,17 +76,20 @@
         </div>
 
         <div class="edit-row">
+          <!-- The one amount in the app that is typed, not slid: the decimal keypad, by Andy's call. -->
           <div class="edit-field">
-            <label class="field-label">Investment Amount</label>
+            <label class="field-label" for="investment-amount">Amount</label>
             <div class="currency-input-wrap">
               <span class="currency-sym">$</span>
               <input
+                id="investment-amount"
                 class="field-input currency-field-input"
-                type="number"
-                [(ngModel)]="editedInvestment.investmentAmount"
+                type="text"
+                inputmode="decimal"
+                autocomplete="off"
+                [(ngModel)]="amountInput"
                 (blur)="onAmountChange()"
-                placeholder="0"
-                min="1">
+                placeholder="0">
             </div>
           </div>
 
@@ -104,43 +107,108 @@
 
         <p class="helper-hint">Amount to invest every {{ getEditedFrequencyText() }}</p>
 
+        <!-- The date opens the FRED date sheet; semi-monthly locks it, since the backend sets the 1st and 15th. -->
         <div class="edit-field edit-field--full">
           <div class="field-label">Transfer Date</div>
-          <button id="open-date-modal" class="date-btn" [disabled]="editedInvestment.frequency === 'SEMI_MONTHLY'">
+          <button
+            type="button"
+            class="field-value-btn transfer-date-btn"
+            aria-haspopup="dialog"
+            [attr.aria-label]="transferDateAriaLabel()"
+            [disabled]="isTransferDateLocked()"
+            (click)="openTransferDate()">
+            @if (transferDateText(); as text) {
+              <span>{{ text }}</span>
+            } @else {
+              <span class="field-placeholder">Select date</span>
+            }
             <span class="material-symbols-outlined">calendar_month</span>
-            {{ formatDate((editedInvestment.nextInvestmentDate || (currentInvestment && currentInvestment.nextInvestmentDate)) || '') }}
           </button>
 
-          <ion-modal #dateModal trigger="open-date-modal" [keepContentsMounted]="true" style="--height: auto; --width: auto; --border-radius: 16px;">
-            <ng-template>
-              <ion-datetime
-                #datetime
-                presentation="date"
-                [value]="getDateForPicker(editedInvestment.nextInvestmentDate || (currentInvestment && currentInvestment.nextInvestmentDate) || undefined)"
-                (ionChange)="onNextInvestmentDateChange($event)"
-                [min]="todayISO"
-                color="primary"
-                style="height: auto; max-width: 350px;">
-                <span slot="title">Select Transfer Date</span>
-                <ion-buttons slot="buttons">
-                  <ion-button color="primary" (click)="datetime.confirm(); dateModal.dismiss()">Done</ion-button>
-                </ion-buttons>
-              </ion-datetime>
-            </ng-template>
-          </ion-modal>
-
-          <p class="helper-hint">When the ACH transfer will initiate to fund the investment</p>
-          <p class="helper-hint helper-hint--primary"
-            *ngIf="editedInvestment.nextInvestmentDate || currentInvestment?.nextInvestmentDate">
-            <span class="material-symbols-outlined">schedule</span>
-            Estimated investment execution: {{ getEstimatedTradeWindow() }}
+          <p class="field-echo" [class.primary]="!isTransferDateLocked()">
+            @if (isTransferDateLocked()) {
+              <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+            } @else {
+              <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+            }
+            <span>{{ transferEcho() }}</span>
           </p>
         </div>
 
-        <button class="cta-btn" (click)="saveChanges()" [disabled]="isLoading || !hasChanges()">
+        <button class="cta-btn" (click)="saveChanges()" [disabled]="isLoading || !hasChanges() || !isAmountValid()">
           <span>Save Changes</span>
           <span class="material-symbols-outlined">check</span>
         </button>
+      </div>
+
+    </div>
+
+    <!-- Loading: the same two cards, with the data's shapes where the data will land. A reload behind
+         a schedule that is already up (after a save) keeps the real cards, so this needs both. -->
+    <div *ngIf="isLoading && !currentInvestment" class="cards-wrapper" aria-busy="true">
+
+      <div class="status-banner status-banner--sk">
+        <div class="status-left">
+          <app-skeleton height="28px" radius="circle" />
+          <div class="status-text">
+            <app-skeleton width="64px" height="22px" radius="6px" />
+            <app-skeleton width="176px" height="16px" radius="4px" />
+          </div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="card-header-row">
+          <span class="material-symbols-outlined card-icon">calendar_month</span>
+          <h3 class="card-title">Investment Schedule</h3>
+        </div>
+
+        <div class="schedule-stats">
+          <div class="stat-col">
+            <span class="stat-label">AMOUNT</span>
+            <app-skeleton width="56px" height="20px" radius="6px" />
+          </div>
+          <div class="stat-col stat-col--center">
+            <span class="stat-label">FREQUENCY</span>
+            <app-skeleton width="112px" height="20px" radius="6px" />
+          </div>
+          <div class="stat-col stat-col--end">
+            <span class="stat-label">NEXT DATE</span>
+            <app-skeleton width="56px" height="20px" radius="6px" />
+          </div>
+        </div>
+
+        <!-- No streak pill: the real row shows only past month one, and a new schedule is the
+             likeliest thing to load here, so a placeholder would shift the cards when it left. -->
+        <app-skeleton height="48px" radius="12px" />
+      </div>
+
+      <div class="section-card">
+        <div class="card-header-row">
+          <span class="material-symbols-outlined card-icon">tune</span>
+          <h3 class="card-title">Modify Schedule</h3>
+        </div>
+
+        <div class="edit-row">
+          <div class="edit-field">
+            <p class="field-label">Amount</p>
+            <app-skeleton height="37px" radius="6px" />
+          </div>
+          <div class="edit-field">
+            <p class="field-label">Frequency</p>
+            <app-skeleton height="37px" radius="6px" />
+          </div>
+        </div>
+
+        <div class="helper-hint"><app-skeleton width="196px" height="16px" radius="4px" /></div>
+
+        <div class="edit-field edit-field--full">
+          <div class="field-label">Transfer Date</div>
+          <app-skeleton class="date-btn-sk" height="37px" radius="6px" />
+          <div class="field-echo"><app-skeleton width="196px" height="16px" radius="4px" /></div>
+        </div>
+
+        <app-skeleton class="cta-sk" height="52px" radius="12px" />
       </div>
 
     </div>

@@ -135,11 +135,11 @@ deliberate: the first item is what tells you the rest are broken.
 
 ### (e) Anytime
 
-The **14 FRED-226 frontend spec failures**: eight `should create` smoke specs,
-`FreedomDetailSheetComponent`, `SecuritySettingsPage`, the `TabsPage` pager, and two `swipe-settle`
-velocity specs. They predate the analytics work, none of them is an analytics spec, and they are
-documented so that a session can tell them apart from a failure it caused. Anything beyond those 14
-is new.
+The **13 FRED-226 frontend spec failures**: nine `should create` smoke specs, `SecuritySettingsPage`,
+the `TabsPage` pager, and two `swipe-settle` velocity specs. They predate the analytics work, none of
+them is an analytics spec, and they are documented so that a session can tell them apart from a
+failure it caused. Anything beyond those 13 is new. (There were 14 until Goals v3.1 replaced the
+Freedom sheet with `FreedomPlanPage` and deleted the sheet's failing 4% rule spec.)
 
 ---
 

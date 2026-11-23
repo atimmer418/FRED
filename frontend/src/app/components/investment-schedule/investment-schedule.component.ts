@@ -1,21 +1,29 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import {
-  IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner, NavController
+  IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner, ModalController, NavController, ViewWillLeave
 } from '@ionic/angular/standalone';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { InvestmentService } from '../../services/investment.service'; // Import this
+import { ToastService } from '../../services/toast.service';
 import { environment } from '../../../environments/environment';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
+import { AmountTrayHost } from '../plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../plan-amount-tray/amount-tray-slot.component';
+import { PiecewiseScale } from '../../utils/plan-amount-scale';
+import { addDays, dayOfWeek, formatFull, formatShort, parseYmd, todayYmd, ymd } from '../../utils/local-date';
+import { nextBusinessDay } from '../../utils/business-days';
+import { quickPicks } from '../../utils/quick-picks';
+import { InvestmentFrequencyKey } from '../../utils/investment-frequency.utils';
+import { presentDateSheet } from '../fred-date-sheet/fred-date-sheet.component';
 
 export interface InvestmentSchedule {
-  payFrequency: string;
-  investmentAmount: number;
+  payFrequency: InvestmentFrequencyKey;
   startDate: string;
   isEnabled: boolean;
 }
@@ -35,6 +43,41 @@ export interface InvestmentScheduleResponse {
   updatedAt: string;
 }
 
+/** The one tray-driven field on this screen. */
+type TrayField = 'amount';
+
+/** The next pay date is locked on this frequency: the backend owns the 1st and 15th. */
+const LOCKED_FREQUENCY: InvestmentFrequencyKey = 'SEMI_MONTHLY';
+/** The echo under the locked date, as the mockup words it. */
+export const PAY_DATE_LOCKED_ECHO = 'Set by your pay schedule: the 1st and 15th.';
+
+const MONDAY = 1;
+
+/** The Monday strictly after the date. */
+function nextMondayAfter(from: string): string {
+  let current = addDays(from, 1);
+  while (dayOfWeek(current) !== MONDAY) current = addDays(current, 1);
+  return current;
+}
+
+/** The 1st of the month after the one the date is in. */
+function firstOfNextMonth(from: string): string {
+  const { y, m } = parseYmd(from);
+  return m === 12 ? ymd(y + 1, 1, 1) : ymd(y, m + 1, 1);
+}
+
+/**
+ * The amount per paycheck, as the rollout table sets it
+ * (docs/superpowers/specs/2026-11-11-amount-tray-rollout-design.md): $5 to $10,000, the dollar step
+ * growing with the amount; minus and plus move $5.
+ */
+const AMOUNT_SCALE: PiecewiseScale = {
+  min: 5,
+  max: 10_000,
+  fine: 5,
+  segments: [{ to: 500, step: 5 }, { to: 2000, step: 50 }, { to: 5000, step: 250 }, { to: 10_000, step: 500 }],
+};
+
 @Component({
   selector: 'app-investment-schedule',
   templateUrl: './investment-schedule.component.html',
@@ -43,12 +86,18 @@ export interface InvestmentScheduleResponse {
   imports: [
     CommonModule, FormsModule,
     IonContent, IonHeader, IonToolbar, IonFooter, IonSpinner,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective, AmountTraySlotComponent
   ]
 })
-export class InvestmentScheduleComponent implements OnInit {
+export class InvestmentScheduleComponent implements OnInit, OnDestroy, ViewWillLeave {
   // User's financial data from initial survey
   monthlyGoal: number = 0;
+
+  /** The amount per paycheck: a signal, so the tray under it follows every change. */
+  readonly investmentAmount = signal(0);
+  /** The slide tray under the amount: open, close, outside tap and the label swap live in the host. */
+  readonly tray: AmountTrayHost<TrayField>;
+  readonly PAY_DATE_LOCKED_ECHO = PAY_DATE_LOCKED_ECHO;
 
   isSubmitting: boolean = false;
   isReady: boolean = false;
@@ -79,19 +128,36 @@ export class InvestmentScheduleComponent implements OnInit {
     private authService: AuthService,
     private investmentService: InvestmentService,
     private http: HttpClient,
-    private analytics: AnalyticsService
-  ) {}
+    private analytics: AnalyticsService,
+    private toastService: ToastService,
+    private modalCtrl: ModalController,
+    el: ElementRef<HTMLElement>
+  ) {
+    this.tray = new AmountTrayHost<TrayField>({
+      root: el,
+      fields: {
+        amount: {
+          label: 'Amount',
+          scale: AMOUNT_SCALE,
+          value: this.investmentAmount,
+          set: v => this.investmentAmount.set(v),
+          valueSuffix: ' per paycheck',
+        },
+      },
+    });
+  }
 
   // Investment schedule configuration
   schedule: InvestmentSchedule = {
     payFrequency: 'BIWEEKLY',
-    investmentAmount: 0,
     startDate: '', // This will be the next pay date
     isEnabled: true
   };
 
   // Frequency options with descriptions and calculation details
-  frequencyOptions = [
+  frequencyOptions: Array<{
+    value: InvestmentFrequencyKey; label: string; description: string; paychecksPerMonth: number; daysBetween: number | null;
+  }> = [
     {
       value: 'WEEKLY',
       label: 'Weekly',
@@ -136,6 +202,15 @@ export class InvestmentScheduleComponent implements OnInit {
 
   }
 
+  ngOnDestroy(): void {
+    this.tray.destroy();
+  }
+
+  /** Leaving the screen: the tray snaps shut instead of collapsing into a screen that is going. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
+  }
+
   private restoreAcatsFromStorage(): void {
     const saved = localStorage.getItem('pendingAcats');
     if (saved) {
@@ -164,7 +239,7 @@ export class InvestmentScheduleComponent implements OnInit {
         if (savedSchedule && savedSchedule.frequency && savedSchedule.investmentAmount) {
           console.log('[InvestmentScheduleComponent] ✅ Restoring saved schedule:', savedSchedule);
           this.schedule.payFrequency = savedSchedule.frequency;
-          this.schedule.investmentAmount = savedSchedule.investmentAmount;
+          this.investmentAmount.set(savedSchedule.investmentAmount);
           this.schedule.startDate = this.parseDateValue(savedSchedule.startDate) || this.getInvestmentDate();
         } else {
           this.schedule.startDate = this.getInvestmentDate();
@@ -201,7 +276,7 @@ export class InvestmentScheduleComponent implements OnInit {
   }
 
   private setFinancialData(progress: any): void {
-    console.log('[InvestmentScheduleComponent] setFinancialData — monthlyInvestment:', progress?.monthlyInvestment);
+    console.log('[InvestmentScheduleComponent] setFinancialData, monthlyInvestment:', progress?.monthlyInvestment);
 
     if (progress && progress.monthlyInvestment) {
       this.monthlyGoal = progress.monthlyInvestment;
@@ -220,7 +295,7 @@ export class InvestmentScheduleComponent implements OnInit {
     this.authService.loadUserProgress();
   }
 
-  onFrequencyChange(frequency: string) {
+  onFrequencyChange(frequency: InvestmentFrequencyKey) {
     this.schedule.payFrequency = frequency;
     this.calculateRecommendedAmount();
     // Update the suggested pay date based on the new frequency
@@ -229,51 +304,39 @@ export class InvestmentScheduleComponent implements OnInit {
     console.log('[InvestmentScheduleComponent] Frequency changed to:', frequency, 'Start date set to:', this.schedule.startDate);
   }
 
-  onAmountChange() {
-    // Amount changes don't affect the schedule description
+  /** The next pay date is set by the backend on SEMI_MONTHLY: the button is disabled with the echo. */
+  payDateLocked(): boolean {
+    return this.schedule.payFrequency === LOCKED_FREQUENCY;
   }
 
-  onStartDateChange(date: string) {
-    // Check if the selected date is a weekend
-    const selectedDate = new Date(date);
-    const dayOfWeek = selectedDate.getDay(); // 0 = Sunday, 6 = Saturday
-    
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      // Find next business day
-      const nextBusinessDay = this.findNextBusinessDay(selectedDate);
-      const adjustedDate = nextBusinessDay.toISOString().split('T')[0];
-      
-      console.warn('[InvestmentSchedule] Weekend date selected, adjusting to next business day:', date, '->', adjustedDate);
-      this.schedule.startDate = adjustedDate;
-      
-      // Show warning to user
-      this.showDateAdjustmentWarning(selectedDate, nextBusinessDay);
-    } else {
-      this.schedule.startDate = date;
-    }
+  /** The button's text: 'Mon, Dec 1', with the year once it is not this year. */
+  payDateText(): string {
+    return this.schedule.startDate ? formatShort(this.schedule.startDate) : '';
   }
 
-  private findNextBusinessDay(date: Date): Date {
-    const nextDay = new Date(date);
-    
-    while (this.isWeekend(nextDay)) {
-      nextDay.setDate(nextDay.getDate() + 1);
-    }
-    
-    return nextDay;
+  payDateAriaLabel(): string {
+    const date = this.schedule.startDate ? `, ${formatFull(this.schedule.startDate)}` : '';
+    return `Next pay date${date}${this.payDateLocked() ? ', set by your pay schedule' : '. Opens a date picker'}`;
   }
 
-  private isWeekend(date: Date): boolean {
-    const dayOfWeek = date.getDay();
-    return dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
-  }
-
-  private showDateAdjustmentWarning(originalDate: Date, adjustedDate: Date): void {
-    // You can implement a toast or alert here if available in your Ionic setup
-    // For now, just console warn
-    const originalStr = originalDate.toLocaleDateString();
-    const adjustedStr = adjustedDate.toLocaleDateString();
-    console.warn(`Date adjusted from ${originalStr} to ${adjustedStr} (weekend dates are not allowed for investments)`);
+  /**
+   * The date sheet in upcoming mode: tomorrow onward, business days only (so the weekend bump this
+   * screen used to make is gone: the sheet cannot return a weekend), quick picks for the chosen
+   * frequency. Nothing changes until Done.
+   */
+  async openPayDateSheet(): Promise<void> {
+    if (this.payDateLocked()) return;
+    const today = todayYmd();
+    const min = this.getMinDate();
+    const date = await presentDateSheet(this.modalCtrl, {
+      title: 'Next pay date',
+      mode: 'upcoming',
+      value: this.schedule.startDate || null,
+      min,
+      businessDaysOnly: true,
+      quickPicks: quickPicks(this.schedule.payFrequency, min, today, true),
+    });
+    if (date !== null) this.schedule.startDate = date;
   }
 
   private parseDateValue(value: any): string {
@@ -288,11 +351,9 @@ export class InvestmentScheduleComponent implements OnInit {
     return '';
   }
 
+  /** The earliest pay date the sheet offers: tomorrow. */
   getMinDate(): string {
-    // Set minimum date to tomorrow
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+    return addDays(todayYmd(), 1);
   }
 
   calculateRecommendedAmount() {
@@ -301,9 +362,7 @@ export class InvestmentScheduleComponent implements OnInit {
     const selectedFrequency = this.getSelectedFrequencyDetails();
 
     if (selectedFrequency) {
-      this.schedule.investmentAmount = Math.round(
-        this.monthlyGoal / selectedFrequency.paychecksPerMonth
-      );
+      this.investmentAmount.set(Math.round(this.monthlyGoal / selectedFrequency.paychecksPerMonth));
     }
   }
 
@@ -314,7 +373,7 @@ export class InvestmentScheduleComponent implements OnInit {
   getMonthlyProjection(): number {
     const frequencyDetails = this.getSelectedFrequencyDetails();
     if (!frequencyDetails) return 0;
-    return this.schedule.investmentAmount * frequencyDetails.paychecksPerMonth;
+    return this.investmentAmount() * frequencyDetails.paychecksPerMonth;
   }
 
   getMonthlyShortfall(): number {
@@ -325,64 +384,31 @@ export class InvestmentScheduleComponent implements OnInit {
     return this.getMonthlyProjection() * 12;
   }
 
-  private getNextMonday(): string {
-    const today = new Date();
-    const daysUntilMonday = (8 - today.getDay()) % 7 || 7;
-    const nextMonday = new Date(today);
-    nextMonday.setDate(today.getDate() + daysUntilMonday);
-    
-    // Format date as YYYY-MM-DD in local time to avoid timezone issues
-    const year = nextMonday.getFullYear();
-    const month = String(nextMonday.getMonth() + 1).padStart(2, '0');
-    const day = String(nextMonday.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
-  private getNextNextMonday(): string {
-    const today = new Date();
-    const daysUntilMonday = (8 - today.getDay()) % 7 || 7;
-    const nextNextMonday = new Date(today);
-    nextNextMonday.setDate(today.getDate() + daysUntilMonday + 7);
-    
-    // Format date as YYYY-MM-DD in local time to avoid timezone issues
-    const year = nextNextMonday.getFullYear();
-    const month = String(nextNextMonday.getMonth() + 1).padStart(2, '0');
-    const day = String(nextNextMonday.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
+  /**
+   * The suggested pay date for the frequency. The sheet only offers business days, so every seed
+   * but SEMI_MONTHLY's lands on one; SEMI_MONTHLY stays on the 1st or 15th (the field is locked
+   * and the backend owns that rule).
+   */
   private getInvestmentDate(): string {
-    const today = new Date();
-    const frequency = this.schedule.payFrequency;
+    const today = todayYmd();
 
-    switch (frequency) {
+    switch (this.schedule.payFrequency) {
       case 'WEEKLY':
-        // Next Monday
-        return this.getNextMonday();
-      
+        return nextMondayAfter(today);
+
       case 'BIWEEKLY':
-        // Monday after next Monday (2 weeks out)
-        return this.getNextNextMonday();
-      
+        return addDays(nextMondayAfter(today), 7);
+
       case 'SEMI_MONTHLY':
-        // Next 1st or 15th (whichever comes first)
         return this.getNextSemiMonthlyDate();
-      
+
       case 'MONTHLY':
-        // Next 1st of the month
-        return this.getNextFirstOfMonth();
-      
+        // A weekend 1st seeds the Monday after it. The backend anchors MONTHLY on that day of the
+        // month, so the moved day, not the 1st, is the recurring day until the date is edited.
+        return nextBusinessDay(firstOfNextMonth(today));
+
       default:
-        // Fallback to next business day
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const nextBusinessDay = this.findNextBusinessDay(tomorrow);
-        
-        // Format date as YYYY-MM-DD in local time to avoid timezone issues
-        const year = nextBusinessDay.getFullYear();
-        const month = String(nextBusinessDay.getMonth() + 1).padStart(2, '0');
-        const day = String(nextBusinessDay.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        return nextBusinessDay(addDays(today, 1));
     }
   }
 
@@ -395,10 +421,10 @@ export class InvestmentScheduleComponent implements OnInit {
     let nextDate: Date;
 
     if (currentDay < 15) {
-      // Before 15th — next date is 15th of this month
+      // Before the 15th: the 15th of this month
       nextDate = new Date(currentYear, currentMonth, 15);
     } else {
-      // On or after 15th — next date is 1st of next month
+      // On or after the 15th: the 1st of next month
       nextDate = new Date(currentYear, currentMonth + 1, 1);
     }
 
@@ -409,131 +435,14 @@ export class InvestmentScheduleComponent implements OnInit {
     return `${year}-${month}-${day}`;
   }
 
-  private getNextFirstOfMonth(): string {
-    const today = new Date();
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
-    
-    // If today is the 1st, go to next month's 1st. Otherwise, go to next month's 1st
-    const nextFirstOfMonth = new Date(currentYear, currentMonth + 1, 1);
-    
-    // Format date as YYYY-MM-DD in local time to avoid timezone issues
-    const year = nextFirstOfMonth.getFullYear();
-    const month = String(nextFirstOfMonth.getMonth() + 1).padStart(2, '0');
-    const day = String(nextFirstOfMonth.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
-  /**
-   * Calculate the next investment dates based on the pay frequency and start date
-   */
-  getNextInvestmentDates(count: number = 3): string[] {
-    if (!this.schedule.startDate) return [];
-
-    const startDate = new Date(this.schedule.startDate);
-    const dates: string[] = [];
-    const frequency = this.getSelectedFrequencyDetails();
-
-    if (!frequency) return [];
-
-    for (let i = 0; i < count; i++) {
-      let nextDate = new Date(startDate);
-
-      if (frequency.value === 'WEEKLY' || frequency.value === 'BIWEEKLY') {
-        // Add days for weekly/biweekly
-        const daysToAdd = i * (frequency.daysBetween || 14);
-        nextDate.setDate(startDate.getDate() + daysToAdd);
-      } else if (frequency.value === 'SEMI_MONTHLY') {
-        // For semi-monthly, alternate between 1st and 15th
-        const monthsToAdd = Math.floor(i / 2);
-        nextDate.setMonth(startDate.getMonth() + monthsToAdd);
-        
-        if (i % 2 === 0) {
-          // Keep original date (could be 1st or 15th)
-          nextDate.setDate(startDate.getDate());
-        } else {
-          // Switch between 1st and 15th
-          nextDate.setDate(startDate.getDate() === 1 ? 15 : 1);
-        }
-      } else if (frequency.value === 'MONTHLY') {
-        // Add months for monthly
-        nextDate.setMonth(startDate.getMonth() + i);
-      }
-
-      dates.push(nextDate.toISOString().split('T')[0]);
-    }
-
-    return dates;
-  }
-
-  /**
-   * Get a user-friendly description of when investments will happen
-   */
-  getInvestmentScheduleDescription(): string {
-    const frequency = this.getSelectedFrequencyDetails();
-    if (!frequency || !this.schedule.startDate) {
-      console.log('[InvestmentScheduleComponent] Missing data for description - frequency:', frequency, 'startDate:', this.schedule.startDate);
-      return '';
-    }
-
-    // Parse the date string ensuring it's treated as local time, not UTC
-    const dateParts = this.schedule.startDate.split('-');
-    const startDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-    
-    console.log('[InvestmentScheduleComponent] Calculating description - frequency:', frequency.value, 'startDate:', this.schedule.startDate, 'parsed date:', startDate, 'day of week:', startDate.getDay());
-    
-    switch (frequency.value) {
-      case 'WEEKLY':
-        const weekday = startDate.toLocaleDateString('en-US', { weekday: 'long' });
-        return `Every ${weekday}`;
-      
-      case 'BIWEEKLY':
-        const biweeklyDay = startDate.toLocaleDateString('en-US', { weekday: 'long' });
-        return `Every other ${biweeklyDay}`;
-      
-      case 'SEMI_MONTHLY':
-        return `Every 1st and 15th of the month`;
-      
-      case 'MONTHLY':
-        const monthlyDay = startDate.getDate();
-        const monthlyDayWithSuffix = this.getDayWithOrdinalSuffix(monthlyDay);
-        return `Every ${monthlyDayWithSuffix} of the month`;
-      
-      default:
-        return '';
-    }
-  }
-
-  /**
-   * Helper function to add ordinal suffix to day numbers (1st, 2nd, 3rd, etc.)
-   */
-  private getDayWithOrdinalSuffix(day: number): string {
-    const lastDigit = day % 10;
-    const lastTwoDigits = day % 100;
-    
-    if (lastTwoDigits >= 11 && lastTwoDigits <= 13) {
-      return `${day}th`;
-    }
-    
-    switch (lastDigit) {
-      case 1:
-        return `${day}st`;
-      case 2:
-        return `${day}nd`;
-      case 3:
-        return `${day}rd`;
-      default:
-        return `${day}th`;
-    }
-  }
-
   canProceed(): boolean {
-    if (this.schedule.investmentAmount <= 0 || this.schedule.startDate === '') return false;
+    if (this.investmentAmount() <= 0 || this.schedule.startDate === '') return false;
     if (this.showTransferOptions && (!this.transferBrokerageDtc || !this.transferAccountNumber)) return false;
     return true;
   }
 
   goToStockPreferences(): void {
+    this.tray.close();
     console.log('[InvestmentScheduleComponent] Proceeding to investment confirmation with schedule:', this.schedule);
     // At the tap. The amount and frequency themselves are a server-side fact (recurring_created).
     this.analytics.trackOnboardingStepCompleted('investment_schedule', null);
@@ -541,7 +450,7 @@ export class InvestmentScheduleComponent implements OnInit {
 
     // Prepare data for backend - match CreateInvestmentScheduleRequest DTO
     const investmentScheduleData = {
-      investmentAmount: this.schedule.investmentAmount,
+      investmentAmount: this.investmentAmount(),
       frequency: this.schedule.payFrequency,
       startDate: this.schedule.startDate // Send as string in YYYY-MM-DD format
     };
@@ -585,16 +494,14 @@ export class InvestmentScheduleComponent implements OnInit {
         error: (error) => {
           console.error('[InvestmentScheduleComponent] ❌ Error saving investment schedule:', error);
           this.isSubmitting = false;
-          // Before the alert, which blocks the thread until the user dismisses it.
           this.analytics.trackErrorShown(
             isNetworkFailure(error) ? 'network' : 'save_failed',
             'onboarding',
-            'alert',
+            'toast',
             httpStatusOf(error),
             true,
           );
-          // Show error message to user
-          alert('Error saving investment schedule. Please try again.');
+          this.toastService.show({ severity: 'error', message: 'Error saving investment schedule. Please try again.' });
         }
       });
   }

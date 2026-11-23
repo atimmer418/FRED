@@ -249,7 +249,8 @@ ion-content::part(scroll) {
     }
 
     .field-input,
-    .field-select {
+    .field-select,
+    .field-value-btn {
       border-bottom-color: var(--kyc-error);
     }
 
@@ -293,8 +294,58 @@ ion-content::part(scroll) {
   }
 }
 
-input[type="date"].field-input {
-  color-scheme: light;
+// The date of birth button: the .field-input box (font, padding, underline) with the calendar
+// glyph on the right, as the date sheet mockup draws it. Copied from theme/_form-fields.scss
+// because this component does not use that partial.
+.field-value-btn {
+  font-family: 'Manrope', sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: normal;
+  color: var(--kyc-text);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--kyc-primary);
+  border-radius: 0;
+  padding: 6px 0;
+  margin: 0;
+  outline: none;
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  font-variant-numeric: tabular-nums;
+
+  .material-symbols-outlined {
+    font-size: 18px;
+    color: var(--kyc-gray);
+    flex-shrink: 0;
+  }
+
+  // Shown in place of the date while it is unset, in the input's placeholder colour.
+  .field-placeholder {
+    color: #cbd5e1;
+    font-weight: 400;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--kyc-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 .select-wrapper {

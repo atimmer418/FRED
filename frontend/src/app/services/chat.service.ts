@@ -137,16 +137,14 @@ export class ChatService {
 
   getDailySuggestions(): Observable<string[]> {
     const token = JwtTokenUtils.getValidJwtToken();
-    const userId = localStorage.getItem('userId');
 
     let headers = new HttpHeaders();
     if (token) {
       headers = headers.set('Authorization', `Bearer ${token}`);
     }
 
-    // Include userId for personalized questions (Phase 3)
-    const userIdParam = userId ? `?userId=${userId}` : '';
-    return this.http.get<string[]>(`${this.apiUrl}/suggestions${userIdParam}`, { headers });
+    // No userId is sent: the backend personalizes from the signed-in user on the token.
+    return this.http.get<string[]>(`${this.apiUrl}/suggestions`, { headers });
   }
 
   // History Management

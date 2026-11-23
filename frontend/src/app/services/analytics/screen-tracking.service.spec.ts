@@ -56,6 +56,28 @@ describe('ScreenTrackingService', () => {
     expect(names.join(' ')).not.toContain('8f2c1b44');
   });
 
+  it('remembers a pushed page, and the tab the user returns to', async () => {
+    localStorage.setItem('userId', 'u-1');
+    try {
+      service.start();
+
+      await router.navigateByUrl('/my-profile');
+      const read = () => JSON.parse(localStorage.getItem('fred.lastScreen.v1.u-1')!);
+      expect(read().url).toBe('/my-profile');
+
+      // A page that must never be reopened leaves the remembered screen where it was.
+      await router.navigateByUrl('/beneficiaries');
+      expect(read().url).toBe('/my-profile');
+
+      // Going back to the tabs is a real navigation, and the URL names the right tab.
+      await router.navigateByUrl('/tabs/tab2');
+      expect(read().url).toBe('/tabs/tab2');
+    } finally {
+      localStorage.removeItem('userId');
+      localStorage.removeItem('fred.lastScreen.v1.u-1');
+    }
+  });
+
   it('leaves the tabs to the pager, which knows which tab is actually showing', async () => {
     service.start();
 

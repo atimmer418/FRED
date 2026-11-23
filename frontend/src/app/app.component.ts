@@ -1,6 +1,6 @@
-import { Component, OnInit, HostListener } from '@angular/core';
+import { Component, OnInit, HostListener, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { IonApp, IonRouterOutlet } from '@ionic/angular/standalone';
+import { IonApp, IonRouterOutlet, NavController } from '@ionic/angular/standalone';
 import { CommonModule } from '@angular/common';
 import { Platform } from '@ionic/angular/standalone';
 import { SplashScreen } from '@capacitor/splash-screen';
@@ -13,8 +13,11 @@ import { PasskeyService } from './services/passkey.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { JwtTokenUtils } from './utils/jwt-token.utils';
 import { plaidOAuthReturnRoute, storePlaidOAuthReturnHref } from './utils/plaid-link-session';
+import { LastScreenUtils } from './utils/last-screen.utils';
+import { FirstTimeTourService } from './services/first-time-tour.service';
 import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourComponent } from './components/first-time-tour/first-time-tour.component';
+import { FredToastHostComponent } from './components/fred-toast/fred-toast-host.component';
 import { environment } from '../environments/environment';
 import { captureDevToolsKeyFromUrl } from './utils/dev-tools-key.utils';
 import { AnalyticsService } from './services/analytics/analytics.service';
@@ -39,7 +42,7 @@ const CRITICAL_FONT_SPECS = [
   templateUrl: 'app.component.html',
   styleUrls: ['app.component.scss'],
   standalone: true,
-  imports: [IonApp, IonRouterOutlet, CommonModule, FirstTimeTourComponent],
+  imports: [IonApp, IonRouterOutlet, CommonModule, FirstTimeTourComponent, FredToastHostComponent],
 })
 export class AppComponent implements OnInit {
 
@@ -51,6 +54,16 @@ export class AppComponent implements OnInit {
    * capturePlaidOAuthReturn and spent once by navigateBasedOnProgress.
    */
   private plaidOAuthReturn: string | null = null;
+
+  private readonly navCtrl = inject(NavController);
+  private readonly tour = inject(FirstTimeTourService);
+
+  /**
+   * The onboarded landing currently in flight, if any. Several code paths decide the landing on
+   * the same launch (the optimistic nav, then the DB result); they all join this one promise so
+   * the screen is built once. The launch cover also stays up for as long as it is set.
+   */
+  private landing: Promise<void> | null = null;
 
   constructor(
     private router: Router,
@@ -378,6 +391,8 @@ export class AppComponent implements OnInit {
         this.hideCoversWhenReady(currentBaseUrl);
         return;
       }
+      void this.landOnboarded();
+      return;
     }
 
     this.router.navigateByUrl(targetRoute, { replaceUrl: true }).finally(() => {
@@ -423,11 +438,21 @@ export class AppComponent implements OnInit {
     return allowed ? pending : null;
   }
 
-  private hideCoversWhenReady(targetRoute?: string): void {
+  /**
+   * @param stackRestored true after a landing that pushed pages on top of a tab. The cover then
+   *        waits for the whole stack to settle, so the tab underneath is never seen first.
+   */
+  private hideCoversWhenReady(targetRoute?: string, stackRestored = false): void {
+    // A landing is still building the screen; it hides the covers itself when it finishes.
+    if (this.landing) return;
     const route = (targetRoute ?? this.router.url).split('?')[0].split('#')[0];
-    const painted = this.preloadAssetsForRoute(route).then(() => this.waitForRoutePainted());
+    const painted = this.preloadAssetsForRoute(route).then(() => this.waitForRoutePainted(stackRestored));
     const dataReady = route === '/tabs/tab1' ? this.waitForTab1DataPainted() : Promise.resolve();
-    Promise.all([painted, dataReady]).then(() => this.appLockService.hideAllCovers());
+    Promise.all([painted, dataReady]).then(() => {
+      // Re-checked here too: a landing may have started while this wait was running, and
+      // lifting now would show the tab before the page being pushed on top of it.
+      if (!this.landing) this.appLockService.hideAllCovers();
+    });
   }
 
   /**
@@ -475,12 +500,19 @@ export class AppComponent implements OnInit {
    * e.g. tab1 → portfolio-dashboard). Bounded by a safety timeout so the cover can never
    * hang waiting for a route that never paints.
    */
-  private waitForRoutePainted(): Promise<void> {
+  private waitForRoutePainted(stackRestored = false): Promise<void> {
     return new Promise<void>(resolve => {
       let settled = false;
       const finish = () => { if (!settled) { settled = true; resolve(); } };
       const check = () => {
         if (settled) return;
+        if (stackRestored) {
+          // Pages were pushed on top of a tab: the generic check below would pass on the tab's
+          // own ion-content while the pushed page is still entering.
+          if (LastScreenUtils.isOutletSettled(document.querySelector('ion-router-outlet'))) { finish(); return; }
+          requestAnimationFrame(check);
+          return;
+        }
         // The route's ion-content exists and has a non-zero layout box => it has upgraded
         // and painted. The launch cover lives outside ion-router-outlet, so it's excluded.
         const content = document.querySelector('ion-router-outlet ion-content') as HTMLElement | null;
@@ -550,8 +582,8 @@ export class AppComponent implements OnInit {
    * GET /user/progress still runs and remains the sole routing authority.
    * This method only PAINTS FASTER — it is purely additive.
    *
-   * @returns true when it navigated to /tabs/tab1 (and therefore OWNS the data-gated
-   *          cover-hide); false when no optimistic nav happened.
+   * @returns true when it started the onboarded landing (which then OWNS the cover-hide,
+   *          data-gated when it lands on /tabs/tab1); false when no optimistic nav happened.
    */
   private tryOptimisticNav(): boolean {
     // A pending Plaid OAuth return must reach its Link page; tab1 would drop it.
@@ -571,12 +603,78 @@ export class AppComponent implements OnInit {
     const hint = JwtTokenUtils.getNextStepHint();
     if (hint === 'complete') {
       this.portfolioStore.prime();
-      this.router.navigateByUrl('/tabs/tab1', { replaceUrl: true })
-        .finally(() => this.hideCoversWhenReady('/tabs/tab1'));
+      void this.landOnboarded();
       return true;
     }
     // Non-'complete' slugs: no optimistic nav in v1 — fall through to setupNavigationLogic.
     return false;
+  }
+
+  /**
+   * Land a fully onboarded user who is still on an entry route. Normally that is the home tab.
+   * On a cold start (the first navigation of this page load) it is the screen they left, when
+   * they left it recently enough: see LastScreenUtils.landingChain for the rules.
+   *
+   * A restored page is rebuilt with its real stack underneath (Profile tab, then My Profile,
+   * then the goal), so Back and the edge-swipe work as if the user had navigated there by hand.
+   * The tab is always the FIRST navigation of the session, which is what keeps Ionic from
+   * building a second TabsPage.
+   */
+  private landOnboarded(): Promise<void> {
+    if (this.landing) return this.landing;
+
+    const progress = this.authService.getCurrentProgress();
+    // Same rule TabsPage uses to gate tabs.
+    const subExpired = !!progress
+      && progress.investmentConfirmationCompleted === true
+      && progress.selectedTier == null
+      && progress.privateBeta !== true;
+
+    // router.navigated is false until the first navigation of this page load completes, so a
+    // warm resume, the end of onboarding and a fresh sign-in all land on the home tab as before.
+    const chain = this.router.navigated
+      ? [LastScreenUtils.HOME]
+      : LastScreenUtils.landingChain({
+          now: Date.now(),
+          userId: localStorage.getItem('userId'),
+          tourSeen: this.tour.hasSeenTour(),
+          subExpired,
+        });
+    const stackRestored = chain.length > 1;
+
+    // Started synchronously so the landing is under way before anything else can navigate.
+    const first = this.router.navigateByUrl(chain[0], { replaceUrl: true });
+
+    const run = async (): Promise<void> => {
+      let landed: boolean;
+      try {
+        landed = await first;
+      } catch {
+        // The restored tab failed to load. Fall back to the home tab rather than a blank screen.
+        if (chain[0] !== LastScreenUtils.HOME) {
+          await this.router.navigateByUrl(LastScreenUtils.HOME, { replaceUrl: true }).catch(() => false);
+        }
+        return;
+      }
+      // false means another navigation (an onboarding redirect) took over. Leave it alone.
+      if (!landed) return;
+
+      for (const url of chain.slice(1)) {
+        try {
+          // No replaceUrl here: Ionic would drop the page underneath instead of pushing.
+          if (!(await this.navCtrl.navigateForward(url, { animated: false }))) break;
+        } catch {
+          break; // keep whatever page was reached
+        }
+      }
+    };
+
+    const landing = run().finally(() => {
+      this.landing = null;
+      this.hideCoversWhenReady(stackRestored ? undefined : chain[0], stackRestored);
+    });
+    this.landing = landing;
+    return landing;
   }
 
   /**

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { ModalController, createAnimation } from '@ionic/angular/standalone';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import { filter, firstValueFrom, take } from 'rxjs';
 import { MonthlyFreedomUpdateComponent } from '../components/monthly-freedom-update/monthly-freedom-update.component';
 import { MonthlyFreedomUpdateData } from './monthly-freedom-update.service';
@@ -43,6 +43,19 @@ export class MfuPresenterService {
     // consume the one-shot claim (a later unlock/trigger can still present).
     await this.mfuStore.ensureFonts();
     await this.waitForUnlock();
+
+    // The tabs stay mounted underneath a pushed page, so this can fire while My Profile or a
+    // goal is on screen (a launch that reopened there). Hold it until the user is back on the
+    // tabs. The claim below is taken only after the wait, so whichever trigger gets there first
+    // presents it and the rest drop out.
+    if (!this.router.url.startsWith('/tabs')) {
+      await firstValueFrom(this.router.events.pipe(
+        filter((e): e is NavigationEnd => e instanceof NavigationEnd && e.urlAfterRedirects.startsWith('/tabs')),
+        take(1),
+      ));
+      // Re-check the lock: the app may have been backgrounded and locked while this waited.
+      await this.waitForUnlock();
+    }
 
     const month = session.data?.generatedForMonth || this.currentMonth();
     if (!this.mfuStore.tryClaimAutoPopup(month)) return;

@@ -122,7 +122,7 @@ describe('Tab3Page — FRED-200 signal-driven stat strip', () => {
     TestBed.resetTestingModule();
   });
 
-  it('shows — placeholders while isLoading is true', fakeAsync(() => {
+  it('shows a skeleton bar in each stat slot while isLoading is true, then the numbers once it flips', fakeAsync(() => {
     const freedomStatsMock = makeFreedomStatsServiceMock(
       true,
       { freedomYear: '2045', freedomAge: '42', dollarsAway: '$1.2M' }
@@ -150,11 +150,27 @@ describe('Tab3Page — FRED-200 signal-driven stat strip', () => {
     fixture.detectChanges();
 
     const compiled = fixture.nativeElement as HTMLElement;
-    const values = compiled.querySelectorAll('.stat-value');
+    const strip = compiled.querySelector('.stat-strip')!;
+    const values = Array.from(compiled.querySelectorAll('.stat-value'));
+    expect(strip.getAttribute('aria-busy')).toBe('true');
     expect(values.length).toBe(3);
-    expect(values[0].textContent?.trim()).toBe('—');
-    expect(values[1].textContent?.trim()).toBe('—');
-    expect(values[2].textContent?.trim()).toBe('—');
+    // One bar per slot, sized to the number it stands in for, and no number text yet.
+    values.forEach(v => {
+      expect(v.querySelectorAll('app-skeleton').length).toBe(1);
+      expect(v.querySelectorAll('.sk-block').length).toBe(1);
+      expect(v.textContent?.trim()).toBe('');
+    });
+    const bars = values.map(v => v.querySelector('app-skeleton') as HTMLElement);
+    expect(bars.map(b => b.style.width)).toEqual(['52px', '36px', '60px']);
+    bars.forEach(b => expect((b.querySelector('.sk-block') as HTMLElement).style.height).toBe('18px'));
+    expect(compiled.textContent).not.toContain('2045');
+
+    // The data lands: the bars give way to the numbers on the same instance.
+    freedomStatsMock.isLoading.set(false);
+    fixture.detectChanges();
+    expect(strip.getAttribute('aria-busy')).toBeNull();
+    expect(compiled.querySelector('app-skeleton')).toBeNull();
+    expect(values.map(v => v.textContent?.trim())).toEqual(['2045', '42', '$1.2M']);
   }));
 
   it('shows real stats once isLoading becomes false', fakeAsync(() => {
@@ -190,6 +206,8 @@ describe('Tab3Page — FRED-200 signal-driven stat strip', () => {
     expect(values[0].textContent?.trim()).toBe('2045');
     expect(values[1].textContent?.trim()).toBe('42');
     expect(values[2].textContent?.trim()).toBe('$1.2M');
+    expect(compiled.querySelector('app-skeleton')).toBeNull();
+    expect(compiled.querySelector('.stat-strip')!.getAttribute('aria-busy')).toBeNull();
   }));
 
   it('runs onTabActivated (freedomStats refresh) when the tab is activated', fakeAsync(() => {

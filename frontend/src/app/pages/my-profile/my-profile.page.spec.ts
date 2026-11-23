@@ -14,10 +14,15 @@
  * change detection, which intermittently failed to flush on WKWebView
  * keystrokes; signal writes schedule CD themselves via the hybrid scheduler.
  */
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
-import { BehaviorSubject, of } from 'rxjs';
+import { NavController, ModalController } from '@ionic/angular/standalone';
+import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
+import { GoalTypePickerSheetComponent } from '../../components/goal-type-picker-sheet/goal-type-picker-sheet.component';
+import { McInfoSheetComponent } from '../../components/mc-info-sheet/mc-info-sheet.component';
+import { Goal, LegacyGoalV2 } from '../../models/goal.model';
 import { MyProfilePage } from './my-profile.page';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../services/toast.service';
@@ -53,7 +58,6 @@ function makePage(birthYear: number = 0): MyProfilePage {
     accountStatusMock,    // AccountStatusService
     {} as any,            // MonthlyFreedomUpdateService
     {} as any,            // Router
-    {} as any,            // AlertController
     {} as any,            // NavController
     {} as any,            // ModalController
     {} as any,            // GoalsService (FRED-216)
@@ -248,17 +252,22 @@ function setupDom(initialProgress: any, schedule$ = of(null as any)): DomHarness
       { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 0 } }) } },
       { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
-      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy() } },
+      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true)) } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-      { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {
           create: jasmine.createSpy('create').and.returnValue(Promise.resolve({
             present: () => Promise.resolve(),
             onDidDismiss: () => Promise.resolve({ role: 'cancel' }),
           }))
       } },
-      { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy('suspend'), freedomSheetClosed: jasmine.createSpy('freedomSheetClosed') } },
-      { provide: GoalsService, useValue: { getGoals: () => [], getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }) } },
+      { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy('freedomPlanLeft') } },
+      { provide: GoalsService, useValue: {
+          goals: signal<Goal[]>([]),
+          load: () => of([]),
+          refresh: () => of([]),
+          readLegacyV2: () => [],
+          getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }),
+      } },
       { provide: FreedomStatsService, useValue: {
           birthYear: () => 0,
           stats: () => ({ freedomYear: '—', freedomAge: '—', dollarsAway: '—' })
@@ -279,7 +288,7 @@ describe('MyProfilePage — live plan rendering (DOM)', () => {
     harness = setupDom(SAVED_PROGRESS);
   });
 
-  /** Tiles moved into the Freedom detail sheet (2026-08-15); plan edits now
+  /** Tiles moved to the Freedom page (first a sheet, 2026-08-15); plan edits now
    *  arrive through the same sanitizing handlers, driven directly. */
   function editInvest(value: string): void {
     harness.fixture.componentInstance.onInvestInput(inputEvent(value).event);
@@ -320,15 +329,43 @@ describe('MyProfilePage — live plan rendering (DOM)', () => {
     expect(harness.fixture.componentInstance.monthlyInvestGoal()).toBe(700);
   });
 
-  it('openFreedomSheet suspends the tour before presenting and reports the close after dismiss', async () => {
+  it('tapping the Freedom row navigates to /freedom instead of presenting a modal', () => {
+    const router = TestBed.inject(Router) as any;
+    const modal = TestBed.inject(ModalController) as any;
+
+    const row = harness.fixture.nativeElement.querySelector('[data-tour="freedom-row"]') as HTMLElement;
+    row.click();
+
+    expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/freedom');
+    expect(modal.create).not.toHaveBeenCalled();
+  });
+
+  it('coming back from /freedom completes the tour handoff once, on enter', async () => {
     const page = harness.fixture.componentInstance;
     const tour = TestBed.inject(FirstTimeTourService) as any;
 
-    await page.openFreedomSheet();
+    page.ionViewWillEnter();                      // an ordinary enter: not back from /freedom
+    expect(tour.freedomPlanLeft).not.toHaveBeenCalled();
 
-    expect(tour.suspend).toHaveBeenCalledTimes(1);
-    expect(tour.freedomSheetClosed).toHaveBeenCalledTimes(1);
-    expect(tour.suspend).toHaveBeenCalledBefore(tour.freedomSheetClosed);
+    await page.openFreedom();
+    expect(tour.freedomPlanLeft).not.toHaveBeenCalled();   // nothing fires on the way out
+
+    page.ionViewWillEnter();                      // back from the Freedom page
+    expect(tour.freedomPlanLeft).toHaveBeenCalledTimes(1);
+
+    page.ionViewWillEnter();                      // a later enter (back from a goal page)
+    expect(tour.freedomPlanLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed navigation to /freedom does not arm the handoff', async () => {
+    const page = harness.fixture.componentInstance;
+    const tour = TestBed.inject(FirstTimeTourService) as any;
+    (TestBed.inject(Router) as any).navigateByUrl.and.returnValue(Promise.resolve(false));
+
+    await page.openFreedom();
+    page.ionViewWillEnter();
+
+    expect(tour.freedomPlanLeft).not.toHaveBeenCalled();
   });
 });
 
@@ -358,7 +395,8 @@ describe('MyProfilePage — plan seeding resilience (DOM)', () => {
     const { fixture } = setupDom(null);
     expect(fixture.componentInstance.monthlyInvestGoal()).toBe(0);
     expect(fixture.componentInstance.retirementIncomeGoal()).toBe(0);
-    expect(fixture.componentInstance.freedomGoalSub).toContain('—');  // — placeholders
+    expect(fixture.componentInstance.freedomGoalSub).toBe('Set your Freedom Plan to see your date.');
+    expect(fixture.componentInstance.freedomGoalSub).not.toContain('\u2014');
   });
 
   it('always applies the FIRST real DB emission even if the user typed pre-seed', () => {
@@ -399,5 +437,438 @@ describe('MyProfilePage — plan seeding resilience (DOM)', () => {
     const { fixture } = setupDom(noGoal, of({ investmentAmount: 100, frequency: 'WEEKLY' }));
     expect(fixture.componentInstance.monthlyInvestGoal()).toBe(433);  // $100 weekly × 4.33
     expect(fixture.componentInstance.isDirty()).toBeFalse();          // seeded, not an edit
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Goals card: navigation, tier nudge, picker, and the one-time v2 import
+// ---------------------------------------------------------------------------
+
+describe('MyProfilePage: goals card', () => {
+  const YEAR = new Date().getFullYear();
+  const ACTIVE: Goal = {
+    id: 3, clientId: null, type: 'WEDDING', name: 'Wedding', icon: 'favorite',
+    config: { targetAmount: 30_000, targetYear: YEAR + 3 },
+    currentBalance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 700,
+    planRate: 0.10, planRateKind: 'market', planAnchoredAt: `${YEAR}-01-01T00:00:00`,
+    completed: false, sortOrder: 0, createdAt: '', updatedAt: '',
+  };
+  const LEGACY: LegacyGoalV2 = {
+    id: 'v2-a', name: 'Old goal', icon: 'flag', targetAmount: 5_000, targetYear: YEAR + 2,
+    startingValue: 100, perPaycheckOutsideFRED: 20, completed: false,
+  };
+
+  interface GoalsHarness {
+    fixture: ComponentFixture<MyProfilePage>;
+    page: MyProfilePage;
+    router: { navigate: jasmine.Spy; navigateByUrl: jasmine.Spy };
+    modalCreate: jasmine.Spy;
+    showToast: jasmine.Spy;
+    importLegacy: jasmine.Spy;
+    clearLegacyV2: jasmine.Spy;
+    progress$: BehaviorSubject<any>;
+  }
+
+  function setupGoals(opts: {
+    userId?: string; tier?: string; goals?: Goal[]; legacy?: LegacyGoalV2[];
+    importResult?: () => Observable<Goal[]>; dismiss?: { role?: string; data?: unknown };
+  } = {}): GoalsHarness {
+    localStorage.setItem('userId', opts.userId ?? '40');
+    const progress$ = new BehaviorSubject<any>({ ...SAVED_PROGRESS, selectedTier: opts.tier ?? 'pro' });
+    const router = { navigate: jasmine.createSpy('navigate'), navigateByUrl: jasmine.createSpy('navigateByUrl') };
+    const modalCreate = jasmine.createSpy('create').and.returnValue(Promise.resolve({
+      present: () => Promise.resolve(),
+      onDidDismiss: () => Promise.resolve(opts.dismiss ?? { role: undefined }),
+    }));
+    const showToast = jasmine.createSpy('showToast');
+    const importLegacy = jasmine.createSpy('importLegacy')
+      .and.callFake(opts.importResult ?? (() => of([])));
+    const clearLegacyV2 = jasmine.createSpy('clearLegacyV2');
+
+    TestBed.configureTestingModule({
+      imports: [MyProfilePage],
+      providers: [
+        { provide: AuthService, useValue: {
+            userProgress$: progress$,
+            getCurrentInvestmentSchedule: () => of(null),
+            updateUserProfile: () => of({}),
+            loadUserProgress: jasmine.createSpy('loadUserProgress'),
+        } },
+        { provide: ToastService, useValue: { showToast } },
+        { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 0 } }) } },
+        { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
+        { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
+        { provide: Router, useValue: router },
+        { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
+        { provide: ModalController, useValue: { create: modalCreate } },
+        { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy() } },
+        { provide: GoalsService, useValue: {
+            goals: signal<Goal[]>(opts.goals ?? []),
+            load: () => of(opts.goals ?? []),
+            refresh: () => of(opts.goals ?? []),
+            readLegacyV2: () => opts.legacy ?? [],
+            importLegacy,
+            clearLegacyV2,
+            getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }),
+        } },
+        { provide: FreedomStatsService, useValue: {
+            birthYear: () => 0,
+            stats: () => ({ freedomYear: '', freedomAge: '', dollarsAway: '' }),
+        } },
+        { provide: AnalyticsService, useValue: analyticsStub() },
+      ],
+    });
+    const fixture = TestBed.createComponent(MyProfilePage);
+    fixture.detectChanges();
+    return {
+      fixture, page: fixture.componentInstance, router, modalCreate, showToast,
+      importLegacy, clearLegacyV2, progress$,
+    };
+  }
+
+  afterEach(() => localStorage.removeItem('userId'));
+
+  it('plans a never-planned import at the horizon rule, not its stored kind', () => {
+    const imported: Goal = {
+      ...ACTIVE, id: 4, clientId: 'v2-a', type: 'CUSTOM', icon: 'flag', anchorMonthly: 0, planRateKind: 'market',
+      config: { targetAmount: 20_000, targetYear: YEAR + 1 },
+    };
+    const h = setupGoals({ goals: [imported, ACTIVE] });
+    const [importRow, planned] = h.page.goalSummaries();
+    expect(importRow.view.rateKind).toBe('cash');
+    // A planned goal keeps its anchored kind.
+    expect(planned.view.rateKind).toBe('market');
+  });
+
+  it('starts the subtitle with what is due now in the target month', () => {
+    // Anchored after the target year at $24,000: no months of growth, so $6,000 is due now.
+    const due: Goal = {
+      ...ACTIVE, config: { targetAmount: 30_000, targetYear: YEAR - 1 }, currentBalance: 24_000,
+      anchorBalance: 24_000, anchorMonthly: 0, planAnchoredAt: `${YEAR}-01-01T00:00:00`,
+    };
+    const h = setupGoals({ goals: [due] });
+    expect(h.page.goalSummaries()[0].view.subtitle.startsWith('$6,000 due now')).toBeTrue();
+  });
+
+  it('words the Freedom Date row as whole sentences for partial plans', () => {
+    const h = setupGoals();
+    h.page.monthlyInvestGoal.set(0);
+    h.page.currentPortfolioValue.set(0);
+    expect(h.page.freedomGoalSub).toBe('$1.5M goal. Add a monthly amount to see your date.');
+    h.page.currentPortfolioValue.set(200_000);
+    expect(h.page.freedomGoalSub).toMatch(/^\$1\.5M by \d{4}$/);
+    expect(h.page.freedomGoalSub).not.toContain('not set');
+  });
+
+  it('navigates to /goals/:id on row tap', () => {
+    const h = setupGoals({ goals: [ACTIVE] });
+    (h.fixture.nativeElement.querySelectorAll('.goal-row')[1] as HTMLElement).click();
+    expect(h.router.navigate).toHaveBeenCalledWith(['/goals', 3]);
+  });
+
+  it('opens the Plus nudge for a core user with one active goal', async () => {
+    const h = setupGoals({ tier: 'core', goals: [ACTIVE] });
+    await h.page.addGoal();
+    expect(h.modalCreate).toHaveBeenCalledTimes(1);
+    const args = h.modalCreate.calls.mostRecent().args[0];
+    expect(args.component).toBe(McInfoSheetComponent);
+    expect(args.componentProps.nudgeTitle).toBe('Plan more than one goal with Piggy Plus');
+    expect(h.router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('opens the picker for a core user with no active goal', async () => {
+    const h = setupGoals({ tier: 'core', goals: [{ ...ACTIVE, completed: true }] });
+    await h.page.addGoal();
+    expect(h.modalCreate.calls.mostRecent().args[0].component).toBe(GoalTypePickerSheetComponent);
+  });
+
+  it('opens the picker for a plus user and navigates to /goals/new/:type', async () => {
+    const h = setupGoals({ tier: 'plus', goals: [ACTIVE], dismiss: { role: 'picked', data: 'HOUSE' } });
+    await h.page.addGoal();
+    expect(h.modalCreate.calls.mostRecent().args[0].component).toBe(GoalTypePickerSheetComponent);
+    expect(h.router.navigate).toHaveBeenCalledWith(['/goals/new', 'HOUSE']);
+  });
+
+  it('imports v2 goals once, clears the key, and does not retry after a failure', () => {
+    // Success: one import, key cleared, one toast, and a later progress emission does not re-import.
+    const ok = setupGoals({ userId: 'import-ok', legacy: [LEGACY] });
+    expect(ok.importLegacy).toHaveBeenCalledOnceWith([LEGACY]);
+    expect(ok.clearLegacyV2).toHaveBeenCalledOnceWith('import-ok');
+    expect(ok.showToast).toHaveBeenCalledWith(
+      'Your goals moved to your account. FRED built a plan for each one, tap to review.', 'success');
+    ok.progress$.next({ ...SAVED_PROGRESS });
+    expect(ok.importLegacy).toHaveBeenCalledTimes(1);
+    TestBed.resetTestingModule();
+
+    // Failure: the key stays, and neither a re-emission nor a fresh page retries this session.
+    const failed = setupGoals({
+      userId: 'import-fail', legacy: [LEGACY],
+      importResult: () => throwError(() => new HttpErrorResponse({ status: 500 })),
+    });
+    expect(failed.importLegacy).toHaveBeenCalledTimes(1);
+    expect(failed.clearLegacyV2).not.toHaveBeenCalled();
+    failed.progress$.next({ ...SAVED_PROGRESS });
+    expect(failed.importLegacy).toHaveBeenCalledTimes(1);
+    TestBed.resetTestingModule();
+
+    const again = setupGoals({ userId: 'import-fail', legacy: [LEGACY] });
+    expect(again.importLegacy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Loading skeleton: one flag across progress, goals, schedule, dashboard and
+// the MFU check. Until all five settle, the percentile pill, the Freedom sub
+// line, two goal rows and the rebalance rows are placeholders, and nothing
+// real is shown in their place, so nothing pops in after the rest.
+// ---------------------------------------------------------------------------
+
+describe('MyProfilePage: loading skeleton', () => {
+  const YEAR = new Date().getFullYear();
+  const WEDDING: Goal = {
+    id: 3, clientId: null, type: 'WEDDING', name: 'Wedding', icon: 'favorite',
+    config: { targetAmount: 30_000, targetYear: YEAR + 3 },
+    currentBalance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 700,
+    planRate: 0.10, planRateKind: 'market', planAnchoredAt: `${YEAR}-01-01T00:00:00`,
+    completed: false, sortOrder: 0, createdAt: '', updatedAt: '',
+  };
+
+  interface LoadHarness {
+    fixture: ComponentFixture<MyProfilePage>;
+    page: MyProfilePage;
+    progress$: BehaviorSubject<any>;
+    goals$: Subject<Goal[]>;
+    schedule$: Subject<any>;
+    dashboard$: Subject<any>;
+    mfu$: Subject<any>;
+  }
+
+  /** Every fetch held open, so each one can be landed (or failed) by hand. */
+  function setupLoading(userId: string | null = '40'): LoadHarness {
+    if (userId) localStorage.setItem('userId', userId);
+    else localStorage.removeItem('userId');
+    const progress$ = new BehaviorSubject<any>(null);
+    const goals$ = new Subject<Goal[]>();
+    const schedule$ = new Subject<any>();
+    const dashboard$ = new Subject<any>();
+    const mfu$ = new Subject<any>();
+
+    TestBed.configureTestingModule({
+      imports: [MyProfilePage],
+      providers: [
+        { provide: AuthService, useValue: {
+            userProgress$: progress$,
+            getCurrentInvestmentSchedule: () => schedule$,
+            updateUserProfile: () => of({}),
+            loadUserProgress: jasmine.createSpy('loadUserProgress'),
+        } },
+        { provide: ToastService, useValue: { showToast: jasmine.createSpy() } },
+        { provide: PortfolioService, useValue: { getPortfolioDashboard: () => dashboard$ } },
+        { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
+        { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => mfu$ } },
+        { provide: Router, useValue: { navigateByUrl: jasmine.createSpy(), navigate: jasmine.createSpy() } },
+        { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
+        { provide: ModalController, useValue: {} },
+        { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy() } },
+        { provide: GoalsService, useValue: {
+            goals: signal<Goal[]>([WEDDING]),
+            load: () => goals$,
+            refresh: () => of([WEDDING]),
+            readLegacyV2: () => [],
+            getPrefs: () => ({ rebalanceSchedule: 'Annual' }),
+        } },
+        { provide: FreedomStatsService, useValue: {
+            birthYear: () => 0,
+            stats: () => ({ freedomYear: '', freedomAge: '', dollarsAway: '' }),
+        } },
+        { provide: AnalyticsService, useValue: analyticsStub() },
+      ],
+    });
+    const fixture = TestBed.createComponent(MyProfilePage);
+    fixture.detectChanges();
+    return { fixture, page: fixture.componentInstance, progress$, goals$, schedule$, dashboard$, mfu$ };
+  }
+
+  afterEach(() => localStorage.removeItem('userId'));
+
+  const el = (h: LoadHarness) => h.fixture.nativeElement as HTMLElement;
+  const busyRegions = (h: LoadHarness) => el(h).querySelectorAll('[aria-busy="true"]').length;
+  const skeletons = (h: LoadHarness) => el(h).querySelectorAll('app-skeleton').length;
+  const freedomSub = (h: LoadHarness) => el(h).querySelector('[data-tour="freedom-row"] .goal-sub') as HTMLElement;
+
+  it('skeletons the Freedom sub line, two goal rows and the rebalance rows while nothing has landed', () => {
+    const h = setupLoading();
+
+    expect(h.page.loaded()).toBeFalse();
+    expect(busyRegions(h)).toBe(3);                       // hero, goals card, rebalancing card
+    expect(skeletons(h)).toBeGreaterThan(0);
+    // The pill is held back but has no placeholder: most users (first month, no MFU history) never
+    // get one, so a stand-in would shift the page down and then back up.
+    expect(el(h).querySelector('.percentile-pill')).toBeNull();
+    expect(el(h).querySelector('.id-hero app-skeleton')).toBeNull();
+    expect(freedomSub(h).querySelector('app-skeleton')).not.toBeNull();
+    // A share of the text column, never a fixed length: .goal-mid is ~190px on a 375 phone and
+    // does not clip, so a fixed bar would run under the status chip.
+    expect((freedomSub(h).querySelector('app-skeleton') as HTMLElement).style.width).toMatch(/%$/);
+    expect(freedomSub(h).textContent!.trim()).toBe('');
+    expect(el(h).querySelectorAll('.goal-row--sk').length).toBe(2);
+    expect(el(h).querySelectorAll('.goal-row').length).toBe(3);   // Freedom row + two placeholders
+    expect(el(h).querySelectorAll('.goal-row--sk .goal-bar').length).toBe(2);
+    expect(el(h).textContent).not.toContain('Wedding');
+    expect(el(h).querySelectorAll('.rb-chips button').length).toBe(0);
+    expect(el(h).querySelector('.rb-chips-sk')).not.toBeNull();
+    // Two lines: the Piggy note's shape, since Piggy is the tier until progress lands.
+    expect(el(h).querySelectorAll('.rb-note-sk .sk-block').length).toBe(2);
+    expect(el(h).querySelector('.rb-next')).toBeNull();
+    expect(el(h).querySelector('.rb-default-note')).toBeNull();
+  });
+
+  it('holds the skeleton until the last check settles, then swaps every region at once', () => {
+    const h = setupLoading();
+    h.progress$.next({ ...SAVED_PROGRESS });
+    h.goals$.next([WEDDING]);
+    h.schedule$.next(null);
+    h.dashboard$.next({ summary: { equity: 10_000 } });
+    h.fixture.detectChanges();
+
+    // Four of five are in; the MFU check is still out, so nothing real shows yet.
+    expect(h.page.loaded()).toBeFalse();
+    expect(skeletons(h)).toBeGreaterThan(0);
+    expect(el(h).querySelector('.percentile-pill')).toBeNull();
+    expect(el(h).textContent).not.toContain('Wedding');
+    expect(el(h).querySelectorAll('.rb-chips button').length).toBe(0);
+
+    h.mfu$.next({ hasMfuHistory: true, statusPercentile: 72, equityLevel: 2 });
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(skeletons(h)).toBe(0);
+    expect(busyRegions(h)).toBe(0);
+    expect(el(h).querySelector('.percentile-pill')!.textContent).toContain('Ahead of 72% of investors');
+    expect(freedomSub(h).textContent).toContain('$7,000/mo through FRED');
+    expect(el(h).querySelectorAll('.goal-row').length).toBe(2);   // Freedom row + Wedding
+    expect(el(h).textContent).toContain('Wedding');
+    const chips = Array.from(el(h).querySelectorAll('.rb-chips button')) as HTMLButtonElement[];
+    expect(chips.map(c => c.textContent!.trim())).toEqual(['Quarterly', 'Semi-annual', 'Annual']);
+    // The saved preference was already applied when the chips appeared: no Quarterly-to-Annual flip.
+    expect(chips.filter(c => c.classList.contains('on')).map(c => c.textContent!.trim())).toEqual(['Annual']);
+    expect(el(h).querySelector('.rb-next')).not.toBeNull();        // pro tier
+  });
+
+  it('a failed check settles its region too, so an error never leaves the skeleton up', () => {
+    const h = setupLoading();
+    h.progress$.next({ ...SAVED_PROGRESS });
+    h.goals$.error(new HttpErrorResponse({ status: 500 }));
+    h.schedule$.error(new HttpErrorResponse({ status: 500 }));
+    h.dashboard$.error(new HttpErrorResponse({ status: 500 }));
+    h.mfu$.error(new HttpErrorResponse({ status: 500 }));
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(skeletons(h)).toBe(0);
+    expect(busyRegions(h)).toBe(0);
+    expect(el(h).querySelector('.percentile-pill')).toBeNull();   // no percentile: nothing to show, nothing pending
+    expect(el(h).querySelectorAll('.rb-chips button').length).toBe(3);
+  });
+
+  it('a Piggy user gets the default-schedule note where the two-line placeholder stood', () => {
+    const h = setupLoading();
+    h.progress$.next({ ...SAVED_PROGRESS, selectedTier: 'piggy' });
+    h.goals$.next([WEDDING]);
+    h.schedule$.next(null);
+    h.dashboard$.next({ summary: { equity: 10_000 } });
+    h.mfu$.next(null);
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(el(h).querySelector('.rb-note-sk')).toBeNull();
+    expect(el(h).querySelector('.rb-next')).toBeNull();
+    expect(el(h).querySelector('.rb-default-note')!.textContent).toContain('On Piggy');
+  });
+
+  it('with no stored userId there are no goals to wait for', () => {
+    const h = setupLoading(null);
+    h.progress$.next({ ...SAVED_PROGRESS });
+    h.schedule$.next(null);
+    h.dashboard$.next({ summary: { equity: 0 } });
+    h.mfu$.next(null);
+    h.fixture.detectChanges();
+
+    expect(h.page.loaded()).toBeTrue();
+    expect(skeletons(h)).toBe(0);
+  });
+});
+
+/**
+ * The referral tier upgrade asks through the FRED confirm sheet. Direct construction: the flow
+ * touches only the modal controller, AuthService.updateUserProfile and the toast.
+ */
+describe('MyProfilePage: tier upgrade confirm', () => {
+  interface UpgradeHarness {
+    page: MyProfilePage;
+    modalCreate: jasmine.Spy;
+    updateUserProfile: jasmine.Spy;
+    showToast: jasmine.Spy;
+  }
+
+  function setupUpgrade(role: string | undefined, update: () => Observable<unknown> = () => of({})): UpgradeHarness {
+    const modalCreate = jasmine.createSpy('create').and.resolveTo({
+      present: () => Promise.resolve(),
+      onDidDismiss: () => Promise.resolve({ role }),
+    });
+    const updateUserProfile = jasmine.createSpy('updateUserProfile').and.callFake(update);
+    const showToast = jasmine.createSpy('showToast');
+    const page = new MyProfilePage(
+      { updateUserProfile } as any,                  // AuthService
+      { showToast } as any,                          // ToastService
+      {} as any,                                     // PortfolioService
+      { actionRequired$: of(false) } as any,         // AccountStatusService
+      {} as any,                                     // MonthlyFreedomUpdateService
+      {} as any,                                     // Router
+      {} as any,                                     // NavController
+      { create: modalCreate } as any,                // ModalController
+      {} as any,                                     // GoalsService
+      { birthYear: () => 0, stats: () => ({}) } as any, // FreedomStatsService
+      analyticsStub()
+    );
+    page.selectedTier = 'core';
+    return { page, modalCreate, updateUserProfile, showToast };
+  }
+
+  it('presents a primary sheet with the offer, and Confirm upgrade saves the tier', async () => {
+    const h = setupUpgrade('confirm');
+
+    await h.page.confirmTierUpgrade('plus', 'Plus', 4);
+
+    const props = h.modalCreate.calls.mostRecent().args[0].componentProps;
+    expect(props.tone).toBe('primary');
+    expect(props.icon).toBe('workspace_premium');
+    expect(props.title).toBe('Upgrade to Plus?');
+    expect(props.body).toBe('Upgrade to Plus for $4/mo using your referral discount?');
+    expect(props.confirmLabel).toBe('Confirm upgrade');
+    expect(props.cancelLabel).toBe('Not now');
+    expect(h.updateUserProfile).toHaveBeenCalledOnceWith({ selectedTier: 'plus', billingPeriod: 'monthly' });
+    expect(h.page.selectedTier).toBe('plus');
+    expect(h.showToast).toHaveBeenCalledOnceWith('Upgraded to Plus!', 'success');
+  });
+
+  it('a bare dismiss saves nothing and says nothing', async () => {
+    const h = setupUpgrade(undefined);
+
+    await h.page.confirmTierUpgrade('plus', 'Plus', 4);
+
+    expect(h.modalCreate).toHaveBeenCalledTimes(1);
+    expect(h.updateUserProfile).not.toHaveBeenCalled();
+    expect(h.showToast).not.toHaveBeenCalled();
+    expect(h.page.selectedTier).toBe('core');
+  });
+
+  it('a failed save keeps the tier and toasts the failure', async () => {
+    const h = setupUpgrade('confirm', () => throwError(() => new HttpErrorResponse({ status: 500 })));
+
+    await h.page.confirmTierUpgrade('pro', 'Pro', 9);
+
+    expect(h.page.selectedTier).toBe('core');
+    expect(h.showToast).toHaveBeenCalledOnceWith('Upgrade failed. Please try again.', 'danger');
   });
 });

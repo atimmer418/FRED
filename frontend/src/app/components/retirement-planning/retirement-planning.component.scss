@@ -726,10 +726,6 @@ ion-item {
     --color: var(--app-gray-400);
     --box-shadow: none;
   }
-
-  ion-spinner {
-    margin-right: var(--app-spacing-sm);
-  }
 }
 
 .results-section {
@@ -1057,10 +1053,6 @@ ion-item {
   align-items: center;
   justify-content: center;
   padding: 40px;
-
-  ion-spinner {
-    margin-bottom: var(--app-spacing-md);
-  }
 
   p {
     color: var(--app-gray-400);

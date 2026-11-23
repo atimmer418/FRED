@@ -131,61 +131,6 @@ $indigo-50: #eef2ff;
   }
 }
 
-.mfu-skeleton-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-
-  &__left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-}
-
-.mfu-skeleton-circle {
-  border-radius: 9999px;
-  background: $slate-200;
-
-  &--sm {
-    width: 32px;
-    height: 32px;
-  }
-}
-
-.mfu-skeleton-bar {
-  border-radius: 4px;
-  background: $slate-200;
-
-  &--md {
-    height: 16px;
-    width: 96px;
-  }
-}
-
-.mfu-skeleton-card {
-  width: 100%;
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-
-  &--lg {
-    height: 192px;
-  }
-
-  &--sm {
-    height: 64px;
-    border-radius: 8px;
-  }
-}
-
-.mfu-skeleton-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 // --------------------------------------------------------------------------
 // Modal wrapper (fixed, centered)
 // --------------------------------------------------------------------------

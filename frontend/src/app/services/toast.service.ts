@@ -1,76 +1,94 @@
 import { Injectable } from '@angular/core';
-import { ToastController } from '@ionic/angular/standalone';
+import { Observable, Subject } from 'rxjs';
 
+/**
+ * What kind of thing happened. FredToastHostComponent turns it into the chip
+ * colour and icon, so a user can read the outcome from the colour alone.
+ */
+export type ToastSeverity = 'success' | 'error' | 'warning' | 'info' | 'neutral';
+
+/** One button on the card, such as Undo. A tap runs it once and dismisses the card. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+export interface ToastRequest {
+  severity: ToastSeverity;
+  message: string;
+  title?: string;
+  action?: ToastAction;
+  /**
+   * Milliseconds on screen. Defaults to TOAST_DURATION_MS, or ERROR_TOAST_DURATION_MS for an
+   * error. An error never shows shorter than ERROR_TOAST_DURATION_MS, whatever is passed.
+   */
+  duration?: number;
+}
+
+/** A request with every default filled in, the shape the host receives. */
+export interface ToastItem {
+  severity: ToastSeverity;
+  message: string;
+  title?: string;
+  duration: number;
+  action?: ToastAction;
+}
+
+export const TOAST_DURATION_MS = 3000;
+/** A toast with an action (Undo) stays five seconds: long enough to read it and tap. */
+export const ACTION_TOAST_DURATION_MS = 5000;
+/** Errors stay up ten seconds: the user has to read what went wrong and decide what to do next. */
+export const ERROR_TOAST_DURATION_MS = 10000;
+
+/**
+ * The Ionic colour names call sites have always passed to showToast, mapped
+ * onto severities. Anything unrecognised reads as info, the old default look.
+ */
+const SEVERITY_BY_COLOR: Record<string, ToastSeverity> = {
+  success: 'success',
+  danger: 'error',
+  warning: 'warning',
+  primary: 'info',
+  medium: 'neutral',
+};
+
+export function severityForColor(color: string | undefined): ToastSeverity {
+  return SEVERITY_BY_COLOR[color ?? ''] ?? 'info';
+}
+
+/**
+ * ToastService: the one way to put a notification on screen.
+ *
+ * It owns no DOM. Every request is pushed down items$ and drawn by the single
+ * FredToastHostComponent mounted inside ion-app, which stacks, times and
+ * dismisses the cards. showToast keeps the signature every call site already
+ * uses; show takes a severity directly.
+ */
 @Injectable({
   providedIn: 'root'
 })
 export class ToastService {
-  private activeToasts: HTMLIonToastElement[] = [];
-  private readonly TOAST_SPACING = 6; // px
-  private readonly TOAST_HEIGHT = 50; // Approximate height, tighter for standard messages
+  private readonly items = new Subject<ToastItem>();
 
-  constructor(private toastController: ToastController) {}
+  /** Every toast asked for, in order. FredToastHostComponent is the subscriber. */
+  readonly items$: Observable<ToastItem> = this.items.asObservable();
 
-  async showToast(message: string, color: string = 'primary', duration: number = 3000) {
-    // Create the new toast
-    const toast = await this.toastController.create({
-      message: message,
-      duration: duration,
-      color: color,
-      position: 'top',
-      cssClass: 'stacked-toast',
-      buttons: [
-        {
-          icon: 'close',
-          role: 'cancel'
-        }
-      ]
-    });
-
-    // Add to our tracking array immediately so we can adjust positions
-    this.activeToasts.push(toast);
-    
-    // Calculate position based on index in the stack
-    // Move existing toasts down BEFORE presenting the new one to avoid overlap
-    this.updateToastPositions();
-
-    // Present the toast
-    await toast.present();
-
-    // Handle dismissal
-    toast.onDidDismiss().then(() => {
-      this.removeToast(toast);
-    });
+  /**
+   * Legacy entry point: an Ionic colour name stands in for the severity. A
+   * 'danger' toast stays up the full ten seconds an error gets, even when a
+   * call site passes something shorter.
+   */
+  showToast(message: string, color: string = 'primary', duration?: number): void {
+    this.show({ severity: severityForColor(color), message, duration });
   }
 
-  private removeToast(toast: HTMLIonToastElement) {
-    const index = this.activeToasts.indexOf(toast);
-    if (index > -1) {
-      this.activeToasts.splice(index, 1);
-      this.updateToastPositions();
-    }
-  }
-
-  private updateToastPositions() {
-    // We need to manually adjust the top position of each toast
-    // Newest toast (last in array) should be at the top (offset 0)
-    // Older toasts should cascade down
-    
-    this.activeToasts.forEach((toast, index) => {
-      // Calculate position from top (0 = newest/bottom of array)
-      const positionFromTop = this.activeToasts.length - 1 - index;
-      
-      const offset = positionFromTop * (this.TOAST_HEIGHT + this.TOAST_SPACING);
-      
-      toast.style.setProperty('--toast-transform', `translateY(${offset}px)`);
-      toast.style.setProperty('transition', 'transform 0.3s ease-in-out');
-      
-      // Optional: Fade out older toasts slightly to emphasize the new one
-      if (positionFromTop > 0) {
-        toast.style.opacity = '0.9';
-      } else {
-        toast.style.opacity = '1';
-      }
-    });
+  show(request: ToastRequest): void {
+    const { severity, message, title, action } = request;
+    const duration = severity === 'error'
+      // Errors hold the ten-second floor: a short duration from an older call site would cut them off.
+      ? Math.max(request.duration ?? 0, ERROR_TOAST_DURATION_MS)
+      : request.duration ?? (action ? ACTION_TOAST_DURATION_MS : TOAST_DURATION_MS);
+    // The field is left off when there is no action, so a plain toast keeps its old shape.
+    this.items.next({ severity, message, title, duration, ...(action ? { action } : {}) });
   }
 }

@@ -1,14 +1,15 @@
 /**
- * my-profile.goals-render.spec.ts — freeze-hunt harness.
+ * my-profile.goals-render.spec.ts: freeze-hunt harness.
  *
- * Renders MyProfilePage with a persisted v2 goal (Plus tier) and asserts the
- * page renders, stays stable across CD cycles, and remains interactive.
- * Written while debugging the on-device "my-profile dead on arrival with a
- * saved goal" freeze (2026-08-14).
+ * Renders MyProfilePage with one backend goal and asserts the page renders,
+ * stays stable across CD cycles, and remains interactive. Written while
+ * debugging the on-device "my-profile dead on arrival with a saved goal"
+ * freeze (2026-08-14); rewritten for the Goals v3 summary card.
  */
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
+import { NavController, ModalController } from '@ionic/angular/standalone';
 import { BehaviorSubject, of } from 'rxjs';
 import { MyProfilePage } from './my-profile.page';
 import { AuthService } from '../../services/auth.service';
@@ -21,15 +22,26 @@ import { FreedomStatsService } from '../../services/freedom-stats.service';
 import { FirstTimeTourService } from '../../services/first-time-tour.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 
-const V2_GOAL: Goal = {
-  id: 'g-1',
+const YEAR = new Date().getFullYear();
+
+const GOAL: Goal = {
+  id: 1,
+  clientId: null,
+  type: 'CUSTOM',
   name: 'Test goal',
   icon: 'home',
-  targetAmount: 20000,
-  targetYear: new Date().getFullYear() + 4,
-  startingValue: 500,
-  perPaycheckOutsideFRED: 150,
+  config: { targetAmount: 20_000, targetYear: YEAR + 4 },
+  currentBalance: 500,
+  balanceUpdatedAt: null,
+  anchorBalance: 500,
+  anchorMonthly: 380,
+  planRate: 0.10,
+  planRateKind: 'market',
+  planAnchoredAt: `${YEAR}-01-01T00:00:00`,
   completed: false,
+  sortOrder: 0,
+  createdAt: '',
+  updatedAt: '',
 };
 
 const PRO_PROGRESS = {
@@ -39,8 +51,11 @@ const PRO_PROGRESS = {
   investmentConfirmationCompleted: true,
 };
 
+let refresh: jasmine.Spy;
+
 function setup(goals: Goal[]): ComponentFixture<MyProfilePage> {
   localStorage.setItem('userId', '40');
+  refresh = jasmine.createSpy('refresh').and.returnValue(of(goals));
   TestBed.configureTestingModule({
     imports: [MyProfilePage],
     providers: [
@@ -55,13 +70,15 @@ function setup(goals: Goal[]): ComponentFixture<MyProfilePage> {
       { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 10000 } }) } },
       { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
-      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy() } },
+      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy(), navigate: jasmine.createSpy() } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-      { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {} },
-      { provide: FirstTimeTourService, useValue: { suspend: jasmine.createSpy('suspend'), freedomSheetClosed: jasmine.createSpy('freedomSheetClosed') } },
+      { provide: FirstTimeTourService, useValue: { freedomPlanLeft: jasmine.createSpy('freedomPlanLeft') } },
       { provide: GoalsService, useValue: {
-          getGoals: () => goals,
+          goals: signal(goals),
+          load: () => of(goals),
+          refresh,
+          readLegacyV2: () => [],
           getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }),
       } },
       { provide: FreedomStatsService, useValue: {
@@ -77,44 +94,85 @@ function setup(goals: Goal[]): ComponentFixture<MyProfilePage> {
   return fixture;
 }
 
-describe('MyProfilePage — goals rendering (freeze hunt)', () => {
+function chipTexts(fixture: ComponentFixture<MyProfilePage>): string[] {
+  return Array.from(fixture.nativeElement.querySelectorAll('.goal-proj'))
+    .map(el => (el as HTMLElement).textContent!.trim());
+}
+
+describe('MyProfilePage: goals rendering (freeze hunt)', () => {
   afterEach(() => localStorage.removeItem('userId'));
 
-  it('renders a saved v2 goal row without throwing', () => {
-    const fixture = setup([V2_GOAL]);
+  it('renders a saved goal row without throwing', () => {
+    const fixture = setup([GOAL]);
     const rows = fixture.nativeElement.querySelectorAll('.goal-row');
     expect(rows.length).toBe(2); // Freedom Date row + the goal
-    const sub = fixture.nativeElement.querySelectorAll('.goal-sub')[1]?.textContent ?? '';
-    expect(sub).toContain('by ' + V2_GOAL.targetYear);
+    const sub = (fixture.nativeElement.querySelectorAll('.goal-sub')[1]?.textContent ?? '').trim();
+    expect(sub).toMatch(/^\$[\d,]+\/mo Test goal$/);
+  });
+
+  it('my-profile row subtitle reads "$X/mo for all 3 kids" for the sample family, and the disclaimer is gone', () => {
+    const fresh = () => ({ balance: 0, balanceUpdatedAt: null, anchorBalance: 0, anchorMonthly: 0 });
+    const kids: Goal = {
+      ...GOAL, id: 2, type: 'KIDS', name: 'Our kids', icon: 'child_care',
+      config: {
+        plan529Target: 47_800, brokerageTarget: 100_000,
+        kids: [
+          { label: 'Ellie', birthYear: YEAR - 2, birthMonth: null, accounts: { plan529: fresh(), brokerage: fresh() } },
+          { label: 'Theo', birthYear: YEAR + 2, birthMonth: 6, accounts: { plan529: fresh(), brokerage: fresh() } },
+          { label: 'Kid 3', birthYear: null, birthMonth: null, accounts: { plan529: fresh(), brokerage: fresh() } },
+        ],
+      },
+    };
+    const fixture = setup([kids]);
+    const sub = (fixture.nativeElement.querySelectorAll('.goal-sub')[1]?.textContent ?? '').trim();
+    expect(sub).toMatch(/^\$[\d,]+\/mo for all 3 kids$/);
+    expect(fixture.nativeElement.querySelector('.goals-disclaimer')).toBeNull();
+    expect((fixture.nativeElement.textContent as string)).not.toContain('FRED invests only toward your Freedom Date');
   });
 
   it('survives 25 change-detection cycles without exploding or churning', () => {
-    const fixture = setup([V2_GOAL]);
+    const fixture = setup([GOAL]);
     const rowBefore = fixture.nativeElement.querySelectorAll('.goal-row')[1];
     for (let i = 0; i < 25; i++) fixture.detectChanges();
     const rowAfter = fixture.nativeElement.querySelectorAll('.goal-row')[1];
-    expect(rowAfter).toBe(rowBefore); // same DOM node — no ngFor identity churn
+    expect(rowAfter).toBe(rowBefore); // same DOM node, no ngFor identity churn
   });
 
-  it('renders a completed goal and a no-pace goal without throwing', () => {
-    const fixture = setup([
-      { ...V2_GOAL, id: 'g-2', completed: true },
-      { ...V2_GOAL, id: 'g-3', perPaycheckOutsideFRED: 0 },
-    ]);
-    const projTexts = Array.from(
-      fixture.nativeElement.querySelectorAll('.goal-proj')
-    ).map(el => (el as HTMLElement).textContent!.trim());
-    expect(projTexts.some(t => t.includes('Done'))).toBeTrue();
-    expect(projTexts.some(t => t.includes('no pace set'))).toBeTrue();
+  it('renders a completed goal as Done', () => {
+    const fixture = setup([{ ...GOAL, id: 2, completed: true }]);
+    expect(chipTexts(fixture)).toContain('Done');
+  });
+
+  it('shows Started, never Behind, for a goal with no logged balance', () => {
+    const fixture = setup([{ ...GOAL, currentBalance: 0, anchorBalance: 0, balanceUpdatedAt: null }]);
+    const chips = chipTexts(fixture);
+    expect(chips).toContain('Started');
+    expect(chips).not.toContain('Behind');
+  });
+
+  it('shows Plan updated for an imported goal that has not been planned', () => {
+    const fixture = setup([{ ...GOAL, clientId: 'v2-1', anchorMonthly: 0 }]);
+    expect(chipTexts(fixture)).toContain('Plan updated');
+    expect(fixture.nativeElement.querySelectorAll('.goal-sub')[1].textContent).toContain('Plan updated, take a look');
+  });
+
+  it('refreshes goals on ionViewWillEnter', () => {
+    const fixture = setup([GOAL]);
+    refresh.calls.reset();
+    fixture.componentInstance.ionViewWillEnter();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('keeps buttons clickable after rendering goals', () => {
-    const fixture = setup([V2_GOAL]);
+    const fixture = setup([GOAL]);
     const page = fixture.componentInstance;
-    spyOn(page, 'openAddGoalSheet').and.resolveTo();
+    spyOn(page, 'addGoal').and.resolveTo();
+    spyOn(page, 'openGoal');
     const addBtn = fixture.nativeElement.querySelector('.add-goal-btn') as HTMLButtonElement;
     expect(addBtn).withContext('add-goal button rendered').toBeTruthy();
     addBtn.click();
-    expect(page.openAddGoalSheet).toHaveBeenCalled();
+    expect(page.addGoal).toHaveBeenCalled();
+    (fixture.nativeElement.querySelectorAll('.goal-row')[1] as HTMLElement).click();
+    expect(page.openGoal).toHaveBeenCalledWith(1);
   });
 });

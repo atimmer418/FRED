@@ -116,19 +116,30 @@ The four education decks are ungated. `optimal_drawdown` is Pro only.
 
 | Event | Properties | When |
 |---|---|---|
-| `goal_changed` | `action`, `icon`, `target_band`, `years_to_target`, `progress`, `goal_count` | A goal was created, edited, completed, reopened or removed. |
+| `goal_changed` | `action`, `goal_type`, `icon`, `plan_rate`, `target_band`, `years_to_target`, `progress`, `goal_count` | A goal was created, edited, completed, reopened or removed. |
+| `goal_tally_changed` | `goal_type`, `kind` | A saved-so-far correction posted successfully. |
 
-Actions: `created`, `updated`, `completed`, `reopened`, `removed`. Icons: `home`,
-`health_and_safety`, `flag`, `balance`, `savings`, `school`, `directions_car`.
+Actions: `created`, `updated`, `completed`, `reopened`, `removed`. Goal types: `KIDS`, `HOUSE`,
+`VACATION`, `CAR`, `EMERGENCY_FUND`, `WEDDING`, `CUSTOM`. Icons: `home`, `health_and_safety`,
+`flag`, `balance`, `savings`, `school`, `directions_car`, `child_care`, `flight`, `favorite`.
+`plan_rate` is the return assumption the plan was proposed at: `8`, `10` or `12` (percent), or
+`cash` for short-horizon and emergency plans.
 
-A goal's **name is free text the user typed** and its **id is a UUID**: neither ever leaves the
-device. The icon is the safe descriptor. `completed` and `reopened` are the two sides of one toggle
-and are separate values so they can be told apart. Goals are stored in localStorage only, so the
-single save point is where the sheet is dismissed.
+`goal_tally_changed` fires once per ledger entry the server accepts, after the response, never on
+a failed save or a 409. `kind` is `missed` (Missed one), `extra` (Doubled up) or `set` (the Saved
+so far tray). An Undo is an adjustment too and carries the opposite kind it posted. The event
+carries no amount, no unit and no kid index.
 
-The sheet is its own `surface` (`goals`), not the page that presented it. It is reachable from the
-goals list and from a goal row, and "the goal form was rejected" is a different fact from "the
-profile page failed to save".
+A goal's **name is free text the user typed** and its **id is a server row id**: neither ever
+leaves the device. The type and icon are the safe descriptors. `completed` and `reopened` are the
+two sides of one toggle and are separate values so they can be told apart. Goals now live on the
+server, so the event fires only after the write succeeds, and the single save point is the goal
+page (not a sheet). `goal_count` is read after the local list reflects the change, so for `removed`
+it is the number of goals the user is left with. `years_to_target` is `never` for a vacation goal,
+which has no deadline, and for a kids goal it uses the latest kid's 18th-birthday year.
+
+The goal page is its own `surface` (`goals`). "The goal write was rejected" is a different fact
+from "the profile page failed to save".
 
 ## Settings
 
@@ -338,8 +349,10 @@ Counts (`toCountBand`): `0`, `1`, `2_3`, `4_9`, `10_plus`. Years (`toYearsBand`)
 - **`validation` collapses distinct rejections.** Nine different field errors on one form all
   report as one category, because the only thing that separates them is the message, which is
   never sent. A bounded `field` slug would fix it if the funnel ever needs that detail.
-- **One nudge, two affordances.** `goals` covers both the frosted veil and the add-goal button,
-  and they share a modal, so a `shown` event cannot say which one the user hit.
+- **One nudge, several affordances.** `goals` covers the Add a goal button on my-profile and the
+  goal page's nudge (opening a new goal at the limit, or a save or reopen the server refused with
+  `TIER_LIMIT`). They share a modal and a feature value, so a `shown` event cannot say which one
+  the user hit.
 - **No event describes a plan saved from the my-profile page itself.** `freedom_plan_changed` is
   restricted to `onboarding` and `freedom_sheet`. Harmless today, since the page's tiles live only
   in the sheet.

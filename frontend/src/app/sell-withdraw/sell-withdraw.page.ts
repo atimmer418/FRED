@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -13,7 +13,6 @@ import {
   IonRange,
   IonToggle,
   IonPopover,
-  AlertController,
   ModalController
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
@@ -42,9 +41,19 @@ import { ToastService } from '../services/toast.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { PasskeyPromptComponent } from '../components/passkey-prompt/passkey-prompt.component';
-import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
+import { presentConfirmSheet } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
+import { AmountTrayHost, TRAY_INSIDE_SELECTOR } from '../components/plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
+import { SkeletonComponent } from '../components/skeleton/skeleton.component';
+import { buildAmountScale } from '../utils/plan-amount-scale';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+
+/** The one tray field on this page. */
+type TrayField = 'amount';
+/** The withdraw tray runs from $5 to what can be withdrawn; minus and plus move by $5. */
+const WITHDRAW_FLOOR = 5;
+const WITHDRAW_FINE = 5;
 
 @Component({
   selector: 'app-sell-withdraw',
@@ -60,7 +69,8 @@ import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-
     IonRange,
     IonToggle,
     IonPopover,
-    KeyboardAvoidDirective
+    AmountTraySlotComponent,
+    SkeletonComponent
   ]
 })
 export class SellWithdrawPage implements OnInit, OnDestroy {
@@ -69,11 +79,43 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
   // State
   public isLoading = true;
   public positions: Position[] = [];
-  public balance: AccountSummary | null = null;
   public dashboardData: PortfolioDashboardData | null = null;
   public selectedPosition: Position | null = null;
   public sellPercentage = 25;
-  public withdrawAmount: number | null = null;
+
+  // The account summary and the withdraw amount live in signals: the tray's scale follows
+  // withdrawable cash and its value follows the amount only through signal reads. The accessors
+  // keep the template and the rest of the page reading and writing plain fields.
+  private readonly balanceSig = signal<AccountSummary | null>(null);
+  private readonly withdrawAmountSig = signal<number | null>(null);
+
+  get balance(): AccountSummary | null { return this.balanceSig(); }
+  set balance(value: AccountSummary | null) { this.balanceSig.set(value); }
+
+  get withdrawAmount(): number | null { return this.withdrawAmountSig(); }
+  set withdrawAmount(value: number | null) { this.withdrawAmountSig.set(value); }
+
+  /** What can be withdrawn: withdrawable cash, else settled cash, else buying power. */
+  private readonly withdrawMax = computed(() => {
+    const balance = this.balanceSig();
+    if (!balance) return 0;
+    if (typeof balance.withdrawableCash !== 'undefined') return balance.withdrawableCash;
+    if (typeof balance.cash !== 'undefined') return balance.cash;
+    return balance.buyingPower || 0;
+  });
+
+  /**
+   * Rebuilt whenever the cash changes; its last detent is exactly the cash, so "all" is reachable.
+   * Cash under the floor runs from $0 instead: the last few dollars have to be able to leave, or
+   * the account can never be emptied and closed.
+   */
+  readonly withdrawScale = computed(() => {
+    const max = this.withdrawMax();
+    return buildAmountScale(max < WITHDRAW_FLOOR ? 0 : WITHDRAW_FLOOR, max, WITHDRAW_FINE);
+  });
+
+  /** The withdraw amount's slide tray: open, close, outside tap (see AmountTrayHost). */
+  readonly tray: AmountTrayHost<TrayField>;
 
   // UI state
   public isSelling = false;
@@ -92,20 +134,33 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
 
   // Close account state
   public isClosingAccount = false;
-  public showCloseConfirmation = false;
 
   constructor(
     private router: Router,
     private tradingService: TradingService,
     private portfolioService: PortfolioService,
-    private alertController: AlertController,
     private modalController: ModalController,
     private toastService: ToastService,
     private passkeyService: PasskeyService,
     private pinService: PinService,
     private navCtrl: NavController,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    host: ElementRef<HTMLElement>,
   ) {
+    this.tray = new AmountTrayHost<TrayField>({
+      root: host,
+      fields: {
+        amount: {
+          label: 'Amount',
+          scale: this.withdrawScale,
+          value: () => this.withdrawAmount ?? 0,
+          set: value => { this.withdrawAmount = value; },
+        },
+      },
+      // The quick chips set the same amount: a chip tap moves the thumb and leaves the tray open.
+      insideSelector: `${TRAY_INSIDE_SELECTOR}, .quick-amounts .quick-btn`,
+      labelSelector: '.amount-label.active',
+    });
     addIcons({
       pieChartOutline,
       checkmarkCircle,
@@ -134,11 +189,17 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
     this.loadData();
   }
 
+  /** Leaving the page: the tray snaps shut rather than collapsing into the transition. */
+  ionViewWillLeave() {
+    this.tray.close(true);
+  }
+
   goBack() {
     this.navCtrl.navigateBack('/tabs/tab3');
   }
 
   ngOnDestroy() {
+    this.tray.destroy();
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -243,19 +304,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
 
 
   get maxWithdrawAmount(): number {
-    if (this.balance) {
-      // Use withdrawableCash if available (it's the most accurate for withdrawals)
-      if (typeof this.balance.withdrawableCash !== 'undefined') {
-        return this.balance.withdrawableCash;
-      }
-      // Fallback to cash if withdrawableCash is not available
-      if (typeof this.balance.cash !== 'undefined') {
-        return this.balance.cash;
-      }
-      // Fallback to buyingPower if cash is not available
-      if (this.balance.buyingPower) return this.balance.buyingPower;
-    }
-    return 0;
+    return this.withdrawMax();
   }
 
   async sellPosition() {
@@ -333,6 +382,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
 
   async withdrawCash() {
     if (!this.withdrawAmount || this.isWithdrawing || this.withdrawAmount > this.maxWithdrawAmount) return;
+    this.tray.close();
 
     try {
       // Step-up authentication check
@@ -536,17 +586,23 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
         return;
       }
 
-      // Show the inline confirmation
-      this.showCloseConfirmation = true;
+      // The sheet stays up and busy ("Closing...") while confirmCloseAccount runs; that method
+      // handles its own outcome (toasts, the navigation home), so there is nothing to read back.
+      await presentConfirmSheet(this.modalController, {
+        tone: 'destructive',
+        icon: 'warning',
+        title: 'Close your account?',
+        body: 'This action is irreversible and will permanently destroy your account. All your data, settings, and history will be deleted. If you return, you\'ll need to start over.',
+        confirmLabel: 'Close account',
+        cancelLabel: 'Cancel',
+        busyLabel: 'Closing...',
+        onConfirm: () => this.confirmCloseAccount(),
+      });
     } catch (error) {
       console.error('Error during close account auth:', error);
       this.analytics.trackErrorShown('passkey', 'portfolio', 'toast', httpStatusOf(error), false);
       this.showToast('Authentication failed. Please try again.', 'danger');
     }
-  }
-
-  cancelCloseAccount() {
-    this.showCloseConfirmation = false;
   }
 
   async confirmCloseAccount() {
@@ -593,20 +649,10 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       }
     } finally {
       this.isClosingAccount = false;
-      this.showCloseConfirmation = false;
     }
   }
 
   private showToast(message: string, color: string = 'primary') {
     this.toastService.showToast(message, color);
   }
-
-  private async showConfirmation(header: string, message: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const confirmed = confirm(`${header}\n\n${message}`);
-      resolve(confirmed);
-    });
-  }
-
-  // Helper methods for WebAuthn
 }

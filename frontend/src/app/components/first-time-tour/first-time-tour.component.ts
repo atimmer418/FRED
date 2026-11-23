@@ -2,8 +2,10 @@ import {
   Component, OnInit, OnDestroy, ElementRef, ViewChild, ChangeDetectorRef, NgZone
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { NavigationEnd, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.service';
+import { filter } from 'rxjs/operators';
+import { FirstTimeTourService, TourStep, isFreedomPlanUrl } from '../../services/first-time-tour.service';
 import { computeSpotlight, Rect, SpotlightLayout } from './spotlight-geometry';
 
 interface TourStepDef {
@@ -57,6 +59,12 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
   suspended = false;
   /** True while the tour ferries the user back to chat; show only a dim veil. */
   transiting = false;
+  /**
+   * True while the Freedom page (/freedom) is up. The profileFreedom gate is
+   * the tap that opens it, so the overlay stays out of the way there and
+   * comes back, step intact, when the route leaves it.
+   */
+  onFreedomPage = false;
   /** Set when a gated target never appeared; the step renders like an explain step. */
   fallback = false;
   layout: SpotlightLayout | null = null;
@@ -73,10 +81,18 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
   constructor(
     private tourService: FirstTimeTourService,
     private cdr: ChangeDetectorRef,
-    private zone: NgZone
+    private zone: NgZone,
+    private router: Router
   ) {}
 
   ngOnInit() {
+    this.onFreedomPage = isFreedomPlanUrl(this.router.url ?? '');
+    this.subs.add(this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe(e => {
+        this.onFreedomPage = isFreedomPlanUrl(e.urlAfterRedirects);
+        this.cdr.markForCheck();
+      }));
     this.subs.add(this.tourService.step$.subscribe(step => this.onStep(step)));
     this.subs.add(this.tourService.suspended$.subscribe(s => {
       this.suspended = s;
@@ -107,7 +123,7 @@ export class FirstTimeTourComponent implements OnInit, OnDestroy {
   // ── Template state ────────────────────────────────────────────────────────
 
   get isVisible(): boolean {
-    return this.currentStep !== null && !this.suspended;
+    return this.currentStep !== null && !this.suspended && !this.onFreedomPage;
   }
 
   get stepDef(): TourStepDef | null {

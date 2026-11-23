@@ -1,0 +1,22 @@
+<form class="gs-body" novalidate (submit)="save($event)">
+  <div class="gs-handle"></div>
+
+  <h3>{{ title }}</h3>
+
+  <label class="field-label" [for]="fieldId">{{ label }}</label>
+  <input
+    class="field-input"
+    [id]="fieldId"
+    type="text"
+    autocomplete="off"
+    autocapitalize="sentences"
+    enterkeyhint="done"
+    autofocus
+    [attr.maxlength]="maxlength ?? null"
+    [value]="draft()"
+    (input)="onInput($event)"
+  />
+
+  <button type="submit" class="fd-cta tp-save" [disabled]="!canSave()">{{ saveLabel }}</button>
+  <button type="button" class="gs-cancel" (click)="close()">Cancel</button>
+</form>

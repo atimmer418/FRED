@@ -1,48 +1,28 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { Observable, of } from 'rxjs';
+import { finalize, map, shareReplay, tap } from 'rxjs/operators';
+import { environment } from '../../environments/environment';
+import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { DeviceIdService } from './device-id.service';
+import { AuthService } from './auth.service';
+import { Goal, GoalWrite, LedgerKind, LegacyGoalV2 } from '../models/goal.model';
+import { ACTIVE_GOALS_MOCK, mockGoals } from './dev/goals-mock';
+
+// Existing imports of Goal, GoalIcon and friends from this file keep resolving.
+export * from '../models/goal.model';
 
 // ─── Schema version ──────────────────────────────────────────────────────────
-// Bump SCHEMA_VERSION whenever the Goal or Prefs shape changes.
-// Old data is silently discarded — corrupt-tolerant, never crashes.
-// v2 (2026-08-13): startingValue + perPaycheckOutsideFRED (replaces
-// monthlyOutsideFRED) + completed.
+// SCHEMA_VERSION covers the profile prefs and the legacy v2 localStorage goals
+// (read only, kept for the one-time import to the backend).
 const SCHEMA_VERSION = 2;
 const KEY_GOALS_PREFIX = `fred.goals.v${SCHEMA_VERSION}.`;
 const KEY_PREFS_PREFIX = `fred.profilePrefs.v${SCHEMA_VERSION}.`;
+const GOALS_TTL_MS = 60_000;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-/** Icons allowed for user-created goals. */
-export type GoalIcon =
-  | 'home'
-  | 'health_and_safety'
-  | 'flag'
-  | 'balance'
-  | 'savings'
-  | 'school'
-  | 'directions_car';
-
 export type RebalanceSchedule = 'Quarterly' | 'Semi-annual' | 'Annual';
-
-export interface Goal {
-  /** UUID assigned at creation — used as the stable edit/delete key. */
-  id: string;
-  name: string;
-  icon: GoalIcon;
-  /** Dollar target for the goal. */
-  targetAmount: number;
-  /** Calendar year the user wants to reach the goal. */
-  targetYear: number;
-  /** Amount already saved toward this goal when it was set up. Default 0. */
-  startingValue: number;
-  /**
-   * Amount the user saves toward this goal each PAYCHECK, outside of FRED.
-   * The monthly equivalent is derived live from the user's investment-schedule
-   * frequency via InvestmentFrequencyUtils.toMonthlyEquivalent — not stored.
-   */
-  perPaycheckOutsideFRED: number;
-  /** Marked as completed by the user. */
-  completed: boolean;
-}
 
 export interface ProfilePrefs {
   rebalanceSchedule: RebalanceSchedule;
@@ -57,60 +37,165 @@ const DEFAULT_PREFS: ProfilePrefs = {
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 /**
- * GoalsService — FRED-216
+ * GoalsService
  *
- * Per-user localStorage CRUD for:
- *   - goals[]          : projection-only goals (not managed by FRED's investment engine)
- *   - profilePrefs     : rebalance schedule preference
- *
- * V1 persistence decision (documented in implementation-notes-FRED-216.md):
- * These are UI/projection features. The rebalancing engine and server-side goal
- * tracking are future stories; localStorage is the agreed interim store.
- *
- * Discipline mirrors SimulationHistoryService:
- *   - Key prefix includes schema version
- *   - Per-user scoping via localStorage 'userId'
- *   - Corrupt/stale data silently returns empty/default state
- *   - Write failures (private mode, quota) are silently swallowed
+ * Backend-backed goals store (/api/goals) exposing a signal, plus the
+ * localStorage profile prefs and a read-only reader for legacy v2 goals.
  */
 @Injectable({ providedIn: 'root' })
 export class GoalsService {
+  private readonly apiUrl = `${environment.backendApiUrl}/goals`;
 
-  // ── Goals CRUD ─────────────────────────────────────────────────────────────
+  readonly goals = signal<Goal[]>([]);
+  readonly loaded = signal(false);
 
-  /** Returns goals for the current user, or [] on any error. */
-  getGoals(userId: string): Goal[] {
+  private entry: { fetchedAt: number; userId: string } | null = null;
+  private inFlight$: Observable<Goal[]> | null = null;
+  /** Bumped by every write and logout, so a GET that started before one never overwrites newer state. */
+  private generation = 0;
+
+  constructor(
+    private http: HttpClient,
+    private deviceIdService: DeviceIdService,
+    private authService: AuthService
+  ) {
+    this.authService.isLoggedIn$.subscribe(loggedIn => {
+      if (!loggedIn) {
+        this.clearMemory();
+      }
+    });
+  }
+
+  // ── Backend store ──────────────────────────────────────────────────────────
+
+  /** GET the user's goals. Cached for 60 s per user, single flight. */
+  load(): Observable<Goal[]> {
+    if (this.useMock()) return this.mockLoad();
+    const userId = localStorage.getItem('userId') ?? '';
+    if (!userId) return of([]);
+    if (
+      this.entry &&
+      this.entry.userId === userId &&
+      Date.now() - this.entry.fetchedAt < GOALS_TTL_MS
+    ) {
+      return of(this.goals());
+    }
+    return this.fetch(userId);
+  }
+
+  /** Same as load() but ignores the TTL. */
+  refresh(): Observable<Goal[]> {
+    if (this.useMock()) return this.mockLoad();
+    const userId = localStorage.getItem('userId') ?? '';
+    if (!userId) return of([]);
+    return this.fetch(userId);
+  }
+
+  create(body: GoalWrite): Observable<Goal> {
+    return this.http.post<Goal>(this.apiUrl, body, { headers: this.getAuthHeaders() }).pipe(
+      tap(created => {
+        this.invalidate();
+        this.goals.update(list => list.some(g => g.id === created.id) ? list : [...list, created]);
+      })
+    );
+  }
+
+  update(id: number, body: GoalWrite): Observable<Goal> {
+    return this.http.put<Goal>(`${this.apiUrl}/${id}`, body, { headers: this.getAuthHeaders() }).pipe(
+      tap(updated => {
+        this.invalidate();
+        this.goals.update(list => list.map(g => g.id === updated.id ? updated : g));
+      })
+    );
+  }
+
+  /**
+   * One Saved so far correction on a unit (`goal`, or `kid:<index>:<account>`): Missed one, Doubled up,
+   * or an exact figure (`set`, with `amount`). The server computes the share. `capped` is true when a
+   * Missed one stopped at $0 (header X-Fred-Capped). `moved` is how far the entry moved the tally
+   * (header X-Fred-Moved; 0 when absent or nothing was written).
+   */
+  adjust(id: number, unit: string, kind: LedgerKind, amount?: number): Observable<{ goal: Goal; capped: boolean; moved: number }> {
+    const body = amount === undefined ? { unit, kind } : { unit, kind, amount };
+    return this.http.post<Goal>(`${this.apiUrl}/${id}/ledger`, body, {
+      headers: this.getAuthHeaders(),
+      observe: 'response',
+    }).pipe(
+      map(res => ({
+        goal: res.body as Goal,
+        capped: res.headers.get('X-Fred-Capped') === 'true',
+        moved: movedOf(res.headers.get('X-Fred-Moved')),
+      })),
+      tap(({ goal }) => {
+        this.invalidate();
+        this.goals.update(list => list.map(g => g.id === goal.id ? goal : g));
+      })
+    );
+  }
+
+  remove(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/${id}`, { headers: this.getAuthHeaders() }).pipe(
+      tap(() => {
+        this.invalidate();
+        this.goals.update(list => list.filter(g => g.id !== id));
+      })
+    );
+  }
+
+  /** One-time upload of legacy v2 localStorage goals. */
+  importLegacy(goals: LegacyGoalV2[]): Observable<Goal[]> {
+    const body = {
+      goals: goals.map(g => ({
+        clientId: g.id,
+        name: g.name,
+        icon: g.icon,
+        targetAmount: g.targetAmount,
+        targetYear: g.targetYear,
+        startingValue: g.startingValue,
+        completed: g.completed,
+      })),
+    };
+    return this.http.post<Goal[]>(`${this.apiUrl}/import`, body, { headers: this.getAuthHeaders() }).pipe(
+      tap(imported => {
+        this.invalidate();
+        this.goals.update(list => {
+          const ids = new Set(list.map(g => g.id));
+          return [...list, ...imported.filter(g => !ids.has(g.id))];
+        });
+      })
+    );
+  }
+
+  /** Drop cached goals and the TTL entry (runs on logout). */
+  clearMemory(): void {
+    this.invalidate();
+    this.goals.set([]);
+    this.loaded.set(false);
+  }
+
+  // ── Legacy v2 localStorage goals (read only) ───────────────────────────────
+
+  /** Returns the legacy v2 goals for the user, or [] on any error. */
+  readLegacyV2(userId: string): LegacyGoalV2[] {
     if (!userId) return [];
     try {
       const raw = localStorage.getItem(KEY_GOALS_PREFIX + userId);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter(g => this._isValidGoal(g));
+      return parsed.filter(g => this._isValidLegacyGoal(g));
     } catch {
       return [];
     }
   }
 
-  /** Append a new goal and persist. Generates a stable UUID for the entry. */
-  addGoal(userId: string, goal: Omit<Goal, 'id'>): Goal {
-    const entry: Goal = { ...goal, id: this._uuid() };
-    const existing = this.getGoals(userId);
-    this._saveGoals(userId, [...existing, entry]);
-    return entry;
-  }
-
-  /** Replace an existing goal matched by id. No-ops if the id is not found. */
-  updateGoal(userId: string, updated: Goal): void {
-    const existing = this.getGoals(userId);
-    const next = existing.map(g => g.id === updated.id ? updated : g);
-    this._saveGoals(userId, next);
-  }
-
-  /** Remove a goal by id. No-ops if the id is not found. */
-  deleteGoal(userId: string, goalId: string): void {
-    const existing = this.getGoals(userId);
-    this._saveGoals(userId, existing.filter(g => g.id !== goalId));
+  clearLegacyV2(userId: string): void {
+    if (!userId) return;
+    try {
+      localStorage.removeItem(KEY_GOALS_PREFIX + userId);
+    } catch {
+      // Storage unavailable, silently swallow.
+    }
   }
 
   // ── Profile prefs (rebalance schedule) ────────────────────────────────────
@@ -133,22 +218,67 @@ export class GoalsService {
     try {
       localStorage.setItem(KEY_PREFS_PREFIX + userId, JSON.stringify(prefs));
     } catch {
-      // Storage unavailable — silently swallow.
+      // Storage unavailable, silently swallow.
     }
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  private _saveGoals(userId: string, goals: Goal[]): void {
-    if (!userId) return;
-    try {
-      localStorage.setItem(KEY_GOALS_PREFIX + userId, JSON.stringify(goals));
-    } catch {
-      // Storage unavailable — silently swallow.
-    }
+  /** Dev-only: true when the local build has a goals mock toggled on (always false under Karma). */
+  private useMock(): boolean {
+    return environment.local && !!ACTIVE_GOALS_MOCK;
   }
 
-  private _isValidGoal(g: any): g is Goal {
+  private mockLoad(): Observable<Goal[]> {
+    const list = mockGoals(new Date());
+    this.goals.set(list);
+    this.loaded.set(true);
+    return of(list);
+  }
+
+  private fetch(userId: string): Observable<Goal[]> {
+    if (this.inFlight$) return this.inFlight$;
+    const generation = this.generation;
+    const obs: Observable<Goal[]> = this.http.get<Goal[]>(this.apiUrl, { headers: this.getAuthHeaders() }).pipe(
+      tap(list => {
+        // A write or logout happened while this GET was in flight: its list is older than the signal.
+        if (generation !== this.generation) return;
+        this.goals.set(list);
+        this.loaded.set(true);
+        this.entry = { fetchedAt: Date.now(), userId };
+      }),
+      finalize(() => {
+        if (this.inFlight$ === obs) {
+          this.inFlight$ = null;
+        }
+      }),
+      shareReplay(1)
+    );
+    this.inFlight$ = obs;
+    return obs;
+  }
+
+  private invalidate(): void {
+    this.generation++;
+    this.entry = null;
+    this.inFlight$ = null;
+  }
+
+  private getAuthHeaders(): HttpHeaders {
+    let headers = new HttpHeaders();
+    const token = JwtTokenUtils.getValidJwtToken();
+
+    if (token) {
+      headers = headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const deviceId = this.deviceIdService.getDeviceId();
+    headers = headers.set('X-Device-ID', deviceId);
+
+    return headers;
+  }
+
+  private _isValidLegacyGoal(g: any): g is LegacyGoalV2 {
     return (
       g != null &&
       typeof g === 'object' &&
@@ -170,12 +300,10 @@ export class GoalsService {
       ['Quarterly', 'Semi-annual', 'Annual'].includes(p.rebalanceSchedule)
     );
   }
+}
 
-  /** Minimal UUID v4-like string without crypto dependency. Sufficient for localStorage keys. */
-  private _uuid(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-      const r = Math.random() * 16 | 0;
-      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-    });
-  }
+/** The X-Fred-Moved header as a number of dollars; 0 when it is absent or not a number. */
+function movedOf(header: string | null): number {
+  const value = header === null ? NaN : Number(header);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }

@@ -20,7 +20,7 @@ one of them to make progress, that is a bug in this file worth fixing for the ne
 | 2 | `hold_reason` is orthogonal to the status, and **2.1** a KYC rejection now sets a hold |
 | 3 | The one rule that decides whether money moves |
 | 4 | Every file of yours the merge touched, and how |
-| 5 | Migration numbers (**start at V9**), and **5.1** why the backend may not boot |
+| 5 | Migration numbers (**start at V11**), and **5.1** why the backend may not boot |
 | 6 | The churn view's two meanings of "active" |
 | 7 | If you add a schedule transition, it must emit an event |
 | 8 | The outbound privacy filter, what may never be sent, and **8.2** your own privacy consequence |
@@ -173,15 +173,17 @@ moved into `AchRelationshipServiceTest.firstAdoptionNeverRestartsAScheduleTheUse
 
 ---
 
-## 5. Migration numbers: **your next one is V9**
+## 5. Migration numbers: **your next one is V11**
 
 | Version | Owner |
 | --- | --- |
 | `V6__paycheck_autopilot.sql` | Paycheck Autopilot Phase 0 (yours, untouched) |
 | `V7__investment_schedule_status.sql` | analytics (the status replacement) |
 | `V8__analytics_person_deletions.sql` | analytics (vendor person-deletion queue) |
+| `V9__goals.sql` | goals v3 (2026-11-02) |
+| `V10__goal_ledger.sql` | goals tally and loan terms (2026-11-18) |
 
-**Start at `V9`.** Check `backend/src/main/resources/db/migration/` before you name it: this
+**Start at `V11`.** (Note, 2026-11-18: goals took V10 for the tally ledger, so Autopilot moves to V11.) Check `backend/src/main/resources/db/migration/` before you name it: this
 collision happened once already, because two branches both chose V6, and git merges that cleanly
 (different filenames) while Flyway refuses to start. The failure only appears at boot, so a
 duplicate number will not be caught by tests or review.
@@ -435,10 +437,10 @@ Count from the XML rather than the console, because the console does not total t
 grep -ho 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' build/test-results/test/*.xml
 ```
 
-The frontend suite has **14 pre-existing failures** that are not yours and not analytics: eight
-`should create` smoke specs, `FreedomDetailSheetComponent`, `SecuritySettingsPage`, the `TabsPage`
-pager, and two `swipe-settle` velocity specs. They are tracked as FRED-226. Anything beyond those
-14 is yours. Karma also disconnects occasionally with "no message in 30000 ms"; that is
+The frontend suite has **13 pre-existing failures** that are not yours and not analytics: nine
+`should create` smoke specs, `SecuritySettingsPage`, the `TabsPage` pager, and two `swipe-settle`
+velocity specs. They are tracked as FRED-226. Anything beyond those 13 is yours. (The Freedom sheet's
+4% rule spec, once the fourteenth, went with the sheet when Goals v3.1 moved it to `FreedomPlanPage`.) Karma also disconnects occasionally with "no message in 30000 ms"; that is
 environmental, so re-run before investigating.
 
 ---

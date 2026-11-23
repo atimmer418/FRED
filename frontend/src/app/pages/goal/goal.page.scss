@@ -1,0 +1,473 @@
+// The one-screen plan page. The header and white sheet come from settings-shell; the hero, tiles,
+// chips, pill, note card and CTA from plan-page (shared with the Freedom plan page). Values below
+// follow the approved mockup's plan page frame (.kcard, .krow, .zone, .pd).
+@use '../../../theme/settings-shell';
+@use '../../../theme/plan-page';
+
+.gp-inner {
+  gap: 10px;
+  color: #111827;
+}
+
+.gp-hero {
+  padding-bottom: 12px;
+}
+
+// The band text wraps as text; the pill and the status chip stay together at the right end,
+// on a second line when the text leaves no room (margin-left keeps them right-aligned there).
+.gp-band-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gp-band-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+// ── Zone label: "PER KID", the status chip, the swipe dots ────────────────────
+.gp-zone {
+  margin-top: 4px;
+}
+
+// The Freedom page gives its zone labels 8px above the list gap; same here.
+.gp-zone-gap {
+  margin-top: 8px;
+}
+
+.gp-zone-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gp-chip {
+  font-family: 'Manrope', sans-serif;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #059669;
+  background: #ecfdf5;
+  border: none;
+  border-radius: 7px;
+  padding: 3px 8px;
+
+  &.behind {
+    color: #b45309;
+    background: #fffbeb;
+  }
+}
+
+.gp-dots {
+  display: flex;
+  gap: 4px;
+
+  i {
+    display: block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #d5dbe6;
+    transition: width 0.2s, background 0.2s;
+
+    &.on {
+      width: 14px;
+      border-radius: 3px;
+      background: #2563eb;
+    }
+  }
+}
+
+// ── The pager: one card per kid, each the full width of the hero card above ──
+// (Andy, 2026-11-10: no peek of the next card; the dots say there are more.)
+.gp-pager {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+}
+
+.gp-slide {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.gp-kcard {
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 13px;
+  padding: 12px 13px 4px;
+  font-family: 'Manrope', sans-serif;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.gp-kh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eef1f6;
+}
+
+// 34px with an 18px icon, the same as the Freedom page's .fd-insight-icon.
+.gp-av {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #eef4ff;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 18px; }
+}
+
+.gp-kname {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gp-kname-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+
+  b {
+    font-size: 13.5px;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.gp-pen,
+.gp-check {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gp-pen {
+  color: #9aa6ba;
+  .material-symbols-outlined { font-size: 13px; }
+}
+
+.gp-check {
+  color: #2563eb;
+  .material-symbols-outlined { font-size: 16px; }
+}
+
+.gp-kname-edit {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.gp-rename {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  border-bottom: 2px solid #2563eb;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 1px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #111827;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.gp-ksub {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #8a94a6;
+}
+
+.gp-kmonthly {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #2563eb;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Zone hint: "TAP FOR DETAILS" beside "PER KID" ───────────────────────────
+.gp-hint {
+  margin-left: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b3bccb;
+}
+
+// ── Groups: "INVEST" and "EVERYDAY" (labels only; the totals left 2026-11-11, Andy) ─────────
+.gp-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+
+  &.second {
+    border-top: 1px solid #eef1f6;
+    padding-top: 10px;
+  }
+}
+
+// ── Unit rows: the whole row opens the unit's sheet ──────────────────────────
+.gp-krow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 11px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-family: 'Manrope', sans-serif;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  em {
+    font-style: normal;
+    font-size: 13px;
+    font-weight: 800;
+    color: #111827;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// A hairline between rows, so Baby Fund, College and Nest Egg read as three separate lines.
+.gp-krow + .gp-krow {
+  border-top: 1px solid #eef1f6;
+}
+
+.gp-kic {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 16px; }
+}
+
+.gp-ktx {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.gp-klabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #111827;
+
+  b { font-weight: 800; }
+}
+
+.gp-ktarget {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a94a6;
+}
+
+// Beats the row's black amount color.
+.gp-krow .gp-kdone {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #059669;
+
+  .material-symbols-outlined { font-size: 15px; }
+}
+
+// An unborn kid or a kid in year one: when everyday costs start, in place of a row.
+.gp-from {
+  margin: 8px 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a94a6;
+}
+
+// ── Saved so far tile: a label row over a value button that opens the slide tray ──────────────
+// The tile recipe stays; the lit tile follows the Freedom page (blue border, white face, blue label).
+.gp-tile.active {
+  border-color: #2563eb;
+  background: #fff;
+}
+
+.gp-tile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fd-tile-label.active {
+  color: #2563eb;
+}
+
+// While the finger is down on the slider the label reads the step size ("± $25"). Colour and text
+// only, at the label's own size: a taller label would move the tray under the finger.
+.fd-tile-label.gp-step {
+  color: #2563eb;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+// The value row as a button: the button chrome goes (Ionic's normalize gives buttons line-height
+// 1, which would squash the figure), the tile's layout stays.
+.gp-tile-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+// The assumed-growth line, one line directly under the tile (saved mode only).
+.gp-growth {
+  margin: 6px 2px 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// Missed one / Doubled up under the tile (and under the growth line when there is one).
+.gp-pills {
+  margin-top: 10px;
+}
+
+// ── Assumptions, read-only: the Freedom Plan card with the figure where the chips were ─────
+.gp-assume-ro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+
+  .fd-assume-name { margin-bottom: 0; }
+}
+
+.fd-assume-value {
+  flex: none;
+  font-size: 17px;
+  font-weight: 800;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Cash note: the Assumptions card look for a cash plan ─────────────────────
+.gp-cash-note {
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 13px;
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.gp-cta {
+  margin-top: auto;
+}
+
+// ── Skeleton: the plan's shapes while the goal loads (ready() is false) ──────
+// The hero keeps .fd-hero's radius and padding, flat and quiet instead of blue; the tile and the
+// rate card are the real containers with blocks inside, so the swap to data moves nothing.
+.gp-sk-hero {
+  border-radius: 20px;
+  padding: 18px 18px 12px;
+  background: #f8fafc;
+  box-shadow: inset 0 0 0 1px #eef1f6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gp-sk-amount { margin-top: 6px; }
+.gp-sk-meta { margin-top: 7px; }
+.gp-sk-bar { margin-top: 16px; }
+
+// The band's saved/target text on the left, the status chip on the right (.fd-hero-labels).
+.gp-sk-band {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 7px;
+}
+
+.gp-sk-value { margin-top: 5px; }
+.gp-sk-sub { margin-top: 5px; }
+
+// Two note lines where the How FRED helps cards sit (.fd-how padding).
+.gp-sk-lines { padding: 9px 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gp-dots i { transition: none; }
+}

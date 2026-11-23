@@ -66,10 +66,15 @@
 
           <!-- Date of Birth + Phone row (sign-up) / Funding Source + Phone row (edit) -->
           <div class="form-row two-col">
+            <!-- The date of birth opens the FRED date sheet, not the keyboard. -->
             <div *ngIf="!editMode" class="form-field" [class.field-error]="step1Form.get('dateOfBirth')?.invalid && step1Form.get('dateOfBirth')?.touched">
               <span class="field-label">DATE OF BIRTH</span>
-              <input id="dateOfBirthInput" class="field-input" type="text" formControlName="dateOfBirth" placeholder="mm/dd/yyyy" inputmode="numeric" maxlength="10" (input)="onDateOfBirthInput($event)" autocomplete="bday" />
-              <div class="error-msg" *ngIf="step1Form.get('dateOfBirth')?.invalid && step1Form.get('dateOfBirth')?.touched">Use mm/dd/yyyy</div>
+              <button id="dateOfBirthBtn" type="button" class="field-value-btn" aria-haspopup="dialog" [attr.aria-label]="dateOfBirthAriaLabel" (click)="openDateOfBirth()">
+                <span *ngIf="dateOfBirthText; else dobPlaceholder">{{ dateOfBirthText }}</span>
+                <ng-template #dobPlaceholder><span class="field-placeholder">Select date</span></ng-template>
+                <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+              </button>
+              <div class="error-msg" *ngIf="step1Form.get('dateOfBirth')?.invalid && step1Form.get('dateOfBirth')?.touched">Required</div>
             </div>
             <div *ngIf="editMode" class="form-field" [class.field-error]="step1Form.get('fundingSource')?.invalid && step1Form.get('fundingSource')?.touched">
               <span class="field-label">PRIMARY SOURCE OF FUNDS</span>

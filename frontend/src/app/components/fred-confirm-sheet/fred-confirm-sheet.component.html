@@ -1,0 +1,30 @@
+<div class="gs-body">
+  <div class="gs-handle"></div>
+
+  @if (icon) {
+    <div class="cs-chip" [class.cs-chip--danger]="tone === 'destructive'" aria-hidden="true">
+      <span class="material-symbols-outlined">{{ icon }}</span>
+    </div>
+  }
+
+  <h3>{{ title }}</h3>
+  <p class="gs-sub">{{ body }}</p>
+
+  <button
+    type="button"
+    class="cs-confirm"
+    [class.gs-remove]="tone === 'destructive'"
+    [class.fd-cta]="tone === 'primary'"
+    [class.is-busy]="busy()"
+    [disabled]="busy()"
+    [attr.aria-busy]="busy() ? 'true' : null"
+    (click)="confirm()"
+  >
+    @if (busy()) {
+      <ion-spinner name="crescent" class="cs-spinner"></ion-spinner>
+    }
+    <span>{{ buttonLabel }}</span>
+  </button>
+
+  <button type="button" class="gs-cancel" [disabled]="busy()" (click)="close()">{{ cancelLabel }}</button>
+</div>

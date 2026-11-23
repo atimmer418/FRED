@@ -1,0 +1,425 @@
+// FRED date sheet. The ion-modal shell (mc-bottom-sheet-modal in global.scss) provides the rounded
+// white chrome; this styles the content inside it. Sizes, colours and spacing are the approved
+// mockup's (docs/superpowers/specs/2026-11-15-fred-date-sheet-design.md). Light only.
+// Every move is WAAPI from the component (the global reduced-motion rule zeroes CSS transitions);
+// the one CSS transition here, the month chevron's turn, is decorative and may snap.
+
+:host {
+  display: block;
+  font-family: 'Manrope', sans-serif;
+}
+
+.ds-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 22px calc(env(safe-area-inset-bottom, 0px) + 8px);
+}
+
+.gs-handle {
+  width: 38px;
+  height: 4.5px;
+  border-radius: 3px;
+  background: #e2e6ee;
+  margin: 0 auto 4px;
+  flex-shrink: 0;
+}
+
+// ── Readout ──────────────────────────────────────────────────────────────────
+.ds-zone {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9aa6ba;
+}
+
+.ds-value {
+  margin-top: 3px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+
+  // Nothing chosen yet.
+  &.ph {
+    color: #cbd5e1;
+    font-weight: 700;
+  }
+}
+
+.ds-sub {
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6b7280;
+  min-height: 18px;
+}
+
+// ── Year rail (birthday) ─────────────────────────────────────────────────────
+// The tray draws the card; this is the caption and live year projected into its header slot.
+.rail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+
+  .cap {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #9aa6ba;
+  }
+
+  .live {
+    font-size: 13px;
+    font-weight: 800;
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+
+    &.dragging { color: #2563eb; }
+  }
+}
+
+// ── Quick picks (upcoming) ───────────────────────────────────────────────────
+.ds-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.chip {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  padding: 5px 4px;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  .l {
+    font-size: 12px;
+    font-weight: 800;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+
+  .d {
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #9aa6ba;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  &:active { background: #eef1f6; }
+
+  &.on {
+    background: #eef4ff;
+    border-color: #2563eb;
+
+    .l { color: #2563eb; }
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+}
+
+// ── Grid card ────────────────────────────────────────────────────────────────
+.ds-grid {
+  background: #f8fafc;
+  border: 1px solid #eef1f6;
+  border-radius: 14px;
+  padding: 8px;
+}
+
+.ds-mh {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 34px;
+  padding-left: 6px;
+}
+
+.ds-month {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  padding: 6px 4px 6px 2px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 8px;
+
+  .ex {
+    font-size: 16px;
+    color: #c3ccd9;
+    transition: transform 0.2s;
+  }
+
+  &.up .ex {
+    transform: rotate(180deg);
+    color: #2563eb;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+}
+
+.ds-nav {
+  display: flex;
+  gap: 6px;
+}
+
+// The two month chevrons: the tray's round nudge recipe.
+.ds-nav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #2563eb;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+
+  .material-symbols-outlined { font-size: 18px; }
+
+  &:active { background: #eef4ff; }
+
+  &[disabled] {
+    color: #cbd5e1;
+    cursor: default;
+
+    &:active { background: #fff; }
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+}
+
+.ds-wd {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  height: 20px;
+  align-items: center;
+  margin-top: 2px;
+
+  span {
+    text-align: center;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #9aa6ba;
+  }
+}
+
+// Six 40px rows, fixed: the sheet keeps one height from month to month. The pane is the ring's
+// offset parent, so the cells' offsets are the ring's coordinates.
+.ds-pane {
+  position: relative;
+  height: 240px;
+}
+
+.ds-days {
+  display: block;
+
+  &[hidden] { display: none; }
+}
+
+.ds-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  height: 40px;
+}
+
+.cell {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+  border-radius: 12px;
+
+  &.blank {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  &.weekend { color: #6b7280; }
+
+  &.dis {
+    color: #cbd5e1;
+    font-weight: 500;
+    cursor: default;
+  }
+
+  // Today's 4px dot.
+  &.today::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 4px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #2563eb;
+    transform: translateX(-50%);
+  }
+
+  // The chosen day: white over the ring.
+  &.sel {
+    color: #fff;
+    font-weight: 800;
+
+    &.today::after { background: #fff; }
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: -2px;
+  }
+}
+
+// The one ring under the chosen cell; the component moves it with translate.
+.ds-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 3px 8px rgba(37, 99, 235, 0.28);
+  z-index: 0;
+  opacity: 0;
+  transform: translate(0, 0) scale(0.6);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.ds-months {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 6px;
+  padding: 2px;
+
+  &[hidden] { display: none; }
+}
+
+.mtile {
+  border: 1px solid #eef1f6;
+  background: #fff;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  &:active { background: #eef1f6; }
+
+  &.on {
+    background: #eef4ff;
+    border-color: #2563eb;
+    color: #2563eb;
+  }
+
+  &.dis {
+    color: #cbd5e1;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+}
+
+.ds-note {
+  margin-top: 6px;
+  min-height: 16px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #6b7280;
+  padding-left: 6px;
+}
+
+// ── Done and Cancel: the house recipes ───────────────────────────────────────
+.fd-cta {
+  display: block;
+  width: 100%;
+  height: 50px;
+  border: 0;
+  border-radius: 13px;
+  background: #111827;
+  color: #fff;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &[disabled] {
+    background: #cbd5e1;
+    cursor: default;
+  }
+
+  &:active:not([disabled]) { transform: scale(0.98); }
+}
+
+.gs-cancel {
+  display: block;
+  width: 100%;
+  margin: -4px 0 0;
+  padding: 6px 0 0;
+  text-align: center;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}

@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -81,7 +82,12 @@ public class BeneficiaryService {
      */
     public Beneficiary createBeneficiary(User user, Beneficiary beneficiary) {
         logger.info("Creating new beneficiary for user: {}", user.getEmail());
-        
+
+        // The body is bound straight onto the entity, so a client could send an "id". With an id
+        // set, save() is an UPDATE of that row, whoever owns it, and the row would change hands.
+        // A create always makes a new row: the id comes from the database, never from the client.
+        beneficiary.setId(null);
+
         // Validation
         validateBeneficiary(user, beneficiary);
         
@@ -107,17 +113,7 @@ public class BeneficiaryService {
     public Beneficiary updateBeneficiary(User user, Long beneficiaryId, Beneficiary updatedBeneficiary) {
         logger.info("Updating beneficiary {} for user: {}", beneficiaryId, user.getEmail());
         
-        Optional<Beneficiary> existingOpt = beneficiaryRepository.findById(beneficiaryId);
-        if (existingOpt.isEmpty()) {
-            throw new RuntimeException("Beneficiary not found with ID: " + beneficiaryId);
-        }
-        
-        Beneficiary existing = existingOpt.get();
-        
-        // Security check - ensure beneficiary belongs to user
-        if (!existing.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Unauthorized access to beneficiary");
-        }
+        Beneficiary existing = findOwned(user, beneficiaryId);
         
         // Check if changes require re-submission to Alpaca BEFORE updating fields
         boolean hasSignificantChanges = hasSignificantChanges(existing, updatedBeneficiary);
@@ -148,17 +144,7 @@ public class BeneficiaryService {
     public void deleteBeneficiary(User user, Long beneficiaryId) {
         logger.info("Deleting beneficiary {} for user: {}", beneficiaryId, user.getEmail());
         
-        Optional<Beneficiary> beneficiaryOpt = beneficiaryRepository.findById(beneficiaryId);
-        if (beneficiaryOpt.isEmpty()) {
-            throw new RuntimeException("Beneficiary not found with ID: " + beneficiaryId);
-        }
-        
-        Beneficiary beneficiary = beneficiaryOpt.get();
-        
-        // Security check
-        if (!beneficiary.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Unauthorized access to beneficiary");
-        }
+        Beneficiary beneficiary = findOwned(user, beneficiaryId);
         
         // Mark as inactive instead of deleting (for audit trail)
         beneficiary.setStatus(BeneficiaryStatus.INACTIVE);
@@ -198,17 +184,22 @@ public class BeneficiaryService {
     }
     
     /**
+     * The beneficiary with this id, only if it belongs to this user. Someone else's id and an id
+     * that does not exist give the same answer, so a caller cannot tell which ids are taken.
+     */
+    private Beneficiary findOwned(User user, Long beneficiaryId) {
+        return beneficiaryRepository.findByIdAndUserId(beneficiaryId, user.getId())
+                .orElseThrow(() -> new NoSuchElementException("Beneficiary not found"));
+    }
+
+    /**
      * Submit beneficiaries to Alpaca broker system
      * Updates all beneficiaries for the user's account since Alpaca API replaces the entire beneficiaries array
      */
-    public void submitToAlpaca(Long beneficiaryId) {
-        Optional<Beneficiary> beneficiaryOpt = beneficiaryRepository.findById(beneficiaryId);
-        if (beneficiaryOpt.isEmpty()) {
-            throw new RuntimeException("Beneficiary not found with ID: " + beneficiaryId);
-        }
-        
-        Beneficiary beneficiary = beneficiaryOpt.get();
-        User user = beneficiary.getUser();
+    public void submitToAlpaca(User user, Long beneficiaryId) {
+        // The caller's own beneficiary, pushed to the caller's own brokerage account. This used to
+        // look the row up by id alone and then act on whoever owned it.
+        Beneficiary beneficiary = findOwned(user, beneficiaryId);
         
         // Check if user has an Alpaca account
         if (user.getAlpacaAccountId() == null || user.getAlpacaAccountId().trim().isEmpty()) {

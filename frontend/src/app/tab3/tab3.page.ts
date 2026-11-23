@@ -19,6 +19,7 @@ import { TabActivationService } from '../services/tab-activation.service';
 import { Observable } from 'rxjs';
 import { EquityPigUtils } from '../utils/equity-pig.utils';
 import { TabBarScrollDirective } from '../directives/tab-bar-scroll.directive';
+import { SkeletonComponent } from '../components/skeleton/skeleton.component';
 
 interface SettingSection {
   title: string;
@@ -45,7 +46,8 @@ interface SettingItem {
     IonContent,
     IonAvatar,
     IonBadge,
-    TabBarScrollDirective
+    TabBarScrollDirective,
+    SkeletonComponent
   ],
 })
 export class Tab3Page implements OnInit, OnDestroy {

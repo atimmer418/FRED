@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, ElementRef, OnInit, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -18,7 +18,8 @@ import {
   IonItem,
   IonSpinner,
   IonNote,
-  IonPopover
+  IonPopover,
+  ViewWillLeave
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import {
@@ -32,6 +33,9 @@ import {
 } from 'ionicons/icons';
 import { InvestmentService } from '../services/investment.service';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
+import { AmountTrayHost } from '../components/plan-amount-tray/amount-tray-host';
+import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-tray-slot.component';
+import { PiecewiseScale } from '../utils/plan-amount-scale';
 import { PortfolioService, AccountSummary } from '../services/portfolio.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
@@ -54,6 +58,22 @@ interface AlpacaAsset {
   tradable: boolean;
 }
 
+/** The one tray-driven field on this page. */
+type TrayField = 'amount';
+
+/**
+ * The one-time amount, as the rollout table sets it
+ * (docs/superpowers/specs/2026-11-11-amount-tray-rollout-design.md): $25 to $100,000, the dollar step
+ * growing with the amount; minus and plus move $25. The validator below allows up to $1,000,000, so
+ * the tray's cap is the lower of the two.
+ */
+const AMOUNT_SCALE: PiecewiseScale = {
+  min: 25,
+  max: 100_000,
+  fine: 25,
+  segments: [{ to: 1000, step: 25 }, { to: 5000, step: 100 }, { to: 25_000, step: 500 }, { to: 100_000, step: 2500 }],
+};
+
 @Component({
   selector: 'app-lump-sum-investment',
   standalone: true,
@@ -70,17 +90,26 @@ interface AlpacaAsset {
     IonSpinner,
     IonNote,
     IonPopover,
-    KeyboardAvoidDirective
+    KeyboardAvoidDirective,
+    AmountTraySlotComponent
   ],
   templateUrl: './lump-sum-investment.page.html',
   styleUrls: ['./lump-sum-investment.page.scss']
 })
-export class LumpSumInvestmentPage implements OnInit, OnDestroy {
+export class LumpSumInvestmentPage implements OnInit, OnDestroy, ViewWillLeave {
   private destroy$ = new Subject<void>();
   searchInput$ = new Subject<string>();
 
   // Investment data
-  investmentAmount: number | null = null;
+  /**
+   * The amount: a signal behind an accessor, so the tray follows it while the page's reads and
+   * writes (validation, the request, the reset after a success) stay as they were.
+   */
+  private readonly amount = signal<number | null>(null);
+  get investmentAmount(): number | null { return this.amount(); }
+  set investmentAmount(value: number | null) { this.amount.set(value); }
+  /** The slide tray under the amount: open, close, outside tap and the label swap live in the host. */
+  readonly tray: AmountTrayHost<TrayField>;
   investmentType: 'portfolio' | 'stock' = 'portfolio';
   fundingSource: 'bank' | 'buying_power' = 'bank';
   buyingPower: number = 0;
@@ -122,7 +151,8 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
     private pinService: PinService,
     private toastService: ToastService,
     private navCtrl: NavController,
-    private analytics: AnalyticsService
+    private analytics: AnalyticsService,
+    el: ElementRef<HTMLElement>
   ) {
     addIcons({
       cashOutline,
@@ -132,6 +162,17 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
       chevronDownOutline,
       chevronUpOutline,
       swapHorizontalOutline
+    });
+    this.tray = new AmountTrayHost<TrayField>({
+      root: el,
+      fields: {
+        amount: {
+          label: 'Investment Amount',
+          scale: AMOUNT_SCALE,
+          value: () => this.amount() ?? 0,
+          set: v => this.amount.set(v),
+        },
+      },
     });
   }
 
@@ -224,62 +265,16 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+    this.tray.destroy();
+  }
+
+  /** Leaving the page: the tray snaps shut instead of collapsing into a page that is going. */
+  ionViewWillLeave(): void {
+    this.tray.close(true);
   }
 
   goBack() {
     this.navCtrl.navigateBack('/tabs/tab3');
-  }
-
-  onAmountChange() {
-    // Validate amount
-    if (this.investmentAmount && this.investmentAmount < 0) {
-      this.investmentAmount = 0;
-    }
-  }
-
-  validateInvestmentAmount(event: any) {
-    let value = event.target.value;
-    
-    if (!value) {
-      return;
-    }
-    
-    // Convert to string to handle validation
-    const strValue = value.toString();
-    
-    // Check if there's a decimal point
-    if (strValue.includes('.')) {
-      const parts = strValue.split('.');
-      const integerPart = parts[0];
-      const decimalPart = parts[1] || '';
-      
-      // Limit integer part to 5 digits
-      if (integerPart.length > 5) {
-        const limitedInteger = integerPart.substring(0, 5);
-        this.investmentAmount = parseFloat(`${limitedInteger}.${decimalPart}`);
-        event.target.value = `${limitedInteger}.${decimalPart}`;
-        return;
-      }
-      
-      // Limit decimal part to 2 digits
-      if (decimalPart.length > 2) {
-        const limitedDecimal = decimalPart.substring(0, 2);
-        this.investmentAmount = parseFloat(`${integerPart}.${limitedDecimal}`);
-        event.target.value = `${integerPart}.${limitedDecimal}`;
-        return;
-      }
-    } else {
-      // No decimal point - just limit to 5 digits
-      if (strValue.length > 5) {
-        const limited = strValue.substring(0, 5);
-        this.investmentAmount = parseFloat(limited);
-        event.target.value = limited;
-        return;
-      }
-    }
-    
-    // Update the model
-    this.investmentAmount = value ? parseFloat(value) : null;
   }
 
   onInvestmentTypeChange() {
@@ -356,6 +351,7 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy {
   }
 
   async makeInvestment() {
+    this.tray.close();
     // If we have separate buttons, this function should strictly handle investment logic
     if (!this.validateInvestment()) {
       // Fired here rather than inside validateInvestment's five branches: they all show the same

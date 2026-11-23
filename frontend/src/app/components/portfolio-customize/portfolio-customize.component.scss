@@ -154,7 +154,7 @@ ion-content { --keyboard-offset: 0px !important; }
   }
 }
 
-// Portfolio list
+// Search results spinner
 .loading-state {
   display: flex;
   align-items: center;
@@ -166,12 +166,6 @@ ion-content { --keyboard-offset: 0px !important; }
     width: 18px;
     height: 18px;
     color: #2563EB;
-  }
-
-  .loading-text {
-    font-family: 'Manrope', sans-serif;
-    font-size: 13px;
-    color: #6b7280;
   }
 }
 
@@ -230,29 +224,59 @@ ion-content { --keyboard-offset: 0px !important; }
       }
     }
 
-    .alloc-input-wrap {
+    // The allocation's value button: the inline input's old look (blue, bold, right-aligned), sized to its text.
+    .alloc-btn {
+      width: auto;
+      color: #2563EB;
+      font-weight: 700;
+      padding: 4px 0;
+      margin-right: 8px;
+      justify-content: flex-end;
+      gap: 2px;
+
+      .field-affix { font-size: 14px; }
+    }
+
+    // The open row: a faint tint, since a row has no label to turn blue.
+    &.active { --background: #f8fafc; }
+  }
+
+  // The tray's slot sits between rows, inset to the rows' text. Form screens space the tray with
+  // the next field's own top margin; these rows have none, so the card would sit flush on the next
+  // row (or the list frame, under the last row). The gap below matches the inner's 10px above, and
+  // lives on the inner, not the host: the host is the box the grow and collapse animate, and
+  // border-box padding on it would never collapse below 10px.
+  .field-tray {
+    box-sizing: border-box;
+    padding: 0 10px;
+
+    ::ng-deep .field-tray-in {
+      padding-bottom: 10px;
+    }
+  }
+
+  // A loading row: the real row's left inset, its 8px right margin and its hairline divider.
+  // Head row 20px, gap, name 12px and 11px of padding each side add up to the real row's ~58px.
+  .skeleton-row {
+    display: flex;
+    align-items: center;
+    padding: 11px 8px 11px 12px;
+    background: white;
+
+    & + .skeleton-row { border-top: 1px solid #f1f5f9; }
+
+    &__text {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    &__head {
       display: flex;
       align-items: center;
-      gap: 2px;
-      padding-right: 8px;
-
-      // Native .field-input overrides for inline allocation input
-      input.alloc-input {
-        color: #2563EB;
-        font-size: 17px;
-        font-weight: 700;
-        text-align: right;
-        width: 30px;
-        padding: 4px 0;
-        border-bottom-color: #2563EB;
-      }
-
-      .percent-sign {
-        font-family: 'Manrope', sans-serif;
-        font-size: 14px;
-        font-weight: 700;
-        color: #2563EB;
-      }
+      gap: 6px;
+      min-height: 20px;
     }
   }
 }

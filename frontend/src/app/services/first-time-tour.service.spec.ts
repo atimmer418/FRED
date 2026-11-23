@@ -8,6 +8,7 @@ import { TabActivationService } from './tab-activation.service';
 describe('FirstTimeTourService', () => {
   let svc: FirstTimeTourService;
   let routerEvents: Subject<unknown>;
+  let router: { events: unknown; navigateByUrl: jasmine.Spy; url: string };
   let navigateByUrl: jasmine.Spy;
   let navigateBack: jasmine.Spy;
   let pop: jasmine.Spy;
@@ -20,9 +21,10 @@ describe('FirstTimeTourService', () => {
     navigateByUrl = jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true));
     navigateBack = jasmine.createSpy('navigateBack').and.returnValue(Promise.resolve(true));
     pop = jasmine.createSpy('pop').and.returnValue(Promise.resolve(true));
+    router = { events: routerEvents.asObservable(), navigateByUrl, url: '/' };
     TestBed.configureTestingModule({
       providers: [
-        { provide: Router, useValue: { events: routerEvents.asObservable(), navigateByUrl } },
+        { provide: Router, useValue: router },
         { provide: NavController, useValue: { navigateBack, pop } },
         // Real TabActivationService: the transit needs its activeTab settle signal.
         TabActivationService,
@@ -35,8 +37,18 @@ describe('FirstTimeTourService', () => {
 
   afterEach(() => localStorage.removeItem(TOUR_STORAGE_KEY));
 
+  /** The router's url moves first, then NavigationEnd fires, as in the real router. */
   function landOn(url: string) {
+    router.url = url;
     routerEvents.next(new NavigationEnd(1, url, url));
+  }
+
+  /** Walk the tour to the profileFreedom step on /my-profile. */
+  function toProfileFreedom() {
+    svc.startTour();
+    svc.next();
+    svc.next();
+    landOn('/my-profile');
   }
 
   /** Drain the microtasks behind navCtrl.pop().then(...). */
@@ -108,14 +120,14 @@ describe('FirstTimeTourService', () => {
     expect(svc.currentStep).toBe('profileFreedom');
   });
 
-  it('freedomSheetClosed rests on tab3, then swipes to chat, then shows the story step', fakeAsync(() => {
+  it('freedomPlanLeft rests on tab3, then swipes to chat, then shows the story step', fakeAsync(() => {
     svc.startTour();
     svc.next();
     svc.next();
     landOn('/my-profile');
     svc.suspend();
 
-    svc.freedomSheetClosed();
+    svc.freedomPlanLeft();
     flushMicrotasks(); // pop() resolves; the beat on tab3 begins
 
     // pop() returns to the CACHED TabsPage by its own URL; navigateBack('/tabs/chat')
@@ -138,14 +150,14 @@ describe('FirstTimeTourService', () => {
     expect(svc.isInTransit).toBeFalse();
   }));
 
-  it('freedomSheetClosed falls back to a route when there is nothing to pop', fakeAsync(() => {
+  it('freedomPlanLeft falls back to a route when there is nothing to pop', fakeAsync(() => {
     pop.and.returnValue(Promise.resolve(false));
     svc.startTour();
     svc.next();
     svc.next();
     landOn('/my-profile');
 
-    svc.freedomSheetClosed();
+    svc.freedomPlanLeft();
     flushMicrotasks();
 
     expect(requestTab).not.toHaveBeenCalledWith('chat');
@@ -156,13 +168,70 @@ describe('FirstTimeTourService', () => {
     expect(svc.isInTransit).toBeFalse();
   }));
 
+  // The Freedom page's ionViewWillLeave reports the exit, then my-profile's ionViewWillEnter
+  // reports the same exit again. Only the first may start the ride back to chat.
+  it('freedomPlanLeft advances from profileFreedom exactly as freedomSheetClosed did', fakeAsync(() => {
+    toProfileFreedom();
+    landOn('/freedom');
+    expect(svc.currentStep).toBe('profileFreedom');
+    landOn('/my-profile');                 // back from the Freedom page
+
+    svc.freedomPlanLeft();                 // the Freedom page's ionViewWillLeave
+    svc.freedomPlanLeft();                 // my-profile's ionViewWillEnter
+    completeTransit();
+
+    expect(pop).toHaveBeenCalledTimes(1);
+    expect(requestTab.calls.allArgs().filter(a => a[0] === 'chat').length).toBe(1);
+    expect(svc.currentStep).toBe('chatStory');
+    expect(svc.isInTransit).toBeFalse();
+
+    // A late duplicate after the step moved on changes nothing.
+    svc.freedomPlanLeft();
+    flushMicrotasks();
+    expect(pop).toHaveBeenCalledTimes(1);
+    expect(svc.currentStep).toBe('chatStory');
+  }));
+
+  // A swipe-back fires ionViewWillLeave as the gesture starts, while the route is still /freedom
+  // and the gesture can still be cancelled. Popping then would land on my-profile, not tab3.
+  it('freedomPlanLeft called while still on /freedom waits for the route to leave it', fakeAsync(() => {
+    toProfileFreedom();
+    landOn('/freedom');
+
+    svc.freedomPlanLeft();                 // swipe starts
+    flushMicrotasks();
+    expect(pop).not.toHaveBeenCalled();
+    expect(svc.isInTransit).toBeFalse();
+
+    landOn('/freedom');                    // swipe cancelled, the page re-lands
+    flushMicrotasks();
+    expect(pop).not.toHaveBeenCalled();
+
+    landOn('/my-profile');                 // the back finally completes
+    svc.freedomPlanLeft();                 // my-profile's ionViewWillEnter: a no-op now
+    completeTransit();
+    expect(pop).toHaveBeenCalledTimes(1);
+    expect(svc.currentStep).toBe('chatStory');
+  }));
+
+  it('a skip while the exit is pending drops it', fakeAsync(() => {
+    toProfileFreedom();
+    landOn('/freedom');
+    svc.freedomPlanLeft();
+    svc.skip();
+    landOn('/my-profile');
+    flushMicrotasks();
+    expect(pop).not.toHaveBeenCalled();
+    expect(svc.currentStep).toBeNull();
+  }));
+
   it('complete during the transit cancels it', fakeAsync(() => {
     svc.startTour();
     svc.next();
     svc.next();
     landOn('/my-profile');
 
-    svc.freedomSheetClosed();
+    svc.freedomPlanLeft();
     flushMicrotasks(); // beat scheduled
     svc.complete();    // e.g. the flag path ends the tour mid-transit
 
@@ -172,23 +241,23 @@ describe('FirstTimeTourService', () => {
     expect(svc.isInTransit).toBeFalse();
   }));
 
-  it('freedomSheetClosed does not advance other steps', async () => {
+  it('freedomPlanLeft does not advance other steps', async () => {
     svc.startTour();
-    svc.freedomSheetClosed();
+    svc.freedomPlanLeft();
     await flush();
     expect(pop).not.toHaveBeenCalled();
     expect(navigateBack).not.toHaveBeenCalled();
     expect(svc.currentStep).toBe('tab1');
   });
 
-  // The Freedom sheet suspends the overlay. If it dismisses on any other step
-  // the suspend must still lift, or the overlay stays hidden for good.
-  it('freedomSheetClosed off-step still clears a suspend', () => {
+  // If anything suspended the overlay and the Freedom page is left on any
+  // other step, the suspend must still lift, or the overlay stays hidden for good.
+  it('freedomPlanLeft off-step still clears a suspend', () => {
     svc.startTour();
     svc.suspend();
     expect(svc.isSuspended).toBeTrue();
 
-    svc.freedomSheetClosed();
+    svc.freedomPlanLeft();
 
     expect(svc.isSuspended).toBeFalse();
     expect(svc.currentStep).toBe('tab1');
@@ -203,7 +272,7 @@ describe('FirstTimeTourService', () => {
     svc.next();
     svc.next();
     landOn('/my-profile');
-    svc.freedomSheetClosed();
+    svc.freedomPlanLeft();
     completeTransit();
     svc.storyChipTapped();
     expect(svc.currentStep).toBeNull();

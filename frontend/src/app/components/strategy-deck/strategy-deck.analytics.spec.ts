@@ -1,7 +1,6 @@
 import { ElementRef } from '@angular/core';
 import { ModalController } from '@ionic/angular/standalone';
 import { StrategyDeckComponent } from './strategy-deck.component';
-import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 
 /**
@@ -24,8 +23,7 @@ describe('StrategyDeckComponent — analytics', () => {
   function build(strategyKey = 'guardrails', userTier: string | null = null) {
     const analytics = jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track']);
     const modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create', 'dismiss']);
-    const toast = jasmine.createSpyObj<ToastService>('ToastService', ['showToast']);
-    const cmp = new StrategyDeckComponent(modalCtrl, toast, analytics);
+    const cmp = new StrategyDeckComponent(modalCtrl, analytics);
     cmp.strategyKey = strategyKey;
     cmp.userTier = userTier;
     cmp.ngOnInit();

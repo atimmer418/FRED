@@ -126,16 +126,6 @@ export class AlpacaService {
   }
 
   /**
-   * Get current account information
-   */
-  getAccountInfo(): Observable<any> {
-    return this.http.get(
-      `${this.baseUrl}/alpaca/account`,
-      { headers: this.getAuthHeaders() }
-    );
-  }
-
-  /**
    * Get tradeable assets from Alpaca (public endpoint, but include auth if available)
    */
   getAssets(status: string = 'active', assetClass: string = 'us_equity'): Observable<any> {
@@ -148,23 +138,6 @@ export class AlpacaService {
     return this.http.get(
       `${this.baseUrl}/alpaca/assets?${params.toString()}`,
       { headers }
-    );
-  }
-
-  /**
-   * Get account status by account ID
-   */
-  getAccountStatus(accountId: string): Observable<any> {
-    return this.http.get(`${this.baseUrl}/alpaca/account/${accountId}/status`);
-  }
-
-  /**
-   * Get ACH relationships for an account
-   */
-  getAchRelationships(accountId: string): Observable<any> {
-    return this.http.get(
-      `${this.baseUrl}/alpaca/accounts/${accountId}/ach-relationships`,
-      { headers: this.getAuthHeaders() }
     );
   }
 

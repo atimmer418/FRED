@@ -1,0 +1,256 @@
+<ion-header class="ion-no-border">
+  <div class="blue-hero-header">
+    <div class="hero-nav">
+      <button type="button" class="back-btn" (click)="goBack()" aria-label="Back">
+        <span class="material-symbols-outlined">arrow_back_ios_new</span>
+      </button>
+      <h2 class="header-title">{{ title() }}</h2>
+      @if (mode() === 'saved') {
+        <button type="button" class="hero-action-btn gp-menu" (click)="openMenu()" aria-label="More">
+          <span class="material-symbols-outlined">more_horiz</span>
+        </button>
+      } @else {
+        <div class="back-btn-spacer"></div>
+      }
+    </div>
+  </div>
+</ion-header>
+
+<ion-content class="shell-content" appKeyboardAvoid>
+  <div class="shell-inner gp-inner" [attr.aria-busy]="ready() ? null : 'true'">
+    @if (ready()) {
+      @if (view(); as v) {
+
+        <!-- Hero: the monthly, who it is for, and the band -->
+        <section class="fd-hero gp-hero">
+          <p class="fd-hero-label">{{ v.heroLabel }}</p>
+          @if (isDueNow()) {
+            <div class="fd-hero-big">{{ fmtMoney(v.dueNow) }}<span> due now</span></div>
+          } @else {
+            <div class="fd-hero-big">{{ fmtMoney(heroAmount()) }}<span>/mo</span></div>
+          }
+          <div class="fd-hero-meta">
+            <span>{{ v.audience }}</span>
+            @if (v.perPaycheck !== null && !isDueNow()) {
+              <span class="fd-dot">·</span><span>~{{ fmtMoney(v.perPaycheck) }} a paycheck</span>
+            }
+          </div>
+
+          @if (v.timeline) {
+            <app-kid-timeline [timeline]="v.timeline"></app-kid-timeline>
+          } @else {
+            <div class="fd-hero-bar"><i [style.width.%]="v.progressPct"></i></div>
+            <!-- The pill and the status chip sit at the right end of the band (spec). -->
+            <div class="fd-hero-labels gp-band">
+              <span class="gp-band-text">{{ bandText() }}</span>
+              <span class="gp-band-right">
+                @if (v.pill) { <span class="fd-pill" [class.cash]="v.pill === 'Cash'">{{ v.pill }}</span> }
+                <span class="gp-chip" [class.behind]="v.status.kind === 'behind'">{{ statusChip() }}</span>
+              </span>
+            </div>
+          }
+        </section>
+
+        <!-- KIDS: one card per kid -->
+        @if (v.kids) {
+          <div class="fd-zone gp-zone">
+            <span>Per kid <span class="gp-hint">Tap for details</span></span>
+            <span class="gp-zone-right">
+              <span class="gp-chip" [class.behind]="v.status.kind === 'behind'">{{ statusChip() }}</span>
+              @if (kidCards().length > 1) {
+                <span class="gp-dots" aria-hidden="true">
+                  @for (card of kidCards(); track card.index) {
+                    <i [class.on]="card.index === activeKid()"></i>
+                  }
+                </span>
+              }
+            </span>
+          </div>
+
+          <swiper-container #pager class="gp-pager" init="false" (swiperslidechange)="onKidSlide($event)">
+            @for (card of kidCards(); track card.index) {
+              <swiper-slide class="gp-slide">
+                <div class="gp-kcard">
+                  <div class="gp-kh">
+                    <div class="gp-av"><span class="material-symbols-outlined">child_care</span></div>
+                    <div class="gp-kname">
+                      @if (renaming() === card.index) {
+                        <span class="gp-kname-edit">
+                          <input class="gp-rename" type="text" maxlength="30" autocapitalize="words" autofocus
+                                 [attr.aria-label]="'Name for ' + card.label" [value]="card.label"
+                                 (keydown.enter)="commitRenameFrom(card.index, $event)" (blur)="commitRenameFrom(card.index, $event)" />
+                          <button type="button" class="gp-check" aria-label="Save name" (mousedown)="$event.preventDefault()" (click)="commitRenameFrom(card.index, $event)">
+                            <span class="material-symbols-outlined">check</span>
+                          </button>
+                        </span>
+                      } @else {
+                        <span class="gp-kname-row">
+                          <b>{{ card.label }}</b>
+                          <button type="button" class="gp-pen" [attr.aria-label]="'Rename ' + card.label" (click)="beginRename(card.index)">
+                            <span class="material-symbols-outlined">edit</span>
+                          </button>
+                        </span>
+                      }
+                      <span class="gp-ksub">{{ card.subLine }}</span>
+                    </div>
+                    <em class="gp-kmonthly">{{ fmtMoney(card.monthly) }}/mo</em>
+                  </div>
+
+                  <div class="gp-group"><span>Invest</span></div>
+                  @for (unit of card.units; track unit.key) {
+                    <button type="button" class="gp-krow" (click)="openUnitDetail(card.index, unit.key)">
+                      <span class="gp-kic"><span class="material-symbols-outlined">{{ unit.icon }}</span></span>
+                      <span class="gp-ktx">
+                        <span class="gp-klabel">
+                          <b>{{ unit.title }}</b><span class="fd-pill" [class.cash]="unit.pill === 'Cash'">{{ unit.pill }}</span>
+                        </span>
+                        <span class="gp-ktarget">{{ unit.targetLine }}</span>
+                      </span>
+                      @if (unit.finished) {
+                        <em class="gp-kdone"><span class="material-symbols-outlined">check</span>Done</em>
+                      } @else {
+                        <em>{{ fmtMoney(unit.monthly) }}</em>
+                      }
+                    </button>
+                  }
+
+                  @if (card.everyday.state !== 'grown') {
+                    <div class="gp-group second"><span>Everyday</span></div>
+                    @if (card.everyday.state === 'priced') {
+                      <button type="button" class="gp-krow everyday" (click)="openUnitDetail(card.index, 'everyday')">
+                        <span class="gp-kic"><span class="material-symbols-outlined">shopping_basket</span></span>
+                        <span class="gp-ktx">
+                          <span class="gp-klabel">
+                            <b>{{ card.everyday.label }}</b><span class="fd-pill cash">Cash</span>
+                          </span>
+                          <span class="gp-ktarget">{{ card.everyday.subLine }}</span>
+                        </span>
+                        <em>{{ fmtMoney(card.everyday.monthly) }}</em>
+                      </button>
+                    } @else {
+                      <p class="gp-from">{{ card.everyday.fromLine }}</p>
+                    }
+                  }
+                </div>
+              </swiper-slide>
+            }
+          </swiper-container>
+        } @else {
+          <!-- Every other type: the one Saved so far tile (the status chip is on the band above). The
+               value opens the slide tray; Done sits in the tile's label row while it is open. The tile
+               and the tray's slot share one block, so the page's gap stays as it was. A saved goal
+               adds the assumed-growth line and the Missed one / Doubled up pills under it. -->
+          @if (balanceField(); as field) {
+            <div class="gp-plan">
+              <div class="fd-tiles gp-tiles">
+                <div class="fd-tile gp-tile" [class.active]="tray.isOpen(field)">
+                  <span class="gp-tile-head">
+                    <span class="fd-tile-label" [class.active]="tray.isOpen(field)" [class.gp-step]="tray.showsStep(field)">{{ tray.label(field) }}</span>
+                    @if (tray.shown()) {
+                      <button type="button" class="fd-reset gp-done" (click)="tray.close()">Done</button>
+                    }
+                  </span>
+                  <button type="button" class="fd-tile-edit gp-tile-btn" [id]="'gp-bal-' + field"
+                          [attr.aria-expanded]="tray.isOpen(field)" (click)="tray.toggle(field)">
+                    <span class="fd-pre">$</span>
+                    <span class="fd-tile-value">{{ shownBalance() | number:'1.0-0' }}</span>
+                  </button>
+                </div>
+              </div>
+              @if (tray.shown()) {
+                <app-amount-tray-slot [tray]="tray" />
+              }
+              @if (mode() === 'saved' && v.growthLine) {
+                <p class="gp-growth">{{ v.growthLine }}</p>
+              }
+              @if (pillShare() > 0) {
+                <app-tally-pills class="gp-pills" [share]="pillShare()" [disabled]="tallyBusy()"
+                                 (missed)="onTally(field, 'missed')" (doubled)="onTally(field, 'extra')" />
+              }
+            </div>
+          }
+        }
+
+        <!-- Assumptions: the Freedom Plan page's card, read-only here. One return runs the whole app. -->
+        @if (v.rateKind === 'market') {
+          <p class="fd-zone gp-zone-gap">Assumptions</p>
+          <div class="fd-assume gp-assume-ro">
+            <div class="fd-assume-name">
+              Avg annual return
+              <span class="fd-assume-sub">Set on your Freedom Plan page</span>
+            </div>
+            <span class="fd-assume-value">{{ pct(annualReturn()) }}%</span>
+          </div>
+        } @else {
+          <p class="fd-zone gp-zone-gap">Assumptions</p>
+          <p class="gp-cash-note">Planned as cash at ~4%, like a high-yield savings account. Money you need within 3 years should stay out of the market.</p>
+        }
+
+        <!-- How FRED helps. A kids plan carries these notes in its unit sheets' info button instead. -->
+        @if (!isDueNow() && !v.kids) {
+          <div class="fd-how">
+            <span class="material-symbols-outlined">account_balance_wallet</span>
+            <p><b>How FRED helps.</b> {{ v.howFredHelps }}</p>
+          </div>
+          @if (v.coversLine) {
+            <div class="fd-how">
+              <span class="material-symbols-outlined">checklist</span>
+              <p><b>What the monthly covers.</b> {{ v.coversLine }}</p>
+            </div>
+          }
+          @if (v.whyInvestLine) {
+            <div class="fd-how">
+              <span class="material-symbols-outlined">trending_up</span>
+              <p><b>Why invest it.</b> {{ v.whyInvestLine }}</p>
+            </div>
+          }
+        }
+
+        <!-- The loan that follows a house or car down payment. Due-now plans keep it: the loan still follows. -->
+        @if (v.loanLine) {
+          <div class="fd-how">
+            <span class="material-symbols-outlined">request_quote</span>
+            <p><b>The loan that follows.</b> {{ v.loanLine }}@if (v.loanSource) { {{ v.loanSource }}}</p>
+          </div>
+        }
+
+        <!-- CTA, preview modes only -->
+        @if (ctaLabel(); as label) {
+          <button type="button" class="fd-cta gp-cta" [disabled]="saving()" (click)="mode() === 'preview-new' ? startPlan() : updatePlan()">{{ label }}</button>
+        }
+
+      }
+    } @else {
+      <!-- The plan's shapes while the goal loads: hero, the Saved so far tile, the rate card, two note
+           lines and the CTA, each where the real one lands so nothing moves when data arrives. -->
+      <section class="gp-sk-hero">
+        <app-skeleton width="84px" height="10px" radius="5px" />
+        <app-skeleton class="gp-sk-amount" width="150px" height="42px" radius="10px" />
+        <app-skeleton class="gp-sk-meta" width="170px" height="14px" radius="6px" />
+        <app-skeleton class="gp-sk-bar" height="6px" radius="pill" />
+        <div class="gp-sk-band">
+          <app-skeleton width="120px" height="10px" radius="5px" />
+          <app-skeleton width="64px" height="17px" radius="7px" />
+        </div>
+      </section>
+
+      <div class="fd-tiles">
+        <div class="fd-tile">
+          <app-skeleton width="72px" height="10px" radius="5px" />
+          <app-skeleton class="gp-sk-value" width="110px" height="25px" radius="7px" />
+        </div>
+      </div>
+
+      <p class="fd-zone gp-zone-gap">Assumptions</p>
+      <div class="fd-assume gp-assume-ro">
+        <div class="fd-assume-name">
+          <app-skeleton width="120px" height="14px" radius="6px" />
+          <app-skeleton class="gp-sk-sub" width="150px" height="11px" radius="5px" />
+        </div>
+        <app-skeleton width="44px" height="16px" radius="6px" />
+      </div>
+
+      <app-skeleton class="gp-sk-lines" [lines]="2" height="14px" radius="6px" />
+    }
+  </div>
+</ion-content>

@@ -1,0 +1,33 @@
+// -------------------------------------------------------
+// Skeleton block, FRED design system. Light only.
+// Flat #eef1f6 with a gradient child that sweeps across on WAAPI (see the TS). The sweep parks
+// off the left edge, so without an animation the block is simply flat.
+// -------------------------------------------------------
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.sk-block {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  background: #eef1f6;
+  // A compositing layer, so WebKit clips the moving sweep at the rounded corners.
+  transform: translateZ(0);
+}
+
+.sk-block--short {
+  width: 60%;
+}
+
+.sk-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #eef1f6 0%, #f8fafc 50%, #eef1f6 100%);
+  transform: translateX(-100%);
+  will-change: transform;
+}

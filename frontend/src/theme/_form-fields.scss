@@ -82,4 +82,103 @@
       opacity: 0.5;
     }
   }
+
+  // ── Tray-driven amount fields ──────────────────────────────────────────────
+  // An amount or percentage field that opens the slide tray (components/plan-amount-tray) instead
+  // of the keyboard. The value is a button that renders exactly like .field-input at rest, so a
+  // screen swaps one for the other without the row moving. The page hosts the tray through
+  // AmountTrayHost; the slot (<app-amount-tray-slot>, host class .field-tray) sits right under the
+  // field's row, full width of the card.
+
+  // Label plus Done on one line: Done appears only while the tray is open (`@if (tray.shown())`).
+  .field-label-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 10px 0;
+
+    .field-label {
+      margin-bottom: 0;
+    }
+  }
+
+  // The open field's label.
+  .field-label.active {
+    color: #2563EB;
+  }
+
+  .field-value-btn {
+    // The .field-input box: same font, size, weight, padding and underline.
+    font-family: 'Manrope', sans-serif;
+    font-size: 17px;
+    font-weight: 500;
+    line-height: normal;
+    color: #0f172a;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid #2563EB;
+    border-radius: 0;
+    padding: 6px 0;
+    margin: 0;
+    outline: none;
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+
+    // The $ or % beside the value.
+    .field-affix {
+      flex-shrink: 0;
+    }
+
+    // Shown in place of the value while it is unset, in the input's placeholder colour.
+    .field-placeholder {
+      color: #cbd5e1;
+      font-weight: 400;
+    }
+
+    // The tray is open on this field.
+    &.active {
+      border-bottom-color: #2563EB;
+    }
+
+    &.field-value-btn--error {
+      border-bottom-color: #dc2626;
+    }
+
+    &:disabled {
+      color: #64748b;
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+
+  // The tray's slot, under the field's row: the host animates its height, the slot clips.
+  .field-tray {
+    display: block;
+    width: 100%;
+  }
+
+  // Done, right-aligned in the label row while the tray is open (the Freedom page's .fd-reset recipe).
+  .field-tray-done {
+    font-family: 'Manrope', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: #2563EB;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
 }

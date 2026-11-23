@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
-import { BehaviorSubject } from 'rxjs';
+import { NavigationEnd, Router } from '@angular/router';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { FirstTimeTourComponent, TARGET_POLL_MS, TARGET_POLL_MAX_ATTEMPTS, STABLE_TICKS } from './first-time-tour.component';
 import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.service';
 
@@ -9,6 +10,14 @@ describe('FirstTimeTourComponent', () => {
   let suspended$: BehaviorSubject<boolean>;
   let transit$: BehaviorSubject<boolean>;
   let svc: { next: jasmine.Spy; forceGate: jasmine.Spy; skip: jasmine.Spy };
+  let routerEvents: Subject<unknown>;
+  let router: { events: unknown; url: string };
+
+  /** The router's url moves first, then NavigationEnd fires, as in the real router. */
+  function landOn(url: string): void {
+    router.url = url;
+    routerEvents.next(new NavigationEnd(1, url, url));
+  }
   let mounted: HTMLElement[] = [];
 
   function mountTarget(attr: string, w = 52, h = 52): HTMLElement {
@@ -38,10 +47,13 @@ describe('FirstTimeTourComponent', () => {
       forceGate: jasmine.createSpy('forceGate'),
       skip: jasmine.createSpy('skip'),
     };
+    routerEvents = new Subject<unknown>();
+    router = { events: routerEvents.asObservable(), url: '/tabs/tab3' };
     TestBed.configureTestingModule({
       imports: [FirstTimeTourComponent],
       providers: [
         { provide: FirstTimeTourService, useValue: { ...svc, step$: step$.asObservable(), suspended$: suspended$.asObservable(), transit$: transit$.asObservable() } },
+        { provide: Router, useValue: router },
       ],
     });
     fixture = TestBed.createComponent(FirstTimeTourComponent);
@@ -143,6 +155,37 @@ describe('FirstTimeTourComponent', () => {
     expect(q('.ftt-overlay')).not.toBeNull();
     tick(2000);
   }));
+
+  // The profileFreedom gate is the tap on the Freedom row, which now pushes /freedom. The overlay
+  // must not cover that page, and must come back (with the step intact) on my-profile.
+  it('the overlay is hidden while the url is /freedom and shown again on /my-profile', fakeAsync(() => {
+    landOn('/my-profile');
+    mountTarget('freedom-row');
+    step$.next('profileFreedom');
+    fixture.detectChanges();
+    tick(TARGET_POLL_MS);
+    fixture.detectChanges();
+    expect(q('.ftt-overlay')).not.toBeNull();
+
+    landOn('/freedom');
+    fixture.detectChanges();
+    expect(q('.ftt-overlay')).toBeNull();
+
+    landOn('/my-profile');
+    fixture.detectChanges();
+    expect(q('.ftt-overlay')).not.toBeNull();
+    tick(2000);
+  }));
+
+  it('starts hidden when it mounts on /freedom (a reload of the Freedom page mid-tour)', () => {
+    fixture.destroy();
+    router.url = '/freedom';
+    fixture = TestBed.createComponent(FirstTimeTourComponent);
+    fixture.detectChanges();
+    step$.next('profileFreedom');
+    fixture.detectChanges();
+    expect(q('.ftt-overlay')).toBeNull();
+  });
 
   it('Skip calls the service on any step', () => {
     step$.next('tab2');

@@ -11,26 +11,22 @@
 
 // ion-content background and shell structure are provided by settings-shell.
 
-// Loading
-.loading-state {
+// Skeleton helpers. The blocks sit inside the real card, list and row classes; these only
+// stack the two text lines of a row, place the subtitle, and push a chevron to the edge.
+.sk-col {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px 0;
-
-  .loading-spinner {
-    width: 18px;
-    height: 18px;
-    color: #2563EB;
-  }
-
-  .loading-text {
-    font-family: 'Manrope', sans-serif;
-    font-size: 13px;
-    color: #6b7280;
-  }
+  flex-direction: column;
+  gap: 6px;
 }
+
+// Same margin and indent as .card-subtitle.
+.sk-subtitle {
+  margin: 0 0 14px 0;
+  padding-left: 28px;
+}
+
+// The real year label is flex: 1 and pushes the chevron to the edge; the skeleton label is not.
+.sk-right { margin-left: auto; }
 
 // Full empty state
 .empty-state {

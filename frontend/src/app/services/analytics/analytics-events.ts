@@ -1,4 +1,5 @@
 import { AmountBand, CountBand, PercentBand, YearsBand } from './analytics-bands';
+import { GoalType } from '../../models/goal.model';
 
 /**
  * The one place a client-side analytics event is defined.
@@ -101,7 +102,10 @@ export type GoalIcon =
   | 'balance'
   | 'savings'
   | 'school'
-  | 'directions_car';
+  | 'directions_car'
+  | 'child_care'
+  | 'flight'
+  | 'favorite';
 
 /** What happened to a goal. 'completed' and 'reopened' are the two sides of the same toggle. */
 export type GoalAction = 'created' | 'updated' | 'completed' | 'reopened' | 'removed';
@@ -154,8 +158,8 @@ export type Surface =
   | 'onboarding'
   | 'freedom_sheet'
   | 'my_profile'
-  // The goal sheet is its own surface, not the page that presents it: it is reachable from more
-  // than one place, and an error inside it is a different fact from an error on the profile page.
+  // The goal page is its own surface: an error on it is a different fact from an error on the
+  // profile page that links to it.
   | 'goals'
   | 'retirement_planning'
   | 'monte_carlo'
@@ -251,6 +255,18 @@ export type AnalyticsEvent =
     }
 
   /**
+   * A saved-so-far correction on a goal posted successfully: Missed one, Doubled up, an Undo of
+   * either, or a typed figure ('set'). Never the amount, the unit or which kid.
+   */
+  | {
+      name: 'goal_tally_changed';
+      props: {
+        goal_type: GoalType;
+        kind: 'missed' | 'extra' | 'set';
+      };
+    }
+
+  /**
    * A goal was created, edited, completed, reopened or removed. The goal's name and id never
    * leave the device; the icon and the bands are what describe it.
    */
@@ -258,7 +274,9 @@ export type AnalyticsEvent =
       name: 'goal_changed';
       props: {
         action: GoalAction;
+        goal_type: GoalType;
         icon: GoalIcon;
+        plan_rate: '8' | '10' | '12' | 'cash';
         target_band: AmountBand;
         years_to_target: YearsBand;
         progress: PercentBand | null;
@@ -361,6 +379,7 @@ export const CLIENT_EVENT_NAMES = [
   'strategy_viewed',
   'freedom_plan_changed',
   'goal_changed',
+  'goal_tally_changed',
   'setting_changed',
   'monte_carlo_opened',
   'monte_carlo_step_completed',
@@ -478,6 +497,7 @@ export const DECLARED_PROPERTY_KEYS = [
   'exit',
   'feature',
   'goal_count',
+  'goal_type',
   'http_status',
   'icon',
   'included_outside_accounts',
@@ -485,10 +505,12 @@ export const DECLARED_PROPERTY_KEYS = [
   'input_method',
   'invest_changed',
   'is_rerun',
+  'kind',
   'max_slide_reached',
   'monthly_income_band',
   'monthly_invest_band',
   'outcome',
+  'plan_rate',
   'platform',
   'preset_changed',
   'progress',

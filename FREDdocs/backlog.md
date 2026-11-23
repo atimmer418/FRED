@@ -161,6 +161,9 @@ Build one shared settings-shell (family gradient header, white Manrope-800 18px 
 7. **Visual proof.** Headless screenshots per converted page (top + scrolled) as fred214-<page>.png, consistent with tab3.
 8. **Quality gates.** AOT build (dev config) zero new warnings; lint; subset-icons re-run if new ligatures; no TODOs/dead styles.
 
+## FRED-234 — Preload all images to prevent late pop-in
+load all images instantly or as quickly as possible, because some (like on the MFU) load after the MFU has already appeared, which is an issue
+
 
 \n# 💤 SLEEPING — Backlog (not yet started)
 _Queued but not prioritized. Promote to READY (remove the 💤) when ripe._
@@ -412,14 +415,81 @@ There is no user-facing sign-out anywhere in the app: `tab3.onLogout()` is a `co
 **Severity: LOW.**
 `LinkPlaidComponent.exchangePublicToken` pipes `catchError` into `handleError`, which returns `throwError(...)`, and the pipeline ends in a bare `.subscribe()` with no error callback (linkplaid.component.ts:166-191, :212-222). The error is handled for the user (the status message is set and an analytics `error_shown` fires), but the rethrow has no subscriber, so rxjs reports it as an unhandled error on a timer. In a spec that lands after the test finished and killed a whole Karma run with "An error was thrown in afterAll"; the analytics spec now installs a file-scoped `onUnhandledError` hook to contain it, which is a workaround, not a fix. `initializePlaidLink` has the same shape. Fix: give the subscribe an error callback (or drop the rethrow, since nothing downstream consumes it) and remove the hook from linkplaid.component.analytics.spec.ts. Found while wiring the analytics call sites, 2026-10-19.
 
-## FRED-226 — 14 pre-existing frontend spec failures, plus a flaky Karma disconnect
+## FRED-226 — 13 pre-existing frontend spec failures, plus a flaky Karma disconnect
 **Severity: LOW.**
-`npx ng test` has 14 failures that predate the analytics work and are unrelated to it (verified by running the suite at commit a2df67c in a scratch worktree: the same 14, exactly). Eight are stale `should create` specs that still pass standalone components in `declarations` or construct them without `provideHttpClient`: AuthFinalize, FiPlanResults, InvestmentConfirmation, LinkPlaid, PortfolioCustomize, RetirementPlanning, SurveyInitial, Tab1Page, Tab2Page. The rest are real assertion failures: FreedomDetailSheet "holds the withdrawal rate at the fixed 4% rule", SecuritySettings three-state gating (AC-3/4/5), TabsPage pager `onSlideChange`, and two `swipe-settle.utils releaseVelocity` specs. Separately, the run intermittently DISCONNECTS mid-suite when an unhandled async error (most often `"Keyboard" plugin is not implemented on web`, which appears hundreds of times per run) lands in `afterAll`; jasmine randomises spec order, so it moves around and a re-run usually passes. Fix: repair or delete the stale scaffolding specs, fix the four real ones, and stub the Capacitor Keyboard plugin in the test setup so the noise stops. Until this is cleared, "14 failures" is the baseline every analytics checkpoint compares against. Found while wiring the analytics call sites, 2026-10-19.
+`npx ng test` has 13 failures that predate the analytics work and are unrelated to it (verified by running the suite at commit a2df67c in a scratch worktree: the same 14 then, exactly; Goals v3.1 deleted the Freedom sheet and its failing spec, leaving 13). Nine are stale `should create` specs that still pass standalone components in `declarations` or construct them without `provideHttpClient`: AuthFinalize, FiPlanResults, InvestmentConfirmation, LinkPlaid, PortfolioCustomize, RetirementPlanning, SurveyInitial, Tab1Page, Tab2Page. The rest are real assertion failures: SecuritySettings three-state gating (AC-3/4/5), TabsPage pager `onSlideChange`, and two `swipe-settle.utils releaseVelocity` specs. Separately, the run intermittently DISCONNECTS mid-suite when an unhandled async error (most often `"Keyboard" plugin is not implemented on web`, which appears hundreds of times per run) lands in `afterAll`; jasmine randomises spec order, so it moves around and a re-run usually passes. Fix: repair or delete the stale scaffolding specs, fix the four real ones, and stub the Capacitor Keyboard plugin in the test setup so the noise stops. Until this is cleared, "13 failures" is the baseline every analytics checkpoint compares against. Found while wiring the analytics call sites, 2026-10-19.
 
 ## FRED-228 — Schedule transitions are read-modify-write with no lock, so churn can double count
 **Severity: LOW.**
 `InvestmentScheduleService` decides whether a schedule transition really happened by loading the row, reading `status`, and comparing before writing the new one (`pauseSchedule`, `resumeSchedule`, `resetForBankChange`, `updateWithAchRequestId`). There is no `SELECT ... FOR UPDATE`, no `@Version` column and no unique constraint on the transition, so two concurrent transactions can both read `ACTIVE`, both decide the pause is real, and both emit `schedule_paused`. The outbox would then show two pauses for one user action and `v_schedule_churn` would over-report churn by that much. The same race already double-writes the status column itself, so this is a pre-existing concurrency gap that the analytics events make *visible* rather than one they introduce. Realistically it needs a double submit (a retried request, a double tap) to fire, and the guard already stops the common repeat case. Fix options, cheapest first: `@Version` on `InvestmentSchedule` for optimistic locking (one column, fails the second writer loudly), or `findByIdAndUserForUpdate` with a pessimistic lock on the three user-facing paths. Related: FRED-223 notes the same absence of idempotency on the money paths. Found while wiring the schedule transition events, 2026-10-20.
 
+## FRED-229 — Goals v3: plans FRED proposes
+Goals v3: plans FRED proposes. Goals move to the backend (goals table V9, /api/goals), FRED proposes each plan (monthly and per paycheck; kids get birthday and New Year rituals with 18/22/30 milestones), seven goal types (Kids, House, Car, Vacation, Emergency fund, Wedding, Something else), cash rate for money needed within three years, one free goal and Piggy Plus for more, pushed goal page with a my-profile summary card, v2 localStorage goals imported. Supersedes the goals criteria of FRED-216. Built on feature/goals-v3; device pass and API smoke pending. Design: docs/superpowers/specs/2026-11-02-goals-v3-plans-design.md.
+
+## FRED-230 — Goals: AI-written personal plan summary
+Goals: AI-written personal plan summary. The backend sends a goal's computed plan (fixed numbers) to Claude, which writes a short personal summary through the compliance gate, the Monthly Market Breakdown pattern, plus a read-only get_goals tool for Ask FRED. The AI never produces or changes a dollar figure. Follows Goals v3 (kid costs and quiz shipped on feature/goals-v3).
+
+## FRED-231 — Goals v3.1: quiz and plan page redesign
+Goals v3.1: quiz and plan page redesign. Every goal type is set up through one full-screen quiz (title and one-line subtitle per screen, big readouts with tap-to-type, sliders, chips and switches, no keyboard unless asked), ending in a one-screen plan page (Freedom-style hero, kid cards with rename in place, kid timeline, gift days row, How FRED helps note), and the Freedom sheet becomes a pushed Freedom Plan page. Supersedes the UI half of FRED-229's acceptance criteria (its backend and plan-math half stands). Built on feature/goals-v3-wt; owner steps: `npx cap sync ios` for the regenerated icon font, then the device pass in the spec's Verification list. Design: docs/superpowers/specs/2026-11-06-goals-quiz-and-plan-page-redesign.md.
+
+## FRED-232 — Child brokerage accounts, a potential future addition
+Potential future addition, not planned: if users would value it, let a kid's nest egg be a custodial brokerage account opened through FRED (Alpaca Broker API lists custodial accounts; verify before writing copy). Decided 2026-11-11 (Andy): FRED does not split the user's portfolio across goals; FRED's own investing is the Freedom Plan alone, paycheck by paycheck, and every goal account (529, brokerage nest egg, cash baby fund) lives outside the app, with FRED working out the amounts and keeping score. This replaces the earlier "one portfolio, split across long-term goals by share" idea, which is dropped. Source: the 2026-11-11 note under "How FRED helps" in docs/superpowers/specs/2026-11-06-goals-quiz-and-plan-page-redesign.md.
+
+## FRED-233 — Family plan everyday line
+Family plan everyday line: each kid card on the family plan page shows an Invest group and an Everyday group (FRED's age-band estimate of what a kid costs this month, USDA 2015 figures inflated to today and adjusted for kids at home); the card header and the "Family plan" hero are the kids' whole month; the baby fund is always cash; the page's info cards and inline balance field move into each row's detail sheet. Built on feature/goals-v3-polish, awaiting merge. Spec: docs/superpowers/specs/2026-11-10-family-everyday-plan-design.md.
+
+## FRED-235 — Goal tally: FRED credits paydays, Missed one / Doubled up; house and car loan terms
+FRED now keeps each goal's "saved so far" on the server: one paycheck share is credited per payday, and the user corrects it with Missed one, Doubled up, an Undo, or a typed figure. House plans offer 5, 10 or 20 percent down with a mortgage line, and a car has a dollar down payment with a loan line. Built on develop (commits b7f8204..90b70bb); this story is the device pass.
+
+### Summary
+Walk the new goal tally and loan terms on a real device. The server credits one paycheck share per payday; Missed one takes a share off, Doubled up adds one, Undo puts back exactly what moved. The house and car plans show the down payment as the plan and the loan that follows as its own card. One analytics event, `goal_tally_changed` (goal type and kind only), fires per accepted adjustment.
+
+### Acceptance Criteria
+1. Missed one, Doubled up and Undo work on a simple goal; the toast reads the new saved-so-far figure, and Undo offers no second Undo.
+2. The same three work in a kid sheet, and the toast neither dims nor dismisses the sheet.
+3. The band's Next date matches the Recurring investments page's next date.
+4. Editing a house in the quiz moves the rate slider.
+5. A car at $0 down blocks Continue and shows the hint.
+6. A car saved before this change opens cleanly (a full-price car opens in the quiz at the $25,000 slider max).
+7. The growth line ellipsis reads cleanly at narrow widths.
+8. The terms screens keep a steady height with 2 or 3 stacked readouts.
+9. A kid added later at a reused index inherits the old unit's ledger history (units are keyed by position, `kid:<index>:<account>`; only trailing kids are ever dropped). Decide whether that is acceptable or whether a removed kid's entries must be cleared.
+
+## FRED-236 — Scheduler: MONTHLY day 29-31 skips a month after a weekend push
+Found during the goal tally build. `InvestmentSchedule.calculateNextInvestmentDate` adds a month to the already-adjusted payday, so a payday on Sat Oct 31 2026 is pushed to Mon Nov 2, and the next payday becomes Dec 31, skipping Nov 30. The goal ledger's `PaydayCalendar` deliberately does not copy this. The scheduler moves real money, so it was left alone.
+
+### Summary
+Fix the scheduler so a MONTHLY schedule on day 29 to 31 computes the next date from the nominal day of the month, not from the weekend-adjusted date. Done means no month is skipped after a weekend push, and the scheduler agrees with the goal ledger's payday calendar.
+
+### Acceptance Criteria
+1. `calculateNextInvestmentDate` computes the next MONTHLY date from the nominal day (clamped to the month's last day), then applies the weekend adjustment.
+2. A schedule on day 31 whose Oct 31 2026 payday lands on a Saturday yields Mon Nov 2, then Mon Nov 30, then Dec 31, with no month skipped.
+3. The parity test in `PaydayCalendarTest` drops its exclusion for this case and passes.
+4. Existing scheduler tests stay green; no change to non-MONTHLY frequencies.
+
+## FRED-237 — Goal ledger: two devices adjusting at once can lose an update
+Found in the goal tally review. `Goal` has no `@Version` and the ledger POST takes no row lock, so two devices that tap Missed one, Doubled up or a typed figure at the same moment can each read the same tally and the later save overwrites the earlier one. The ledger keeps both entries, but the stored tally is never recomputed from the ledger, so the two drift apart.
+
+### Summary
+Make concurrent adjustments on one goal safe. Done means two adjustments that race both land in the stored tally, or the later one is refused and retried, and the stored tally always equals what the ledger says.
+
+### Acceptance Criteria
+1. `Goal` carries `@Version` (optimistic lock, with a migration for the column), or `GoalService.adjust` and `update` load the goal with `SELECT ... FOR UPDATE`.
+2. Two adjustments on the same goal in parallel (a test with two transactions) end with both entries in the ledger and the stored tally equal to the sum they imply.
+3. A refused write (optimistic lock) answers 409 and the app refreshes the goal with no error toast, the same way UNIT_FINISHED does.
+4. The read path's roll-forward (`rollForwardAlone`) still recovers from a duplicate credit as it does today.
+
+## FRED-238 — Goal tally: a typed figure re-bases a kid account's plan
+Found in the goal tally review. On simple and vacation goals a typed "Saved so far" figure re-bases the plan, so the line grows again from that figure. Kid accounts cannot do this yet: each account has its own anchor balance but the anchor date (`planAnchoredAt`) is goal-level, so moving it for one account would restart every sibling account's plan and clear its "behind by" figure. Today a kids set changes the tally only.
+
+### Summary
+Give each kid account its own anchor date so a typed figure re-bases only that account. Done means a kids set re-bases the set account's plan and leaves every sibling's plan line and net exactly as they were.
+
+### Acceptance Criteria
+1. Each kid account carries a per-account anchor date (in `AccountState`), defaulting to the goal's `planAnchoredAt` for accounts stored before the change.
+2. A kids set writes that account's anchor balance (the typed figure) and anchor date (now, Eastern); the goal-level `planAnchoredAt` and every sibling account stay unchanged.
+3. The account's net and the plan page's planValue and growth line read the account's own anchor date.
+4. A test pins that a sibling's planValue and net are identical before and after another account's set.
 
 # 🚫 BLOCKED — Waiting on Something
 _Cannot proceed until a dependency or external party clears._

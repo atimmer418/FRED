@@ -73,16 +73,6 @@ public class AlpacaApiService {
         return headers;
     }
 
-    public String getAccountInfo() {
-        HttpEntity<String> entity = new HttpEntity<>(createHeaders());
-        ResponseEntity<String> response = restTemplate.exchange(
-                brokerBaseUrl + "/accounts",
-                HttpMethod.GET,
-                entity,
-                String.class);
-        return response.getBody();
-    }
-
     /**
      * @deprecated Use {@link #createAccount(CreateAlpacaAccountRequest, String)} instead,
      *             which sends the full KYC payload with real disclosures and all 3 agreements.

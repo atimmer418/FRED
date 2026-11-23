@@ -14,7 +14,7 @@ import {
   IonItem,
   IonItemOptions,
   IonItemOption,
-  ActionSheetController,
+  ModalController,
   ViewWillEnter
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
@@ -41,6 +41,7 @@ import { BeneficiaryService, Beneficiary, BeneficiaryAllocationSummary } from '.
 import { ToastService } from '../services/toast.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+import { presentConfirmSheet } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
 
 @Component({
   selector: 'app-beneficiaries',
@@ -65,7 +66,7 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
     private router: Router,
     private beneficiaryService: BeneficiaryService,
     private toastService: ToastService,
-    private actionSheetCtrl: ActionSheetController,
+    private modalCtrl: ModalController,
     private navCtrl: NavController,
     private analytics: AnalyticsService
   ) {
@@ -301,51 +302,37 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
       this.toastService.showToast('Cannot delete beneficiary: Invalid ID', 'danger');
       return;
     }
-    
-    const actionSheet = await this.actionSheetCtrl.create({
-      header: 'Delete Beneficiary?',
-      subHeader: 'This beneficiary will be deleted.',
-      buttons: [
-        {
-          text: 'Delete',
-          role: 'destructive',
-          data: {
-            action: 'delete',
-          },
-          handler: async () => {
-            try {
-              // Delete (mark inactive) in backend - this processes the inactive status update
-              await this.beneficiaryService.deleteBeneficiary(beneficiary.id!).toPromise();
-              
-              this.toastService.showToast(`Deleted ${beneficiary.firstName} ${beneficiary.lastName} and updated Alpaca`, 'success');
-              
-              // Refresh the data to show updated list
-              await this.loadBeneficiaries();
-              
-            } catch (error) {
-              console.error('Error deleting beneficiary:', error);
-              this.analytics.trackErrorShown(
-                isNetworkFailure(error) ? 'network' : 'save_failed',
-                'portfolio',
-                'toast',
-                httpStatusOf(error),
-                false,
-              );
-              this.toastService.showToast('Failed to delete beneficiary. Please try again.', 'danger');
-            }
-          }
-        },
-        {
-          text: 'Cancel',
-          role: 'cancel',
-          data: {
-            action: 'cancel',
-          },
-        },
-      ],
-    });
+    const id = beneficiary.id;
 
-    await actionSheet.present();
+    // The sheet stays up and busy while the server marks them inactive. A failure keeps it open
+    // (with the toast above it) so the user can try again or keep them.
+    const deleted = await presentConfirmSheet(this.modalCtrl, {
+      tone: 'destructive',
+      title: 'Delete this beneficiary?',
+      body: 'They will no longer be listed on your account.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      onConfirm: async () => {
+        await this.beneficiaryService.deleteBeneficiary(id).toPromise();
+      },
+      onConfirmError: (error) => {
+        console.error('Error deleting beneficiary:', error);
+        this.analytics.trackErrorShown(
+          isNetworkFailure(error) ? 'network' : 'save_failed',
+          'portfolio',
+          'toast',
+          httpStatusOf(error),
+          false,
+        );
+        this.toastService.showToast('Failed to delete beneficiary. Please try again.', 'danger');
+      },
+    });
+    if (!deleted) return;
+
+    this.toastService.showToast(`Deleted ${beneficiary.firstName} ${beneficiary.lastName} and updated Alpaca`, 'success');
+
+    // Refresh the data to show updated list
+    await this.loadBeneficiaries();
   }
   
   /**

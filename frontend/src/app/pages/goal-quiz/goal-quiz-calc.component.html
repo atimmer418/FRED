@@ -1,0 +1,14 @@
+<div class="calc-stage" role="status" aria-live="polite">
+  <div class="calc-ring" [class.still]="reducedMotion">
+    <span class="material-symbols-outlined calc-spark" aria-hidden="true">auto_awesome</span>
+  </div>
+  <h2 class="calc-title">Working out this month's number</h2>
+  <ul class="calc-lines">
+    @for (line of lines; track $index; let i = $index) {
+      <li class="calc-line" [class.done]="i < ticked()">
+        <span class="material-symbols-outlined" aria-hidden="true">{{ i < ticked() ? 'check_circle' : 'radio_button_unchecked' }}</span>
+        <span>{{ line }}</span>
+      </li>
+    }
+  </ul>
+</div>

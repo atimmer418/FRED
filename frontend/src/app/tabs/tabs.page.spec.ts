@@ -74,6 +74,31 @@ describe('TabsPage pager', () => {
     expect(c.initialIndex).toBe(0);
   });
 
+  // When the pager starts on a later tab (a launch that reopens on Profile), Swiper fires
+  // slideChange and transitionEnd from inside its constructor, before the instance is on the
+  // element. Reading those as index 0 used to highlight tab1, rewrite the URL to tab1 and
+  // activate tab1 while the pager was showing Profile.
+  it('ignores the events Swiper fires while it is still being set up', async () => {
+    const fixture = build();
+    const c = fixture.componentInstance;
+    c.ngOnInit();
+    c.activeTab.set('tab3'); // as ngOnInit does for /tabs/tab3
+    (c as any).settledTab = 'tab3';
+    const location = TestBed.inject(Location);
+    const activation = TestBed.inject(TabActivationService);
+    const replaceSpy = spyOn(location, 'replaceState');
+    const setActiveSpy = spyOn(activation, 'setActive');
+    const setupEvent = { target: {} } as unknown as Event;
+
+    c.onSlideChange(setupEvent);
+    c.onTransitionEnd(setupEvent);
+    await Promise.resolve(); // onSlideChange defers its write to a microtask
+
+    expect(c.activeTab()).toBe('tab3');
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(setActiveSpy).not.toHaveBeenCalled();
+  });
+
   // The slide-change moment is the start of the settle animation. Only the
   // tab-bar indicator may react there — URL sync and tab activation (HTTP
   // refreshes, menu state) are deferred to the settle END so they never run

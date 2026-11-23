@@ -1,0 +1,5 @@
+@use '../../../theme/blue-flow' with ($controls-only: true);
+
+:host { display: block; }
+
+.big-readout.static { cursor: default; }

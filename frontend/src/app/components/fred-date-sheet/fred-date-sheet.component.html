@@ -1,0 +1,144 @@
+<div class="ds-body">
+  <div class="gs-handle"></div>
+
+  <div class="ds-top">
+    <p class="ds-zone">{{ title }}</p>
+    <!-- One live region for the day and its line, so VoiceOver reads both on every change. -->
+    <div class="ds-readout" aria-live="polite" aria-atomic="true">
+      <div #readout class="ds-value" [class.ph]="!selected()">{{ readoutText() }}</div>
+      <div class="ds-sub">{{ sublineText() }}</div>
+    </div>
+  </div>
+
+  @if (mode === 'birthday') {
+    <!-- The year rail: the slide tray with unit year, caption and live year projected into its card. -->
+    <app-plan-amount-tray
+      field="year"
+      label="Year of birth"
+      unit="year"
+      [value]="year()"
+      [scale]="yearScale"
+      [gears]="YEAR_GEARS"
+      [edgeGuard]="false"
+      lessLabel="Earlier year"
+      moreLabel="Later year"
+      (valueChange)="onYear($event)"
+      (dragging)="railDragging.set($event)"
+      (keydown)="onRailKeydown($event)"
+    >
+      <div trayHead class="rail-head">
+        <span class="cap">Year</span>
+        <span class="live" [class.dragging]="railDragging()">{{ year() }}</span>
+      </div>
+    </app-plan-amount-tray>
+  } @else if (chips.length) {
+    <div class="ds-chips" role="radiogroup" aria-label="Quick picks">
+      @for (chip of chips; track chip.date) {
+        <button
+          type="button"
+          class="chip"
+          role="radio"
+          [class.on]="chip.date === selected()"
+          [attr.aria-checked]="chip.date === selected()"
+          [attr.aria-label]="chip.ariaLabel"
+          (click)="onChip(chip)"
+        >
+          <span class="l">{{ chip.label }}</span>
+          <span class="d">{{ chip.monthDay }}</span>
+        </button>
+      }
+    </div>
+  }
+
+  <div class="ds-grid">
+    <div class="ds-mh">
+      <button
+        type="button"
+        class="ds-month"
+        [class.up]="pane() === 'months'"
+        [attr.aria-expanded]="pane() === 'months'"
+        (click)="flip()"
+      >
+        <span class="t">{{ headerText() }}</span>
+        <span class="material-symbols-outlined ex" aria-hidden="true">expand_more</span>
+      </button>
+      <div class="ds-nav">
+        <button type="button" class="ds-nav-btn prev" aria-label="Previous month" [disabled]="prevDisabled()" (click)="page(-1)">
+          <span class="material-symbols-outlined">chevron_left</span>
+        </button>
+        <button type="button" class="ds-nav-btn next" aria-label="Next month" [disabled]="nextDisabled()" (click)="page(1)">
+          <span class="material-symbols-outlined">chevron_right</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="ds-wd" aria-hidden="true">
+      @for (letter of weekdays; track $index) {
+        <span>{{ letter }}</span>
+      }
+    </div>
+
+    <div class="ds-pane">
+      <!-- The one ring: moved with element.animate from the chosen cell's offsets. -->
+      <div #ring class="ds-ring" aria-hidden="true"></div>
+
+      <div
+        #days
+        class="ds-days"
+        role="grid"
+        [attr.aria-label]="headerText()"
+        [hidden]="visiblePane() !== 'days'"
+        (keydown)="onGridKeydown($event)"
+      >
+        @for (row of rows(); track $index) {
+          <div class="ds-row" role="row">
+            @for (cell of row; track cell.key) {
+              @if (cell.date) {
+                <button
+                  type="button"
+                  class="cell"
+                  role="gridcell"
+                  [class.dis]="cell.disabled"
+                  [class.weekend]="cell.weekend && !cell.disabled"
+                  [class.today]="cell.today"
+                  [class.sel]="cell.date === paint()"
+                  [attr.data-date]="cell.date"
+                  [attr.aria-label]="cell.label"
+                  [attr.aria-selected]="cell.date === selected()"
+                  [attr.aria-disabled]="cell.disabled ? 'true' : null"
+                  [attr.aria-current]="cell.today ? 'date' : null"
+                  (click)="onCell(cell, $event)"
+                >{{ cell.day }}</button>
+              } @else {
+                <span class="cell blank" aria-hidden="true"></span>
+              }
+            }
+          </div>
+        }
+      </div>
+
+      <div #months class="ds-months" [hidden]="visiblePane() !== 'months'">
+        @for (tile of monthTiles(); track tile.m) {
+          <button
+            type="button"
+            class="mtile"
+            [class.on]="tile.m === view().m"
+            [class.dis]="tile.disabled"
+            [attr.aria-disabled]="tile.disabled ? 'true' : null"
+            [attr.aria-pressed]="tile.m === view().m"
+            [attr.aria-label]="tile.label"
+            (click)="onMonthTile(tile)"
+          >{{ tile.name }}</button>
+        }
+      </div>
+    </div>
+
+    <div class="ds-note" aria-live="polite">{{ noteText() }}</div>
+  </div>
+
+  <button type="button" class="fd-cta" [disabled]="!selected()" (click)="done()">{{ doneText() }}</button>
+
+  @if (mode === 'birthday') {
+    <button type="button" class="gs-cancel" (click)="close()">Cancel</button>
+  }
+</div>

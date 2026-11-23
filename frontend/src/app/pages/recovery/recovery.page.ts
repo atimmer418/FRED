@@ -63,10 +63,10 @@ export class RecoveryPage {
         this.step = 'otp';
         this.toastService.showToast('Recovery code sent. Check your email.');
       } else {
-        this.toastService.showToast(response.message || 'Failed to initiate recovery.');
+        this.toastService.showToast(response.message || 'Failed to initiate recovery.', 'danger');
       }
     } catch (e) {
-      this.toastService.showToast('An error occurred. Please try again.');
+      this.toastService.showToast('An error occurred. Please try again.', 'danger');
     } finally {
       this.isLoading = false;
     }
@@ -95,28 +95,28 @@ export class RecoveryPage {
                     this.isLoading = false;
                     this.router.navigate(['/tabs/tab3']);
                   } else {
-                    this.toastService.showToast(finishResponse.message || 'Passkey registration failed. Please try again.');
+                    this.toastService.showToast(finishResponse.message || 'Passkey registration failed. Please try again.', 'danger');
                     this.isLoading = false;
                   }
                 },
                 error: () => {
-                  this.toastService.showToast('Passkey registration failed. Please try again.');
+                  this.toastService.showToast('Passkey registration failed. Please try again.', 'danger');
                   this.isLoading = false;
                 }
               });
             } catch {
               // User cancelled the OS passkey prompt or WebAuthn failed
-              this.toastService.showToast('Passkey registration was cancelled. Please try again.');
+              this.toastService.showToast('Passkey registration was cancelled. Please try again.', 'danger');
               this.isLoading = false;
             }
           },
           error: () => {
-            this.toastService.showToast('Could not start passkey registration. Try again.');
+            this.toastService.showToast('Could not start passkey registration. Try again.', 'danger');
             this.isLoading = false;
           }
         });
       } else {
-        this.toastService.showToast(response.message || 'Verification failed.');
+        this.toastService.showToast(response.message || 'Verification failed.', 'danger');
         this.isLoading = false;
       }
     } catch {

@@ -222,36 +222,6 @@ ion-searchbar.fred-searchbar {
   }
 }
 
-.currency-input-wrap {
-  display: flex;
-  align-items: center;
-  border-bottom: 2px solid #2563EB;
-  padding-bottom: 4px;
-
-  .currency-sym {
-    font-family: 'Manrope', sans-serif;
-    font-size: 17px;
-    font-weight: 600;
-    color: #2563EB;
-    margin-right: 4px;
-  }
-
-  // Native .field-input inside the currency wrap: suppress its own border-bottom
-  // so the parent wrap's single underline shows
-  .currency-field-input {
-    border-bottom: none;
-    padding: 4px 0;
-    flex: 1;
-    font-size: 17px;
-    font-weight: 600;
-
-    &:focus {
-      border-bottom: none;
-    }
-  }
-}
-
-
 .projection-card {
   background: #f8fafc;
   border: 1.5px solid #e5e7eb;

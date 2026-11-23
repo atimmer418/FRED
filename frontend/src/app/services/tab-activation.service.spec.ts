@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { TabActivationService } from './tab-activation.service';
+import { Router } from '@angular/router';
 import { AnalyticsService } from './analytics/analytics.service';
 
 /**
@@ -10,12 +11,15 @@ import { AnalyticsService } from './analytics/analytics.service';
 describe('TabActivationService screen views', () => {
   let service: TabActivationService;
   let screenCalls: string[];
+  let routerStub: { url: string };
 
   beforeEach(() => {
     screenCalls = [];
+    routerStub = { url: '/tabs/tab1' };
     TestBed.configureTestingModule({
       providers: [
         TabActivationService,
+        { provide: Router, useValue: routerStub },
         {
           provide: AnalyticsService,
           useValue: { screen: (name: string) => screenCalls.push(name) },
@@ -31,6 +35,36 @@ describe('TabActivationService screen views', () => {
     service.setActive('tab3');
 
     expect(screenCalls).toEqual(['/tabs/tab1', '/tabs/chat', '/tabs/tab3']);
+  });
+
+  it('remembers the tab so a cold start can reopen on it', () => {
+    localStorage.setItem('userId', 'u-1');
+    try {
+      service.setActive('tab3');
+
+      const record = JSON.parse(localStorage.getItem('fred.lastScreen.v1.u-1')!);
+      expect(record.url).toBe('/tabs/tab3');
+    } finally {
+      localStorage.removeItem('userId');
+      localStorage.removeItem('fred.lastScreen.v1.u-1');
+    }
+  });
+
+  // The pager re-pulses the active tab when a pushed page starts to leave, which an edge swipe
+  // does at the start of the gesture. The swipe can still be cancelled, so the pushed page must
+  // stay the remembered screen.
+  it('does not remember the tab while a pushed page is the routed screen', () => {
+    localStorage.setItem('userId', 'u-1');
+    routerStub.url = '/my-profile';
+    try {
+      service.setActive('tab3');
+
+      expect(localStorage.getItem('fred.lastScreen.v1.u-1')).toBeNull();
+      expect(screenCalls).toEqual(['/tabs/tab3']);
+    } finally {
+      localStorage.removeItem('userId');
+      localStorage.removeItem('fred.lastScreen.v1.u-1');
+    }
   });
 
   it('still sets the active tab signal', () => {

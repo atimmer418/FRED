@@ -130,7 +130,8 @@ ion-content::part(scroll) {
 .form-row-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  // No row gap: the locked echo on the second row keeps its own 6px under the pay-date field.
+  gap: 0 16px;
   margin-bottom: 12px;
 
   .form-section {
@@ -231,15 +232,6 @@ ion-content::part(scroll) {
   }
 }
 
-input[type='date'].field-input {
-  color-scheme: light;
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-}
-
 input[type='number'].field-input {
   -moz-appearance: textfield;
 
@@ -247,6 +239,137 @@ input[type='number'].field-input {
   &::-webkit-outer-spin-button {
     -webkit-appearance: none;
   }
+}
+
+// --- Tray-driven amount field ---
+// The amount opens the slide tray (components/plan-amount-tray) instead of the keyboard: the
+// value is a button drawn like a .field-row, Done shares the label's line, and the slot sits
+// under the pair at full width. The class names are the ones AmountTrayHost looks for.
+.field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px 0;
+
+  .field-label {
+    margin-bottom: 0;
+  }
+}
+
+.field-label.active {
+  color: var(--schedule-primary);
+}
+
+.field-value-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  // The .field-row's 6px below, plus the 1px the input itself carried.
+  padding: 1px 0 7px;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--schedule-primary);
+  border-radius: 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: normal;
+  color: var(--schedule-text);
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+
+  // The $, as .field-prefix drew it.
+  .field-affix {
+    color: var(--schedule-gray);
+    flex-shrink: 0;
+  }
+
+  .field-placeholder {
+    color: #cbd5e1;
+    font-weight: 400;
+  }
+}
+
+// Bottom-aligned with the field beside it, as the .field-row was.
+.form-row-pair .form-section .field-value-btn {
+  margin-top: auto;
+}
+
+// --- Pay date field ---
+// The same value button, with the calendar glyph at its right edge (date-sheet mockup, tab C). It
+// opens the FRED date sheet; SEMI_MONTHLY disables it, the backend owning the 1st and 15th.
+.field-date-btn {
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+
+  // The date may carry a year in a half-width column: it clips before the glyph does.
+  .field-date-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .field-date-icon {
+    font-size: 18px;
+    color: var(--schedule-gray);
+    flex-shrink: 0;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+// One line under the field that says what the date means; here, only the locked echo.
+.field-echo {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 6px 0 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--schedule-gray);
+  min-height: 16px;
+
+  .material-symbols-outlined {
+    font-size: 14px;
+    color: var(--schedule-gray);
+  }
+}
+
+// The echo takes the pair's second row under the date column, so the two buttons stay level.
+.form-row-pair .field-echo--pay-date {
+  grid-column: 2;
+}
+
+.field-tray {
+  display: block;
+  width: 100%;
+}
+
+.field-tray-done {
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--schedule-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 // --- Info tip (recommendation) ---

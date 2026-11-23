@@ -1,16 +1,28 @@
 #!/bin/bash
-# Shared curl helper for domain test scripts.
+# Shared helpers for the domain test scripts.
 # Requires $TOKEN and $BASE_URL (exported by lib/auth.sh).
-# Requires $PASS and $FAIL to be declared as integers in the calling script.
 #
-# Usage:
-#   run_curl "label" METHOD /api/path [optional-json-body]
+#   run_curl        "label" METHOD /api/path [json-body]
+#       Passes on any 2xx.
 #
-# Prints [PASS] or [FAIL] with HTTP status and full response body.
-# Increments $PASS or $FAIL in the calling scope.
+#   run_curl_expect "label" NEW_USER_STATUS METHOD /api/path [json-body]
+#       For endpoints whose answer depends on who is asking. Passes on any 2xx for a set-up
+#       user. When API_TEST_USER_STATE=new (a user with no brokerage account and no schedule,
+#       which is what CI seeds), it passes only on exactly NEW_USER_STATUS.
+#
+#   run_curl_broker "label" METHOD /api/path [json-body]
+#       For endpoints that need the live broker whoever is asking. Runs as run_curl, except when
+#       API_TEST_BROKER=offline (CI has no broker), where it is counted as SKIPPED and shown.
+#
+#   finish_suite "Name"
+#       Prints the totals and the RESULT line run-all.sh reads, then exits. Every suite must end
+#       with it: a suite that never reaches it is treated as broken, never as passed.
 
-run_curl() {
-  local label="$1" method="$2" path="$3" body="${4:-}"
+PASS=0; FAIL=0; SKIP=0
+
+# _request "label" EXPECTED METHOD path [body]   (EXPECTED is "2xx" or an exact status)
+_request() {
+  local label="$1" expected="$2" method="$3" path="$4" body="${5:-}"
   local tmpfile
   tmpfile=$(mktemp)
 
@@ -28,13 +40,51 @@ run_curl() {
   resp=$(cat "$tmpfile")
   rm -f "$tmpfile"
 
-  if [[ "$status" == 2* ]]; then
+  local ok=1
+  if [ "$expected" = "2xx" ]; then
+    [[ "$status" == 2* ]] && ok=0
+  else
+    [ "$status" = "$expected" ] && ok=0
+  fi
+
+  if [ $ok -eq 0 ]; then
     echo "[PASS] $label → HTTP $status"
     PASS=$((PASS + 1))
   else
-    echo "[FAIL] $label → HTTP $status"
+    echo "[FAIL] $label → HTTP $status (expected $expected)"
     FAIL=$((FAIL + 1))
   fi
   echo "Response: $resp"
   echo ""
+}
+
+run_curl() {
+  _request "$1" "2xx" "$2" "$3" "${4:-}"
+}
+
+run_curl_expect() {
+  local label="$1" new_user_status="$2" method="$3" path="$4" body="${5:-}"
+  if [ "${API_TEST_USER_STATE:-}" = "new" ]; then
+    _request "$label (new user)" "$new_user_status" "$method" "$path" "$body"
+  else
+    _request "$label" "2xx" "$method" "$path" "$body"
+  fi
+}
+
+run_curl_broker() {
+  if [ "${API_TEST_BROKER:-}" = "offline" ]; then
+    echo "[SKIP] $1 (needs the live broker, API_TEST_BROKER=offline)"
+    echo ""
+    SKIP=$((SKIP + 1))
+  else
+    _request "$1" "2xx" "$2" "$3" "${4:-}"
+  fi
+}
+
+finish_suite() {
+  echo "---"
+  echo "$1 tests: $PASS passed, $FAIL failed, $SKIP skipped"
+  echo "RESULT pass=$PASS fail=$FAIL skip=$SKIP"
+  [ "$FAIL" -eq 0 ]
+  exit $?
 }

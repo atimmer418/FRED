@@ -1,0 +1,102 @@
+@if (detail(); as d) {
+  <div class="ud-body">
+    <div class="ud-handle"></div>
+    <p class="ud-kid">{{ d.kidLabel }}</p>
+    <div class="ud-title-row">
+      <h3>{{ d.title }}<span class="fd-pill" [class.cash]="d.pill === 'Cash'">{{ d.pill }}</span></h3>
+      @if (notes.length > 0) {
+        <button type="button" class="ud-info" aria-label="How FRED plans this" (click)="openInfo()">
+          <span class="material-symbols-outlined">info</span>
+        </button>
+      }
+    </div>
+    <p class="ud-sub">{{ d.targetLine }}</p>
+
+    <div class="fd-tiles ud-tiles">
+      <div class="fd-tile">
+        <span class="fd-tile-label">Every month</span>
+        @if (d.finished) {
+          <span class="ud-tile-val ud-done-val"><span class="material-symbols-outlined">check</span>Done</span>
+        } @else {
+          <span class="ud-tile-val">{{ fmtMoney(d.monthly) }}</span>
+        }
+      </div>
+      @if (!d.finished && d.perPaycheck !== null) {
+        <div class="fd-tile">
+          <span class="fd-tile-label">From your pay</span>
+          <span class="ud-tile-val">~{{ fmtMoney(d.perPaycheck) }} <small>a paycheck</small></span>
+        </div>
+      }
+    </div>
+
+    @if (d.balance !== null || d.status !== null) {
+      <div class="fd-tiles ud-tiles ud-tiles-2">
+        @if (d.balance !== null) {
+          <div class="fd-tile ud-bal" [class.active]="tray.isOpen('balance')">
+            @if (canEditBalance()) {
+              <!-- The tile's label row carries Done while the tray is open; the value opens it. -->
+              <span class="ud-tile-head">
+                <span class="fd-tile-label" [class.active]="tray.isOpen('balance')" [class.ud-step]="tray.showsStep('balance')">{{ tray.label('balance') }}</span>
+                @if (tray.shown()) {
+                  <button type="button" class="fd-reset ud-tray-done" (click)="tray.close()">Done</button>
+                }
+              </span>
+              <button type="button" class="fd-tile-edit ud-bal-btn" [attr.aria-expanded]="tray.isOpen('balance')" (click)="tray.toggle('balance')">
+                <span class="fd-pre">$</span>
+                <span class="fd-tile-value">{{ shownBalance() | number:'1.0-0' }}</span>
+              </button>
+            } @else {
+              <span class="fd-tile-label">Saved so far</span>
+              <span class="ud-tile-val">{{ fmtMoney(d.balance) }}</span>
+            }
+          </div>
+        }
+        @if (d.status !== null) {
+          <div class="fd-tile ud-status-tile">
+            <span class="fd-tile-label">Status</span>
+            <span class="ud-status" [class.good]="d.status.tone === 'good'" [class.warn]="d.status.tone === 'warn'"
+              [class.info]="d.status.tone === 'info'" [class.muted]="d.status.tone === 'muted'">{{ d.status.text }}</span>
+          </div>
+        }
+      </div>
+      <!-- The tray's slot, the full width of the sheet, right under the tiles; the sheet grows with it. -->
+      @if (tray.shown()) {
+        <app-amount-tray-slot [tray]="tray" />
+      }
+    }
+
+    @if (d.growthLine) {
+      <p class="ud-growth">{{ d.growthLine }}</p>
+    }
+    @if (onTally && !d.finished) {
+      <app-tally-pills class="ud-pills" [share]="d.share" [disabled]="tallyBusy()"
+                       (missed)="tally('missed')" (doubled)="tally('extra')" />
+    }
+
+    @if (d.milestones.length) {
+      <p class="fd-zone ud-zone">What it grows to</p>
+      <div class="ud-ms">
+        @for (m of d.milestones; track m.label) {
+          <div class="ud-ms-tile">
+            <span class="ud-ms-label">{{ m.label }}</span>
+            @if (m.year) { <span class="ud-ms-year">{{ m.year }}</span> }
+            <b>{{ m.value }}</b>
+          </div>
+        }
+      </div>
+    }
+
+    @for (n of d.notes; track n) {
+      <p class="ud-note">{{ n }}</p>
+    }
+
+    <p class="ud-sources">
+      {{ d.sourcesLine }}
+      @if (d.sourcesSheetKids !== null) {
+        <button type="button" class="ud-link" (click)="openSources()">Where these numbers come from</button>
+      }
+    </p>
+
+    <button type="button" class="ud-done" (click)="close()">Done</button>
+  </div>
+}

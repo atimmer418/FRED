@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import type { ReturnPreset } from './analytics/analytics-events';
 
 /**
  * RateAssumptionsService — user-adjustable projection assumptions.
@@ -25,6 +26,19 @@ export const DEFAULT_ANNUAL_RETURN = 0.10;
  * preset so every surface (sheet, my-profile, tab3, MFU) agrees.
  */
 export const RETURN_RATE_PRESETS: number[] = [0.08, 0.10, 0.12];
+
+/**
+ * The same three choices as RETURN_RATE_PRESETS, with the label shown on each chip and the
+ * analytics name for the choice. Kept here so the freedom sheet and goals plan math share one list.
+ */
+export const RETURN_SCENARIOS: ReadonlyArray<{ label: string; rate: number; preset: ReturnPreset }> = [
+  { label: 'Conservative (8%)', rate: 0.08, preset: 'conservative' },
+  { label: 'Moderate (10%)',    rate: 0.10, preset: 'moderate'     },
+  { label: 'Optimistic (12%)',  rate: 0.12, preset: 'optimistic'   },
+];
+
+/** Assumed annual return on cash (fraction). */
+export const CASH_RATE = 0.04;
 export const DEFAULT_WITHDRAWAL_RATE = 0.04;
 
 /** Sane bounds for user-set values (fractions). */

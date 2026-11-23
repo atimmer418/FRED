@@ -1,6 +1,7 @@
 // Monte Carlo Flow — fullscreen modal blue-gradient sub-theme
 // Force light mode (this component has its own dark themed world so we
 // don't apply the standard force-light variables; the gradient IS the background)
+@use '../../../theme/blue-flow';
 
 :host {
   // Absolute inset sizing — never relies on a %-height chain through the
@@ -10,90 +11,6 @@
   inset: 0;
   font-family: 'Manrope', sans-serif;
   -webkit-font-smoothing: antialiased;
-}
-
-// ─── CSS custom properties for the blue sub-theme ─────────────────────────────
-
-.flow-host {
-  --sim-deep:         #0e3a96;
-  --sim-mid:          #1e60e3;
-  --sim-primary:      #2563EB;
-  --sim-bright:       #3b82f6;
-  --glass:            rgba(255, 255, 255, 0.09);
-  --glass-border:     rgba(255, 255, 255, 0.16);
-  --mint:             #34d399;
-  --amber:            #fbbf24;
-  --coral:            #f87171;
-
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-
-  // Multi-layer blue gradient background
-  background: linear-gradient(160deg, #1e60e3 0%, #1a58d0 60%, #0e3a96 100%);
-}
-
-// ─── Top navigation bar ───────────────────────────────────────────────────────
-
-.flow-top {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  // Account for iOS status bar safe area
-  padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 0;
-}
-
-.flow-back,
-.flow-x {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(8px);
-  transition: background 0.15s, opacity 0.25s, visibility 0.25s;
-  flex-shrink: 0;
-
-  &:active { background: rgba(255, 255, 255, 0.24); }
-
-  .material-symbols-outlined { font-size: 20px; }
-}
-
-.flow-back {
-  opacity: 0;
-  pointer-events: none;
-  &.show { opacity: 1; pointer-events: auto; }
-}
-
-// Step dots
-.flow-dots {
-  display: flex;
-  gap: 6px;
-  transition: opacity 0.3s ease;
-
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.28);
-    transition: all 0.3s ease;
-
-    &.on {
-      background: #fff;
-      width: 18px;
-      border-radius: 4px;
-    }
-  }
 }
 
 // ─── Results info button ──────────────────────────────────────────────────────
@@ -129,241 +46,49 @@
   .flow-dots { display: none; }
 }
 
+// No margin reset here: .fs-h1 (now in blue-flow) used to come later in this
+// file and won the tie, so the title has always rendered with its 8px top
+// margin. Resetting it here would now win and shift the title.
 .flow-top-title {
-  margin: 0;
   min-width: 0;
   white-space: nowrap;
   // Clear the absolutely positioned info button parked next to the X.
   padding-right: 56px;
 }
 
-// ─── Full-screen step panels ─────────────────────────────────────────────────
-
-.fscreen {
-  position: absolute;
-  inset: 0;
-  padding: calc(env(safe-area-inset-top, 0px) + 80px) 26px
-           calc(env(safe-area-inset-bottom, 0px) + 36px);
-  display: flex;
-  flex-direction: column;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.38s ease, transform 250ms ease;
-  overflow: hidden;
-
-  &.on {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
-
-// ─── Step typography ─────────────────────────────────────────────────────────
-
-.fs-eyebrow {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: pre-line; // honour \n in resultsEyebrow
-  flex-shrink: 0;
-  margin-top: 4px;
-}
-
-.fs-h1 {
-  font-size: 30px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: #fff;
-  line-height: 1.12;
-  margin: 8px 0 0;
-  flex-shrink: 0;
-}
-
-.fs-sub {
-  font-size: 13.5px;
-  color: rgba(255, 255, 255, 0.65);
-  font-weight: 500;
-  margin: 8px 0 8px;
-  line-height: 1.5;
-  flex-shrink: 0;
-}
-
-.fs-center {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 0;
-}
-
-// ─── Big dollar readout ───────────────────────────────────────────────────────
-
-.big-readout {
-  font-size: 52px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  color: #fff;
-  text-align: center;
-  cursor: pointer;
-  line-height: 1;
-  text-shadow: 0 6px 30px rgba(8, 28, 78, 0.45);
-  border: none;
-  background: none;
-  font-family: 'Manrope', sans-serif;
-  width: 100%;
-  padding: 0;
-
-  .unit {
-    font-size: 20px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.55);
-    letter-spacing: -0.01em;
-  }
-}
-
-.big-input {
-  font-size: 52px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  color: #fff;
-  text-align: center;
-  width: 100%;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid rgba(255, 255, 255, 0.5);
-  padding-bottom: 4px;
-  outline: none;
-  font-family: 'Manrope', sans-serif;
-  -webkit-appearance: none;
-}
-
-.readout-hint {
-  text-align: center;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 10px;
-}
-
-// ─── Range slider ─────────────────────────────────────────────────────────────
-
-.sim-range {
-  margin-top: 34px;
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 36px;
-  background: transparent;
-  cursor: pointer;
-
-  &::-webkit-slider-runnable-track {
-    height: 5px;
-    border-radius: 3px;
-    background: var(--track, rgba(255, 255, 255, 0.22));
-  }
-
-  &::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    background: #fff;
-    margin-top: -12.5px;
-    box-shadow: 0 4px 16px rgba(8, 28, 78, 0.5), inset 0 -3px 6px rgba(37, 99, 235, 0.18);
-    border: none;
-  }
-}
-
-.range-ends {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 8px;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
-  letter-spacing: 0.04em;
-}
-
-// ─── Fetch chip ───────────────────────────────────────────────────────────────
-
-.fetch-chip {
-  margin: 26px auto 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #fff;
-  font-family: 'Manrope', sans-serif;
-  font-size: 12.5px;
-  font-weight: 700;
-  padding: 10px 18px;
-  border-radius: 24px;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  transition: background 0.15s;
-
-  &:active { background: rgba(255, 255, 255, 0.24); }
-  &.loading .material-symbols-outlined { animation: spin 1s linear infinite; }
-
-  .material-symbols-outlined { font-size: 16px; }
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-// ─── Primary CTA button ───────────────────────────────────────────────────────
-
-.fs-cta {
-  flex-shrink: 0;
-  height: 54px;
-  border: none;
-  border-radius: 14px;
-  cursor: pointer;
-  background: #fff;
-  color: #1d4ed8;
-  font-family: 'Manrope', sans-serif;
-  font-size: 15.5px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: 0 10px 30px -6px rgba(8, 28, 78, 0.55);
-  transition: transform 0.15s, opacity 0.2s;
-  margin-top: 16px;
-
-  &:active { transform: scale(0.98); }
-
-  &:disabled {
-    opacity: 0.35;
-    pointer-events: none;
-  }
-
-  .material-symbols-outlined { font-size: 20px; font-variation-settings: 'FILL' 1; }
-}
-
-// ─── Outside accounts glass fields ───────────────────────────────────────────
+// ─── Outside accounts glass fields (the .glass-field shell is in blue-flow) ──
+// The balances open the slide tray instead of the keyboard, so the value is a button in the old
+// input's clothes: same row, same type, the $ beside it, the placeholder in the input's placeholder
+// colour. The open field's label and card edge come up to full ink (the white page's #2563EB cue
+// would vanish on the blue).
 
 .glass-field {
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 14px 16px;
-  backdrop-filter: blur(12px);
-  margin-top: 12px;
+  transition: border-color 0.2s;
 
-  label {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.5);
-    display: block;
+  &.active { border-color: rgba(255, 255, 255, 0.34); }
+
+  // The label and, while the tray is open, Done on one line.
+  .field-label-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
   }
+
+  .field-label.active { color: var(--bf-ink); }
+}
+
+.field-tray-done {
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--bf-ink);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .gf-row {
@@ -371,6 +96,16 @@
   align-items: baseline;
   gap: 4px;
   margin-top: 6px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 
   .gf-pre {
     font-size: 18px;
@@ -379,21 +114,49 @@
     flex-shrink: 0;
   }
 
-  input {
-    flex: 1;
-    background: transparent;
-    border: none;
-    outline: none;
-    font-family: 'Manrope', sans-serif;
+  .gf-val {
     font-size: 24px;
     font-weight: 800;
     color: #fff;
     letter-spacing: -0.02em;
     min-width: 0;
-    -webkit-appearance: none;
-
-    &::placeholder { color: rgba(255, 255, 255, 0.28); }
+    font-variant-numeric: tabular-nums;
   }
+
+  .field-placeholder { color: rgba(255, 255, 255, 0.28); }
+}
+
+// The step centres its content in .fs-center, so a tray growing inside it would re-centre the
+// column and slide the tapped field up under the finger. While the tray is shown the column is
+// held where it sat: top-aligned, its centred offset as inline padding (measured in the component
+// before the slot renders), and scrolling where the tray pushes the content past the CTA on a
+// short phone instead of running under it.
+.fscreen .fs-center.tray-pinned {
+  justify-content: flex-start;
+  overflow-y: auto;
+}
+
+// The tray in the blue flow: ink-on-blue like .sim-range, through the tray's custom properties
+// (components/plan-amount-tray SCSS header lists them), all mapped onto the --bf-* tokens so a
+// retune of the flow's palette carries into the tray. The thumb's dot takes the sim-range thumb's
+// inset tint, so it reads as that thumb rather than the white page's blue-dotted one.
+app-amount-tray-slot {
+  --tray-surface: var(--bf-fill-faint);
+  --tray-border: var(--glass-border);
+  --tray-track: var(--bf-track);
+  --tray-fill: var(--bf-ink);
+  --tray-thumb: var(--bf-thumb);
+  --tray-thumb-ring: transparent;
+  --tray-thumb-dot: rgba(37, 99, 235, 0.18);
+  --tray-thumb-glow: var(--bf-shadow);
+  --tray-focus: rgba(255, 255, 255, 0.35);
+  --tray-tick: rgba(255, 255, 255, 0.12);
+  --tray-mark: rgba(255, 255, 255, 0.45);
+  --tray-label: rgba(255, 255, 255, 0.4);
+  --tray-nudge: var(--bf-fill);
+  --tray-nudge-border: var(--bf-fill-press);
+  --tray-nudge-ink: var(--bf-ink);
+  --tray-nudge-press: var(--bf-fill-press);
 }
 
 .combined-line {
@@ -1079,9 +842,7 @@
 // ─── Reduced motion ───────────────────────────────────────────────────────────
 
 @media (prefers-reduced-motion: reduce) {
-  .fscreen          { transition: none !important; }
   .sd-card          { transition: none !important; opacity: 1 !important; transform: none !important; }
   .sd-bar i         { transition: none !important; }
   .calc-rings .ring { animation: none !important; }
-  .fetch-chip.loading .material-symbols-outlined { animation: none !important; }
 }

@@ -1,0 +1,15 @@
+<div class="gs-body">
+  <div class="gs-handle"></div>
+  <h3>Remove this goal?</h3>
+  <p class="gs-sub">Its plan goes with it. This cannot be undone.</p>
+
+  <button
+    class="gs-remove"
+    type="button"
+    [attr.aria-label]="goalName ? 'Remove goal ' + goalName : 'Remove goal'"
+    (click)="remove()"
+  >
+    Remove goal
+  </button>
+  <button class="gs-cancel" type="button" (click)="close()">Keep it</button>
+</div>

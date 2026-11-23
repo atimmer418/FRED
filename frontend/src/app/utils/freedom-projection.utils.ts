@@ -2,7 +2,7 @@
  * Shared freedom-date projection math.
  *
  * Single implementation of the months-to-target formula used by the my-profile
- * Freedom Plan card, the Freedom detail sheet, and (via its own port)
+ * Freedom Plan card, the Freedom page (pages/freedom-plan), and (via its own port)
  * FreedomStatsService — annuity-with-growth solved for n, capped at 600 months
  * (50 years) on degenerate inputs. Keep in lockstep with the backend's
  * MonthlyFreedomUpdateService projection.

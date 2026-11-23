@@ -2,18 +2,19 @@
  * my-profile.analytics.spec.ts
  *
  * Payload specs for every event this page fires. Each one drives the real UI path (a tapped chip,
- * the header Save button, a sheet dismiss role) and asserts the EXACT props object, so any change
+ * the header Save button, a modal dismiss role) and asserts the EXACT props object, so any change
  * to a payload fails here rather than silently changing what lands in the vendor.
  *
  * What is deliberately asserted as ABSENT matters as much as what is present:
  *   - no goal name and no goal id (the only two free-text/identifier fields a goal has),
  *   - no raw dollar amount anywhere (everything is banded),
- *   - no second `freedom_plan_changed`: the sheet owns that event, this page must not double it.
+ *   - no `freedom_plan_changed`: the Freedom page owns that event, this page must not double it.
  */
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { NavController, AlertController, ModalController } from '@ionic/angular/standalone';
+import { NavController, ModalController } from '@ionic/angular/standalone';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { MyProfilePage } from './my-profile.page';
 import { AuthService } from '../../services/auth.service';
@@ -30,15 +31,25 @@ import { AnalyticsAdapter } from '../../services/analytics/analytics-adapter';
 const CURRENT_YEAR = new Date().getFullYear();
 const USER_ID = '40';
 
+/** One active goal: enough to gate "Add a goal" for a core user. */
 const EXISTING_GOAL: Goal = {
-  id: 'g-1',
+  id: 1,
+  clientId: null,
+  type: 'HOUSE',
   name: 'House down payment',
   icon: 'home',
-  targetAmount: 60_000,
-  targetYear: CURRENT_YEAR + 5,
-  startingValue: 5_000,
-  perPaycheckOutsideFRED: 275,
+  config: { price: 300_000, downPaymentPct: 20, targetYear: CURRENT_YEAR + 5 },
+  currentBalance: 5_000,
+  balanceUpdatedAt: null,
+  anchorBalance: 5_000,
+  anchorMonthly: 800,
+  planRate: 0.10,
+  planRateKind: 'market',
+  planAnchoredAt: `${CURRENT_YEAR}-01-01T00:00:00`,
   completed: false,
+  sortOrder: 0,
+  createdAt: '',
+  updatedAt: '',
 };
 
 /** Plan tiles seed to $7,000 invest / $5,000 income per month. */
@@ -64,7 +75,6 @@ interface Harness {
   page: MyProfilePage;
   track: jasmine.Spy;
   savePrefs: jasmine.Spy;
-  deleteGoal: jasmine.Spy;
   updateUserProfile: jasmine.Spy;
 }
 
@@ -86,7 +96,6 @@ function setup(opts: Options = {}): Harness {
   const updateUserProfile = jasmine.createSpy('updateUserProfile')
     .and.returnValue(opts.saveResult ?? of({}));
   const savePrefs = jasmine.createSpy('savePrefs');
-  const deleteGoal = jasmine.createSpy('deleteGoal');
 
   TestBed.configureTestingModule({
     imports: [MyProfilePage],
@@ -101,9 +110,8 @@ function setup(opts: Options = {}): Harness {
       { provide: PortfolioService, useValue: { getPortfolioDashboard: () => of({ summary: { equity: 0 } }) } },
       { provide: AccountStatusService, useValue: { actionRequired$: of(false) } },
       { provide: MonthlyFreedomUpdateService, useValue: { checkShouldShow: () => of(null) } },
-      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy() } },
+      { provide: Router, useValue: { navigateByUrl: jasmine.createSpy('navigateByUrl').and.returnValue(Promise.resolve(true)) } },
       { provide: NavController, useValue: { navigateBack: jasmine.createSpy() } },
-      { provide: AlertController, useValue: {} },
       { provide: ModalController, useValue: {
           create: jasmine.createSpy('create').and.returnValue(Promise.resolve({
             present: () => Promise.resolve(),
@@ -111,15 +119,14 @@ function setup(opts: Options = {}): Harness {
           })),
       } },
       { provide: FirstTimeTourService, useValue: {
-          suspend: jasmine.createSpy('suspend'),
-          freedomSheetClosed: jasmine.createSpy('freedomSheetClosed'),
+          freedomPlanLeft: jasmine.createSpy('freedomPlanLeft'),
       } },
       { provide: GoalsService, useValue: {
-          getGoals: () => goals,
+          goals: signal<Goal[]>(goals),
+          load: () => of(goals),
+          refresh: () => of(goals),
+          readLegacyV2: () => [],
           getPrefs: () => ({ rebalanceSchedule: 'Quarterly' }),
-          addGoal: (_uid: string, goal: Omit<Goal, 'id'>) => ({ ...goal, id: 'g-new' }),
-          updateGoal: jasmine.createSpy('updateGoal'),
-          deleteGoal,
           savePrefs,
       } },
       { provide: FreedomStatsService, useValue: {
@@ -132,7 +139,7 @@ function setup(opts: Options = {}): Harness {
 
   const fixture = TestBed.createComponent(MyProfilePage);
   fixture.detectChanges();
-  return { fixture, page: fixture.componentInstance, track, savePrefs, deleteGoal, updateUserProfile };
+  return { fixture, page: fixture.componentInstance, track, savePrefs, updateUserProfile };
 }
 
 /** A native input event carrying a raw value, as the tile handlers receive it. */
@@ -157,148 +164,16 @@ function cleanup(): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// goal_changed — the five actions, all reported from the sheet's dismiss role.
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('MyProfilePage analytics — goal_changed', () => {
-  afterEach(cleanup);
-
-  it('reports a created goal with bands and the resulting count, never the name', async () => {
-    const newGoal: Omit<Goal, 'id'> = {
-      name: 'Dream vacation',
-      icon: 'flag',
-      targetAmount: 20_000,
-      targetYear: CURRENT_YEAR + 4,
-      startingValue: 5_000,
-      perPaycheckOutsideFRED: 150,
-      completed: false,
-    };
-    const h = setup({ dismiss: { role: 'saved', data: newGoal } });
-
-    await h.page.openAddGoalSheet();
-
-    expect(h.track).toHaveBeenCalledTimes(1);
-    expect(h.track).toHaveBeenCalledWith({
-      name: 'goal_changed',
-      props: {
-        action: 'created',
-        icon: 'flag',
-        target_band: '10k_49k',
-        years_to_target: '3_5',
-        progress: '25_49',       // $5,000 of $20,000
-        goal_count: '1',         // counted AFTER the change
-      },
-    });
-    const sent = JSON.stringify(allProps(h.track));
-    expect(sent).not.toContain('Dream vacation');
-    expect(sent).not.toContain('g-new');
-  });
-
-  it('reports an edited goal, with the id left on the device', async () => {
-    const edited: Goal = { ...EXISTING_GOAL, targetAmount: 120_000, startingValue: 90_000 };
-    const h = setup({ goals: [EXISTING_GOAL], dismiss: { role: 'updated', data: edited } });
-
-    await h.page.openAddGoalSheet(EXISTING_GOAL);
-
-    expect(h.track).toHaveBeenCalledWith({
-      name: 'goal_changed',
-      props: {
-        action: 'updated',
-        icon: 'home',
-        target_band: '50k_249k',
-        years_to_target: '3_5',
-        progress: '75_99',       // $90,000 of $120,000
-        goal_count: '1',
-      },
-    });
-    expect(JSON.stringify(allProps(h.track))).not.toContain('g-1');
-  });
-
-  // One TestBed per spec: setup() configures the testing module, so calling it twice in a single
-  // spec throws "Cannot configure the test module when the test module has already been
-  // instantiated". The two sides of the toggle are therefore two specs.
-  it('reports the completed side of the toggle', async () => {
-    const h = setup({
-      goals: [EXISTING_GOAL],
-      dismiss: { role: 'completed', data: { ...EXISTING_GOAL, completed: true } },
-    });
-
-    await h.page.openAddGoalSheet(EXISTING_GOAL);
-
-    expect(h.track).toHaveBeenCalledWith({
-      name: 'goal_changed',
-      props: {
-        action: 'completed',
-        icon: 'home',
-        target_band: '50k_249k',
-        years_to_target: '3_5',
-        progress: '0_9',         // $5,000 of $60,000
-        goal_count: '1',
-      },
-    });
-  });
-
-  it('reports the reopened side of the same toggle', async () => {
-    const done: Goal = { ...EXISTING_GOAL, completed: true };
-    const h = setup({
-      goals: [done],
-      dismiss: { role: 'completed', data: { ...done, completed: false } },
-    });
-
-    await h.page.openAddGoalSheet(done);
-
-    expect(h.track).toHaveBeenCalledWith({
-      name: 'goal_changed',
-      props: {
-        action: 'reopened',
-        icon: 'home',
-        target_band: '50k_249k',
-        years_to_target: '3_5',
-        progress: '0_9',
-        goal_count: '1',
-      },
-    });
-  });
-
-  it('reports a removed goal from the goal it read before deleting it', async () => {
-    const h = setup({ goals: [EXISTING_GOAL], dismiss: { role: 'deleted', data: EXISTING_GOAL.id } });
-
-    await h.page.openAddGoalSheet(EXISTING_GOAL);
-
-    expect(h.deleteGoal).toHaveBeenCalledWith(USER_ID, 'g-1');
-    expect(h.track).toHaveBeenCalledWith({
-      name: 'goal_changed',
-      props: {
-        action: 'removed',
-        icon: 'home',
-        target_band: '50k_249k',
-        years_to_target: '3_5',
-        progress: '0_9',
-        goal_count: '0',         // the count the user is left with
-      },
-    });
-  });
-
-  it('sends nothing when the goal sheet is cancelled', async () => {
-    const h = setup({ goals: [EXISTING_GOAL], dismiss: { role: 'cancel' } });
-
-    await h.page.openAddGoalSheet(EXISTING_GOAL);
-
-    expect(h.track).not.toHaveBeenCalled();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // paywall_nudge_shown — presented, upgraded, dismissed. Billing is untouched.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('MyProfilePage analytics — paywall_nudge_shown', () => {
   afterEach(cleanup);
 
-  it('reports the goals veil nudge as shown, then dismissed', async () => {
-    const h = setup({ tier: 'core', dismiss: { role: undefined } });
+  it('reports the goals nudge from Add a goal as shown, then dismissed', async () => {
+    const h = setup({ tier: 'core', goals: [EXISTING_GOAL], dismiss: { role: undefined } });
 
-    await h.page.openGoalsVeilNudge();
+    await h.page.addGoal();
 
     expect(h.track.calls.allArgs().map((a) => a[0])).toEqual([
       { name: 'paywall_nudge_shown', props: { feature: 'goals', tier: 'core', action: 'shown' } },
@@ -334,9 +209,9 @@ describe('MyProfilePage analytics — paywall_nudge_shown', () => {
   });
 
   it('sends a null tier when the user has none', async () => {
-    const h = setup({ tier: '', dismiss: { role: undefined } });
+    const h = setup({ tier: '', goals: [EXISTING_GOAL], dismiss: { role: undefined } });
 
-    await h.page.openGoalsVeilNudge();
+    await h.page.addGoal();
 
     expect(h.track.calls.first().args[0].props.tier).toBeNull();
   });
@@ -469,34 +344,20 @@ describe('MyProfilePage analytics — error_shown', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// freedom_plan_changed belongs to the sheet. This page must not double it.
+// freedom_plan_changed belongs to the Freedom page. This page must not double it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('MyProfilePage analytics — the freedom sheet is counted once', () => {
+describe('MyProfilePage analytics: the Freedom plan is counted on its own page', () => {
   afterEach(cleanup);
 
-  it('persists a saved plan without firing a second freedom_plan_changed', async () => {
-    const h = setup({
-      tier: 'pro',
-      dismiss: { role: 'saved', data: { income: 4000, invest: 3000, annualReturn: 0.08, withdrawalRate: 0.04 } },
-    });
+  it('opening the Freedom page and coming back fires nothing and writes nothing from here', async () => {
+    const h = setup({ tier: 'pro' });
 
-    await h.page.openFreedomSheet();
+    (h.fixture.nativeElement.querySelector('[data-tour="freedom-row"]') as HTMLElement).click();
+    await flush();
+    h.page.ionViewWillEnter();                            // back from /freedom
 
-    expect(h.updateUserProfile).toHaveBeenCalledWith({ monthlyInvestment: 3000, retirementIncome: 48000 });
-    expect(h.track.calls.allArgs().map((a) => a[0].name)).not.toContain('freedom_plan_changed');
-  });
-
-  it('applies a rates-only change without firing anything from the page', async () => {
-    const h = setup({
-      tier: 'pro',
-      // The plan the page already holds ($5,000 income / $7,000 invest) with a new preset.
-      dismiss: { role: 'saved', data: { income: 5000, invest: 7000, annualReturn: 0.12, withdrawalRate: 0.04 } },
-    });
-
-    await h.page.openFreedomSheet();
-
-    expect(h.updateUserProfile).not.toHaveBeenCalled();   // nothing dirty, no server write
+    expect(h.updateUserProfile).not.toHaveBeenCalled();
     expect(h.track).not.toHaveBeenCalled();
   });
 });

@@ -87,6 +87,7 @@ describe('AppComponent: a Plaid OAuth return at cold start', () => {
             step$: new BehaviorSubject(null).asObservable(),
             suspended$: new BehaviorSubject(false).asObservable(),
             transit$: new BehaviorSubject(false).asObservable(),
+            hasSeenTour: () => true,
           },
         },
       ],

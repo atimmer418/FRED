@@ -1,0 +1,196 @@
+import { KID_COST_SOURCES, USDA_2015_ANNUAL_BY_BAND, USDA_2015_TOTAL } from '../constants/kid-costs';
+import {
+  collegePresets,
+  costCardSources,
+  everydayMonthlyForKid,
+  everydayMonthlyToday,
+  everydayRowLabel,
+  everydaySubLine,
+  familyMonthly,
+  familySizeFactor,
+  firstYearFactor,
+  firstYearTargetForRank,
+  inflationFactor,
+  kidAgeToday,
+  kidCostFigures,
+  kidRanks,
+  kidsAtHome,
+  perKidMonthly,
+} from './kid-cost.utils';
+
+describe('kidAgeToday and everydayMonthlyToday', () => {
+  const NOW = new Date(2026, 10, 7); // 2026-11-07
+
+  it('ages kids by whole years, counting a kid dated this year with no month as not yet born (Ruling R4)', () => {
+    expect(kidAgeToday(2025, 3, NOW)).toBe(1);
+    expect(kidAgeToday(2025, 12, NOW)).toBe(0);
+    expect(kidAgeToday(2026, 11, NOW)).toBe(0);
+    expect(kidAgeToday(2026, 12, NOW)).toBeNull();
+    expect(kidAgeToday(2026, null, NOW)).toBeNull();
+    expect(kidAgeToday(2024, null, NOW)).toBe(2);
+    expect(kidAgeToday(2030, null, NOW)).toBeNull();
+    expect(kidAgeToday(null, null, NOW)).toBeNull();
+  });
+
+  it('sums the USDA band for each kid at home, sized by the kids at home, to the nearest $10; unborn and 18+ kids add nothing', () => {
+    // One kid at home (the other arrives in 2030), so the only-child factor 1.27: 12,680 x 1.27 x inflation / 12 = ~1,908.
+    expect(everydayMonthlyToday([{ birthYear: 2025, birthMonth: 3 }, { birthYear: 2030, birthMonth: null }], NOW)).toBe(1910);
+    // Two at home (factor 1.00): ages 10 (9-11 band) and 17 (15-17 band); the 18-year-old is past the study.
+    expect(everydayMonthlyToday([
+      { birthYear: 2016, birthMonth: 1 }, { birthYear: 2009, birthMonth: 6 }, { birthYear: 2008, birthMonth: 1 },
+    ], NOW)).toBe(3210);
+    expect(everydayMonthlyToday([{ birthYear: null, birthMonth: null }], NOW)).toBe(0);
+    expect(everydayMonthlyToday([], NOW)).toBe(0);
+  });
+});
+
+describe('everyday per kid', () => {
+  const NOW = new Date(2026, 10, 10); // 10 Nov 2026
+
+  it('prices a 2-year-old only child at $1,910 (12,680 x 1.421586 x 1.27 / 12, nearest $10)', () => {
+    expect(everydayMonthlyForKid(2, 1)).toBe(1910);
+  });
+  it('prices two kids at home at $1,500 each for the 0-2 band', () => {
+    expect(everydayMonthlyForKid(2, 2)).toBe(1500);
+  });
+  it('returns 0 for age null, age 0 (the baby fund is year one) and age 18 and up', () => {
+    expect(everydayMonthlyForKid(null, 1)).toBe(0);
+    expect(everydayMonthlyForKid(0, 1)).toBe(0);
+    expect(everydayMonthlyForKid(18, 1)).toBe(0);
+  });
+  it('uses each USDA band: 1, 3, 6, 9, 12 and 15 price differently from their neighbours below', () => {
+    const bands = [1, 3, 6, 9, 12, 15].map(age => everydayMonthlyForKid(age, 2));
+    expect(bands).toEqual([1500, 1510, 1460, 1560, 1540, 1650]);
+  });
+  it('counts kids at home as those aged 0 to 17 today', () => {
+    expect(kidsAtHome([{ birthYear: 2024, birthMonth: 3 }, { birthYear: 2027, birthMonth: 3 }, { birthYear: 2008, birthMonth: 1 }, { birthYear: 2026, birthMonth: 11 }], NOW)).toBe(2);
+  });
+  it('everydayMonthlyToday is the sum of the per-kid figures', () => {
+    const kids = [{ birthYear: 2024, birthMonth: 3 }, { birthYear: 2020, birthMonth: 6 }];
+    expect(everydayMonthlyToday(kids, NOW)).toBe(everydayMonthlyForKid(2, 2) + everydayMonthlyForKid(6, 2));
+  });
+  it('labels and sub lines follow the band', () => {
+    expect(everydayRowLabel(2)).toBe('Age 2 costs');
+    expect(everydaySubLine(1)).toBe('Food, clothes, diapers and childcare');
+    expect(everydaySubLine(5)).toBe('Food, clothes, preschool and toys');
+    expect(everydaySubLine(8)).toBe('Food, clothes, school and activities');
+    expect(everydaySubLine(11)).toBe('Food, clothes, sports and school trips');
+    expect(everydaySubLine(14)).toBe('Food, clothes, a phone and activities');
+    expect(everydaySubLine(17)).toBe('Food, clothes, driving and activities');
+  });
+});
+
+describe('kid cost constants', () => {
+  it('six bands of three years sum to the USDA total', () =>
+    expect(USDA_2015_ANNUAL_BY_BAND.reduce((s, b) => s + 3 * b.annual, 0)).toBe(USDA_2015_TOTAL));
+  it('pins the inflation factor', () => expect(inflationFactor()).toBeCloseTo(1.421586, 6));
+});
+
+describe('familySizeFactor', () => {
+  it('follows the USDA table for 1 to 3 and the FRED estimate for 4, 5 and 6', () => {
+    expect(familySizeFactor(1)).toBe(1.27);
+    expect(familySizeFactor(2)).toBe(1);
+    expect(familySizeFactor(3)).toBe(0.76);
+    expect(familySizeFactor(4)).toBe(0.64);
+    expect(familySizeFactor(5)).toBe(0.568);
+    expect(familySizeFactor(6)).toBe(0.52);
+    expect(familySizeFactor(7)).toBe(0.52);
+    expect(familySizeFactor(0)).toBe(1.27);
+  });
+  it('extends by the third-child marginal of 0.28', () => {
+    expect(4 * familySizeFactor(4) - 3 * familySizeFactor(3)).toBeCloseTo(0.28, 10);
+    expect(5 * familySizeFactor(5) - 4 * familySizeFactor(4)).toBeCloseTo(0.28, 10);
+    expect(6 * familySizeFactor(6) - 5 * familySizeFactor(5)).toBeCloseTo(0.28, 10);
+  });
+});
+
+describe('firstYearFactor', () => {
+  it('is 1.27, 1.00, then 0.76 for every later rank', () =>
+    expect([1, 2, 3, 4, 5].map(firstYearFactor)).toEqual([1.27, 1, 0.76, 0.76, 0.76]));
+});
+
+describe('perKidMonthly and familyMonthly', () => {
+  it('familyMonthly(3) is 3510 and perKidMonthly(2) is 1540', () => {
+    expect(familyMonthly(3)).toBe(3510);
+    expect(perKidMonthly(2)).toBe(1540);
+  });
+  it('pins every family size to the nearest $10', () => {
+    expect([1, 2, 3, 4, 5].map(perKidMonthly)).toEqual([1950, 1540, 1170, 980, 870]);
+    expect([1, 2, 3, 4, 5].map(familyMonthly)).toEqual([1950, 3070, 3510, 3940, 4370]);
+  });
+});
+
+describe('kidCostFigures', () => {
+  it('pins per-child and family totals from unrounded inputs', () => {
+    expect(kidCostFigures(1).perChildTotal).toBe(421763);
+    expect(kidCostFigures(1).familyTotal).toBe(421763);
+    expect(kidCostFigures(2).perChildTotal).toBe(332097);
+    expect(kidCostFigures(2).familyTotal).toBe(664193);
+    expect(kidCostFigures(3).perChildTotal).toBe(252393);
+    expect(kidCostFigures(3).familyTotal).toBe(757180);
+  });
+  it('per-kid totals for 1..6 kids are 421763, 332097, 252393, 212542, 188631, 172690 within $1', () => {
+    const pins = [421763, 332097, 252393, 212542, 188631, 172690];
+    [1, 2, 3, 4, 5, 6].forEach((n, i) =>
+      expect(Math.abs(kidCostFigures(n).perChildTotal - pins[i])).withContext(`${n} kids`).toBeLessThanOrEqual(1));
+  });
+  it('names the family size', () =>
+    expect([1, 2, 3, 4, 5, 6].map(n => kidCostFigures(n).sizeWording))
+      .toEqual(['only', 'two', 'three_plus', 'four', 'five', 'six']));
+  it('pins the four stages for two kids', () => {
+    const s = kidCostFigures(2).stages;
+    expect(s.map(x => x.key)).toEqual(['0-2', '3-5', '6-11', '12-17']);
+    expect(s.map(x => Math.round(x.total))).toEqual([54077, 54290, 108879, 114850]);
+    expect(Math.round(s[2].annual)).toBe(18147);
+    expect(Math.round(s[3].annual)).toBe(19142);
+    expect(Math.round(s[0].monthly)).toBe(1502);
+  });
+  it('stage totals sum to the per-child total within two dollars', () => {
+    const f = kidCostFigures(3);
+    expect(Math.abs(f.stages.reduce((a, s) => a + s.total, 0) - f.perChildTotal)).toBeLessThanOrEqual(2);
+  });
+  it('carries the birth figure and the as-of label', () => {
+    const f = kidCostFigures(2);
+    expect(f.childbirthOutOfPocket).toBe(2743);
+    expect(f.asOfLabel).toBe('September 2026');
+  });
+});
+
+describe('firstYearTargetForRank', () => {
+  it('firstYearTargetForRank keeps 25700, 20800, 16500 and 16500 for rank 5', () =>
+    expect([1, 2, 3, 4, 5].map(firstYearTargetForRank)).toEqual([25700, 20800, 16500, 16500, 16500]));
+});
+
+describe('kidRanks', () => {
+  it('orders by birth month with undecided last', () =>
+    expect(
+      kidRanks([
+        { birthYear: null, birthMonth: null },
+        { birthYear: 2029, birthMonth: 3 },
+        { birthYear: 2024, birthMonth: null },
+      ])
+    ).toEqual([3, 2, 1]));
+  it('keeps list order for two undecided kids', () =>
+    expect(
+      kidRanks([
+        { birthYear: null, birthMonth: null },
+        { birthYear: null, birthMonth: null },
+      ])
+    ).toEqual([1, 2]));
+});
+
+describe('collegePresets and sources', () => {
+  it('is four years at the College Board prices', () =>
+    expect(collegePresets().map(p => p.amount)).toEqual([47800, 123960, 180000]));
+  it('keeps the College Board off the cost card', () => {
+    expect(costCardSources().length).toBe(3);
+    expect(costCardSources().some(s => s.name.startsWith('College Board'))).toBeFalse();
+  });
+  it('has no em dash and every source has a year and an https url', () => {
+    expect(JSON.stringify(KID_COST_SOURCES)).not.toMatch(/\u2014/);
+    KID_COST_SOURCES.forEach(s => {
+      expect(s.year.length).toBeGreaterThan(0);
+      expect(s.url.startsWith('https://')).toBeTrue();
+    });
+  });
+});

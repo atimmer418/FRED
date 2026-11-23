@@ -204,7 +204,13 @@ export class TabsPage implements OnInit, AfterViewInit {
    */
   onSlideChange(event: Event) {
     const swiper = (event.target as SwiperContainer).swiper;
-    const tab = TAB_ORDER[swiper?.activeIndex ?? 0] ?? 'tab1';
+    // Swiper fires this from inside its own constructor when the pager starts on a later tab
+    // (a launch that reopens on Profile), before the instance is reachable here. There is no
+    // index to read yet and nothing changed: ngOnInit already set the starting tab.
+    if (!swiper) {
+      return;
+    }
+    const tab = TAB_ORDER[swiper.activeIndex ?? 0] ?? 'tab1';
     if (tab === this.activeTab()) {
       return;
     }
@@ -223,7 +229,12 @@ export class TabsPage implements OnInit, AfterViewInit {
   /** Fires when a settle COMPLETES (drag release or programmatic slideTo). */
   onTransitionEnd(event: Event) {
     const swiper = (event.target as SwiperContainer).swiper;
-    const tab = TAB_ORDER[swiper?.activeIndex ?? 0] ?? 'tab1';
+    // Same setup-time event as in onSlideChange. Reading it as index 0 would rewrite the URL
+    // to tab1 and activate tab1 while the pager is showing another tab.
+    if (!swiper) {
+      return;
+    }
+    const tab = TAB_ORDER[swiper.activeIndex ?? 0] ?? 'tab1';
     if (tab === this.settledTab) {
       return;
     }

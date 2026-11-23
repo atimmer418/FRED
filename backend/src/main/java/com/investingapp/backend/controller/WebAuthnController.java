@@ -62,6 +62,9 @@ public class WebAuthnController {
     @Autowired
     private JwtUtils jwtUtils; // Your JWT utility/service class
 
+    @Autowired
+    private com.investingapp.backend.repository.PasskeyCredentialRepository passkeyCredentialRepository;
+
     /**
      * Null outside the local/dev/test/ci profiles, where the bean is not registered at all. A null
      * here is what makes SIMULATED_ATTESTATION impossible in prod.
@@ -129,6 +132,17 @@ public class WebAuthnController {
         }
         String email = jwtUtils.getUserNameFromJwtToken(token);
         logger.info("Received recovery passkey re-registration start for email: {}", email);
+
+        // SECURITY: this is for an account that has just been through recovery, which removes every
+        // passkey. An account that still has one must not get a new passkey from a session token
+        // alone, or a stolen token would be enough to add the thief's own passkey and keep the
+        // account for good.
+        Long userId = userRepository.findByEmail(email).map(User::getId).orElse(null);
+        if (userId != null && passkeyCredentialRepository.countByUser_Id(userId) > 0) {
+            logger.warn("Refused recovery passkey registration for user {}: account already has a passkey", userId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("This account already has a passkey. Sign in with it.");
+        }
 
         try {
             PublicKeyCredentialCreationOptions options = webAuthnService.startRecoveryRegistrationFlow(email);
@@ -237,11 +251,14 @@ public class WebAuthnController {
             String email = (body != null) ? (String) body.get("email") : null;
             
             PublicKeyCredentialRequestOptions options;
-            if (email != null && !email.isBlank()) {
+            if (email != null && !email.isBlank() && Boolean.TRUE.equals(userRepository.existsByEmail(email))) {
                 // Account-specific flow: restricts allowCredentials to this user's passkeys
                 logger.info("Starting account-specific passkey authentication for: {}", email);
                 options = webAuthnService.startAuthenticationFlow(email);
             } else {
+                // No email, or an email no account has. The second case is a device that still
+                // remembers an address from before an email change: it must still be able to sign
+                // in, and the passkey itself says who the user is.
                 // Usernameless (discoverable) flow: any passkey on the device
                 logger.info("Starting discoverable passkey authentication (Usernameless flow)");
                 options = webAuthnService.startAuthenticationFlow();
@@ -317,7 +334,11 @@ public class WebAuthnController {
                         String loggedInEmail = jwtUtils.getUserNameFromJwtToken(token);
                         String authenticatedEmail = serviceResponse.getEmail();
                         
-                        if (!loggedInEmail.equalsIgnoreCase(authenticatedEmail)) {
+                        // A token whose email no account has any more (it was issued before an
+                        // email change) names nobody, so there is no logged-in account to match.
+                        // The passkey alone decides who this is, as in a normal sign-in.
+                        boolean tokenNamesAnAccount = Boolean.TRUE.equals(userRepository.existsByEmail(loggedInEmail));
+                        if (tokenNamesAnAccount && !loggedInEmail.equalsIgnoreCase(authenticatedEmail)) {
                             logger.warn("Step-Up Auth Mismatch! Logged in: {}, Authenticated: {}", loggedInEmail, authenticatedEmail);
                             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                                 .body("Authentication failed: You must authenticate with the currently logged-in account.");

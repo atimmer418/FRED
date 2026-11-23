@@ -3,16 +3,16 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import {
   IonHeader, IonToolbar, IonContent,
   IonSpinner
 } from '@ionic/angular/standalone';
 import { KeyboardAvoidDirective } from '../../directives/keyboard-avoid.directive';
 import { environment } from '../../../environments/environment';
-import { AuthService } from '../../services/auth.service';
 import { PasskeyService } from '../../services/passkey.service';
-import { PinService } from '../../services/pin.service';
+import { NativePasskeyService } from '../../services/native-passkey.service';
+import { KeychainSyncService } from '../../services/keychain-sync.service';
 import { ToastService } from '../../services/toast.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
@@ -20,8 +20,35 @@ import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { addIcons } from 'ionicons';
 import { mailOutline, alertCircleOutline, shieldCheckmarkOutline } from 'ionicons/icons';
 import { get } from '@github/webauthn-json';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 
+/** No request on this page may hang forever: there is no global HTTP timeout in the app. */
+const REQUEST_TIMEOUT_MS = 30_000;
+/** Safari's WebAuthn get() can hang without settling when it is not happy with the gesture. */
+const PASSKEY_PROMPT_TIMEOUT_MS = 90_000;
+
+/** Thrown when the passkey challenge could not be fetched, as opposed to the prompt being refused. */
+class ChallengeUnavailableError extends Error {
+  constructor(readonly cause: unknown) {
+    super('Passkey challenge unavailable');
+  }
+}
+
+/** What the passkey prompt hands back: the signed assertion and the challenge it answers. */
+interface PasskeyProof {
+  passkeySessionId: string;
+  credential: unknown;
+}
+
+/**
+ * Change of email, in two steps.
+ *
+ *   1. The user types the new address and passes the passkey prompt. The signed result of that
+ *      prompt goes to the server WITH the request, and the server checks it. The prompt on its own
+ *      proves nothing to the server, so it is never enough just to have shown it.
+ *   2. The server sends a code to the new address. The email only changes once that code is
+ *      entered here.
+ */
 @Component({
   selector: 'app-change-email',
   templateUrl: './change-email.page.html',
@@ -37,16 +64,22 @@ import { firstValueFrom } from 'rxjs';
 export class ChangeEmailPage implements OnInit {
   currentEmail: string = '';
   newEmail: string = '';
-  
+  code: string = '';
+
+  /** 'email' = typing the new address. 'code' = the code has been sent and is being entered. */
+  step: 'email' | 'code' = 'email';
+
   isLoading = false;
+  /** True once the change has gone through, so nothing can be tapped while the page leaves. */
+  isDone = false;
   errorMessage: string = '';
 
   constructor(
     private router: Router,
     private http: HttpClient,
-    private authService: AuthService,
     private passkeyService: PasskeyService,
-    private pinService: PinService,
+    private nativePasskeyService: NativePasskeyService,
+    private keychainSyncService: KeychainSyncService,
     private toastService: ToastService,
     private navCtrl: NavController,
     private analytics: AnalyticsService
@@ -71,128 +104,164 @@ export class ChangeEmailPage implements OnInit {
   }
 
   canSave(): boolean {
-    return this.newEmail.length > 0 && 
+    return this.newEmail.length > 0 &&
            this.isValidEmail(this.newEmail) &&
            this.newEmail !== this.currentEmail;
   }
 
+  canConfirm(): boolean {
+    return /^\d{6}$/.test(this.code.trim());
+  }
+
+  /** Step 1: passkey prompt, then ask the server to send a code to the new address. */
   async initiateEmailChange() {
-    if (!this.canSave()) return;
+    if (!this.canSave() || this.isLoading) return;
+
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    let proof: PasskeyProof;
+    try {
+      proof = await this.getPasskeyProof();
+    } catch (error: any) {
+      console.error('Passkey check failed:', error);
+      if (error instanceof ChallengeUnavailableError) {
+        // The server or the network failed before any prompt was shown. That is not the user
+        // declining to confirm who they are.
+        this.showServerError(error.cause, 'We could not start the email change.');
+        return;
+      }
+      this.isLoading = false;
+      this.errorMessage = 'Confirm it is you with your passkey to change your email.';
+      this.analytics.trackErrorShown('auth_required', 'my_profile', 'toast', null, false);
+      this.toastService.showToast(this.errorMessage, 'danger');
+      return;
+    }
+
+    try {
+      await firstValueFrom(this.http.post<any>(
+        `${environment.backendApiUrl}/user/email-change/start`,
+        { newEmail: this.newEmail.trim(), ...proof },
+        { headers: this.authHeaders() },
+      ).pipe(timeout(REQUEST_TIMEOUT_MS)));
+      this.isLoading = false;
+      this.code = '';
+      this.step = 'code';
+    } catch (error: any) {
+      this.showServerError(error, 'We could not start the email change.');
+    }
+  }
+
+  /** Step 2: send the code back. The email changes only if it is right. */
+  async confirmCode() {
+    if (!this.canConfirm() || this.isLoading || this.isDone) return;
 
     this.isLoading = true;
     this.errorMessage = '';
 
     try {
-      // 1. Try Biometric / Passkey Re-authentication first
-      await this.performBiometricVerification();
-      
-      // 2. If successful, proceed to update email
-      await this.performEmailUpdate();
-
-    } catch (error: any) {
-      console.error('Biometric Verification Failed:', error);
-      
-      // Fallback: If biometrics fail or not available, allow PIN as backup check
-      // This is a UX fallback.
-      if (await this.pinService.hasPin()) {
-         try {
-            const pinVerified = await this.pinService.promptPin('verify');
-            if (pinVerified) {
-                await this.performEmailUpdate();
-                return;
-            }
-         } catch (pinError) {
-             console.error('PIN verification failed', pinError);
-         }
-      }
-
+      const response = await firstValueFrom(this.http.post<any>(
+        `${environment.backendApiUrl}/user/email-change/confirm`,
+        { code: this.code.trim() },
+        { headers: this.authHeaders() },
+      ).pipe(timeout(REQUEST_TIMEOUT_MS)));
+      this.isDone = true;
       this.isLoading = false;
-      this.errorMessage = 'Authentication required to update email.';
-      // Reached only once BOTH the passkey and the PIN fallback have failed or been dismissed, so
-      // one event per attempt rather than one per factor.
-      this.analytics.trackErrorShown('auth_required', 'my_profile', 'toast', null, false);
-      this.toastService.showToast(this.errorMessage, 'danger');
+
+      // The session token names the user by email, so the server hands back a new one.
+      localStorage.setItem('userEmail', response.newEmail);
+      if (response.jwtToken) {
+        JwtTokenUtils.storeJwtToken(response.jwtToken, undefined, response.newEmail);
+      }
+      this.currentEmail = response.newEmail;
+      // The keychain copy is what a reinstall or a new phone uses to find the account.
+      void this.keychainSyncService.storeAccountEmail(response.newEmail).catch(() => false);
+
+      this.toastService.showToast('Email updated successfully', 'success');
+      setTimeout(() => {
+        this.router.navigate(['/security-settings']);
+      }, 1500);
+    } catch (error: any) {
+      const serverCode = error?.error?.code;
+      this.showServerError(error, 'We could not confirm that code.');
+      // These mean the pending change is gone, so the only way on is to start over.
+      if (['CODE_EXPIRED', 'TOO_MANY_ATTEMPTS', 'NO_PENDING_CHANGE', 'EMAIL_IN_USE'].includes(serverCode)) {
+        this.startOver();
+      }
     }
   }
 
-  // Uses WebAuthn (Passkey) to re-verify user presence
-  private async performBiometricVerification(): Promise<void> {
+  /** Back to typing the address. Any pending code is replaced when a new one is asked for. */
+  startOver() {
+    this.step = 'email';
+    this.code = '';
+  }
+
+  private showServerError(error: any, fallback: string) {
+    this.isLoading = false;
+    console.error('Email change request failed:', error);
+    this.errorMessage = error?.error?.message || fallback;
+    this.analytics.trackErrorShown(
+      isNetworkFailure(error) ? 'network' : 'save_failed',
+      'my_profile',
+      'toast',
+      httpStatusOf(error),
+      false,
+    );
+    this.toastService.showToast(this.errorMessage, 'danger');
+  }
+
+  private authHeaders(): HttpHeaders {
+    const token = JwtTokenUtils.getValidJwtToken();
+    let headers = new HttpHeaders();
+    if (token) {
+      headers = headers.set('Authorization', `Bearer ${token}`);
+    }
+    return headers;
+  }
+
+  /**
+   * Runs the passkey prompt (the native sheet on iOS, WebAuthn in a browser) and returns the
+   * signed assertion WITHOUT finishing a sign-in. The server verifies it as part of the email
+   * change request, which is what makes the check count.
+   */
+  private async getPasskeyProof(): Promise<PasskeyProof> {
+    let startResponse: { requestOptions: string; sessionId: string };
     try {
-      // Get challenge from backend
-      const startResponse = await firstValueFrom(this.passkeyService.startAuthentication());
-      
-      let requestOptions;
-      if (typeof startResponse.requestOptions === 'string') {
-        requestOptions = JSON.parse(startResponse.requestOptions);
-      } else {
-        requestOptions = startResponse.requestOptions;
-      }
-
-      // Handle structure where challenge is inside publicKey
-      // This logic is copied from PasskeyPromptComponent to ensure consistency
-      // The @github/webauthn-json library handles base64url decoding of challenge/id automatically
-      if (!requestOptions.publicKey && requestOptions.challenge) {
-          // If options are flat (legacy), wrap them
-          requestOptions = { publicKey: requestOptions };
-      }
-
-      // Trigger the browser/device WebAuthn prompt using the library
-      const credential = await get(requestOptions);
-
-      // Verify the assertion with backend
-      const finishResponse = await firstValueFrom(
-          this.passkeyService.finishAuthentication(credential, startResponse.sessionId)
-      );
-
-      if (!finishResponse.success) {
-         throw new Error('Backend verification failed: ' + (finishResponse.message || 'Unknown error'));
-      }
-      
-      return; // Success
-    } catch (e) {
-      console.error('Biometric verification error:', e);
-      throw e;
+      startResponse = await firstValueFrom((
+        this.currentEmail
+          ? this.passkeyService.startAuthenticationForUser(this.currentEmail)
+          : this.passkeyService.startAuthentication()
+      ).pipe(timeout(REQUEST_TIMEOUT_MS)));
+    } catch (error) {
+      throw new ChallengeUnavailableError(error);
     }
-  }
 
-  private async performEmailUpdate() {
-    const payload = {
-      currentEmail: this.currentEmail,
-      newEmail: this.newEmail
-    };
+    const requestOptions: any = typeof startResponse.requestOptions === 'string'
+      ? JSON.parse(startResponse.requestOptions)
+      : startResponse.requestOptions;
 
-    this.http.post<any>(`${environment.backendApiUrl}/user/update-email`, payload)
-      .subscribe({
-        next: (response) => {
-          this.isLoading = false;
-          
-          // Update localStorage
-          localStorage.setItem('userEmail', response.newEmail);
-          if (response.jwtToken) {
-            JwtTokenUtils.storeJwtToken(response.jwtToken, undefined, response.newEmail);
-          }
+    const publicKey = requestOptions.publicKey ?? requestOptions;
+    if (!publicKey?.challenge) {
+      throw new Error('Missing challenge in passkey options');
+    }
 
-          this.toastService.showToast('Email updated successfully', 'success');
-          
-          setTimeout(() => {
-            this.router.navigate(['/security-settings']);
-          }, 1500);
-        },
-        error: (error) => {
-          this.isLoading = false;
-          console.error('Error updating email:', error);
-          this.errorMessage = error.error?.message || 'Failed to update email.';
-          this.analytics.trackErrorShown(
-            isNetworkFailure(error) ? 'network' : 'save_failed',
-            'my_profile',
-            'toast',
-            httpStatusOf(error),
-            false,
-          );
-          this.toastService.showToast(this.errorMessage, 'danger');
-        }
+    let credential: unknown;
+    if (this.nativePasskeyService.isAvailable) {
+      credential = await this.nativePasskeyService.authenticate({
+        challenge: publicKey.challenge,
+        rpId: publicKey.rpId ?? publicKey.rp?.id,
+        userVerification: publicKey.userVerification,
+        allowedCredentials: (publicKey.allowCredentials ?? []).map((c: any) => ({ id: c.id })),
       });
-  }
+    } else {
+      credential = await Promise.race([
+        get(requestOptions.publicKey ? requestOptions : { publicKey: requestOptions }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('PASSKEY_PROMPT_TIMEOUT')), PASSKEY_PROMPT_TIMEOUT_MS)),
+      ]);
+    }
 
-  // --- WebAuthn Helpers (Removed manual implementation) ---
+    return { passkeySessionId: startResponse.sessionId, credential };
+  }
 }

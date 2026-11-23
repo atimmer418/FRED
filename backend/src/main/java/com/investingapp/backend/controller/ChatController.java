@@ -39,7 +39,7 @@ public class ChatController {
         // SECURITY: never trust a client-supplied userId — personalization must
         // follow the authenticated principal.
         ChatRequest bound = new ChatRequest(request.message(), authenticatedUserId(),
-                request.sessionId(), request.generateTitle());
+                sessionOrDefault(request.sessionId()), request.generateTitle());
         ChatResponse response = chatService.processChat(bound);
         return ResponseEntity.ok(response);
     }
@@ -54,8 +54,17 @@ public class ChatController {
         // real portfolio of whichever user the request binds, so it must always
         // be the authenticated principal, never client input.
         ChatRequest request = new ChatRequest(message, authenticatedUserId(),
-                sessionId != null ? sessionId : "default-session", generateTitle);
+                sessionOrDefault(sessionId), generateTitle);
         return chatService.streamChat(request);
+    }
+
+    /**
+     * A request with no session id goes to the caller's own default conversation. The name is the
+     * same for everyone, and that is safe: every message lookup is by user AND session, so one
+     * user's "default-session" is a different conversation from another's.
+     */
+    private static String sessionOrDefault(String sessionId) {
+        return (sessionId == null || sessionId.isBlank()) ? "default-session" : sessionId;
     }
 
     /**

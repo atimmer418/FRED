@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Collections; // Import
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @Service
@@ -186,8 +185,9 @@ public class ChatService {
         String ragContext = formatRagChunks(ragChunks);
 
         // 6. Load History (Top 10 most recent)
+        // Only this user's messages: a session id alone does not identify a conversation.
         List<ChatMessage> historyEntities = chatMessageRepository
-                .findTop10BySessionIdOrderByCreatedAtDesc(request.sessionId());
+                .findTop10ByUserIdAndSessionIdOrderByCreatedAtDesc(request.userId(), request.sessionId());
         // Reverse to Chronological Order
         List<ChatMessage> chronologicalHistory = new ArrayList<>(historyEntities);
         Collections.reverse(chronologicalHistory);
@@ -317,8 +317,9 @@ public class ChatService {
         List<String> ragChunks = ragService.retrieveChunks(request.message());
         String ragContext = formatRagChunks(ragChunks);
 
+        // Only this user's messages: a session id alone does not identify a conversation.
         List<ChatMessage> historyEntities = chatMessageRepository
-                .findTop10BySessionIdOrderByCreatedAtDesc(request.sessionId());
+                .findTop10ByUserIdAndSessionIdOrderByCreatedAtDesc(request.userId(), request.sessionId());
         List<ChatMessage> chronologicalHistory = new ArrayList<>(historyEntities);
         Collections.reverse(chronologicalHistory);
 
@@ -454,7 +455,7 @@ public class ChatService {
      *  throwaway follow-up ("↑") — prefer the session's opening question. */
     private String titleSource(ChatRequest request) {
         return chatMessageRepository
-                .findTopBySessionIdAndRoleOrderByCreatedAtAsc(request.sessionId(), "user")
+                .findTopByUserIdAndSessionIdAndRoleOrderByCreatedAtAsc(request.userId(), request.sessionId(), "user")
                 .map(ChatMessage::getContent)
                 .filter(content -> content != null && !content.isBlank())
                 .orElse(request.message());
@@ -482,42 +483,30 @@ public class ChatService {
         return title;
     }
 
-    public List<ChatMessage> getChatHistory(String sessionId) {
-        if (sessionId == null || sessionId.trim().isEmpty()) {
+    /**
+     * SECURITY: one user's messages in one session. Session ids are chosen by the app and are not
+     * secret, so the user id is part of the query itself: another user's session id, or one two
+     * users happen to share, gives back only the caller's own messages (none, if they have none
+     * there), exactly as an unknown session id does.
+     */
+    public List<ChatMessage> getChatHistoryForUser(String sessionId, Long userId) {
+        if (userId == null || sessionId == null || sessionId.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        List<ChatMessage> history = chatMessageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId);
+        List<ChatMessage> history = new ArrayList<>(
+                chatMessageRepository.findByUserIdAndSessionIdOrderByCreatedAtDesc(userId, sessionId));
         Collections.reverse(history); // Return in chronological order
         return history;
     }
 
-    /**
-     * SECURITY: session-scoped history restricted to the requesting user —
-     * session IDs are client-generated and must not act as bearer tokens for
-     * another user's conversation.
-     */
-    public List<ChatMessage> getChatHistoryForUser(String sessionId, Long userId) {
-        if (userId == null) {
-            return Collections.emptyList();
-        }
-        return getChatHistory(sessionId).stream()
-                .filter(m -> userId.equals(m.getUserId()))
-                .toList();
-    }
-
+    /** The user's most recent conversation: their own messages in the session they last wrote in. */
     public List<ChatMessage> getRecentSessionHistory(Long userId) {
         if (userId == null)
             return Collections.emptyList();
 
-        // 1. Find the MOST RECENT message for this user to get the latest sessionId
-        Optional<ChatMessage> latestMsg = chatMessageRepository.findTopByUserIdOrderByCreatedAtDesc(userId);
-
-        if (latestMsg.isPresent()) {
-            String lastSessionId = latestMsg.get().getSessionId();
-            return getChatHistory(lastSessionId);
-        }
-
-        return Collections.emptyList();
+        return chatMessageRepository.findTopByUserIdOrderByCreatedAtDesc(userId)
+                .map(latest -> getChatHistoryForUser(latest.getSessionId(), userId))
+                .orElse(Collections.emptyList());
     }
 
     private String buildUserContext(User user) {

@@ -6,6 +6,12 @@
 # lib/helpers.sh) and ran at least one request. This runner once printed "ALL SUITES PASSED" for
 # months while every suite failed to load its helpers and sent nothing, because "0 failed" looked
 # the same as "0 run". Zero requests is now a failure, for a suite and for the whole run.
+#
+# One exception: a suite that exits 0 and reports skip>0 with no requests has said, in its own
+# RESULT line, that it chose not to run (the Paycheck Sandbox suites do this when FRED_API_BASE or
+# the Sandbox fixtures are absent, and in CI, whose backend runs the offline ci profile). That is a
+# declared skip and is reported as such; a suite that is silent about why it sent nothing is still
+# broken.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FAILED_SUITES=()
@@ -34,7 +40,9 @@ run_suite() {
   skip=$(echo "$result" | sed -E "s/.*skip=([0-9]+).*/\1/")
   TOTAL_PASS=$((TOTAL_PASS + pass)); TOTAL_FAIL=$((TOTAL_FAIL + fail)); TOTAL_SKIP=$((TOTAL_SKIP + skip))
 
-  if [ $((pass + fail)) -eq 0 ]; then
+  if [ $((pass + fail)) -eq 0 ] && [ "$skip" -gt 0 ] && [ "$code" -eq 0 ]; then
+    echo "SUITE SKIPPED: $name sent no requests and said why (skip=$skip)."
+  elif [ $((pass + fail)) -eq 0 ]; then
     echo "SUITE BROKEN: $name ran zero requests."
     FAILED_SUITES+=("$name (zero requests)")
   elif [ "$code" -ne 0 ] || [ "$fail" -ne 0 ]; then

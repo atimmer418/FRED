@@ -1,7 +1,7 @@
 # Monthly Market Breakdown redesign: design
 
 Date: 2026-11-22
-Status: awaiting Andy's approval
+Status: approved by Andy 2026-11-22
 Builds on: `2026-07-15-monthly-market-breakdown-design.md` (the feature as shipped)
 
 ## Intent
@@ -247,7 +247,8 @@ the hands-off choice.
 
 ## Other fixed pieces
 
-- `app.email.privacy-url` property for the footer link. Andy supplies the value.
+- `app.email.privacy-url` property for the footer link, default
+  `https://fredvested.com/privacy` (given by Andy 2026-11-22).
 - Unsubscribe link stays a placeholder for now, as today. The real one is a go-live gate
   and is out of scope here.
 - The plain-text body is rebuilt from the same pieces: headline, stories as numbered

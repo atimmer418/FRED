@@ -2,8 +2,10 @@
 # Paycheck Autopilot Sandbox guard (spec 13.2). Prints [SKIP] and exits 0 unless FRED_API_BASE is set, the
 # dev shadow report answers 200 from a non-ci profile, and FRED_PAYCHECK_USER_ID / _PUBLIC_ID are set.
 
+# Every exit prints the RESULT line run-all.sh reads (see finish_suite in helpers.sh).
 sandbox_skip() {
   echo "[SKIP] $1"
+  echo "RESULT pass=${PASS:-0} fail=${FAIL:-0} skip=1"
   exit 0
 }
 

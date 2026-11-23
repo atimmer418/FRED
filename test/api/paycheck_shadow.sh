@@ -20,4 +20,5 @@ else
 fi
 echo "---"
 echo "Paycheck shadow: $PASS passed, $FAIL failed"
+echo "RESULT pass=$PASS fail=$FAIL skip=0"
 exit $FAIL

@@ -34,4 +34,5 @@ else
 fi
 echo "---"
 echo "Paycheck webhooks: $PASS passed, $FAIL failed"
+echo "RESULT pass=$PASS fail=$FAIL skip=0"
 exit $FAIL

@@ -13,4 +13,5 @@ check "the response says no sync ran" [ "$(printf '%s' "$DEV_BODY" | python3 -c 
 check "the reconcile alone confirms one shadow cycle" wait_for shadowCycles '1' 120 reconcile
 echo "---"
 echo "Paycheck lost webhook: $PASS passed, $FAIL failed"
+echo "RESULT pass=$PASS fail=$FAIL skip=0"
 exit $FAIL

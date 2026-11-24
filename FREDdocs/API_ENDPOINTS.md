@@ -72,7 +72,6 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | `POST` | `/api/investment-schedule/create` | Create or update schedule (upsert) | Yes | `CreateInvestmentScheduleRequest` | `InvestmentScheduleResponse` |
 | `GET` | `/api/investment-schedule/current` | Get current schedule | Yes | None | `InvestmentScheduleResponse` |
 | `GET` | `/api/investment-schedule/all` | Get all schedules | Yes | None | `List<InvestmentScheduleResponse>` |
-| `POST` | `/api/investment-schedule/update-ach-request-id` | Update ACH request ID | Yes | `{ achRequestId, userEmail }` | `InvestmentScheduleResponse` |
 | `POST` | `/api/investment-schedule/{scheduleId}/pause` | Pause schedule | Yes | None | `InvestmentScheduleResponse` |
 | `POST` | `/api/investment-schedule/{scheduleId}/resume` | Resume paused schedule | Yes | None | `InvestmentScheduleResponse` |
 
@@ -131,7 +130,9 @@ All available API endpoints in the backend. Keep this file updated when adding n
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/plaid/create_link_token` | Create Plaid link token | Yes | None | LinkTokenResponse |
 | `POST` | `/api/plaid/exchange_public_token` | Exchange public token for access token | Yes | `{ public_token }` | Success/Error |
-| `GET` | `/api/plaid/primary-bank-account` | Primary bank account, display fields only (never the Plaid access token) | Yes | None | `{ accountId, institutionName, accountName, accountType, accountSubtype, mask, itemStatus }` |
+| `GET` | `/api/plaid/primary-bank-account` | Primary bank account, display fields only (never the Plaid access token) | Yes | None | `{ accountId, institutionName, accountName, accountType, accountSubtype, mask, itemStatus, transactionsConsented, consentExpiresAt }` (`transactionsConsented` true, false or null for unknown; `consentExpiresAt` ISO date-time with offset, or null) |
+| `POST` | `/api/plaid/update-mode-complete` | Finish an update-mode Link (reconnect or consent): re-reads consent and its expiry, re-registers the webhook, repairs a login. Never exchanges a token | Yes | None | `{ result }`: `CONSENT_GRANTED`, `CONSENT_STILL_MISSING`, `REPAIRED` or `NO_CHANGE`; 409 `STALE_ITEM` or `UPDATE_MODE_UNAVAILABLE`; 502 `PLAID_ERROR` |
+| `GET` | `/api/paycheck-detection/status` | Paycheck detection state (spec 8.1), database only; the first call for a user with no sync cursor starts the initial sync in the background. Not called by the app yet (Phase 1) | Yes | None | the spec 8.1 body (`PaycheckDetectionStatusResponse`) |
 
 ---
 
@@ -230,12 +231,45 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 ---
 
+## 15. Admin (`/api/admin`), every profile, curl only
+
+| Method | Endpoint | Description | Auth | Request Body | Response |
+|--------|----------|-------------|------|-------------|----------|
+| `GET` | `/api/admin/plaid/items` | One row per user holding a Plaid token, by `publicId`; never the token or cursor | `X-Admin-Key` + `X-Admin-Actor` | None | `PlaidItemRow[]` |
+| `POST` | `/api/admin/plaid/{userId}/remove-item?reason=` | Queue `/item/remove`, mark `REMOVED`; schedule, holds and ACH untouched | `X-Admin-Key` + `X-Admin-Actor` | None | 200 `{ result: "QUEUED" }`; 404; 409 `NO_PLAID_ITEM` or `ITEM_ALREADY_REMOVED` |
+| `POST` | `/api/admin/users/{id}/delete?reason=` | Delete the user (reason ADMIN); replaces `POST /api/dev/users/{id}/delete` | `X-Admin-Key` + `X-Admin-Actor` | None | 200 `{ deleted: true, userId }`; 404; 409 `DELETION_DEFERRED` |
+
+> **Every profile, prod included.** A missing or wrong `X-Admin-Key` (env `ADMIN_TOOLS_KEY`; prod
+> refuses to start without it) gets **404 with an empty body**; a blank `X-Admin-Actor` gets **400**.
+> Every call writes one `admin_actions` row. Curl only (no CORS). A write verb's user id comes from
+> `SELECT id FROM users WHERE public_id = ?`.
+
+## Admin: Paycheck Autopilot (`/api/admin/paycheck`)
+
+Every profile, prod included; curl only. Each call needs `X-Admin-Key` (`ADMIN_TOOLS_KEY`; else 404, empty body) and a non-blank `X-Admin-Actor` (else 400), and writes one `admin_actions` row, refusals included. No verb writes the schedule status or a blocking hold, or moves money. Unknown user: 404 `USER_NOT_FOUND`.
+
+| Method | Path under `/api/admin/paycheck` | Does | Refusals |
+|--------|------|------|----------|
+| `GET` | `/{userId}/status` | 8.1 status, streams with raw descriptors, 50 cycles, 20 inbox rows | |
+| `GET` | `/{userId}/plaid-item` | `plaid_*` user columns, token and cursor as presence only | |
+| `POST` | `/{userId}/sync`, `/evaluate`, `/reconcile` | Pipeline (MANUAL), detection (RECONCILE), one-user reconcile | 409 `NO_ITEM` (sync) |
+| `POST` | `/{userId}/hold` `{ reason, note }` | Sets ITEM_LOGIN_REQUIRED, PERMISSION_REVOKED, CONSENT_REQUIRED, BANK_CHANGE or null; no event | 422 `HOLD_RESERVED`; 409 `HOLD_BLOCKING`, `NO_SCHEDULE` |
+| `POST` | `/{userId}/clear-review` `{ note }` | Clears MANUAL_REVIEW; `schedule_resumed` (system, `review_cleared`) only when ACTIVE | 409 `ACCOUNT_REJECTED`, `NOT_IN_REVIEW`, `NO_SCHEDULE` |
+| `POST` | `/{userId}/promote-stream/{streamId}` | PRIMARY (a CANDIDATE or DORMANT stream becomes PROVISIONAL; PROVISIONAL and CONFIRMED keep their state), old primary SECONDARY, mirrored | 404; 409 `STREAM_NOT_PROMOTABLE` |
+| `POST` | `/{userId}/retire-stream/{streamId}` | RETIRED `ADMIN`, its OPEN cycle VOIDED `ADMIN`, mirror cleared | 404 |
+| `POST` | `/{userId}/cycles/{cycleId}/void` | VOIDED `ADMIN` for OPEN or CONFIRMED with no execution | 404; 409 `CYCLE_HAS_EXECUTION`, `CYCLE_NOT_VOIDABLE` |
+| `GET` | `/webhooks?status=FAILED` | Inbox rows in one status, newest first, at most 200 (bounded in the query) | 400 `BAD_STATUS` |
+| `POST` | `/webhooks/{eventId}/replay` | Row back to RECEIVED, attempts 0 | 404 `WEBHOOK_NOT_FOUND`; 409 `WEBHOOK_IN_FLIGHT` |
+
+---
+
 ## Authentication Notes
 
 - JWT tokens go in the `Authorization: Bearer <token>` header.
 - Tokens are 1-hour expiry, HS512 signed. Frontend refreshes proactively.
 - Primary auth is via passkey (biometric). Login with email/password triggers 2FA OTP.
 - `/api/dev/*` endpoints are development-only, disabled in production.
+- `/api/admin/*` endpoints exist in every profile and take `X-Admin-Key` plus `X-Admin-Actor`, never a JWT (section 15).
 - See AUTHENTICATION_AND_JWT.md for full auth system docs.
 
 *Last Updated: February 27, 2026*

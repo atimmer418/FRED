@@ -3,6 +3,9 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.model.PlaidItemRemoval;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
+import com.investingapp.backend.plaid.PlaidApiError;
 import com.investingapp.backend.repository.PlaidItemRemovalRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.util.EasternTime;
@@ -29,6 +32,7 @@ import retrofit2.Response;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Plaid Item lifecycle outside the exchange transaction (spec 2.4 step 6, 2.9).
@@ -58,6 +62,7 @@ public class PlaidItemLifecycleService {
     private final JobLockService jobLockService;
     private final TransactionTemplate writeTx;
     private final String plaidWebhookUrl;
+    private final OpsAlertService opsAlertService;
 
     public PlaidItemLifecycleService(PlaidItemRemovalRepository removalRepository,
             UserRepository userRepository,
@@ -66,7 +71,8 @@ public class PlaidItemLifecycleService {
             SchedulerGate schedulerGate,
             JobLockService jobLockService,
             PlatformTransactionManager transactionManager,
-            @Value("${plaid.webhook.url}") String plaidWebhookUrl) {
+            @Value("${plaid.webhook.url}") String plaidWebhookUrl,
+            OpsAlertService opsAlertService) {
         this.removalRepository = removalRepository;
         this.userRepository = userRepository;
         this.plaidApi = plaidApi;
@@ -75,6 +81,7 @@ public class PlaidItemLifecycleService {
         this.jobLockService = jobLockService;
         this.writeTx = new TransactionTemplate(transactionManager);
         this.plaidWebhookUrl = plaidWebhookUrl;
+        this.opsAlertService = opsAlertService;
     }
 
     public record BackfillReport(int attempted, int succeeded, int failed) {
@@ -158,8 +165,12 @@ public class PlaidItemLifecycleService {
             }
             for (PlaidItemRemoval row : removalRepository
                     .findByRemovedAtIsNullAndRequestedAtBeforeOrderByRequestedAtAsc(retryFloor)) {
-                logger.error("alert.plaid.item_remove.exhausted id={} item={} attempts={} lastError={}",
-                        row.getId(), row.getItemId(), row.getAttempts(), row.getLastError());
+                logger.error("alert.plaid.item_remove.exhausted id={} item={} attempts={}",
+                        row.getId(), row.getItemId(), row.getAttempts());
+                opsAlertService.raise(OpsAlerts.PLAID_ITEM_REMOVE_EXHAUSTED, String.valueOf(row.getId()),
+                        "Plaid /item/remove retries exhausted after 7 days; the Item may still bill",
+                        Map.of("id", String.valueOf(row.getId()), "item", String.valueOf(row.getItemId()),
+                                "attempts", row.getAttempts()));
             }
         } finally {
             jobLockService.release(JobLocks.PLAID_ITEM_REMOVALS);
@@ -172,11 +183,14 @@ public class PlaidItemLifecycleService {
             Response<ItemRemoveResponse> response = plaidApi.itemRemove(new ItemRemoveRequest()
                     .accessToken(encryptionService.decrypt(row.getAccessTokenEnc()))).execute();
             String body = response.errorBody() != null ? response.errorBody().string() : "";
-            error = response.isSuccessful() || body.contains("ITEM_NOT_FOUND")
+            // Spec 12.3 (final review PAL-2): keep the status, code and request id, never the body,
+            // whose error_message is free text that can name the institution.
+            PlaidApiError parsed = response.isSuccessful() ? null : PlaidApiError.fromBody(response.code(), body);
+            error = parsed == null || "ITEM_NOT_FOUND".equals(parsed.errorCode())
                     ? null
-                    : "HTTP " + response.code() + " " + body;
+                    : "HTTP " + response.code() + " " + parsed.errorCode() + " request_id=" + parsed.requestId();
         } catch (Exception e) {
-            error = e.getClass().getSimpleName() + ": " + e.getMessage();
+            error = e.getClass().getSimpleName();
         }
         if (error == null) {
             row.setRemovedAt(now);
@@ -185,7 +199,7 @@ public class PlaidItemLifecycleService {
         } else {
             row.setAttempts(row.getAttempts() + 1);
             row.setLastError(error.length() <= LAST_ERROR_MAX ? error : error.substring(0, LAST_ERROR_MAX));
-            logger.warn("Plaid item {} removal attempt {} failed: {}", row.getItemId(), row.getAttempts(), error);
+            logger.warn("Plaid item {} removal attempt {} failed: {}", row.getItemId(), row.getAttempts(), row.getLastError());
         }
         removalRepository.save(row);
     }

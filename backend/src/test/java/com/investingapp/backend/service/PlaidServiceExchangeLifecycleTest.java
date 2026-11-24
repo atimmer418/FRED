@@ -17,6 +17,7 @@ import com.plaid.client.request.PlaidApi;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -58,6 +60,7 @@ class PlaidServiceExchangeLifecycleTest {
     private PlaidApi plaidApi;
     private UserRepository userRepository;
     private PlaidItemLifecycleService lifecycleService;
+    private PlaidItemStateService itemStateService;
     private InvestmentScheduleRepository investmentScheduleRepository;
     private EncryptionService encryptionService;
     private final List<Runnable> submitted = new ArrayList<>();
@@ -69,6 +72,7 @@ class PlaidServiceExchangeLifecycleTest {
         plaidApi = mock(PlaidApi.class);
         userRepository = mock(UserRepository.class);
         lifecycleService = mock(PlaidItemLifecycleService.class);
+        itemStateService = mock(PlaidItemStateService.class);
         investmentScheduleRepository = mock(InvestmentScheduleRepository.class);
         encryptionService = mock(EncryptionService.class);
 
@@ -79,6 +83,7 @@ class PlaidServiceExchangeLifecycleTest {
         ReflectionTestUtils.setField(plaidService, "accountStatusService", mock(AccountStatusService.class));
         ReflectionTestUtils.setField(plaidService, "analyticsOutboxService", mock(AnalyticsOutboxService.class));
         ReflectionTestUtils.setField(plaidService, "plaidItemLifecycleService", lifecycleService);
+        ReflectionTestUtils.setField(plaidService, "plaidItemStateService", itemStateService);
         ReflectionTestUtils.setField(plaidService, "plaidExecutor", (Executor) submitted::add);
         ReflectionTestUtils.setField(plaidService, "entityManager", mock(EntityManager.class));
 
@@ -171,6 +176,26 @@ class PlaidServiceExchangeLifecycleTest {
         assertThat(submitted).hasSize(1);
         submitted.get(0).run();
         verify(lifecycleService).recordConsentAfterLink(99L, RAW_ACCESS_TOKEN);
+    }
+
+    @Test
+    void relinkResetsDetectionDataInsideTheExchangeAfterTheOldItemIsQueued() throws IOException {
+        User user = lockedUser();
+        user.setPlaidAccessToken("ENC:old");
+        user.setPlaidItemId("item-old");
+        AtomicReference<String> itemAtReset = new AtomicReference<>();
+        doAnswer(i -> {
+            itemAtReset.set(((User) i.getArgument(0)).getPlaidItemId());
+            return null;
+        }).when(itemStateService).resetForNewItem(user);
+
+        plaidService.exchangePublicTokenAndLinkUser(PUBLIC_TOKEN, user);
+
+        InOrder order = inOrder(lifecycleService, userRepository, itemStateService);
+        order.verify(lifecycleService).enqueueRemoval(user);
+        order.verify(userRepository).save(user);
+        order.verify(itemStateService).resetForNewItem(user); // after every Plaid call
+        assertThat(itemAtReset.get()).isEqualTo(ITEM_ID); // the new Item is already on the row
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.JobLockRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +14,7 @@ import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
 
 /**
  * Lease-based locks on job_locks (spec 3.9, 5.6). A crashed holder is taken over once its
@@ -34,13 +37,16 @@ public class JobLockService {
     private final JobLockRepository jobLockRepository;
     private final TransactionTemplate requiresNew;
     private final String owner;
+    private final OpsAlertService opsAlertService;
 
-    public JobLockService(JobLockRepository jobLockRepository, PlatformTransactionManager transactionManager) {
+    public JobLockService(JobLockRepository jobLockRepository, PlatformTransactionManager transactionManager,
+            OpsAlertService opsAlertService) {
         this.jobLockRepository = jobLockRepository;
         this.requiresNew = new TransactionTemplate(transactionManager);
         this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         String runtimeName = ManagementFactory.getRuntimeMXBean().getName(); // pid@host
         this.owner = runtimeName.length() > 64 ? runtimeName.substring(0, 64) : runtimeName;
+        this.opsAlertService = opsAlertService;
     }
 
     /** True when this process now holds the lock until now + lease. */
@@ -54,6 +60,8 @@ public class JobLockService {
             return Boolean.TRUE.equals(acquired);
         } catch (RuntimeException e) {
             logger.error("alert.job_lock.unavailable job={}", name, e);
+            opsAlertService.raise(OpsAlerts.JOB_LOCK_UNAVAILABLE, name, "job_locks unreachable; this run is skipped",
+                    Map.of("job", name, "cause", e.getClass().getSimpleName()));
             return false;
         }
     }
@@ -64,6 +72,8 @@ public class JobLockService {
             requiresNew.executeWithoutResult(status -> jobLockRepository.deleteOwned(name, owner));
         } catch (RuntimeException e) {
             logger.error("alert.job_lock.release_failed job={}", name, e);
+            opsAlertService.raise(OpsAlerts.JOB_LOCK_RELEASE_FAILED, name, "job_locks release failed; the lease expires on its own",
+                    Map.of("job", name, "cause", e.getClass().getSimpleName()));
         }
     }
 }

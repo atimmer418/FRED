@@ -3,6 +3,8 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.config.SchedulerGate;
 import com.investingapp.backend.model.PlaidItemRemoval;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.PlaidItemRemovalRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.util.EasternTime;
@@ -27,10 +29,12 @@ import retrofit2.Response;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -53,6 +57,7 @@ class PlaidItemLifecycleServiceTest {
     private SchedulerGate schedulerGate;
     private JobLockService jobLockService;
     private PlaidItemLifecycleService service;
+    private OpsAlertService opsAlertService;
 
     @BeforeEach
     void setUp() {
@@ -64,8 +69,9 @@ class PlaidItemLifecycleServiceTest {
         EncryptionService encryptionService = mock(EncryptionService.class);
         when(encryptionService.decrypt(any())).thenAnswer(i -> "raw-of-" + i.getArgument(0));
 
+        opsAlertService = mock(OpsAlertService.class);
         service = new PlaidItemLifecycleService(removalRepository, userRepository, plaidApi, encryptionService,
-                schedulerGate, jobLockService, mock(PlatformTransactionManager.class), WEBHOOK);
+                schedulerGate, jobLockService, mock(PlatformTransactionManager.class), WEBHOOK, opsAlertService);
 
         when(schedulerGate.isEnabled()).thenReturn(true);
         when(jobLockService.tryAcquire(eq(JobLocks.PLAID_ITEM_REMOVALS), any())).thenReturn(true);
@@ -168,10 +174,37 @@ class PlaidItemLifecycleServiceTest {
         verify(jobLockService).release(JobLocks.PLAID_ITEM_REMOVALS);
     }
 
+    // Final review PAL-2: last_error (and the log lines built from it) keep the status, code and request id only.
+    @Test
+    void failedRemovalKeepsNoFreeTextFromPlaid() throws IOException {
+        PlaidItemRemoval failing = pending(EasternTime.now().minusHours(1));
+        PlaidItemRemoval thrown = pending(EasternTime.now().minusHours(1));
+        when(removalRepository.findByRemovedAtIsNullAndRequestedAtAfterOrderByRequestedAtAsc(any()))
+                .thenReturn(List.of(failing, thrown));
+        @SuppressWarnings("unchecked")
+        Call<ItemRemoveResponse> refused = mock(Call.class);
+        when(refused.execute()).thenReturn(Response.error(400, ResponseBody.create(
+                "{\"error_type\":\"INVALID_REQUEST\",\"error_code\":\"INVALID_FIELD\",\"request_id\":\"req-77\","
+                        + "\"error_message\":\"MARKER-FIRST-NATIONAL-BANK\",\"display_message\":\"MARKER-DISPLAY\"}",
+                MediaType.parse("application/json"))));
+        @SuppressWarnings("unchecked")
+        Call<ItemRemoveResponse> broken = mock(Call.class);
+        when(broken.execute()).thenThrow(new IOException("MARKER-SOCKET-DETAIL"));
+        when(plaidApi.itemRemove(any(ItemRemoveRequest.class))).thenReturn(refused, broken);
+
+        service.drainRemovals();
+
+        assertThat(failing.getLastError()).isEqualTo("HTTP 400 INVALID_FIELD request_id=req-77");
+        assertThat(thrown.getLastError()).isEqualTo("IOException");
+        assertThat(failing.getRemovedAt()).isNull();
+        assertThat(failing.getAttempts()).isEqualTo(1);
+    }
+
     @Test
     void drainAlertsOnRowsOlderThanSevenDaysInsteadOfCallingPlaid() {
         PlaidItemRemoval stale = pending(EasternTime.now().minusDays(8));
         stale.setAttempts(600);
+        stale.setId(31L);
         when(removalRepository.findByRemovedAtIsNullAndRequestedAtBeforeOrderByRequestedAtAsc(any()))
                 .thenReturn(List.of(stale));
 
@@ -181,6 +214,8 @@ class PlaidItemLifecycleServiceTest {
         verify(removalRepository, never()).save(any(PlaidItemRemoval.class));
         assertThat(stale.getRemovedAt()).isNull();
         verify(jobLockService).release(JobLocks.PLAID_ITEM_REMOVALS);
+        verify(opsAlertService).raise(eq(OpsAlerts.PLAID_ITEM_REMOVE_EXHAUSTED), eq("31"), anyString(),
+                eq(Map.of("id", "31", "item", "item-old", "attempts", 600)));
     }
 
     @Test

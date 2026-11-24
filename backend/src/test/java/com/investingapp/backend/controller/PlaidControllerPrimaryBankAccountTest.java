@@ -13,6 +13,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -112,5 +113,29 @@ class PlaidControllerPrimaryBankAccountTest {
         ResponseEntity<?> response = controller.getPrimaryBankAccount(authentication());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void primaryBankAccountCarriesConsentExpiresAtAndConsentFlag() {
+        user.setPlaidItemStatus(PlaidItemStatus.PENDING_DISCONNECT);
+        user.setPlaidDisconnectAt(LocalDateTime.of(2026, 12, 1, 9, 0));
+        user.setPlaidTransactionsConsented(false);
+
+        ResponseEntity<?> response = controller.getPrimaryBankAccount(authentication());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(body(response))
+                .containsEntry("itemStatus", "PENDING_DISCONNECT")
+                .containsEntry("consentExpiresAt", "2026-12-01T09:00-05:00")
+                .containsEntry("transactionsConsented", false);
+    }
+
+    @Test
+    void unknownConsentAndNoExpiryAnswerNull() {
+        Map<String, Object> body = body(controller.getPrimaryBankAccount(authentication()));
+
+        assertThat(body).containsKey("consentExpiresAt").containsKey("transactionsConsented");
+        assertThat(body.get("consentExpiresAt")).isNull();
+        assertThat(body.get("transactionsConsented")).isNull();
     }
 }

@@ -7,6 +7,10 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.io.InputStream;
+import java.util.Properties;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -26,6 +30,8 @@ class BrokerEnvironmentGuardTest {
     private static final String CI_SECRET = "ci-disabled";
     private static final String PROD_DATASOURCE = "jdbc:mysql://db.internal:3306/fred";
     private static final String PROD_JWT_SECRET = "prod-signing-key-not-the-dev-one";
+    private static final String PROD_ADMIN_TOOLS_KEY = "prod-admin-key-not-the-ci-one";
+    private static final String OPS_WEBHOOK = "https://alerts.example.invalid/hook";
 
     /** A fixture value standing in for the real leaked sandbox secret, so tests never carry it. */
     private static final String TEST_KNOWN_SANDBOX_SECRET = "test-fixture-sandbox-secret-not-the-real-one";
@@ -71,7 +77,10 @@ class BrokerEnvironmentGuardTest {
             // Valid-by-default prod fixtures for the datasource/jwt rules, so existing prod tests
             // that do not care about these two properties keep passing unchanged.
             env.withProperty("spring.datasource.url", PROD_DATASOURCE)
-                    .withProperty("jwt.secret", PROD_JWT_SECRET);
+                    .withProperty("jwt.secret", PROD_JWT_SECRET)
+                    .withProperty("app.ops.alert.provider", "webhook")
+                    .withProperty("app.ops.alert.webhook-url", OPS_WEBHOOK);
+            env.withProperty("app.admin-tools.key", PROD_ADMIN_TOOLS_KEY);
         }
         return env;
     }
@@ -335,5 +344,68 @@ class BrokerEnvironmentGuardTest {
                 LOCAL_WEBHOOK, TEST_KNOWN_SANDBOX_SECRET)
                 .withProperty("plaid.known-sandbox-secret-sha256", TEST_KNOWN_SANDBOX_SECRET_SHA256)))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("prod refuses the logging or a blank alert provider: an alert nobody reads is no alert")
+    void prodRefusesLoggingAlertProvider() {
+        for (String provider : new String[] {"logging", ""}) {
+            assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                    .withProperty("app.ops.alert.provider", provider)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("app.ops.alert.provider=" + provider + " cannot deliver alerts");
+        }
+    }
+
+    @Test
+    void prodRefusesWebhookProviderWithoutUrl() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("app.ops.alert.webhook-url", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.ops.alert.webhook-url is not set");
+    }
+
+    @Test
+    void prodRefusesPlainHttpAlertWebhookAndNeverEchoesIt() {
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("app.ops.alert.webhook-url", "http://alerts.example.invalid/hook/secret-token-xyz")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.ops.alert.webhook-url must start with https://")
+                .hasMessageNotContaining("secret-token-xyz");
+    }
+
+    @Test
+    void nonProdLoggingAlertProviderStarts() {
+        assertThatCode(() -> run(env("dev", SANDBOX_BROKER, PAPER_TRADING, "sandbox")
+                .withProperty("app.ops.alert.provider", "logging")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("prod with a blank admin tools key refuses to start")
+    void prodRefusesUnsetAdminKey() {
+        for (String blank : new String[] {"", "   "}) {
+            assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                    .withProperty("app.admin-tools.key", blank)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("app.admin-tools.key is not set");
+        }
+    }
+
+    @Test
+    @DisplayName("prod on the ci admin key committed to this repo refuses to start, and never echoes it")
+    void prodRefusesCiAdminKey() throws Exception {
+        Properties ci = new Properties();
+        try (InputStream in = getClass().getClassLoader().getResourceAsStream("application-ci.properties")) {
+            ci.load(in);
+        }
+        assertThat(ci.getProperty("app.admin-tools.key"))
+                .isEqualTo("${ADMIN_TOOLS_KEY:" + BrokerEnvironmentGuard.CI_ADMIN_TOOLS_KEY + "}");
+
+        assertThatThrownBy(() -> run(env("prod", LIVE_BROKER, LIVE_TRADING, "production")
+                .withProperty("app.admin-tools.key", BrokerEnvironmentGuard.CI_ADMIN_TOOLS_KEY)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.admin-tools.key is the ci default")
+                .hasMessageNotContaining(BrokerEnvironmentGuard.CI_ADMIN_TOOLS_KEY);
     }
 }

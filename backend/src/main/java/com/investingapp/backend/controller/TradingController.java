@@ -7,6 +7,8 @@ import com.investingapp.backend.service.AnalyticsPersonDeletionService;
 import com.investingapp.backend.service.EncryptionService;
 import com.investingapp.backend.service.DeletionDeferredException;
 import com.investingapp.backend.service.UserDeletionService;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.dto.ErrorCodeResponse;
 import com.investingapp.backend.model.User;
 import com.investingapp.backend.repository.InvestmentScheduleRepository;
@@ -57,6 +59,9 @@ public class TradingController {
 
     @Autowired
     private AnalyticsOutboxService analyticsOutboxService;
+
+    @Autowired
+    private OpsAlertService opsAlertService;
 
 
 
@@ -309,6 +314,7 @@ public class TradingController {
      */
     @PostMapping("/account/close")
     public ResponseEntity<?> closeAccount(Authentication authentication) {
+        Long closingUserId = null;
         try {
             if (authentication == null || authentication.getPrincipal() == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -321,6 +327,7 @@ public class TradingController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "User or Alpaca account not found"));
             }
+            closingUserId = user.getId();
 
             // Refuse before touching the broker: closing the brokerage account and then keeping
             // the FRED row would leave the user half deleted.
@@ -354,6 +361,10 @@ public class TradingController {
             // A transfer landed between the pre-check and the delete. The brokerage account is
             // already closed, so a person finishes this one through the admin verb.
             logger.error("alert.user_deletion.deferred reason=ACCOUNT_CLOSED deferral={}", deferred.reason);
+            opsAlertService.raise(OpsAlerts.USER_DELETION_DEFERRED,
+                    closingUserId == null ? OpsAlertService.GLOBAL_SUBJECT : String.valueOf(closingUserId),
+                    "brokerage account closed, FRED row deletion deferred",
+                    Map.of("reason", "ACCOUNT_CLOSED", "deferral", String.valueOf(deferred.reason)));
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorCodeResponse("DELETION_DEFERRED", deferred.reason));
         } catch (Exception e) {

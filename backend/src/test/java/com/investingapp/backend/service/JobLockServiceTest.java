@@ -1,5 +1,7 @@
 package com.investingapp.backend.service;
 
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.JobLockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +13,7 @@ import org.springframework.transaction.TransactionDefinition;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -23,12 +26,14 @@ class JobLockServiceTest {
     private JobLockRepository repository;
     private PlatformTransactionManager transactionManager;
     private JobLockService service;
+    private OpsAlertService opsAlertService;
 
     @BeforeEach
     void setUp() {
         repository = mock(JobLockRepository.class);
         transactionManager = mock(PlatformTransactionManager.class);
-        service = new JobLockService(repository, transactionManager);
+        opsAlertService = mock(OpsAlertService.class);
+        service = new JobLockService(repository, transactionManager, opsAlertService);
     }
 
     @Test
@@ -88,6 +93,8 @@ class JobLockServiceTest {
 
         assertFalse(acquired);
         verify(transactionManager).rollback(any());
+        verify(opsAlertService).raise(eq(OpsAlerts.JOB_LOCK_UNAVAILABLE), eq(JobLocks.EOD_BATCH), anyString(),
+                eq(Map.of("job", JobLocks.EOD_BATCH, "cause", "DataAccessResourceFailureException")));
     }
 
     @Test
@@ -110,5 +117,7 @@ class JobLockServiceTest {
                 .thenThrow(new DataAccessResourceFailureException("db down"));
 
         assertDoesNotThrow(() -> service.release(JobLocks.EOD_BATCH));
+        verify(opsAlertService).raise(eq(OpsAlerts.JOB_LOCK_RELEASE_FAILED), eq(JobLocks.EOD_BATCH), anyString(),
+                eq(Map.of("job", JobLocks.EOD_BATCH, "cause", "DataAccessResourceFailureException")));
     }
 }

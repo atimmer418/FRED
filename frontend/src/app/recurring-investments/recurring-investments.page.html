@@ -13,6 +13,9 @@
 <ion-content class="shell-content" appKeyboardAvoid>
   <div class="shell-inner">
 
+    <!-- Bank connection (spec 9.7, R10): read from primary-bank-account, so it shows with or without a schedule -->
+    <app-reconnect-card [account]="reconnectAccount" (reconnect)="onReconnect()"></app-reconnect-card>
+
     <div *ngIf="currentInvestment" class="cards-wrapper">
 
       <!-- Status banner -->

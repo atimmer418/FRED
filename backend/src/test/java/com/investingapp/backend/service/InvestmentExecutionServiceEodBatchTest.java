@@ -3,6 +3,8 @@ package com.investingapp.backend.service;
 import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.User;
+import com.investingapp.backend.ops.OpsAlertService;
+import com.investingapp.backend.ops.OpsAlerts;
 import com.investingapp.backend.repository.InvestmentExecutionRepository;
 import org.hibernate.LazyInitializationException;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +69,7 @@ class InvestmentExecutionServiceEodBatchTest {
     private EncryptionService encryptionService;
     private EmailService emailService;
     private PlatformTransactionManager transactionManager;
+    private OpsAlertService opsAlertService;
     private User user;
 
     /** Populated by queued(); findAllById's default stub reloads from here, simulating a DB round trip. */
@@ -85,6 +88,8 @@ class InvestmentExecutionServiceEodBatchTest {
         ReflectionTestUtils.setField(service, "encryptionService", encryptionService);
         ReflectionTestUtils.setField(service, "emailService", emailService);
         ReflectionTestUtils.setField(service, "transactionManager", transactionManager);
+        opsAlertService = mock(OpsAlertService.class);
+        ReflectionTestUtils.setField(service, "opsAlertService", opsAlertService);
 
         user = new User("batch@fredvested.com");
         user.setId(42L);
@@ -222,6 +227,8 @@ class InvestmentExecutionServiceEodBatchTest {
         verify(executionRepository, times(2)).save(any(InvestmentExecution.class));
         verify(emailService, times(1)).sendEmail(eq("batch@fredvested.com"), anyString(), contains("No ACH relationship on file"));
         verify(emailService).sendEmail(eq("batch@fredvested.com"), anyString(), contains("550.00"));
+        verify(opsAlertService).raise(eq(OpsAlerts.BATCH_NO_RELATIONSHIP), eq("42"), anyString(),
+                eq(Map.of("user", "42", "rows", 2)));
     }
 
     @Test

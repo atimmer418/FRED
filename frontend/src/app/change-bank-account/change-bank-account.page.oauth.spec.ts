@@ -8,10 +8,16 @@ import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
-import { PLAID_LINK_RETURN_KEY, PLAID_LINK_TOKEN_KEY } from '../utils/plaid-link-session';
+import { PLAID_LINK_RETURN_KEY, PLAID_LINK_TOKEN_KEY, PLAID_OAUTH_RETURN_HREF_KEY } from '../utils/plaid-link-session';
 
 /** The route is /change-bank-account (app.routes.ts:82); the OAuth return lands there with oauth_state_id. */
 const RETURN_HREF = 'https://fredvested.com/change-bank-account?oauth_state_id=abc123';
+/**
+ * Every link token names one redirect URI, /link-bank (R9), so a change-bank return lands there,
+ * is forwarded here with its query string, and the /link-bank href is parked for this page (T20).
+ */
+const LINK_BANK_HREF = 'https://local.fredvested.com/link-bank?oauth_state_id=abc123';
+const FORWARDED_HREF = 'https://local.fredvested.com/change-bank-account?oauth_state_id=abc123';
 
 describe('ChangeBankAccountPage OAuth round trip', () => {
   let http: jasmine.SpyObj<HttpClient>;
@@ -116,5 +122,43 @@ describe('ChangeBankAccountPage OAuth round trip', () => {
     plaidConfig.onSuccess('public-sandbox-token', {});
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
+  it('resumes a forwarded return with the /link-bank href Plaid redirected to (changeBankResumeUsesOriginalLinkBankHref)', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'change-bank');
+    sessionStorage.setItem(PLAID_OAUTH_RETURN_HREF_KEY, LINK_BANK_HREF);
+    spyOn(page as any, 'currentHref').and.returnValue(FORWARDED_HREF);
+
+    await page['initializePlaidLink']();
+
+    expect(http.post).not.toHaveBeenCalled();
+    expect(plaidConfig.token).toBe('link-stored-token');
+    expect(plaidConfig.receivedRedirectUri).toBe(LINK_BANK_HREF);
+    expect(open).toHaveBeenCalled();
+    expect(sessionStorage.getItem(PLAID_OAUTH_RETURN_HREF_KEY)).toBeNull();
+  });
+
+  it('ignores a stored href that carries a different oauth_state_id', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'change-bank');
+    sessionStorage.setItem(PLAID_OAUTH_RETURN_HREF_KEY, 'https://local.fredvested.com/link-bank?oauth_state_id=older999');
+    spyOn(page as any, 'currentHref').and.returnValue(FORWARDED_HREF);
+
+    await page['initializePlaidLink']();
+
+    expect(plaidConfig.token).toBe('link-stored-token');
+    expect(plaidConfig.receivedRedirectUri).toBe(FORWARDED_HREF);
+  });
+
+  it('a stored href alone never turns a plain load into an OAuth return', async () => {
+    sessionStorage.setItem(PLAID_OAUTH_RETURN_HREF_KEY, LINK_BANK_HREF);
+    spyOn(page as any, 'currentHref').and.returnValue('https://local.fredvested.com/change-bank-account');
+
+    await page['initializePlaidLink']();
+
+    expect(http.post).toHaveBeenCalled();
+    expect(plaidConfig.receivedRedirectUri).toBeUndefined();
+    expect(open).not.toHaveBeenCalled();
   });
 });

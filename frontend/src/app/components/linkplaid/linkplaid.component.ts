@@ -6,14 +6,15 @@ import { HttpClient, HttpHeaders, HttpErrorResponse } from '@angular/common/http
 import {
   IonHeader, IonToolbar, IonContent, IonFooter, IonSpinner, NavController
 } from '@ionic/angular/standalone';
-import { Observable, throwError, Subscription } from 'rxjs';
+import { Observable, of, throwError, Subscription } from 'rxjs';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { catchError, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
-import { clearPlaidLinkSession, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession } from '../../utils/plaid-link-session';
+import { clearPlaidLinkSession, PlaidLinkMode, readPlaidLinkMode, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession, storePlaidOAuthReturnHref } from '../../utils/plaid-link-session';
+import { UpdateModeCompleteResponse } from '../../models/primary-bank-account';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -45,6 +46,8 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
 
   private isUserAuthenticated: boolean = false; // Determine this based on JWT presence
   private plaidSubscription: Subscription | undefined;
+  /** The mode the current token was created with (spec 2.3). This page only asks for 'link'. */
+  private linkMode: PlaidLinkMode = 'link';
 
   constructor(
     private http: HttpClient,
@@ -62,8 +65,12 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
     this.isUserAuthenticated = !!jwtToken; // Convert to boolean
 
     console.log(`LinkPlaidComponent ngOnInit - User Authenticated: ${this.isUserAuthenticated}`);
-    // Nothing is drafted on this screen, so there is no saved state to resume from.
-    this.analytics.trackOnboardingStepViewed('link_plaid', null, false);
+    // Nothing is drafted on this screen, so there is no saved state to resume from. A change-bank
+    // OAuth return only passes through on its way to /change-bank-account, so it is not a view of
+    // this onboarding step.
+    if (!this.changeBankOAuthReturn()) {
+      this.analytics.trackOnboardingStepViewed('link_plaid', null, false);
+    }
     this.initializePlaidLink();
   }
 
@@ -80,13 +87,24 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
       const returnHref = this.oauthReturnHref();
       const storedToken = returnHref ? readPlaidLinkToken() : null;
       const storedReturn = returnHref ? readPlaidLinkReturn() : null;
+      if (returnHref !== null && storedReturn === 'change-bank') {
+        // Every link token names one redirect URI per environment, and it is this page, so a
+        // change-bank round trip lands here. Hand it to the page that started it, with the query
+        // string intact and the session untouched: that page resumes Link with its own stored
+        // token, which only exists because its PIN step-up passed. The href Plaid redirected to is
+        // kept for that page to pass as receivedRedirectUri.
+        storePlaidOAuthReturnHref(returnHref);
+        this.router.navigateByUrl('/change-bank-account' + new URL(returnHref).search, { replaceUrl: true });
+        return;
+      }
       const resuming = returnHref !== null && storedToken !== null && storedReturn === 'onboarding';
       if (returnHref !== null && storedToken !== null && !resuming) {
-        // Stale token from a different flow (or a corrupted marker): discard it and fetch a fresh
-        // one below.
+        // A corrupted marker: discard it and fetch a fresh token below.
         clearPlaidLinkSession();
       }
       let linkToken: string;
+      // A resumed session carries the mode it was stored with; a fresh token here is always 'link'.
+      this.linkMode = resuming ? readPlaidLinkMode() : 'link';
 
       if (this.isUserAuthenticated) {
         if (resuming) {
@@ -120,7 +138,12 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
           this.statusMessage = 'Processing...';
           this.isLoading = true;
           if (this.isUserAuthenticated) {
-            this.exchangePublicTokenAuthenticated(public_token);
+            if (this.linkMode === 'update') {
+              // Same Item, same access token: nothing to exchange (spec 2.3).
+              this.completeUpdateMode();
+            } else {
+              this.exchangePublicTokenAuthenticated(public_token);
+            }
           } else {
             console.error("Critical error: user is not authenticated when trying to link bank.");
             this.statusMessage = "Error: User is not authenticated. Please restart the process.";
@@ -220,6 +243,29 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
       ).subscribe();
   }
 
+  /**
+   * Update mode keeps the Item, so the bank step is already satisfied: finish it exactly as a
+   * successful exchange does. A failure leaves the user here with the retry button.
+   */
+  private completeUpdateMode(): void {
+    this.plaidSubscription = this.http.post<UpdateModeCompleteResponse>(`${BACKEND_API_URL}/plaid/update-mode-complete`, {}, { headers: this.getAuthHeaders() })
+      .pipe(
+        tap(() => {
+          this.statusMessage = 'Bank account reconnected!';
+          this.authService.completeStep('linkPlaid').subscribe({
+            next: () => this.navCtrl.navigateForward('/investment-schedule', { replaceUrl: true }),
+            error: () => this.navCtrl.navigateForward('/investment-schedule', { replaceUrl: true }),
+          });
+        }),
+        catchError(err => {
+          this.isLoading = false;
+          this.analytics.trackErrorShown('bank_link', 'onboarding', 'inline_banner', httpStatusOf(err), true);
+          this.statusMessage = 'Error: Could not finish reconnecting your bank. Please try again.';
+          return of(null);
+        })
+      ).subscribe();
+  }
+
   openPlaid() {
     if (this.plaidHandler && this.isPlaidReady) {
       this.statusMessage = 'Opening Plaid...';
@@ -241,6 +287,11 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
   /** The current URL when it carries Plaid's oauth_state_id, else null. Stubbed in specs. */
   private oauthReturnHref(): string | null {
     return window.location.search.includes('oauth_state_id') ? window.location.href : null;
+  }
+
+  /** True when this load is a change-bank OAuth return, which belongs on /change-bank-account. */
+  private changeBankOAuthReturn(): boolean {
+    return this.oauthReturnHref() !== null && readPlaidLinkReturn() === 'change-bank';
   }
 
   private handleError(error: HttpErrorResponse) {

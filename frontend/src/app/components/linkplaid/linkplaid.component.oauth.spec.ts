@@ -4,18 +4,29 @@ import { NavController } from '@ionic/angular/standalone';
 import { of } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
-import { PLAID_LINK_RETURN_KEY, PLAID_LINK_TOKEN_KEY } from '../../utils/plaid-link-session';
+import { PLAID_LINK_MODE_KEY, PLAID_LINK_RETURN_KEY,PLAID_LINK_TOKEN_KEY, PLAID_OAUTH_RETURN_HREF_KEY } from '../../utils/plaid-link-session';
 import { LinkPlaidComponent } from './linkplaid.component';
 
-/** The onboarding route is /link-bank (app.routes.ts:38); the OAuth return lands there with oauth_state_id. */
-const RETURN_HREF = 'https://fredvested.com/link-bank?oauth_state_id=abc123';
+/**
+ * The onboarding route is /link-bank (app.routes.ts:38). It is also the one redirect URI every link
+ * token names (R9; local https://local.fredvested.com/link-bank), so every OAuth return lands here,
+ * including one that started on /change-bank-account.
+ */
+const RETURN_HREF = 'https://local.fredvested.com/link-bank?oauth_state_id=abc123';
 
 describe('LinkPlaidComponent OAuth round trip', () => {
   let post: jasmine.Spy;
   let open: jasmine.Spy;
+  let router: jasmine.SpyObj<Router>;
   let navCtrl: jasmine.SpyObj<NavController>;
+  let analytics: jasmine.SpyObj<AnalyticsService>;
   let component: LinkPlaidComponent;
   let plaidConfig: any;
+
+  function storeSession(token: string, marker: string): void {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, token);
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, marker);
+  }
 
   beforeEach(() => {
     plaidConfig = null;
@@ -23,13 +34,20 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     (window as any).Plaid = { create: (config: any) => { plaidConfig = config; return { open }; } };
     sessionStorage.clear();
     post = jasmine.createSpy('post').and.returnValue(of({ link_token: 'link-sandbox-token', expiration: '' }));
+    router = jasmine.createSpyObj<Router>('Router', ['navigate', 'navigateByUrl']);
+    router.navigateByUrl.and.returnValue(Promise.resolve(true));
     navCtrl = jasmine.createSpyObj<NavController>('NavController', ['navigateBack', 'navigateForward']);
+    analytics = jasmine.createSpyObj<AnalyticsService>('AnalyticsService', [
+      'trackOnboardingStepViewed',
+      'trackOnboardingStepCompleted',
+      'trackErrorShown',
+    ]);
     component = new LinkPlaidComponent(
       { post } as unknown as HttpClient,
-      jasmine.createSpyObj<Router>('Router', ['navigate']),
+      router,
       navCtrl,
       { completeStep: jasmine.createSpy('completeStep').and.returnValue(of({})) } as unknown as AuthService,
-      jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['trackOnboardingStepCompleted', 'trackErrorShown']),
+      analytics,
     );
     (component as any).isUserAuthenticated = true;
   });
@@ -50,9 +68,8 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('on the OAuth return it resumes Link with the stored token and receivedRedirectUri', async () => {
-    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
-    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
+  it('resumes an onboarding return in place with the stored token and receivedRedirectUri (onboardingReturnStillResumesInPlace)', async () => {
+    storeSession('link-stored-token', 'onboarding');
     spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
 
     await component.initializePlaidLink();
@@ -61,11 +78,11 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     expect(plaidConfig.token).toBe('link-stored-token');
     expect(plaidConfig.receivedRedirectUri).toBe(RETURN_HREF);
     expect(open).toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
   });
 
   it('consumes the stored session as soon as it resumes, so a stale oauth_state_id cannot replay it', async () => {
-    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
-    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
+    storeSession('link-stored-token', 'onboarding');
     spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
 
     await component.initializePlaidLink();
@@ -74,9 +91,50 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
   });
 
-  it('a token left behind by the other flow does not resume here and is discarded', async () => {
-    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-other-flow-token');
-    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'change-bank');
+  it('forwards a change-bank return to /change-bank-account with the query string kept (forwardsChangeBankReturnWithQueryStringPreserved)', async () => {
+    storeSession('link-change-bank-token', 'change-bank');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await component.initializePlaidLink();
+
+    expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/change-bank-account?oauth_state_id=abc123', { replaceUrl: true });
+  });
+
+  it('leaves the session to the change-bank page and never builds Link here (forwardNeverClearsSessionOrCreatesLink)', async () => {
+    storeSession('link-change-bank-token', 'change-bank');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await component.initializePlaidLink();
+
+    expect(post).not.toHaveBeenCalled();
+    expect(plaidConfig).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+    expect(navCtrl.navigateForward).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-change-bank-token');
+    expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBe('change-bank');
+  });
+
+  it('stores the /link-bank href Plaid redirected to before forwarding (forwardStoresOriginalLinkBankHref)', async () => {
+    storeSession('link-change-bank-token', 'change-bank');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    await component.initializePlaidLink();
+
+    expect(sessionStorage.getItem(PLAID_OAUTH_RETURN_HREF_KEY)).toBe(RETURN_HREF);
+  });
+
+  it('records no onboarding step view for a change-bank return passing through', () => {
+    storeSession('link-change-bank-token', 'change-bank');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+
+    component.ngOnInit();
+
+    expect(analytics.trackOnboardingStepViewed).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/change-bank-account?oauth_state_id=abc123', { replaceUrl: true });
+  });
+
+  it('a corrupted return marker does not resume here and is discarded', async () => {
+    storeSession('link-corrupted-token', 'settings');
     spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
 
     await component.initializePlaidLink();
@@ -85,6 +143,7 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     expect(plaidConfig.token).toBe('link-sandbox-token');
     expect(plaidConfig.receivedRedirectUri).toBeUndefined();
     expect(open).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBe('link-sandbox-token');
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBe('onboarding');
   });
@@ -97,6 +156,7 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     expect(post).toHaveBeenCalled();
     expect(plaidConfig.token).toBe('link-sandbox-token');
     expect(plaidConfig.receivedRedirectUri).toBeUndefined();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
   });
 
   it('success and exit both clear the stored link session', async () => {
@@ -111,6 +171,30 @@ describe('LinkPlaidComponent OAuth round trip', () => {
     plaidConfig.onSuccess('public-sandbox-token', {});
     expect(sessionStorage.getItem(PLAID_LINK_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(PLAID_LINK_RETURN_KEY)).toBeNull();
+  });
+
+  it('updateSuccessCallsCompleteNotExchange: a resumed update-mode session completes instead of exchanging', async () => {
+    sessionStorage.setItem(PLAID_LINK_TOKEN_KEY, 'link-stored-token');
+    sessionStorage.setItem(PLAID_LINK_RETURN_KEY, 'onboarding');
+    sessionStorage.setItem(PLAID_LINK_MODE_KEY, 'update');
+    spyOn(component as any, 'oauthReturnHref').and.returnValue(RETURN_HREF);
+    post.and.returnValue(of({ result: 'REPAIRED' }));
+
+    await component.initializePlaidLink();
+    plaidConfig.onSuccess('public-token-unused-in-update-mode', {});
+
+    expect(post.calls.allArgs().map(args => args[0] as string)).toEqual([jasmine.stringMatching(/\/plaid\/update-mode-complete$/)]);
+    expect(navCtrl.navigateForward).toHaveBeenCalledWith('/investment-schedule', { replaceUrl: true });
+  });
+
+  it('linkModeSuccessStillExchanges: a fresh onboarding token never calls update-mode-complete', async () => {
+    await component.initializePlaidLink();
+    expect(sessionStorage.getItem(PLAID_LINK_MODE_KEY)).toBe('link');
+    post.and.returnValue(of({ message: 'ok' }));
+
+    plaidConfig.onSuccess('public-sandbox-token', {});
+
+    expect(post.calls.mostRecent().args[0]).toMatch(/\/plaid\/exchange_public_token$/);
   });
 
   it('goBack returns to KYC verification', () => {

@@ -430,6 +430,7 @@ export const SERVER_EVENT_NAMES = [
   'ach_transfer_completed',
   'subscription_billed',
   'subscription_cancelled',
+  'paycheck_stream_switched',
 ] as const;
 
 export type ServerEventName = (typeof SERVER_EVENT_NAMES)[number];

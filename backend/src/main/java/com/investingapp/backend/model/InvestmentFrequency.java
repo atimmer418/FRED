@@ -15,7 +15,8 @@ import java.util.Optional;
  * FrequencyFactorParityTest pins both sides.
  *
  * <p>InvestmentSchedule.frequency stays a VARCHAR(20) String column holding one of these names.
- * This enum is for parsing and money math only, never a mapped column type.
+ * The one mapped use is PaycheckStream.cadence (paycheck_streams.cadence, VARCHAR(12), stored by
+ * name): SEMI_MONTHLY is 12 characters, so a longer constant needs a wider column first.
  */
 public enum InvestmentFrequency {
     WEEKLY("4.33", 52),

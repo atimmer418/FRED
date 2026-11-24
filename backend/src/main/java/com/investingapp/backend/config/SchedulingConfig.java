@@ -7,6 +7,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
+import java.util.concurrent.ThreadPoolExecutor;
+
 @Configuration
 @EnableScheduling
 public class SchedulingConfig {
@@ -31,12 +33,30 @@ public class SchedulingConfig {
     @Bean(name = "plaidExecutor")
     public ThreadPoolTaskExecutor plaidExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
+        // Core = max: threads past core start only on a full queue, so core 2 capped the drainer at two Items.
+        executor.setCorePoolSize(4);
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("plaid-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
+        return executor;
+    }
+
+    /**
+     * Ops alert delivery (spec 12.3): the HTTP call never holds a caller's thread, connection or lock.
+     * Past 200 waiting, the oldest is dropped (its ledger row stays PENDING). Injected by name.
+     */
+    @Bean(name = "opsAlertExecutor")
+    public ThreadPoolTaskExecutor opsAlertExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("ops-alert-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.DiscardOldestPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(10);
         return executor;
     }
 }

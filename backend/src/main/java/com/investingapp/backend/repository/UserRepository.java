@@ -54,6 +54,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // (PlaidItemLifecycleService.backfillWebhookUrl, exposed by DevPlaidController)
     List<User> findByPlaidAccessTokenIsNotNull();
 
+    // Paycheck reconcile, REJECTED-applicant pass (R8); the caller skips REMOVED Items in Java.
+    List<User> findByPlaidAccessTokenIsNotNullAndAccountStatus(String accountStatus);
+
+    // Paycheck reconcile, phase B: ids only; consent and Item status are filtered in Java.
+    @Query("SELECT u.id FROM User u WHERE u.plaidAccessToken IS NOT NULL")
+    List<Long> findIdsWithPlaidToken();
+
     // Find users by registration IP who have completed auth-finalize (for passkey
     // re-auth prompting)
     @Query("SELECT u FROM User u JOIN u.userProgress up WHERE u.registrationIpAddress = :ipAddress AND up.authFinalizeCompleted = :completed")

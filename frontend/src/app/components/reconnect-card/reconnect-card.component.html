@@ -1,0 +1,13 @@
+<div class="reconnect-card" *ngIf="card as c" role="status">
+  <div class="reconnect-row">
+    <span class="material-symbols-outlined reconnect-icon" aria-hidden="true">link_off</span>
+    <div class="reconnect-text">
+      <span class="reconnect-title">{{ c.title }}</span>
+      <span class="reconnect-sub">{{ c.sub }}</span>
+    </div>
+  </div>
+  <button *ngIf="c.showButton" class="reconnect-btn" type="button" (click)="reconnect.emit()">
+    <span>Reconnect</span>
+    <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+  </button>
+</div>

@@ -7,6 +7,10 @@ public final class JobLocks {
     public static final String EOD_BATCH = "investment.eod-batch";
     public static final String ACH_POLL = "ach.relationship-poll";
     public static final String PLAID_ITEM_REMOVALS = "plaid.item-removals";
+    public static final String PLAID_WEBHOOK_INBOX = "plaid.webhook-inbox";
+    public static final String OPS_HEARTBEAT = "ops.heartbeat";
+
+    public static final String PAYCHECK_RECONCILE = "paycheck.reconcile";
 
     private JobLocks() {
     }

@@ -59,4 +59,12 @@ class ProdPlaidPropertiesTest {
         assertThat(props.getProperty("webauthn.relyingparty.id")).isEqualTo("${WEBAUTHN_RP_ID_PROD}");
         assertThat(props.getProperty("webauthn.relyingparty.origins")).isEqualTo("${WEBAUTHN_RP_ORIGINS_PROD}");
     }
+
+    @Test
+    @DisplayName("prod ops alerts default to the webhook provider and read the receiver URL from the environment")
+    void prodOpsAlertsDefaultToWebhook() throws IOException {
+        Properties props = prodProperties();
+        assertThat(props.getProperty("app.ops.alert.provider")).isEqualTo("${OPS_ALERT_PROVIDER:webhook}");
+        assertThat(props.getProperty("app.ops.alert.webhook-url")).isEqualTo("${OPS_ALERT_WEBHOOK_URL:}");
+    }
 }

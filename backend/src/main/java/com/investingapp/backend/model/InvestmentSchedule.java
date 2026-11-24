@@ -14,6 +14,9 @@ import com.investingapp.backend.util.EasternTime;
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
+// Ruling R19: an UPDATE names only the columns changed in this unit of work, so a writer holding a
+// stale copy cannot write back a column another transaction moved (next_investment_date, hold_reason).
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "investment_schedules")
 public class InvestmentSchedule {
     @Id
@@ -83,6 +86,34 @@ public class InvestmentSchedule {
     @Enumerated(EnumType.STRING)
     @Column(name = "hold_reason", length = 32)
     private HoldReason holdReason;
+
+    // Paycheck Autopilot, Phase 1: the detection mirror (spec 3.2, ruling R1). Written in every mode
+    // once detection has run; mode stays MANUAL under shadow, and nothing reads these on the wire
+    // until Phase 2. Neither status nor holdReason is ever derived from them. The anchors,
+    // authorization, amount_source, snoozed_until and paused_by_user_at stay unmapped (decision 20).
+    @Enumerated(EnumType.STRING)
+    @Column(name = "detection_state", length = 16)
+    private DetectionState detectionState;
+
+    /** paycheck_streams.id; the V6 foreign key is ON DELETE SET NULL, so a stream purge nulls it. */
+    @Column(name = "primary_stream_id")
+    private Long primaryStreamId;
+
+    /** Display and the D-1 notice only, never a trigger. */
+    @Column(name = "next_expected_date")
+    private LocalDate nextExpectedDate;
+
+    @Column(name = "missed_count", nullable = false)
+    private short missedCount = 0;
+
+    @Column(name = "dormant_since")
+    private LocalDate dormantSince;
+
+    @Column(name = "last_cadence_check_at")
+    private LocalDateTime lastCadenceCheckAt;
+
+    @Column(name = "detection_started_at")
+    private LocalDateTime detectionStartedAt;
 
     @Column(name = "monthly_streak", nullable = false)
     private Integer monthlyStreak = 0;
@@ -327,6 +358,15 @@ public class InvestmentSchedule {
     /** Holds that stop a MANUAL schedule from investing (spec 5.2); BANK_CHANGE is not one of them. */
     private static final EnumSet<HoldReason> BLOCKING_HOLDS = EnumSet.of(
             HoldReason.ACH_RETURN_UNAUTHORIZED, HoldReason.ACH_RETURN_ACCOUNT, HoldReason.MANUAL_REVIEW);
+
+    /**
+     * Whether this hold, on its own, stops money: true for exactly the members of BLOCKING_HOLDS,
+     * the set {@link #isReadyForInvestment} reads. Exposed so callers ask instead of restating the
+     * list (ruling R20). Null, BANK_CHANGE and every other hold are not blocking.
+     */
+    public static boolean isBlockingHold(HoldReason reason) {
+        return reason != null && BLOCKING_HOLDS.contains(reason);
+    }
 
     /**
      * Whether the schedule is stopped, for any reason. Derived from the status rather than stored:

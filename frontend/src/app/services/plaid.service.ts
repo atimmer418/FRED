@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, of, tap } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, map, of, tap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { PlaidItemStatus, PrimaryBankAccount } from '../models/primary-bank-account';
 
 const BACKEND_API_URL = environment.backendApiUrl;
 
@@ -24,6 +25,56 @@ export interface PlaidLinkResult {
   error?: string;
 }
 
+/**
+ * GET /plaid/primary-bank-account as it arrives. Any key can be missing, and consentExpiresAt is a
+ * LocalDateTime that FRED's primary ObjectMapper (config/JacksonConfig) writes as a [y, m, d, h, min]
+ * array unless the controller formats it as a string. Both shapes are accepted.
+ */
+interface PrimaryBankAccountWire {
+  accountId?: string | null;
+  institutionName?: string | null;
+  accountName?: string | null;
+  accountType?: string | null;
+  accountSubtype?: string | null;
+  mask?: string | null;
+  itemStatus?: PlaidItemStatus | null;
+  transactionsConsented?: boolean | null;
+  consentExpiresAt?: string | number[] | null;
+}
+
+function toPrimaryBankAccount(raw: PrimaryBankAccountWire | null): PrimaryBankAccount | null {
+  // An unlinked user still reports itemStatus OK, so linkage is judged by the institution.
+  if (!raw || !raw.institutionName) {
+    return null;
+  }
+  return {
+    accountId: raw.accountId ?? null,
+    institutionName: raw.institutionName,
+    accountName: raw.accountName ?? null,
+    accountType: raw.accountType ?? null,
+    accountSubtype: raw.accountSubtype ?? null,
+    mask: raw.mask ?? null,
+    itemStatus: raw.itemStatus ?? 'OK',
+    transactionsConsented: raw.transactionsConsented ?? null,
+    consentExpiresAt: toLocalDateTimeString(raw.consentExpiresAt),
+  };
+}
+
+function toLocalDateTimeString(value: string | number[] | null | undefined): string | null {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  const [year, month, day, hour = 0, minute = 0] = value;
+  if (!year || !month || !day) {
+    return null;
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -43,6 +94,21 @@ export class PlaidService {
   // Observable for current active account
   getCurrentAccount(): Observable<BankAccount | null> {
     return this.currentAccountSubject.asObservable();
+  }
+
+  /**
+   * The linked bank as the server reports it, typed, with itemStatus (spec 8.8), for surfaces that
+   * react to the Item's health such as the reconnect card. Null when no bank is linked or the read
+   * fails. Unlike the display cache it never falls back to localStorage or the demo account, and it
+   * never writes the cache: a fabricated healthy bank would hide a broken one.
+   */
+  getPrimaryBankAccount(): Observable<PrimaryBankAccount | null> {
+    return this.http.get<PrimaryBankAccountWire>(`${BACKEND_API_URL}/plaid/primary-bank-account`, {
+      headers: this.getAuthHeaders()
+    }).pipe(
+      map(raw => toPrimaryBankAccount(raw)),
+      catchError(() => of(null))
+    );
   }
 
   private getAuthHeaders(): HttpHeaders {

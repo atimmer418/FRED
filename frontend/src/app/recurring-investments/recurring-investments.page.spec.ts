@@ -4,7 +4,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
 import { ModalController } from '@ionic/angular/standalone';
-import { Subject, of, throwError } from 'rxjs';
+import { BehaviorSubject, Subject, of, throwError } from 'rxjs';
 import { RecurringInvestmentsPage } from './recurring-investments.page';
 import { InvestmentService, InvestmentSchedule } from '../services/investment.service';
 import { PasskeyService } from '../services/passkey.service';
@@ -12,6 +12,9 @@ import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AccountStatusService } from '../services/account-status.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
+import { PlaidService } from '../services/plaid.service';
+import { PrimaryBankAccount } from '../models/primary-bank-account';
+import { reconnectCardFor } from '../components/reconnect-card/reconnect-card.component';
 import { KeyboardAvoidDirective } from '../directives/keyboard-avoid.directive';
 import { FRED_DATE_SHEET_ROLE, FredDateSheetComponent, FredDateSheetOptions } from '../components/fred-date-sheet/fred-date-sheet.component';
 import { tradeWindow } from '../utils/business-days';
@@ -47,6 +50,9 @@ describe('RecurringInvestmentsPage — analytics', () => {
   let pin: jasmine.SpyObj<PinService>;
   let modalCtrl: jasmine.SpyObj<ModalController>;
   let page: RecurringInvestmentsPage;
+  let plaid: jasmine.SpyObj<PlaidService>;
+  let router: jasmine.SpyObj<Router>;
+  let status$: BehaviorSubject<string | null>;
 
   /** The confirm sheet, presented and then dismissed with the given role (none = drag, backdrop or Keep investing). */
   function sheetDismissedWith(role: string | undefined): void {
@@ -70,14 +76,20 @@ describe('RecurringInvestmentsPage — analytics', () => {
       'resumeSchedule',
       'createSchedule',
     ]);
-    accountStatus = jasmine.createSpyObj<AccountStatusService>('AccountStatusService', ['isAccountActive']);
+    status$ = new BehaviorSubject<string | null>('ACTIVE');
+    accountStatus = jasmine.createSpyObj<AccountStatusService>('AccountStatusService', ['isAccountActive'], {
+      accountStatus$: status$.asObservable(),
+    });
     accountStatus.isAccountActive.and.returnValue(true);
     pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
     pin.hasPin.and.resolveTo(false);
+    plaid = jasmine.createSpyObj<PlaidService>('PlaidService', ['getPrimaryBankAccount']);
+    plaid.getPrimaryBankAccount.and.returnValue(of(null));
+    router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
 
     page = new RecurringInvestmentsPage(
-      jasmine.createSpyObj<Router>('Router', ['navigate']),
+      router,
       { queryParams: of({}), params: of({}), snapshot: { queryParams: {} } } as unknown as ActivatedRoute,
       investments,
       jasmine.createSpyObj<PasskeyService>('PasskeyService', ['startAuthentication']),
@@ -87,6 +99,7 @@ describe('RecurringInvestmentsPage — analytics', () => {
       modalCtrl,
       jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
       analytics,
+      plaid,
     );
   });
 
@@ -269,6 +282,48 @@ describe('RecurringInvestmentsPage — analytics', () => {
     expect(analytics.trackErrorShown).toHaveBeenCalledOnceWith('network', 'portfolio', 'toast', null, false);
     expect(analytics.track).not.toHaveBeenCalled();
   }));
+
+  // ── the reconnect card (R10, R18) ──────────────────────────────────────────
+
+  const brokenBank: PrimaryBankAccount = {
+    accountId: 'acc-1',
+    institutionName: 'Chase',
+    accountName: 'Plaid Checking',
+    accountType: 'depository',
+    accountSubtype: 'checking',
+    mask: '0000',
+    itemStatus: 'LOGIN_REQUIRED',
+    transactionsConsented: true,
+    consentExpiresAt: null,
+  };
+
+  it('cardRendersWithoutSchedule: a 404 schedule still loads the bank and yields a card', () => {
+    investments.getCurrentSchedule.and.returnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+    plaid.getPrimaryBankAccount.and.returnValue(of(brokenBank));
+
+    page.ngOnInit();
+
+    expect(page.currentInvestment).toBeNull();
+    expect(page.reconnectAccount).toEqual(brokenBank);
+    expect(reconnectCardFor(page.reconnectAccount)).not.toBeNull();
+    expect(analytics.track).not.toHaveBeenCalled();
+  });
+
+  it('reconnectGoesToChangeBankInUpdateMode', () => {
+    page.onReconnect();
+
+    expect(router.navigate).toHaveBeenCalledOnceWith(['/change-bank-account'], { queryParams: { mode: 'update' } });
+  });
+
+  it('hiddenForRejectedApplicant: R18, the card is for users who can invest', () => {
+    investments.getCurrentSchedule.and.returnValue(of(schedule));
+    plaid.getPrimaryBankAccount.and.returnValue(of(brokenBank));
+    status$.next('REJECTED');
+
+    page.ngOnInit();
+
+    expect(page.reconnectAccount).toBeNull();
+  });
 });
 
 /**
@@ -302,7 +357,8 @@ describe('RecurringInvestmentsPage: typed amount', () => {
         { provide: PasskeyService, useValue: {} },
         { provide: PinService, useValue: pin },
         { provide: ToastService, useValue: jasmine.createSpyObj<ToastService>('ToastService', ['showToast']) },
-        { provide: AccountStatusService, useValue: { isAccountActive: () => true } },
+        { provide: AccountStatusService, useValue: { isAccountActive: () => true, accountStatus$: of('ACTIVE') } },
+        { provide: PlaidService, useValue: { getPrimaryBankAccount: () => of(null) } },
         { provide: ModalController, useValue: {} },
         { provide: NavController, useValue: { navigateBack: () => {} } },
         { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown']) },
@@ -450,7 +506,8 @@ describe('RecurringInvestmentsPage: loading skeleton', () => {
         { provide: PasskeyService, useValue: {} },
         { provide: PinService, useValue: pin },
         { provide: ToastService, useValue: jasmine.createSpyObj<ToastService>('ToastService', ['showToast']) },
-        { provide: AccountStatusService, useValue: { isAccountActive: () => true } },
+        { provide: AccountStatusService, useValue: { isAccountActive: () => true, accountStatus$: of('ACTIVE') } },
+        { provide: PlaidService, useValue: { getPrimaryBankAccount: () => of(null) } },
         { provide: ModalController, useValue: {} },
         { provide: NavController, useValue: { navigateBack: () => {} } },
         { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown']) },
@@ -566,7 +623,8 @@ describe('RecurringInvestmentsPage: transfer date', () => {
         { provide: PasskeyService, useValue: {} },
         { provide: PinService, useValue: pin },
         { provide: ToastService, useValue: jasmine.createSpyObj<ToastService>('ToastService', ['showToast']) },
-        { provide: AccountStatusService, useValue: { isAccountActive: () => true } },
+        { provide: AccountStatusService, useValue: { isAccountActive: () => true, accountStatus$: of('ACTIVE') } },
+        { provide: PlaidService, useValue: { getPrimaryBankAccount: () => of(null) } },
         { provide: ModalController, useValue: modalCtrl },
         { provide: NavController, useValue: { navigateBack: () => {} } },
         { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown']) },

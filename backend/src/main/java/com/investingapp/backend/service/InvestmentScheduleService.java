@@ -235,8 +235,13 @@ public class InvestmentScheduleService {
     }
 
     /**
-     * Bank change step 2 (spec 7.8): drop the old relationship id and hold the schedule. is_paused is
-     * not written; the hold is cleared by AchRelationshipService.adopt when the new relationship lands.
+     * Bank change step 2 (spec 7.8): drop the old relationship id and hold the schedule. The status
+     * is not written; the BANK_CHANGE hold is cleared by AchRelationshipService.adopt when the new
+     * relationship lands.
+     *
+     * <p>Ruling R20: a blocking hold ({@link InvestmentSchedule#isBlockingHold}) is kept as it is.
+     * adopt clears only BANK_CHANGE, so replacing MANUAL_REVIEW or an ACH return with BANK_CHANGE
+     * would let a relink restart a schedule that a person or the bank had stopped.
      */
     public void resetForBankChange(User user) {
         investmentScheduleRepository.findTopByUserOrderByCreatedAtDesc(user).ifPresent(schedule -> {
@@ -250,10 +255,16 @@ public class InvestmentScheduleService {
             boolean wasRunning = schedule.getHoldReason() == null
                     && schedule.getStatus() == InvestmentSchedule.Status.ACTIVE;
 
+            // R20: a blocking hold stays; no hold, or a non-blocking one, becomes BANK_CHANGE as
+            // before. One hold write, so this file keeps exactly one hold-writer site.
+            HoldReason hold = InvestmentSchedule.isBlockingHold(schedule.getHoldReason())
+                    ? schedule.getHoldReason()
+                    : HoldReason.BANK_CHANGE;
+
             schedule.setAchRequestId(null);
-            schedule.setHoldReason(HoldReason.BANK_CHANGE);
+            schedule.setHoldReason(hold);
             investmentScheduleRepository.save(schedule);
-            logger.info("Investment schedule held for bank change, user {}", user.getEmail());
+            logger.info("Investment schedule held for bank change, user {} hold {}", user.getId(), hold);
 
             // Analytics: a SYSTEM pause, on a real transition only. A schedule that was already
             // held (a second bank change in a row) or already paused by the user has not stopped

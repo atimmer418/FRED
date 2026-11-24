@@ -448,6 +448,16 @@ environmental, so re-run before investigating.
 
 ## 10. State of the tree
 
+**Update 2026-11-23: Phase 1 (shadow mode) is on `develop` and deployed to the dev Railway service.**
+Merge `74576ad0`; the plan is `FREDdocs/plans/2026-11-02-paycheck-autopilot-phase-1.md` (24 task
+files beside it, rulings R1 to R21 in its header) and the operator guide is
+`FREDdocs/runbooks/paycheck-autopilot.md`. At the merged tree: 1584 backend tests, 0 skipped, 0
+failures against a scratch schema. Dev runs `PAYCHECK_AUTOPILOT_ENABLED=true`, `shadow=true`,
+`pulls.enabled=false`: detection runs, cycles close `SKIPPED SHADOW_CONFIRMED`, nothing moves money.
+What is still open for Phase 1 to be called done is the plan header's "Manual prerequisites" list
+(decision 1 OAuth device test, counsel line on payroll data, two tuned pay cycles of shadow review).
+Phase 2 starts at `V12`. The bullets below describe the tree as it was on 2026-11-02.
+
 - Branch `feature/analytics` and `develop` are both at `597bb4f` and pushed (two documentation commits landed after `fde4f7f`; no code moved). The merge that brought
   these two lines of work together is `c3372d6`, which has both parents: analytics `ff0a317` and
   develop `2580767`.

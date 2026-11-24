@@ -91,11 +91,17 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
       client-supplied id. `BeneficiaryController.java:91-108, 164-170`. (S) *security-auth*
 - [ ] **Beneficiary SSNs are stored in plaintext and returned in full by the API.** (M) *data-model-migrations*
 - [ ] **Applicant SSN sits unencrypted in a localStorage KYC draft** (FRED-221). (S) *onboarding-kyc-lifecycle*
-- [ ] **Recovery code can be brute-forced.** No attempt limit, no rate limit, and success gives a
+- [x] **Recovery code can be brute-forced.** No attempt limit, no rate limit, and success gives a
       full token (FRED-219). (M) *security-auth*
+      Fixed 2026-11-23: 5 wrong tries per code, limits per account and per network address, and a
+      right code gives a one-time recovery token (not a session) that is the only way to register
+      the new passkey. Recovery also ends every session and token the account had. The limits are
+      held in memory, so they assume one backend instance.
 - [ ] **Add rate limiting** on public auth endpoints and on AI chat. (M) *prod-config-infra*
 - [ ] **Session revoke does not work after the first token refresh**, tokens refresh forever, and
       there is no server logout or sign-out button. `AuthController.java:152-194`. (M) *security-auth*
+      Part done 2026-11-23: a refreshed token now keeps its session id, so revoke reaches it. Still
+      open: tokens refresh forever, tokens from sign-up carry no session, no server logout.
 - [ ] **Step-up auth for money is frontend only.** A bare JWT can relink the bank, withdraw,
       liquidate or close the account. (L) *security-auth*
 - [ ] **Email change needs no re-auth and no verification** of the new address. It is also broken
@@ -124,6 +130,8 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
       port and the email log are well shaped for this. Fix the default from-address
       (`noreply@investingapp.com`). (M) *notifications-email*
 - [ ] **Send the recovery code by email** and stop printing it to stdout. (S)
+      Part done 2026-11-23: the code goes through the email service and is no longer printed. Still
+      open: there is no real email provider, so outside development recovery answers "not available".
 - [ ] **Tell users when something fails.** Failed bank pull, failed order, KYC rejected or action
       required, schedule put on hold. Today none of these reach the user by email, push or in app. (L)
 - [ ] Fix the "Investment complete" email, which goes out at midnight for every execution, including

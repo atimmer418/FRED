@@ -10,6 +10,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.Ordered;
+import org.springframework.core.env.Environment;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Registers the dev-tools request filter. Dev tooling (the {@code /api/dev/**} endpoints and
@@ -28,6 +32,22 @@ public class DevToolsConfig {
     public static final String[] DEV_TOOL_PROFILES = {"local", "dev", "test", "ci"};
 
     private static final Logger logger = LoggerFactory.getLogger(DevToolsConfig.class);
+
+    /**
+     * True only when a development profile is active and prod is not. Anything unknown counts as
+     * prod. Used where a secret (a one-time code) may be written to the log because email is mocked.
+     */
+    public static boolean isDevEnvironment(Environment environment) {
+        try {
+            List<String> active = Arrays.asList(environment.getActiveProfiles());
+            if (active.isEmpty() || active.contains("prod")) {
+                return false;
+            }
+            return Arrays.stream(DEV_TOOL_PROFILES).anyMatch(active::contains);
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     /** Shared by the /api/dev/** filter and by simulated passkey attestation. */
     @Bean

@@ -6,7 +6,8 @@ import { environment } from '../../environments/environment';
 export interface RecoveryResponse {
   success: boolean;
   message: string;
-  token?: string;
+  /** Set when the code was accepted. Good for registering one new passkey, nothing else. */
+  recoveryToken?: string;
 }
 
 @Injectable({

@@ -140,19 +140,33 @@ When a user opens the app with no valid JWT, the system decides whether to promp
 
 ## 5. Account Recovery
 
-Since there are no passwords, recovery uses **Biometric Identity Verification** via Persona + email.
+Since there are no passwords, recovery uses a code emailed to the address on the account. There is
+no face scan step: Persona is not part of recovery.
 
 ### Recovery Flow
-1. User clicks "Lost Device" / "Reset Passkey Access" on login screen.
-2. **Persona biometric scan** — liveness detection + 1:1 face match against original KYC profile.
-3. **Email OTP/Magic Link** sent to the email on file (requires both biometric identity AND email access).
-4. **Security purge** — all existing passkeys are immediately deleted (stolen device becomes useless).
-5. **Mandatory re-enrollment** — user registers a new passkey before regaining full access.
+1. User taps "Already have an account?" and enters their email.
+2. **Emailed code.** `POST /api/auth/recovery/initiate` sends a 6-digit code that works for 15 minutes.
+   The answer is the same whether or not the email has an account.
+3. **Check the code.** `POST /api/auth/recovery/verify`. On the right code the server removes every
+   passkey on the account, ends every session and token it had, emails the owner, and returns a
+   one-time **recovery token** (15 minutes). This does not sign the user in, and the recovery token
+   is not a JWT.
+4. **One new passkey.** `POST /api/passkey/register/recovery/start` and `/register/finish`, both
+   carrying the recovery token. Only the recovery token opens these for an existing account; a
+   session token never does. Finishing signs the user in and uses the token up.
+
+### Limits
+- 5 wrong tries per code, then the code is dead.
+- Per account: 5 codes an hour, 10 a day, 10 code checks an hour and 15 a day (after
+  which recovery is closed for that account until the day is over).
+- Per network address: 20 codes and 40 checks an hour. Best effort, since the address header can be forged.
+- A recovery token allows 5 passkey prompts.
 
 ### Security Notes
-- No raw biometric data is stored (Persona handles matching).
-- Recovery endpoint is rate-limited.
-- Security alert email sent when recovery is initiated.
+- Codes, recovery tokens and counters are held in memory (single backend instance; a restart means asking again).
+- Where real email is off outside development, recovery answers "not available" instead of promising a code.
+- Anyone who knows an account's email can use up its tries and keep the owner out of recovery for a
+  day at a time. They cannot get in. Support (help@fredvested.com) is the way round it.
 
 ---
 

@@ -43,7 +43,7 @@
 
     <div *ngIf="step === 'otp'">
       <h2>Enter Recovery Code</h2>
-      <p>We sent a 6-digit code to <strong>{{ email }}</strong>.<br>It expires in 3 minutes.</p>
+      <p>We sent a 6-digit code to <strong>{{ email }}</strong>.<br>It works for 15 minutes.</p>
 
       <div class="email-field">
         <span class="email-label">RECOVERY CODE</span>
@@ -63,6 +63,20 @@
 
       <ion-button fill="clear" expand="block" (click)="step = 'email'" [disabled]="isLoading">
         Back
+      </ion-button>
+    </div>
+
+    <div *ngIf="step === 'passkey'">
+      <h2>Create a New Passkey</h2>
+      <p>Your code is confirmed. Create a new passkey to get back into your account.</p>
+
+      <ion-button expand="block" (click)="createPasskey()" [disabled]="isLoading" class="action-btn">
+        <ion-spinner *ngIf="isLoading" name="crescent"></ion-spinner>
+        <span *ngIf="!isLoading">Create Passkey</span>
+      </ion-button>
+
+      <ion-button fill="clear" expand="block" (click)="startOver()" [disabled]="isLoading">
+        Start Over
       </ion-button>
     </div>
 

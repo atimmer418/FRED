@@ -116,12 +116,16 @@ export class PasskeyService {
     });
   }
 
-  startRecoveryRegistration(): Observable<RegistrationStartResponse> {
+  /**
+   * Start registering the new passkey that follows account recovery. The recovery token from
+   * /auth/recovery/verify is what the server checks; being signed in does not count.
+   */
+  startRecoveryRegistration(recoveryToken: string): Observable<RegistrationStartResponse> {
     return new Observable(observer => {
       this.getHeadersAsync().then(headers => {
         this.http.post<RegistrationStartResponse>(
           `${BACKEND_API_URL}/passkey/register/recovery/start`,
-          {},
+          { recoveryToken },
           { headers }
         ).subscribe({
           next: res => { observer.next(res); observer.complete(); },

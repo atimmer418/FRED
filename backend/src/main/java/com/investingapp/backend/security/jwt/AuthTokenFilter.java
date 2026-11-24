@@ -30,7 +30,30 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
     @Autowired
     private com.investingapp.backend.repository.UserSessionRepository userSessionRepository;
 
+    @Autowired
+    private com.investingapp.backend.security.TokenCutoffRegistry tokenCutoffs;
+
     private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
+
+    /**
+     * The account recovery steps. They never use the signed-in user, and a device going through
+     * recovery may still be sending a token that recovery itself just ended. That dead token must
+     * not be able to block the way back in, so these paths skip this filter altogether.
+     */
+    private static final java.util.Set<String> RECOVERY_PATHS = java.util.Set.of(
+            "/api/auth/recovery/initiate",
+            "/api/auth/recovery/verify",
+            "/api/passkey/register/recovery/start",
+            "/api/passkey/register/finish");
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        String path = (uri != null && contextPath != null && uri.startsWith(contextPath))
+                ? uri.substring(contextPath.length()) : uri;
+        return path != null && RECOVERY_PATHS.contains(path);
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -72,6 +95,16 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
                     String email = jwtUtils.getUserNameFromJwtToken(jwt);
 
                     UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+
+                    // Account recovery ends every token the user held, including ones with no
+                    // session id that the check above cannot reach.
+                    if (userDetails instanceof com.investingapp.backend.security.services.UserDetailsImpl known
+                            && tokenCutoffs.isEnded(known.getId(), jwtUtils.getIssuedAtFromToken(jwt))) {
+                        logger.warn("AuthTokenFilter: token for user {} was ended by account recovery. Blocking request to {}.",
+                                known.getId(), request.getRequestURI());
+                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session has been revoked");
+                        return;
+                    }
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                             userDetails,
                             null,

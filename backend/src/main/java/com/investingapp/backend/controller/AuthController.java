@@ -64,6 +64,9 @@ public class AuthController {
     @Autowired
     JwtUtils jwtUtils;
 
+    @Autowired
+    com.investingapp.backend.security.TokenCutoffRegistry tokenCutoffs;
+
     @GetMapping("/testuser")
     public ResponseEntity<String> userAccess() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -175,7 +178,18 @@ public class AuthController {
                     .body(new MessageResponse("User not found"));
         }
 
-        String newToken = jwtUtils.generateTokenFromUsername(username, ns, user.getPublicId());
+        // Keep the token tied to its session. A refreshed token that dropped the session id could
+        // never be revoked again: signing a device out, or recovering the account, would not reach it.
+        Long sessionId = (oldToken != null) ? jwtUtils.getSessionIdFromJwtToken(oldToken) : null;
+
+        // Account recovery may have ended this token after it passed the filter. Look again here,
+        // as late as possible, so a refresh in flight cannot turn a dead token into a live one.
+        if (oldToken != null && tokenCutoffs.isEnded(user.getId(), jwtUtils.getIssuedAtFromToken(oldToken))) {
+            logger.warn("Token refresh refused for user {}: token was ended by account recovery", user.getId());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new MessageResponse("Session has been revoked"));
+        }
+        String newToken = jwtUtils.generateTokenFromUsername(username, sessionId, ns, user.getPublicId());
 
         logger.info("JWT token refreshed for user: {}", username);
         

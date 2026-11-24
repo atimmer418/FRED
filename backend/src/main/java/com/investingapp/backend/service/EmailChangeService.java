@@ -21,8 +21,6 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -295,16 +293,7 @@ public class EmailChangeService {
         return email.charAt(0) + "***" + email.substring(at);
     }
 
-    /** True only when a development profile is active and prod is not. Unknown counts as prod. */
     private boolean isDevEnvironment() {
-        try {
-            List<String> active = Arrays.asList(environment.getActiveProfiles());
-            if (active.isEmpty() || active.contains("prod")) {
-                return false;
-            }
-            return Arrays.stream(DevToolsConfig.DEV_TOOL_PROFILES).anyMatch(active::contains);
-        } catch (Exception e) {
-            return false;
-        }
+        return DevToolsConfig.isDevEnvironment(environment);
     }
 }

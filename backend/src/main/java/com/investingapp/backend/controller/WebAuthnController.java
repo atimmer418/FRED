@@ -23,6 +23,7 @@ import com.investingapp.backend.dto.RegistrationFinishResponse; // <-- IMPORT YO
 import com.investingapp.backend.dto.RegistrationStartRequest;
 import com.investingapp.backend.dto.RegistrationStartResponse;
 import com.investingapp.backend.security.DevToolsKeyValidator;
+import com.investingapp.backend.service.AccountRecoveryService;
 import com.investingapp.backend.service.SimulatedAttestationService;
 import com.investingapp.backend.service.WebAuthnService;
 import com.yubico.webauthn.data.PublicKeyCredentialCreationOptions;
@@ -64,6 +65,11 @@ public class WebAuthnController {
 
     @Autowired
     private com.investingapp.backend.repository.PasskeyCredentialRepository passkeyCredentialRepository;
+
+    @Autowired
+    private AccountRecoveryService accountRecoveryService;
+
+    static final String RECOVERY_EXPIRED_MESSAGE = "Your recovery session has ended. Please start again.";
 
     /**
      * Null outside the local/dev/test/ci profiles, where the bean is not registered at all. A null
@@ -120,34 +126,45 @@ public class WebAuthnController {
         }
     }
 
+    /**
+     * Starts registering the one new passkey that follows account recovery.
+     *
+     * SECURITY: the only thing that opens this is the one-time recovery token from
+     * POST /api/auth/recovery/verify. A session token does not, whatever account it is for. It used
+     * to, and that let a stolen token add the thief's own passkey to an account, either straight
+     * away or in the moments after the real owner recovered it.
+     */
     @PostMapping("/register/recovery/start")
-    public ResponseEntity<?> startRecoveryRegistration(HttpServletRequest request) {
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authorization required");
-        }
-        String token = authHeader.substring(7);
-        if (!jwtUtils.validateJwtToken(token)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid or expired token");
-        }
-        String email = jwtUtils.getUserNameFromJwtToken(token);
-        logger.info("Received recovery passkey re-registration start for email: {}", email);
+    public ResponseEntity<?> startRecoveryRegistration(@RequestBody(required = false) Map<String, Object> body) {
+        Object tokenValue = (body != null) ? body.get("recoveryToken") : null;
+        String recoveryToken = (tokenValue instanceof String text) ? text : null;
 
-        // SECURITY: this is for an account that has just been through recovery, which removes every
-        // passkey. An account that still has one must not get a new passkey from a session token
-        // alone, or a stolen token would be enough to add the thief's own passkey and keep the
-        // account for good.
-        Long userId = userRepository.findByEmail(email).map(User::getId).orElse(null);
-        if (userId != null && passkeyCredentialRepository.countByUser_Id(userId) > 0) {
+        Long userId = accountRecoveryService.userForRecoveryToken(recoveryToken).orElse(null);
+        User user = (userId != null) ? userRepository.findById(userId).orElse(null) : null;
+        if (user == null && accountRecoveryService.alreadyFinished(recoveryToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("This account already has a passkey. Sign in with it.");
+        }
+        if (user == null) {
+            logger.warn("Refused recovery passkey registration: no live recovery token");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(RECOVERY_EXPIRED_MESSAGE);
+        }
+
+        // Recovery removed every passkey, so there should be none. If one is there anyway, stop.
+        if (passkeyCredentialRepository.countByUser_Id(userId) > 0) {
             logger.warn("Refused recovery passkey registration for user {}: account already has a passkey", userId);
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body("This account already has a passkey. Sign in with it.");
         }
 
         try {
-            PublicKeyCredentialCreationOptions options = webAuthnService.startRecoveryRegistrationFlow(email);
-            challengeCache.put(email, options);
-            logger.info("Recovery registration options cached for: {}", email);
+            PublicKeyCredentialCreationOptions options = webAuthnService.startRecoveryRegistrationFlow(user.getEmail());
+            // Kept with the recovery token, not in the sign-up challenge cache, so only a finish
+            // request that carries the same token can use it.
+            if (!accountRecoveryService.rememberPasskeyChallenge(recoveryToken, options)) {
+                logger.warn("Refused recovery passkey registration for user {}: recovery token used up", userId);
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(RECOVERY_EXPIRED_MESSAGE);
+            }
 
             String optionsJson = options.toCredentialsCreateJson();
             JsonNode fullResponse = objectMapper.readTree(optionsJson);
@@ -155,11 +172,8 @@ public class WebAuthnController {
             String publicKeyJson = objectMapper.writeValueAsString(publicKeyNode);
 
             return ResponseEntity.ok(new RegistrationStartResponse(publicKeyJson));
-        } catch (IllegalArgumentException e) {
-            logger.warn("Recovery registration failed - user not found: {}", email);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
         } catch (Exception e) {
-            logger.error("Failed to generate recovery registration options for: {}", email, e);
+            logger.error("Failed to generate recovery registration options for user {}", userId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error generating registration options");
         }
     }
@@ -193,8 +207,37 @@ public class WebAuthnController {
             return ResponseEntity.ok(simulated);
         }
 
-        PublicKeyCredentialCreationOptions options = challengeCache.getIfPresent(email);
-        challengeCache.invalidate(email); // Invalidate immediately
+        String recoveryToken = finishRequest.getRecoveryToken();
+        boolean afterRecovery = recoveryToken != null && !recoveryToken.isBlank();
+
+        PublicKeyCredentialCreationOptions options;
+        if (afterRecovery) {
+            // The passkey that follows account recovery. The challenge and the account both come
+            // from the recovery token; the email in the request is not trusted for either.
+            AccountRecoveryService.PendingPasskey pending =
+                    accountRecoveryService.takePasskeyChallenge(recoveryToken).orElse(null);
+            User recovered = (pending != null) ? userRepository.findById(pending.userId()).orElse(null) : null;
+            if (recovered == null) {
+                logger.warn("Refused recovery passkey registration finish: no waiting challenge for this recovery token");
+                return ResponseEntity.badRequest().body(new RegistrationFinishResponse(
+                        false, RECOVERY_EXPIRED_MESSAGE, null, null, email));
+            }
+            options = pending.options();
+            email = recovered.getEmail();
+            accountRecoveryService.waitUntilNewTokensAreGood(pending.userId());
+        } else {
+            // A new sign-up. Taken in one step, so one challenge can finish one registration.
+            options = challengeCache.asMap().remove(email);
+
+            // SECURITY: this path is for an account that has never had a passkey. An account that
+            // has one gets another only through account recovery, which needs the recovery token.
+            Long existingUserId = userRepository.findByEmail(email).map(User::getId).orElse(null);
+            if (options != null && existingUserId != null
+                    && passkeyCredentialRepository.countByUser_Id(existingUserId) > 0) {
+                logger.warn("Refused sign-up passkey registration for user {}: account already has a passkey", existingUserId);
+                options = null;
+            }
+        }
 
         if (options == null) {
             logger.warn("No registration challenge found or challenge expired for email: {}", email);
@@ -206,9 +249,14 @@ public class WebAuthnController {
         }
 
         RegistrationFinishResponse serviceResponse = webAuthnService.finishRegistrationFlow(
-                finishRequest.getEmail(),
+                email,
                 finishRequest.getCredential(),
                 options);
+
+        if (serviceResponse.isSuccess() && afterRecovery) {
+            // The new passkey is in place: the recovery token is used up.
+            accountRecoveryService.recoveryFinished(recoveryToken);
+        }
 
         if (serviceResponse.isSuccess()) {
             logger.info("Passkey registration and login successful for: {}", email);

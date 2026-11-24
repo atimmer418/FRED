@@ -128,6 +128,8 @@ jobs:
           # TODO: select the per-story specs by diff in a later iteration
           # (the verifier already runs `ng test --include=<changed>.spec.ts`).
           npx ng test --include='**/jwt-token.utils.spec.ts' --watch=false --browsers=ChromeHeadless
+          # Account recovery screen: it carries the one-time recovery token to the passkey step.
+          npx ng test --include='**/pages/recovery/*.spec.ts' --watch=false --browsers=ChromeHeadless
           # Analytics specs: these are new and green, so they are gated from the start.
           npx ng test --include='**/services/analytics/*.spec.ts' --include='**/dev-tools-key.utils.spec.ts' --watch=false --browsers=ChromeHeadless
           # Paycheck Autopilot Phase 1: the Plaid OAuth return capture (cold start, onboarding and

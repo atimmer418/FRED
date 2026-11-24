@@ -35,6 +35,7 @@ class AuthControllerRefreshPublicIdTest {
     private AuthController controller;
     private UserService userService;
     private JwtUtils jwtUtils;
+    private com.investingapp.backend.security.TokenCutoffRegistry tokenCutoffs;
 
     @BeforeEach
     void setUp() {
@@ -43,13 +44,16 @@ class AuthControllerRefreshPublicIdTest {
         jwtUtils = mock(JwtUtils.class);
         ReflectionTestUtils.setField(controller, "userService", userService);
         ReflectionTestUtils.setField(controller, "jwtUtils", jwtUtils);
+        tokenCutoffs = new com.investingapp.backend.security.TokenCutoffRegistry(3_600_000);
+        ReflectionTestUtils.setField(controller, "tokenCutoffs", tokenCutoffs);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(EMAIL, null, java.util.List.of()));
 
         when(jwtUtils.parseJwt(any())).thenReturn("old.token.value");
         when(jwtUtils.getNextStepFromJwtToken(any())).thenReturn("complete");
-        when(jwtUtils.generateTokenFromUsername(eq(EMAIL), any(), any())).thenReturn("new.token.value");
+        // Refresh passes the old token's session id through (none here), so the new token stays revocable.
+        when(jwtUtils.generateTokenFromUsername(eq(EMAIL), any(), any(), any())).thenReturn("new.token.value");
     }
 
     @AfterEach
@@ -62,6 +66,23 @@ class AuthControllerRefreshPublicIdTest {
         ResponseEntity<?> response = controller.refreshToken(new MockHttpServletRequest());
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         return (Map<String, Object>) response.getBody();
+    }
+
+    @Test
+    @DisplayName("a token that account recovery ended is not refreshed, even if it got past the filter")
+    void endedTokenIsNotRefreshed() {
+        User user = new User(EMAIL);
+        user.setId(7L);
+        when(userService.getUserByEmail(EMAIL)).thenReturn(user);
+        java.time.Instant issued = java.time.Instant.parse("2026-11-23T12:00:00Z");
+        when(jwtUtils.getIssuedAtFromToken("old.token.value")).thenReturn(java.util.Date.from(issued));
+        tokenCutoffs.endTokensIssuedUpTo(7L, issued.plusSeconds(30));
+
+        ResponseEntity<?> response = controller.refreshToken(new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        org.mockito.Mockito.verify(jwtUtils, org.mockito.Mockito.never())
+                .generateTokenFromUsername(any(), any(), any(), any());
     }
 
     @Test

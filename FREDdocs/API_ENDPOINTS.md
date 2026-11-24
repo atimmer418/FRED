@@ -15,7 +15,7 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | Method | Endpoint | Description | Auth | Request Body | Response |
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/auth/login` | Login with credentials (triggers 2FA OTP) | No | `LoginRequest { email, password }` | 202 `{ message, email, twoFactorRequired }` or 200 `{ jwtToken, id, email }` |
-| `POST` | `/api/auth/refresh` | Refresh JWT token (called proactively by frontend) | Yes | None | `{ success, jwtToken, id, email }` |
+| `POST` | `/api/auth/refresh` | Refresh JWT token (called proactively by frontend). The new token keeps the old one's session id, so it can still be revoked | Yes | None | `{ success, jwtToken, id, email }` |
 | `GET` | `/api/auth/testuser` | Debug: returns authenticated user info | Yes | None | String |
 
 ### WebAuthn/Passkey Controller (`/api/passkey`)
@@ -23,7 +23,8 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | Method | Endpoint | Description | Auth | Request Body | Response |
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/passkey/register/start` | Start passkey registration | No | RegistrationStartRequest | Registration challenge |
-| `POST` | `/api/passkey/register/finish` | Complete passkey registration | No | RegistrationFinishRequest | `{ jwtToken, id, email }` |
+| `POST` | `/api/passkey/register/recovery/start` | Start registering the one new passkey that follows account recovery. Opened only by the recovery token from `/api/auth/recovery/verify`; a session token is ignored. At most 5 starts per token. `401` when the token is missing, expired or used up, `403` if the account already has a passkey (including a token that already finished) | No (recovery token) | `{ recoveryToken }` | `{ options }` |
+| `POST` | `/api/passkey/register/finish` | Complete passkey registration. With `recoveryToken` it finishes the passkey that follows account recovery, on the account the token names (`400` when the token has no waiting challenge). Without it, it finishes a new sign-up and is refused for an account that already has a passkey | No | RegistrationFinishRequest (`{ email, credential, recoveryToken? }`) | `{ jwtToken, id, email }` |
 | `POST` | `/api/passkey/authenticate/start` | Start usernameless passkey authentication | No | None | Authentication challenge |
 | `POST` | `/api/passkey/authenticate/finish` | Complete passkey authentication | No | Assertion response | `{ jwtToken, id, email }` |
 
@@ -31,8 +32,8 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 | Method | Endpoint | Description | Auth | Request Body | Response |
 |--------|----------|-------------|------|-------------|----------|
-| `POST` | `/api/auth/recovery/initiate` | Initiate recovery (SSN lookup, OTP email) | No | `{ ssn }` | `{ success, message, token }` |
-| `POST` | `/api/auth/recovery/verify` | Verify OTP, purge passkeys, issue recovery JWT | No | `{ ssn, otp }` | `{ success, message, token }` |
+| `POST` | `/api/auth/recovery/initiate` | Email a 6-digit recovery code (15 minutes). Same answer whether or not the email has an account. Limits: 5 codes an hour and 10 a day per account, 20 an hour per network address (best effort: the address header can be forged). `429` when over a limit, `503` where real email is off outside development | No | `{ email }` | `{ success, message }` |
+| `POST` | `/api/auth/recovery/verify` | Check the code. 5 wrong tries kill the code; 10 checks an hour per account, 40 per network address; 15 checks in a day close recovery for that account until the day is over. On the right code: removes the account's passkeys, ends every session and token it had, and returns a one-time recovery token (15 minutes). Does not sign the caller in. `401` wrong or expired code, `429` over a limit | No | `{ email, otp }` | `{ success, message, recoveryToken }` |
 
 ### Development Auth (`/api/dev`) — Dev only
 

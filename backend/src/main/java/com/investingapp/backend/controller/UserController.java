@@ -898,47 +898,6 @@ public class UserController {
         }
     }
 
-    @PostMapping("/update-email")
-    @Transactional
-    public ResponseEntity<?> updateEmail(@RequestBody Map<String, String> request, Authentication authentication) {
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal(); // Corrected casting
-        String currentEmail = userDetails.getUsername();
-        String newEmail = request.get("newEmail");
-
-        if (newEmail == null || newEmail.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "New email is required"));
-        }
-
-        String providedCurrentEmail = request.get("currentEmail");
-        if (providedCurrentEmail != null && !providedCurrentEmail.equals(currentEmail)) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Current email does not match authenticated user"));
-        }
-
-        User user = userRepository.findByEmail(currentEmail).orElse(null);
-        if (user == null) {
-            return ResponseEntity.status(404).body(Map.of("message", "User not found"));
-        }
-
-        if (userRepository.existsByEmail(newEmail)) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Email is already in use"));
-        }
-
-        user.setEmail(newEmail);
-        userRepository.save(user);
-
-        // Generate new JWT — carry next-step hint so cold-start navigation remains fast
-        String nsEmail = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
-        String newJwt = jwtUtils.generateTokenFromUsername(newEmail, nsEmail, user.getPublicId());
-
-        logger.info("Updated email for user ID {} from {} to {}", user.getId(), currentEmail, newEmail);
-
-        return ResponseEntity.ok(Map.of(
-                "message", "Email updated successfully",
-                "newEmail", newEmail,
-                "jwtToken", newJwt));
-    }
-
     @GetMapping("/sessions")
     public ResponseEntity<?> getUserSessions(Authentication authentication, HttpServletRequest request) {
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();

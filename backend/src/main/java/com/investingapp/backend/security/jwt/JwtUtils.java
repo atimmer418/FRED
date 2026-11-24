@@ -155,6 +155,15 @@ public class JwtUtils {
         return buildToken(username, null, nextStep, publicId);
     }
 
+    /**
+     * Same, but keeps the token tied to a session so it can still be revoked. Used when the email
+     * (the token's subject) changes mid-session. A null sessionId gives a token with no session.
+     */
+    public String generateTokenFromUsername(String username, Long sessionId, String nextStep, String publicId) {
+        logger.info("JwtUtils generateTokenFromUsername(session,ns,pid) - for user: {}, ns: {}", username, nextStep);
+        return buildToken(username, sessionId, nextStep, publicId);
+    }
+
     /** Opaque analytics identity, or null on an older token issued before the claim existed. */
     public String getPublicIdFromJwtToken(String token) {
         try {

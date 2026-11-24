@@ -56,7 +56,8 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | `GET` | `/api/user/progress` | Get onboarding progress (8-step flow) | Yes | None | `UserProgressResponse` (step booleans, nextStep, completionPercentage, profile fields, referral info) |
 | `PUT` | `/api/user/progress` | Update onboarding progress | Yes | `{ getStartedCompleted?, surveyInitialCompleted?, fiPlanResultsCompleted?, authFinalizeCompleted?, kycVerificationCompleted?, linkPlaidCompleted?, investmentScheduleCompleted?, investmentConfirmationCompleted? }` | `UserProgressResponse` |
 | `PUT` | `/api/user/profile` | Update profile fields | Yes | `{ monthlyInvestment?, retirementIncome? }` | `UserProgressResponse` |
-| `POST` | `/api/user/update-email` | Change email address (issues new JWT) | Yes | `{ newEmail, currentEmail? }` | `{ message, newEmail, jwtToken }` |
+| `POST` | `/api/user/email-change/start` | Step 1 of changing email. Needs a fresh passkey assertion (challenge from `/api/passkey/authenticate/start`), checked on the server. Sends a 6-digit code to the new address and a notice to the old one. Changes nothing yet | Yes | `{ newEmail, passkeySessionId, credential }` | `{ message, expiresInMinutes }` or `{ code, message }` |
+| `POST` | `/api/user/email-change/confirm` | Step 2. Applies the pending change if the code is right (15 minutes, 5 tries), notifies the old address, issues a new JWT | Yes | `{ code }` | `{ message, newEmail, jwtToken }` or `{ code, message }` |
 | `POST` | `/api/user/referral/apply` | Apply a referral code | Yes | `{ code }` | `{ message }` |
 | `GET` | `/api/user/should-prompt-reauth` | Check if device should see passkey prompt vs onboarding | No | Header: `X-Device-ID` (optional) | `{ shouldPromptReauth, message, trackingMethod }` |
 | `GET` | `/api/user/sessions` | List all active sessions | Yes | None | `{ currentSessionId, sessions }` |

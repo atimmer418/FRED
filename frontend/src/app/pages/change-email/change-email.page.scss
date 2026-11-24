@@ -76,6 +76,27 @@
   pointer-events: none;
 }
 
+// The 6-digit code reads better spaced out
+.field-input--code {
+  letter-spacing: 0.3em;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-btn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  color: #2563EB;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled { color: #9ca3af; cursor: not-allowed; }
+}
+
 .cta-btn {
   width: 100%;
   height: 52px;

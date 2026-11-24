@@ -22,6 +22,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Returns an Optional, which can be empty if no user is found
     Optional<User> findByEmail(String email);
 
+    /**
+     * Sets one user's email in a single statement. Used only by EmailChangeService, after the new
+     * address has been confirmed. Returns the number of rows changed (1, or 0 if the user is gone).
+     */
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true, clearAutomatically = true)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE User u SET u.email = :email WHERE u.id = :id")
+    int updateEmail(@Param("id") Long id, @Param("email") String email);
+
     Optional<User> findByReferralCode(String referralCode);
     boolean existsByReferralCode(String referralCode);
 

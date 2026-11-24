@@ -13,29 +13,58 @@
 <ion-content class="shell-content" appKeyboardAvoid>
   <div class="shell-inner">
 
-    <div class="section-card">
-      <div class="card-header-row">
-        <span class="material-symbols-outlined card-icon">mail</span>
-        <h3 class="card-title">Update Email Address</h3>
-      </div>
-      <p class="card-subtitle">Enter your new email address below. You will be asked to verify your identity.</p>
+    <!-- Step 1: the new address -->
+    <ng-container *ngIf="step === 'email'">
+      <div class="section-card">
+        <div class="card-header-row">
+          <span class="material-symbols-outlined card-icon">mail</span>
+          <h3 class="card-title">Update Email Address</h3>
+        </div>
+        <p class="card-subtitle">Enter your new email. We will check it is you, then send it a code.</p>
 
-      <div class="form-group">
-        <label class="field-label">Current Email</label>
-        <input class="field-input field-input--readonly" [value]="currentEmail" readonly>
+        <div class="form-group">
+          <label class="field-label">Current Email</label>
+          <input class="field-input field-input--readonly" [value]="currentEmail" readonly>
+        </div>
+
+        <div class="form-group form-group--last">
+          <label class="field-label">New Email</label>
+          <input class="field-input" [(ngModel)]="newEmail" type="email" autocapitalize="none"
+                 autocomplete="email" placeholder="Enter new email">
+        </div>
       </div>
 
-      <div class="form-group form-group--last">
-        <label class="field-label">New Email</label>
-        <input class="field-input" [(ngModel)]="newEmail" type="email" placeholder="Enter new email">
-      </div>
-    </div>
+      <button class="cta-btn" (click)="initiateEmailChange()" [disabled]="!canSave() || isLoading">
+        <ion-spinner *ngIf="isLoading" name="crescent" class="btn-spinner-sm"></ion-spinner>
+        <span class="material-symbols-outlined" *ngIf="!isLoading">send</span>
+        <span>{{ isLoading ? 'Sending...' : 'Send Code' }}</span>
+      </button>
+    </ng-container>
 
-    <button class="cta-btn" (click)="initiateEmailChange()" [disabled]="!canSave() || isLoading">
-      <ion-spinner *ngIf="isLoading" name="crescent" class="btn-spinner-sm"></ion-spinner>
-      <span class="material-symbols-outlined" *ngIf="!isLoading">send</span>
-      <span>{{ isLoading ? 'Sending...' : 'Update Email' }}</span>
-    </button>
+    <!-- Step 2: the code that was sent to the new address -->
+    <ng-container *ngIf="step === 'code'">
+      <div class="section-card">
+        <div class="card-header-row">
+          <span class="material-symbols-outlined card-icon">mark_email_read</span>
+          <h3 class="card-title">Enter Your Code</h3>
+        </div>
+        <p class="card-subtitle">We sent a 6-digit code to {{ newEmail }}. Your email changes once you enter it.</p>
+
+        <div class="form-group form-group--last">
+          <label class="field-label">Code</label>
+          <input class="field-input field-input--code" [(ngModel)]="code" type="text" inputmode="numeric"
+                 autocomplete="one-time-code" maxlength="6" placeholder="000000">
+        </div>
+      </div>
+
+      <button class="cta-btn" (click)="confirmCode()" [disabled]="!canConfirm() || isLoading || isDone">
+        <ion-spinner *ngIf="isLoading" name="crescent" class="btn-spinner-sm"></ion-spinner>
+        <span class="material-symbols-outlined" *ngIf="!isLoading">check</span>
+        <span>{{ isLoading ? 'Checking...' : 'Confirm Email' }}</span>
+      </button>
+
+      <button class="text-btn" (click)="startOver()" [disabled]="isLoading || isDone">Use a different email</button>
+    </ng-container>
 
   </div>
 </ion-content>

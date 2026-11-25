@@ -9,6 +9,7 @@ import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.s
 import { TabActivationService } from '../../services/tab-activation.service';
 import { PinService } from '../../services/pin.service';
 import { ToastService } from '../../services/toast.service';
+import { ChatStorageUtils } from '../../utils/chat-storage.utils';
 
 function makeChatServiceMock() {
   return {
@@ -22,6 +23,9 @@ function makeChatServiceMock() {
     createSession: jasmine.createSpy('createSession').and.returnValue({ id: 's1', messages: [] }),
     saveSession: jasmine.createSpy('saveSession'),
     markSuggestionAsUsed: jasmine.createSpy('markSuggestionAsUsed'),
+    currentUserId: jasmine.createSpy('currentUserId').and.returnValue('1'),
+    streamChat: jasmine.createSpy('streamChat').and.returnValue(of({ done: true })),
+    confirmAction: jasmine.createSpy('confirmAction').and.returnValue(of({ success: true, message: 'ok' })),
   };
 }
 
@@ -50,7 +54,7 @@ function configure(chat: ReturnType<typeof makeChatServiceMock>, tour: ReturnTyp
   })
     .overrideProvider(ChatService, { useValue: chat })
     // Action-card deps (PIN sheet, toasts) pull ModalController/HttpClient; unused on these paths
-    .overrideProvider(PinService, { useValue: {} })
+    .overrideProvider(PinService, { useValue: { hasPin: () => Promise.resolve(false) } })
     .overrideProvider(ToastService, { useValue: {} })
     .overrideProvider(FirstTimeTourService, { useValue: tour });
 }
@@ -347,5 +351,245 @@ describe('AiChatPage action outcome records', () => {
 
     const seg = c.segments(c.messages[0]).find(s => s.kind === 'action') as any;
     expect(seg.state).toBe('idle');
+  });
+});
+
+/**
+ * Chat is private to one account. This page lives inside the tabs pager and
+ * can stay in memory across a sign-out, so it must drop what it holds the
+ * moment the account on the device changes, and ignore anything that arrives
+ * late for the previous account.
+ */
+describe('AiChatPage on a shared phone', () => {
+  const SECRET = 'A-private: my salary is 91234';
+  let chat: ReturnType<typeof makeChatServiceMock>;
+
+  function sessionOf(owner: string, text: string) {
+    return {
+      id: 'sess-' + owner, title: 'Chat of ' + owner, lastModified: Date.now(), ownerId: owner,
+      messages: [{ role: 'user', content: text, timestamp: new Date() }],
+    };
+  }
+
+  /** User A (id 1) opens chat and has a conversation on screen. */
+  function pageWithUserAChat(): AiChatPage {
+    const a = sessionOf('1', SECRET);
+    chat.getSessions.and.returnValue([a]);
+    chat.getRecentSession.and.returnValue(a);
+    chat.getDailySuggestions.and.returnValue(of(['A personal card']));
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.onChatActiveChange(true);
+    c.newMessage = 'half typed by A';
+    expect(c.messages.map(m => m.content)).toEqual([SECRET]);
+    expect(c.sessions.length).toBe(1);
+    return c;
+  }
+
+  function everythingOnScreen(c: AiChatPage): string {
+    return JSON.stringify([c.messages, c.sessions, c.currentSession, c.newMessage, c.dailySuggestions]);
+  }
+
+  /** B (id 2) is now the account on the device and has no chat of their own. */
+  function userBTakesOver() {
+    chat.currentUserId.and.returnValue('2');
+    chat.getSessions.and.returnValue([]);
+    chat.getRecentSession.and.returnValue(null);
+    chat.getHistory.and.returnValue(of([]));
+    chat.getDailySuggestions.and.returnValue(of(['B card']));
+    chat.createSession.and.returnValue({ id: 'b-new', title: 'New Chat', lastModified: Date.now(), messages: [], ownerId: '2' });
+  }
+
+  beforeEach(() => {
+    chat = makeChatServiceMock();
+    configure(chat);
+  });
+
+  it('signing out blanks the chat held by the page', () => {
+    const c = pageWithUserAChat();
+
+    chat.currentUserId.and.returnValue(null);
+    ChatStorageUtils.clearAll(); // what sign-out does
+
+    expect(c.messages).toEqual([]);
+    expect(c.sessions).toEqual([]);
+    expect(c.currentSession).toBeNull();
+    expect(c.newMessage).toBe('');
+    expect(c.dailySuggestions).toEqual([]);
+    expect(everythingOnScreen(c)).not.toContain('91234');
+  });
+
+  it('user B opening chat after A signed out sees only B\'s own chat', () => {
+    const c = pageWithUserAChat();
+    chat.currentUserId.and.returnValue(null);
+    ChatStorageUtils.clearAll();
+
+    userBTakesOver();
+    c.onChatActiveChange(true);
+
+    expect(chat.getHistory.calls.mostRecent().args).toEqual([undefined, '2']);
+    expect(c.messages).toEqual([]);
+    expect(c.sessions).toEqual([]);
+    expect(c.currentSession?.id).toBe('b-new');
+    expect(c.dailySuggestions).toEqual(['B card']);
+    expect(everythingOnScreen(c)).not.toContain('91234');
+  });
+
+  it('user B signing in without A signing out still gets a blank chat', () => {
+    // No wipe event reaches the page: the account id alone changed.
+    const c = pageWithUserAChat();
+    c.onChatActiveChange(false);
+
+    userBTakesOver();
+    c.onChatActiveChange(true);
+
+    expect(c.messages).toEqual([]);
+    expect(c.sessions).toEqual([]);
+    expect(c.currentSession?.id).toBe('b-new');
+    expect(c.newMessage).toBe('');
+    expect(everythingOnScreen(c)).not.toContain('91234');
+  });
+
+  it('the same user coming back to chat keeps their conversation', () => {
+    const c = pageWithUserAChat();
+    c.onChatActiveChange(false);
+    c.onChatActiveChange(true);
+
+    expect(c.messages.map(m => m.content)).toEqual([SECRET]);
+    expect(c.newMessage).toBe('half typed by A');
+  });
+
+  it('A\'s history arriving after B signed in is thrown away', () => {
+    const lateHistory = new Subject<any[]>();
+    chat.getSessions.and.returnValue([]);
+    chat.getHistory.and.returnValue(lateHistory);
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.onChatActiveChange(true); // A's history request is now in flight
+
+    chat.currentUserId.and.returnValue('2');
+    lateHistory.next([{ role: 'user', content: SECRET, createdAt: new Date().toISOString(), sessionId: 'sess-1' }]);
+
+    expect(everythingOnScreen(c)).not.toContain('91234');
+    expect(chat.saveSession).not.toHaveBeenCalled();
+  });
+
+  it('A\'s history request is cancelled when A signs out', () => {
+    const lateHistory = new Subject<any[]>();
+    chat.getSessions.and.returnValue([]);
+    chat.getHistory.and.returnValue(lateHistory);
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.onChatActiveChange(true);
+    expect(lateHistory.observed).toBeTrue();
+
+    chat.currentUserId.and.returnValue(null);
+    ChatStorageUtils.clearAll();
+
+    expect(lateHistory.observed).toBeFalse();
+    expect(c.isLoading).toBeFalse();
+  });
+
+  it('A\'s reply still streaming when the account changes is dropped and never saved', () => {
+    const c = pageWithUserAChat();
+    const stream = new Subject<{ token?: string; done?: boolean; title?: string }>();
+    chat.streamChat.and.returnValue(stream);
+    c.newMessage = 'what about my 91234 salary';
+    c.sendMessage();
+    stream.next({ token: 'Your 91234 ' });
+    chat.saveSession.calls.reset();
+
+    chat.currentUserId.and.returnValue(null);
+    ChatStorageUtils.clearAll(); // A signs out mid-reply
+    expect(stream.observed).toBeFalse();
+
+    userBTakesOver();
+    c.onChatActiveChange(true);
+    stream.next({ token: 'salary is fine' });
+    stream.next({ done: true, title: 'Salary 91234' });
+    stream.complete();
+
+    expect(chat.saveSession).not.toHaveBeenCalled();
+    expect(everythingOnScreen(c)).not.toContain('91234');
+  });
+
+  it('a streamed reply is dropped when the account changed with no wipe event', () => {
+    const c = pageWithUserAChat();
+    const stream = new Subject<{ token?: string; done?: boolean; title?: string }>();
+    chat.streamChat.and.returnValue(stream);
+    c.newMessage = 'question';
+    c.sendMessage();
+    chat.saveSession.calls.reset();
+    const before = c.messages[c.messages.length - 1].content;
+
+    chat.currentUserId.and.returnValue('2');
+    stream.next({ token: 'for A only' });
+    stream.next({ done: true, title: 'A title' });
+    stream.complete();
+
+    expect(c.messages[c.messages.length - 1].content).toBe(before);
+    expect(chat.saveSession).not.toHaveBeenCalled();
+  });
+
+  it('A\'s suggestion cards arriving after B signed in are not cached or shown', () => {
+    const lateCards = new Subject<string[]>();
+    chat.getDailySuggestions.and.returnValue(lateCards);
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.loadDailySuggestions();
+
+    chat.currentUserId.and.returnValue('2');
+    lateCards.next(['How is your 91234 salary doing?']);
+
+    expect(chat.cacheDailySuggestions).not.toHaveBeenCalled();
+    expect(c.dailySuggestions).toEqual([]);
+  });
+
+  it('a conversation resumed from the server is saved for the signed-in user', () => {
+    chat.getSessions.and.returnValue([]);
+    chat.getHistory.and.returnValue(of([
+      { role: 'user', content: 'hello', createdAt: new Date().toISOString(), sessionId: 'srv-1' },
+    ]));
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.onChatActiveChange(true);
+
+    expect(chat.saveSession).toHaveBeenCalledTimes(1);
+    expect(chat.saveSession.calls.mostRecent().args[0].ownerId).toBe('1');
+    expect(c.currentSession?.id).toBe('srv-1');
+  });
+
+  it('the first suggestions request is not restarted when chat loads', () => {
+    const slow = new Subject<string[]>();
+    chat.getDailySuggestions.and.returnValue(slow);
+    const c = TestBed.createComponent(AiChatPage).componentInstance;
+    c.primeSuggestions(); // cold cache: fetch starts
+    c.onChatActiveChange(true); // first activation while it is still in flight
+
+    expect(chat.getDailySuggestions).toHaveBeenCalledTimes(1);
+    slow.next(['a', 'b']);
+    expect(c.dailySuggestions).toEqual(['a', 'b']);
+  });
+
+  it('the outcome of a change A confirmed is not added to B\'s chat', async () => {
+    const c = pageWithUserAChat();
+    const result = new Subject<{ success: boolean; message: string }>();
+    chat.confirmAction.and.returnValue(result);
+    const msg = c.messages[c.messages.length - 1];
+    const seg: any = { kind: 'action', state: 'idle', proposal: { action: 'x', params: {}, summary: 's' } };
+    await c.confirmAction(msg, seg);
+    expect(chat.confirmAction).toHaveBeenCalled();
+
+    userBTakesOver();
+    c.onChatActiveChange(false);
+    c.onChatActiveChange(true);
+    chat.saveSession.calls.reset();
+    result.next({ success: true, message: 'Changed A\'s 91234 plan' });
+
+    expect(c.actionInFlight).toBeFalse();
+    expect(c.messages).toEqual([]);
+    expect(chat.saveSession).not.toHaveBeenCalled();
+  });
+
+  it('stops listening for wipes once the page is destroyed', () => {
+    const c = pageWithUserAChat();
+    c.ngOnDestroy();
+    expect(() => ChatStorageUtils.clearAll()).not.toThrow();
+    expect(c.messages.length).toBe(1); // untouched: the page is gone
   });
 });

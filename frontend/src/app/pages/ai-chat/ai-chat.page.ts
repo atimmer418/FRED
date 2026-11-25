@@ -19,6 +19,7 @@ import {
 import { ChatService, ChatMessage, ChatSession } from '../../services/chat.service';
 import { FirstTimeTourService, TourStep } from '../../services/first-time-tour.service';
 import { TabActivationService } from '../../services/tab-activation.service';
+import { ChatStorageUtils } from '../../utils/chat-storage.utils';
 import { Subscription } from 'rxjs';
 import { finalize } from 'rxjs/operators';
 import { addIcons } from 'ionicons';
@@ -75,7 +76,19 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   readonly FRED_STORY_TRIGGER = "What's your story FRED?";
 
   private streamSubscription: Subscription | null = null;
+  private historySubscription: Subscription | null = null;
+  private suggestionsSubscription: Subscription | null = null;
+  /** Account the in-flight suggestions request was started for. */
+  private suggestionsOwnerId: string | null = null;
   private tourSub: Subscription | null = null;
+  private chatClearedSub: Subscription | null = null;
+
+  /**
+   * User id of the account the chat on this screen belongs to (null until loaded).
+   * This page can outlive a sign-out, so everything it holds is tied to one
+   * account and dropped the moment the account on the device changes.
+   */
+  private chatOwnerId: string | null = null;
 
   /** The assistant message currently receiving streamed tokens (null when idle) */
   private activeStreamMsg: ChatMessage | null = null;
@@ -124,6 +137,60 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     });
 
     this.tourSub = this.tourService.step$.subscribe(step => this.onTourStep(step));
+
+    // Sign-out, or a different user signing in, wipes the chat stored on the
+    // device. Blank the copy held by this screen at the same moment.
+    this.chatClearedSub = ChatStorageUtils.cleared$.subscribe(() => this.resetForAccountChange());
+  }
+
+  /**
+   * Forget everything this screen holds about the last account: messages, the
+   * history list, the draft, the suggestion cards, and any request still in
+   * flight. The next activation loads the signed-in user's own chat.
+   */
+  private resetForAccountChange() {
+    this.streamSubscription?.unsubscribe();
+    this.streamSubscription = null;
+    this.historySubscription?.unsubscribe();
+    this.historySubscription = null;
+    this.suggestionsSubscription?.unsubscribe();
+    this.suggestionsSubscription = null;
+    this.activeStreamMsg = null;
+    this.messages = [];
+    this.sessions = [];
+    this.currentSession = null;
+    this.newMessage = '';
+    this.isLoading = false;
+    this.rawSuggestions = [];
+    this.dailySuggestions = [];
+    this.chatLoaded = false;
+    this.chatOwnerId = null;
+    try {
+      this.menuCtrl.close('chat-menu');
+      this.cdr.detectChanges();
+    } catch { /* view already gone: nothing left on screen to blank */ }
+  }
+
+  /** True when the account on the device is no longer the one a request was started for. */
+  private accountChangedSince(owner: string | null): boolean {
+    return this.chatService.currentUserId() !== owner;
+  }
+
+  /**
+   * Load sessions, recent history and suggestions once per account. If the
+   * account changed since the last load, the old account's chat is dropped first.
+   */
+  private ensureChatLoaded() {
+    const userId = this.chatService.currentUserId();
+    if (this.chatLoaded && this.chatOwnerId !== userId) {
+      this.resetForAccountChange();
+    }
+    if (this.chatLoaded) return;
+    this.chatLoaded = true;
+    this.chatOwnerId = userId;
+    this.loadSessions();
+    this.syncBackendHistory();
+    this.loadDailySuggestions();
   }
 
   get isTourOnStoryStep(): boolean {
@@ -173,14 +240,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     // start keeps priority) — by the time anyone swipes into chat, sessions,
     // history, and suggestions are already rendered. First activation still
     // loads immediately if it beats the timer (see onChatActiveChange).
-    setTimeout(() => {
-      if (!this.chatLoaded) {
-        this.chatLoaded = true;
-        this.loadSessions();
-        this.syncBackendHistory();
-        this.loadDailySuggestions();
-      }
-    }, 2500);
+    setTimeout(() => this.ensureChatLoaded(), 2500);
 
     // Native-only (plugin never fires on web — same pattern as KeyboardAvoidDirective)
     this.kbShow = Keyboard.addListener('keyboardWillShow', info => {
@@ -203,7 +263,10 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     this.kbShow?.then(h => h.remove());
     this.kbHide?.then(h => h.remove());
     this.streamSubscription?.unsubscribe();
+    this.historySubscription?.unsubscribe();
+    this.suggestionsSubscription?.unsubscribe();
     this.tourSub?.unsubscribe();
+    this.chatClearedSub?.unsubscribe();
   }
 
   ngAfterViewInit() {
@@ -250,12 +313,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     // the pager's right-edge swipe).
     this.menuCtrl.enable(true, 'chat-menu');
     this.menuCtrl.swipeGesture(false, 'chat-menu');
-    if (!this.chatLoaded) {
-      this.chatLoaded = true;
-      this.loadSessions();
-      this.syncBackendHistory();
-      this.loadDailySuggestions();
-    }
+    this.ensureChatLoaded();
     if (this.messages.length > 0) {
       setTimeout(() => this.scrollToBottom(), 300);
     }
@@ -278,8 +336,19 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   }
 
   loadDailySuggestions() {
-    this.chatService.getDailySuggestions().subscribe({
+    const owner = this.chatService.currentUserId();
+    // A request for this account is already on its way (the cold-cache fetch from
+    // ngOnInit): let it land instead of starting over.
+    if (this.suggestionsSubscription && !this.suggestionsSubscription.closed
+      && this.suggestionsOwnerId === owner) {
+      return;
+    }
+    this.suggestionsSubscription?.unsubscribe();
+    this.suggestionsOwnerId = owner;
+    this.suggestionsSubscription = this.chatService.getDailySuggestions().subscribe({
       next: (questions) => {
+        // One card is personal: never cache or show it for a different account.
+        if (this.accountChangedSince(owner)) return;
         // Phase 3: Backend returns [LLM, Popular, Personalized/FRED]
         this.chatService.cacheDailySuggestions(questions);
         this.applySuggestions(questions);
@@ -343,7 +412,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
   }
 
   syncBackendHistory() {
-    const userId = localStorage.getItem('userId');
+    const userId = this.chatService.currentUserId();
     const sessionId = this.currentSession?.id;
 
     if (!sessionId && !userId) {
@@ -352,8 +421,11 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     }
 
     this.isLoading = true;
-    this.chatService.getHistory(sessionId, userId).subscribe({
+    this.historySubscription?.unsubscribe();
+    this.historySubscription = this.chatService.getHistory(sessionId, userId).subscribe({
       next: (history) => {
+        // The account changed while this was loading: this history is not theirs.
+        if (this.accountChangedSince(userId)) return;
         this.isLoading = false;
         if (history && history.length > 0) {
           // Convert backend messages to frontend format
@@ -382,7 +454,8 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
                 id: activeSessionId!,
                 title: 'Resumed Chat',
                 lastModified: lastMsg.timestamp.getTime(),
-                messages: this.messages
+                messages: this.messages,
+                ownerId: userId ?? undefined
               };
             } else {
               session.messages = this.messages;
@@ -412,6 +485,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
         }
       },
       error: (err) => {
+        if (this.accountChangedSince(userId)) return;
         console.error('Failed to fetch history', err);
         this.isLoading = false;
         this.checkRecentSession();
@@ -507,6 +581,8 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
       || this.currentSession.title === 'Resumed Chat';
 
     const sessionId = this.currentSession?.id || 'default-session';
+    // The reply belongs to whoever asked. If the account changes mid-stream, drop it.
+    const owner = this.chatService.currentUserId();
 
     // Push placeholder assistant message
     const assistantMsgIndex = this.messages.length;
@@ -524,6 +600,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     this.streamSubscription = this.chatService.streamChat(userMsg, sessionId, needsTitle)
       .subscribe({
         next: (event) => {
+          if (this.accountChangedSince(owner)) return;
           if (event.token) {
             // Turn off loading indicator on first token
             if (this.isLoading) {
@@ -550,6 +627,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
           }
         },
         error: (err) => {
+          if (this.accountChangedSince(owner)) return;
           console.error('[Chat] Stream error:', err);
           this.isLoading = false;
           this.activeStreamMsg = null;
@@ -560,6 +638,7 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
           this.cdr.detectChanges();
         },
         complete: () => {
+          if (this.accountChangedSince(owner)) return;
           this.isLoading = false;
           this.activeStreamMsg = null;
           // Belt-and-suspenders: if the stream closed without a done event
@@ -839,9 +918,12 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
     this.cdr.detectChanges();
 
     const sessionId = this.currentSession?.id || 'default-session';
+    const owner = this.chatService.currentUserId();
     this.chatService.confirmAction(seg.proposal.action, seg.proposal.params, sessionId).subscribe({
       next: (res) => {
         this.actionInFlight = false;
+        // The outcome belongs to whoever confirmed. Never add it to another account's chat.
+        if (this.accountChangedSince(owner)) return;
         seg.state = res.success ? 'done' : 'failed';
         seg.resultMessage = res.message;
         // Persist the outcome as a hidden system record (same ✅/⚠️ prefix the

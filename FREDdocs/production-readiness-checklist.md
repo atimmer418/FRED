@@ -328,4 +328,6 @@ Billing itself waits on counsel. Everything below is needed whichever payment ra
 - TLH is off by default and needs both Pro and an explicit opt-in.
 - Market breakdown generation: real data, grounding and compliance gate.
 - AI chat is bound to the signed-in user, tools are read-only, actions need a Confirm tap.
+- Chat kept on the phone is stored per account and wiped on sign-out or when a different user signs in
+  (`ChatStorageUtils`), so a shared phone never shows one user's chat to another.
 - Analytics layer and opt-out. Tax documents page. App icons, launch screen, Face ID string.

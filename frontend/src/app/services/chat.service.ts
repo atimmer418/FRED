@@ -3,6 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, Observer } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { JwtTokenUtils } from '../utils/jwt-token.utils';
+import { ChatStorageUtils } from '../utils/chat-storage.utils';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -17,6 +18,8 @@ export interface ChatSession {
   title: string;
   lastModified: number;
   messages: ChatMessage[];
+  /** User id of the account this conversation belongs to. A session is only ever saved for its owner. */
+  ownerId?: string;
 }
 
 @Injectable({
@@ -24,10 +27,18 @@ export interface ChatSession {
 })
 export class ChatService {
   private apiUrl = `${environment.backendApiUrl}/chat`;
-  private readonly STORAGE_KEY = 'fred_chat_history';
   private readonly SESSION_TIMEOUT_HOURS = 2;
 
-  constructor(private http: HttpClient) { }
+  constructor(private http: HttpClient) {
+    // Chat used to sit under one key shared by every account on the device.
+    // Nobody can say whose it is, so it is deleted, never shown.
+    ChatStorageUtils.removeLegacyHistory();
+  }
+
+  /** The signed-in user's id, or null when nobody is signed in. Chat on the device is kept per user. */
+  currentUserId(): string | null {
+    return ChatStorageUtils.currentUserId();
+  }
 
   sendMessage(message: string, sessionId: string, generateTitle: boolean = false): Observable<{ reply: string, title?: string }> {
     const token = JwtTokenUtils.getValidJwtToken();
@@ -148,26 +159,45 @@ export class ChatService {
   }
 
   // History Management
+  //
+  // Saved conversations are private to one account. They live under a key that
+  // carries the user id, every session records its owner, and all of it is
+  // wiped when the account on the device changes (see ChatStorageUtils and
+  // JwtTokenUtils). With nobody signed in, nothing is read and nothing is saved.
+
+  /** The signed-in user's saved conversations, newest first. */
   getSessions(): ChatSession[] {
-    const data = localStorage.getItem(this.STORAGE_KEY);
+    const userId = this.currentUserId();
+    if (!userId) return [];
+    const data = localStorage.getItem(ChatStorageUtils.historyKey(userId));
     if (!data) return [];
     try {
       const sessions = JSON.parse(data);
+      if (!Array.isArray(sessions)) return [];
       // Restore Date objects
-      return sessions.map((s: any) => ({
-        ...s,
-        messages: s.messages.map((m: any) => ({
-          ...m,
-          timestamp: new Date(m.timestamp)
-        }))
-      })).sort((a: ChatSession, b: ChatSession) => b.lastModified - a.lastModified);
+      return sessions
+        .filter((s: any) => s && s.ownerId === userId && Array.isArray(s.messages))
+        .map((s: any) => ({
+          ...s,
+          messages: s.messages.map((m: any) => ({
+            ...m,
+            timestamp: new Date(m.timestamp)
+          }))
+        })).sort((a: ChatSession, b: ChatSession) => b.lastModified - a.lastModified);
     } catch (e) {
       console.error('Error parsing chat history', e);
       return [];
     }
   }
 
+  /**
+   * Save a conversation for its owner. Refused when the session belongs to
+   * someone other than the signed-in user: a reply that finishes after the
+   * account changed must never land in the next user's history.
+   */
   saveSession(session: ChatSession): void {
+    const userId = this.currentUserId();
+    if (!userId || session.ownerId !== userId) return;
     const sessions = this.getSessions();
     const index = sessions.findIndex(s => s.id === session.id);
     if (index >= 0) {
@@ -175,21 +205,24 @@ export class ChatService {
     } else {
       sessions.unshift(session);
     }
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(sessions));
+    localStorage.setItem(ChatStorageUtils.historyKey(userId), JSON.stringify(sessions));
   }
 
   deleteSession(id: string): void {
-    let sessions = this.getSessions();
-    sessions = sessions.filter(s => s.id !== id);
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(sessions));
+    const userId = this.currentUserId();
+    if (!userId) return;
+    const sessions = this.getSessions().filter(s => s.id !== id);
+    localStorage.setItem(ChatStorageUtils.historyKey(userId), JSON.stringify(sessions));
   }
 
+  /** A new, empty conversation owned by the signed-in user. */
   createSession(): ChatSession {
     return {
       id: this.generateId(),
       title: 'New Chat',
       lastModified: Date.now(),
-      messages: []
+      messages: [],
+      ownerId: this.currentUserId() ?? undefined
     };
   }
 
@@ -207,10 +240,14 @@ export class ChatService {
     return null;
   }
 
-  // Daily Suggestions Persistence
-  markSuggestionAsUsed(question: string): void {
+  // Daily Suggestions Persistence (per day and per user, like the cards themselves)
+  private usedSuggestionsKey(): string {
     const today = new Date().toISOString().split('T')[0];
-    const key = `fred_used_suggestions_${today}`;
+    return ChatStorageUtils.usedSuggestionsKey(today, this.currentUserId());
+  }
+
+  markSuggestionAsUsed(question: string): void {
+    const key = this.usedSuggestionsKey();
     const used = this.getUsedSuggestions();
 
     if (!used.includes(question)) {
@@ -220,10 +257,14 @@ export class ChatService {
   }
 
   getUsedSuggestions(): string[] {
-    const today = new Date().toISOString().split('T')[0];
-    const key = `fred_used_suggestions_${today}`;
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
+    const data = localStorage.getItem(this.usedSuggestionsKey());
+    if (!data) return [];
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   // Daily Suggestions Cache
@@ -234,8 +275,7 @@ export class ChatService {
 
   private dailySuggestionsCacheKey(): string {
     const today = new Date().toISOString().split('T')[0];
-    const userId = localStorage.getItem('userId') ?? 'anon';
-    return `fred_daily_suggestions_${today}_${userId}`;
+    return ChatStorageUtils.dailySuggestionsKey(today, this.currentUserId());
   }
 
   getCachedDailySuggestions(): string[] | null {

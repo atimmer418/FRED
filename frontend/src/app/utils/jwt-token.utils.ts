@@ -1,4 +1,5 @@
 import { LastScreenUtils } from './last-screen.utils';
+import { ChatStorageUtils } from './chat-storage.utils';
 
 // JWT token utilities for managing authentication tokens
 export class JwtTokenUtils {
@@ -26,6 +27,13 @@ export class JwtTokenUtils {
    * Store JWT with expiration info in localStorage
    */
   static storeJwtToken(token: string, userId?: number, email?: string): void {
+    // A different account is taking over this device (the last one may never have
+    // signed out: its session can simply have run out). Wipe the chat kept on the
+    // device first, so the new user can never be shown the last user's conversations.
+    if (userId && localStorage.getItem('userId') !== userId.toString()) {
+      ChatStorageUtils.clearAll();
+    }
+
     const payload = this.decodeJwtPayload(token);
     
     if (payload) {
@@ -109,6 +117,9 @@ export class JwtTokenUtils {
       // Forget the last screen so the next sign-in starts on the home tab.
       LastScreenUtils.clear(userId);
     }
+    // Chat is private: signing out removes every saved conversation, tapped
+    // suggestion and cached suggestion card from the device, for any account.
+    ChatStorageUtils.clearAll();
     localStorage.removeItem('jwtToken');
     localStorage.removeItem('jwtExpiration');
     localStorage.removeItem('userId');

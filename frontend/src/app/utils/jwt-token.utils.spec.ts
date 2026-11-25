@@ -96,3 +96,79 @@ describe('JwtTokenUtils.clearJwtData', () => {
     expect(localStorage.getItem('fred.lastScreen.v1.u-1')).toBeNull();
   });
 });
+
+/**
+ * Chat stored on the device is private to one account. Signing out, or a
+ * different account signing in, removes all of it (see ChatStorageUtils).
+ */
+describe('JwtTokenUtils and chat kept on the device', () => {
+  const day = '2026-01-01';
+
+  function seedChatFor(userId: string): void {
+    localStorage.setItem('userId', userId);
+    localStorage.setItem(`fred_chat_history_${userId}`, '[{"id":"x"}]');
+    localStorage.setItem(`fred_used_suggestions_${day}_${userId}`, '["q"]');
+    localStorage.setItem(`fred_daily_suggestions_${day}_${userId}`, '["q"]');
+    localStorage.setItem('fred_chat_history', '[{"id":"old"}]');
+  }
+
+  function chatKeys(): string[] {
+    return Object.keys(localStorage).filter(k =>
+      k.startsWith('fred_chat_history') || k.startsWith('fred_used_suggestions_') || k.startsWith('fred_daily_suggestions_'));
+  }
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it('clearJwtData removes every stored chat key', () => {
+    seedChatFor('1');
+    localStorage.setItem('unrelated', 'stays');
+
+    JwtTokenUtils.clearJwtData();
+
+    expect(chatKeys()).toEqual([]);
+    expect(localStorage.getItem('unrelated')).toBe('stays');
+  });
+
+  it('clearJwtData removes stored chat even when no user id is remembered', () => {
+    seedChatFor('1');
+    localStorage.removeItem('userId');
+
+    JwtTokenUtils.clearJwtData();
+
+    expect(chatKeys()).toEqual([]);
+  });
+
+  it('storing a token for a different user removes the last user\'s chat', () => {
+    seedChatFor('1');
+
+    JwtTokenUtils.storeJwtToken(makeToken({ sub: 'b@fred.com', exp: 9999999999 }), 2, 'b@fred.com');
+
+    expect(chatKeys()).toEqual([]);
+    expect(localStorage.getItem('userId')).toBe('2');
+  });
+
+  it('removes the last user\'s chat even when the new token cannot be decoded', () => {
+    seedChatFor('1');
+
+    JwtTokenUtils.storeJwtToken('not-a-jwt', 2, 'b@fred.com');
+
+    expect(chatKeys()).toEqual([]);
+  });
+
+  it('storing a token for the same user keeps their chat', () => {
+    seedChatFor('1');
+
+    JwtTokenUtils.storeJwtToken(makeToken({ sub: 'a@fred.com', exp: 9999999999 }), 1, 'a@fred.com');
+
+    expect(localStorage.getItem('fred_chat_history_1')).toBe('[{"id":"x"}]');
+  });
+
+  it('storing a token with no user id (refresh, email change) keeps the chat', () => {
+    seedChatFor('1');
+
+    JwtTokenUtils.storeJwtToken(makeToken({ sub: 'a@fred.com', exp: 9999999999 }), undefined, 'a@fred.com');
+
+    expect(localStorage.getItem('fred_chat_history_1')).toBe('[{"id":"x"}]');
+  });
+});

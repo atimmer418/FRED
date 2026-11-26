@@ -13,7 +13,13 @@ export interface Beneficiary {
   email?: string;
   phone?: string;
   dateOfBirth?: string;
+  /**
+   * Sent to the server, never sent back. A new beneficiary needs it; an edit leaves it out to keep
+   * the number on file.
+   */
   socialSecurityNumber?: string;
+  /** The last four digits of the number on file. All the server ever returns of it. */
+  ssnLast4?: string;
   addressLine1?: string;
   addressLine2?: string;
   city?: string;

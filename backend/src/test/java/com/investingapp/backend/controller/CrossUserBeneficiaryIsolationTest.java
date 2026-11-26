@@ -51,6 +51,10 @@ class CrossUserBeneficiaryIsolationTest {
     @MockitoBean
     private com.investingapp.backend.service.AlpacaService alpacaService;
 
+    @Autowired
+    private com.investingapp.backend.service.EncryptionService encryptionService;
+
+    private String seededSsn;
     private Long userAId;
     private Long userBId;
     private Long bBeneficiaryId;
@@ -62,10 +66,13 @@ class CrossUserBeneficiaryIsolationTest {
         String emailB = "iso-b-" + UUID.randomUUID() + "@fredvested.test";
         userAId = insertUser(emailA);
         userBId = insertUser(emailB);
+        // Stored the way the application stores it: encrypted. The exact ciphertext is kept so
+        // "exactly as seeded" can be checked byte for byte.
+        seededSsn = encryptionService.encrypt("111-22-3333");
         jdbc.update("INSERT INTO beneficiaries (user_id, beneficiary_type, first_name, last_name, "
                 + "date_of_birth, social_security_number, percentage_allocation, relationship, status, "
                 + "created_at, updated_at) VALUES (?, 'PRIMARY', 'Bea', 'Owner', '1980-02-03', "
-                + "'111-22-3333', 100.00, 'SPOUSE', 'PENDING', NOW(), NOW())", userBId);
+                + "?, 100.00, 'SPOUSE', 'PENDING', NOW(), NOW())", userBId, seededSsn);
         bBeneficiaryId = jdbc.queryForObject(
                 "SELECT id FROM beneficiaries WHERE user_id = ?", Long.class, userBId);
         userA = new UsernamePasswordAuthenticationToken(emailA, null, List.of());
@@ -102,7 +109,7 @@ class CrossUserBeneficiaryIsolationTest {
         assertThat(((Number) row.get("user_id")).longValue()).isEqualTo(userBId);
         assertThat(row.get("first_name")).isEqualTo("Bea");
         assertThat(row.get("last_name")).isEqualTo("Owner");
-        assertThat(row.get("social_security_number")).isEqualTo("111-22-3333");
+        assertThat(row.get("social_security_number")).isEqualTo(seededSsn);
         assertThat(row.get("status")).isEqualTo("PENDING");
     }
 

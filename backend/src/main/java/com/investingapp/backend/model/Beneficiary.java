@@ -11,6 +11,7 @@ import jakarta.validation.constraints.DecimalMax;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.investingapp.backend.model.converter.EncryptedStringConverter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -65,9 +66,22 @@ public class Beneficiary {
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate dateOfBirth;
     
-    @Column(name = "social_security_number", length = 11, nullable = false)
-    @NotBlank(message = "Social Security Number is required")
+    /**
+     * The full number, as typed: 123-45-6789. It belongs to someone who is not our user.
+     *
+     * In the database it is always ciphertext (the converter encrypts on the way in and decrypts on
+     * the way out), so this field holds the readable number only while a request is being handled.
+     * It is write-only in JSON: a client can send it, and no response ever carries it. Responses
+     * carry {@link #getSsnLast4()} instead. The broker needs the full number every time the list is
+     * sent, which is why it is kept at all.
+     *
+     * Not marked required here because an edit may leave it out, meaning "keep the one on file".
+     * BeneficiaryService insists on it for a new beneficiary, and the column is NOT NULL.
+     */
+    @Column(name = "social_security_number", length = 255, nullable = false)
+    @Convert(converter = EncryptedStringConverter.class)
     @Pattern(regexp = "^\\d{3}-\\d{2}-\\d{4}$", message = "SSN must be in format XXX-XX-XXXX")
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String socialSecurityNumber;
     
     // Address Information
@@ -292,7 +306,24 @@ public class Beneficiary {
     public void setDateOfBirth(LocalDate dateOfBirth) { this.dateOfBirth = dateOfBirth; }
     
     public String getSocialSecurityNumber() { return socialSecurityNumber; }
-    public void setSocialSecurityNumber(String socialSecurityNumber) { this.socialSecurityNumber = socialSecurityNumber; }
+    /** A blank number is no number: an edit that sends "" keeps the one on file, like one that sends nothing. */
+    public void setSocialSecurityNumber(String socialSecurityNumber) {
+        this.socialSecurityNumber =
+                socialSecurityNumber == null || socialSecurityNumber.isBlank() ? null : socialSecurityNumber;
+    }
+
+    /**
+     * The last four digits, the only part of the number a response may carry. Enough for the owner
+     * to recognise which number is on file. Null when there is no number.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public String getSsnLast4() {
+        if (socialSecurityNumber == null) {
+            return null;
+        }
+        String digits = socialSecurityNumber.replaceAll("\\D", "");
+        return digits.length() < 4 ? null : digits.substring(digits.length() - 4);
+    }
     
     public String getAddressLine1() { return addressLine1; }
     public void setAddressLine1(String addressLine1) { this.addressLine1 = addressLine1; }

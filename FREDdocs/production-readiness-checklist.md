@@ -89,7 +89,10 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
       `AlpacaController.java:50-60, 225-247`. (S) *security-auth*
 - [ ] **Beneficiary cross-user writes.** Submit by id ignores the owner, and create accepts a
       client-supplied id. `BeneficiaryController.java:91-108, 164-170`. (S) *security-auth*
-- [ ] **Beneficiary SSNs are stored in plaintext and returned in full by the API.** (M) *data-model-migrations*
+- [x] **Beneficiary SSNs are stored in plaintext and returned in full by the API.** (M) *data-model-migrations*
+      Done 2026-11-25: the column is encrypted with the app's AES-GCM field encryption, responses
+      carry only `ssnLast4`, and an edit may leave the number out to keep the one on file. Rows
+      written before the change were not converted (decision: dev only, no production data).
 - [ ] **Applicant SSN sits unencrypted in a localStorage KYC draft** (FRED-221). (S) *onboarding-kyc-lifecycle*
 - [x] **Recovery code can be brute-forced.** No attempt limit, no rate limit, and success gives a
       full token (FRED-219). (M) *security-auth*

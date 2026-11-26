@@ -75,15 +75,20 @@
       </div>
 
       <div class="form-group">
-        <label class="field-label">Social Security Number<span class="required-star">*</span></label>
+        <label class="field-label">Social Security Number<span class="required-star" *ngIf="!hasNumberOnFile">*</span></label>
         <input
           class="field-input"
           [value]="beneficiary.socialSecurityNumber || ''"
-          placeholder="XXX-XX-XXXX"
+          [placeholder]="ssnPlaceholder"
           type="text"
           inputmode="numeric"
+          autocomplete="off"
           maxlength="11"
           (input)="formatSSN($event)">
+        <p class="field-echo" *ngIf="hasNumberOnFile" data-testid="ssn-on-file">
+          <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+          <span>On file. Leave blank to keep it.</span>
+        </p>
       </div>
 
       <div class="form-group">

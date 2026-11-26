@@ -134,6 +134,8 @@ jobs:
           npx ng test --include='**/services/chat.service.spec.ts' --include='**/pages/ai-chat/*.spec.ts' --watch=false --browsers=ChromeHeadless
           # Token refresh: a late answer never replaces a newer token, and a refused token is dropped.
           npx ng test --include='**/services/auth.service.refresh.spec.ts' --watch=false --browsers=ChromeHeadless
+          # A beneficiary's SSN never comes back from the server; an edit may leave it blank.
+          npx ng test --include='**/beneficiaries/*.spec.ts' --watch=false --browsers=ChromeHeadless
           # Analytics specs: these are new and green, so they are gated from the start.
           npx ng test --include='**/services/analytics/*.spec.ts' --include='**/dev-tools-key.utils.spec.ts' --watch=false --browsers=ChromeHeadless
           # Paycheck Autopilot Phase 1: the Plaid OAuth return capture (cold start, onboarding and

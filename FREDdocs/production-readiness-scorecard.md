@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-25. Latest change: Sessions: every token belongs to a session and a sign-in lasts 12 hours at most.
+Last updated: 2026-11-25. Latest change: Beneficiary SSNs are encrypted in the database and never returned by the API.
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **7 of 173** (18 more are part done) |
-| Readiness, weighted by size | **8.4%** (39 of 467 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 10.6% (39 of 369 points, 145 items) |
+| Items done | **8 of 174** (18 more are part done) |
+| Readiness, weighted by size | **9.0%** (42 of 468 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 11.4% (42 of 370 points, 146 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -28,7 +28,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | Area | Done | Part | Open | Points | Weighted |
 |---|---|---|---|---|---|
 | A. Protect the work | 1 | 1 | 0 | 1.5 of 2 | 75% |
-| B. Security | 5 | 1 | 13 | 12.5 of 42 | 30% |
+| B. Security | 6 | 1 | 12 | 15.5 of 42 | 37% |
 | C. A shippable iOS build | 0 | 0 | 8 | 0 of 14 | 0% |
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
@@ -38,7 +38,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | I. Tiers and billing | 0 | 2 | 29 | 3 of 116 | 3% |
 | J. Ask FRED chat | 1 | 1 | 4 | 2.5 of 14 | 18% |
 | K. Before the public App Store launch | 0 | 4 | 17 | 5 of 55 | 9% |
-| L. Should fix soon | 0 | 4 | 18 | 6.5 of 51 | 13% |
+| L. Should fix soon | 0 | 4 | 19 | 6.5 of 52 | 13% |
 
 ### Score history
 
@@ -46,6 +46,7 @@ remaining items are equally urgent: one open security or money item can block a 
 |---|---|---|---|
 | 2026-11-25 | Starting point (develop at `a2aa48d1`) | 6 of 172 | 7.7% |
 | 2026-11-25 | Sessions: every token belongs to a session and a sign-in lasts 12 hours at most | 7 of 173 | 8.4% |
+| 2026-11-25 | Beneficiary SSNs: encrypted in the database, last four digits only in responses (one new item found: L23) | 8 of 174 | 9.0% |
 
 ## Decisions needed from Andy
 
@@ -101,7 +102,7 @@ found after the audit.
 |---|---|---|---|---|---|
 | B1 | Alpaca endpoints leak other users' accounts | small | Done |  | Commit eda5229f. AlpacaController.java:56-67 GET /account now returns only the caller's own account; :258-268 and :277-287 return 404 unless isOwnAlpacaAccount (:90-92). |
 | B2 | Beneficiary cross-user writes | small | Done |  | Commit eda5229f. BeneficiaryService.java:89 forces setId(null) on create; :190-193 findOwned uses findByIdAndUserId for update, delete and submit; submitToAlpaca now takes the user. |
-| B3 | Beneficiary SSNs stored in plaintext and returned in full by the API | medium | Open |  | Encrypt the column (with a data migration), and return a masked value or nothing from the API. |
+| B3 | Beneficiary SSNs stored in plaintext and returned in full by the API | medium | Done |  | Done 2026-11-25. The column is encrypted with the app's AES-GCM field encryption (EncryptedStringConverter on Beneficiary.socialSecurityNumber), responses carry only ssnLast4, an edit may leave the number out to keep the one on file, and a mistyped number is never logged. Proved by BeneficiarySsnAtRestTest against a real database. Rows written before the change were not converted (decision: dev only, no production data). The column was widened by a repeatable migration because V12 is held by an unpushed branch. |
 | B4 | Applicant SSN sits unencrypted in a localStorage KYC draft (FRED-221) | small | Open |  | Leave taxId (and date of birth) out of the draft or drop the draft, and clear it on failure and sign-out. |
 | B5 | Recovery code can be brute-forced (FRED-219) | medium | Done |  | Commit f3776f10. AccountRecoveryService.java:156-165 and :218-227 hold per-account, per-email and per-address AttemptLimiters; 5 wrong tries per code; a right code gives a one-time recovery token, not a session. |
 | B6 | Add rate limiting on public auth endpoints and on AI chat | medium | Part |  | Still no limits on: passkey sign-up and sign-in start and finish (/api/passkey/**), /api/auth/login and /api/auth/refresh, /api/user/should-prompt-reauth, and chat messages (POST /api/chat and GET /api/chat/stream need a per-user ... |
@@ -320,6 +321,7 @@ found after the audit.
 | L20 | KYC submission can create an Alpaca account that FRED never records | medium | Open | A | Record the attempt before the broker call (or store the returned id durably on failure) so a retry can find and adopt the existing Alpaca account. |
 | L21 | Plaid sandbox secret rotation is still owed, and credentials once in git history must not be reused | small | Part | A | Andy rotates the leaked sandbox secret in the Plaid dashboard, sets the new value on Railway dev and test and in the local gitignored file, then confirms the rotation so the old secret stops working. |
 | L22 | Backend test run silently skips database-gated tests when no MySQL is reachable | small | Part | A | Make a skip impossible to miss in CI. |
+| L23 | Beneficiary list is marked approved on any 2xx from Alpaca, and the payload has never been checked against the Alpaca sandbox | small | Open | N | Send a real beneficiary list to the Alpaca sandbox, confirm the field names and that the list is stored, and only then mark rows approved. Found in the audit and confirmed while encrypting the SSNs. |
 
 ## Keeping this current
 

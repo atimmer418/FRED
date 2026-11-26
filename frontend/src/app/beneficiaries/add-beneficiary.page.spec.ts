@@ -381,6 +381,134 @@ describe('AddBeneficiaryPage: allocation tray', () => {
 });
 
 /**
+ * The server keeps a beneficiary's Social Security Number encrypted and never sends it back, only
+ * its last four digits. So an edit starts with an empty field, may leave it empty to keep the
+ * number on file, and sends a number only when a new one was typed.
+ */
+describe('AddBeneficiaryPage: the number on file', () => {
+  let beneficiaryService: jasmine.SpyObj<BeneficiaryService>;
+  let toast: jasmine.SpyObj<ToastService>;
+  let page: AddBeneficiaryPage;
+
+  /** What GET /api/beneficiaries returns for a saved row: last four digits, no number. */
+  const saved: Beneficiary = {
+    id: 7, beneficiaryType: 'PRIMARY', country: 'US', firstName: 'Dana', lastName: 'Example',
+    dateOfBirth: '1990-04-18', ssnLast4: '6789', relationship: 'SPOUSE', percentageAllocation: 50,
+    status: 'APPROVED',
+  };
+
+  function build(params: Record<string, string>): void {
+    beneficiaryService = jasmine.createSpyObj<BeneficiaryService>('BeneficiaryService', [
+      'getBeneficiaries', 'createBeneficiary', 'updateBeneficiary',
+    ]);
+    beneficiaryService.getBeneficiaries.and.returnValue(of([{ ...saved }]));
+    beneficiaryService.updateBeneficiary.and.returnValue(of({ ...saved }));
+    beneficiaryService.createBeneficiary.and.returnValue(of({ ...saved }));
+    const pin = jasmine.createSpyObj<PinService>('PinService', ['hasPin', 'promptPin']);
+    pin.hasPin.and.resolveTo(false);
+    toast = jasmine.createSpyObj<ToastService>('ToastService', ['showToast']);
+    page = new AddBeneficiaryPage(
+      jasmine.createSpyObj<Router>('Router', ['navigate']),
+      { params: of(params), queryParams: of({}), snapshot: { queryParams: {} } } as unknown as ActivatedRoute,
+      beneficiaryService,
+      jasmine.createSpyObj<PasskeyService>('PasskeyService', ['startAuthentication']),
+      pin,
+      toast,
+      jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
+      jasmine.createSpyObj<AnalyticsService>('AnalyticsService', [
+        'track', 'trackOnboardingStepViewed', 'trackOnboardingStepCompleted', 'trackErrorShown', 'screen',
+      ]),
+      jasmine.createSpyObj<ModalController>('ModalController', ['create']),
+      new ElementRef(document.createElement('div')),
+      { onDestroy: () => () => {} } as unknown as DestroyRef,
+    );
+  }
+
+  it('an edit loads with no number in the form, and shows the last four as the placeholder', fakeAsync(() => {
+    build({ id: '7' });
+    page.ngOnInit();
+    tick();
+
+    expect(page.beneficiary.socialSecurityNumber).toBeUndefined();
+    expect(page.hasNumberOnFile).toBeTrue();
+    expect(page.ssnPlaceholder).toBe('•••-••-6789');
+  }));
+
+  it('an edit that leaves the number blank can save, and sends no number', fakeAsync(() => {
+    build({ id: '7' });
+    page.ngOnInit();
+    tick();
+    expect(page.isFormComplete).toBeFalse(); // nothing changed yet
+    page.beneficiary.city = 'Tulsa';
+    expect(page.isFormComplete).toBeTrue();
+
+    page.onSave();
+    tick();
+
+    expect(beneficiaryService.updateBeneficiary).toHaveBeenCalledTimes(1);
+    const [id, sent] = beneficiaryService.updateBeneficiary.calls.mostRecent().args;
+    expect(id).toBe(7);
+    expect(sent.socialSecurityNumber).toBeUndefined();
+    expect('ssnLast4' in sent).toBeFalse();
+  }));
+
+  it('typing in the number field and clearing it again is not a change', fakeAsync(() => {
+    build({ id: '7' });
+    page.ngOnInit();
+    tick();
+    const input = document.createElement('input');
+    input.value = '6';
+    page.formatSSN({ target: input } as unknown as Event);
+    expect(page.isFormComplete).toBeTrue();
+    input.value = '';
+    page.formatSSN({ target: input } as unknown as Event);
+
+    expect(page.isFormComplete).toBeFalse();
+  }));
+
+  it('an edit that types a new number sends it', fakeAsync(() => {
+    build({ id: '7' });
+    page.ngOnInit();
+    tick();
+    page.beneficiary.socialSecurityNumber = '623-45-1234';
+    expect(page.isFormComplete).toBeTrue();
+
+    page.onSave();
+    tick();
+
+    expect(beneficiaryService.updateBeneficiary.calls.mostRecent().args[1].socialSecurityNumber).toBe('623-45-1234');
+  }));
+
+  it('an edit that types half a number is still refused', fakeAsync(() => {
+    build({ id: '7' });
+    page.ngOnInit();
+    tick();
+    page.beneficiary.socialSecurityNumber = '623-45';
+
+    page.onSave();
+    tick();
+
+    expect(beneficiaryService.updateBeneficiary).not.toHaveBeenCalled();
+    expect(toast.showToast).toHaveBeenCalledWith('Social Security Number must be in format XXX-XX-XXXX', 'danger');
+  }));
+
+  it('a new beneficiary still needs a number', fakeAsync(() => {
+    build({});
+    page.ngOnInit();
+    page.beneficiary = { ...saved, id: undefined, ssnLast4: undefined };
+    expect(page.hasNumberOnFile).toBeFalse();
+    expect(page.ssnPlaceholder).toBe('XXX-XX-XXXX');
+    expect(page.isFormComplete).toBeFalse();
+
+    page.onSave();
+    tick();
+
+    expect(beneficiaryService.createBeneficiary).not.toHaveBeenCalled();
+    expect(toast.showToast).toHaveBeenCalledWith('Social Security Number is required', 'danger');
+  }));
+});
+
+/**
  * The date of birth opens the FRED date sheet in birthday mode, capped at today, and the page
  * keeps the backend's YYYY-MM-DD string throughout: the sheet returns it, parseBackendDate
  * normalises to it, and the save payload sends it as is. Nothing lands until Done.

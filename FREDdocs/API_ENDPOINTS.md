@@ -180,6 +180,18 @@ All available API endpoints in the backend. Keep this file updated when adding n
 | `POST` | `/api/beneficiaries/{id}/submit` | Submit beneficiary to Alpaca | Yes | None | `{ success, message }` |
 | `POST` | `/api/beneficiaries/submit-all` | Submit all approved beneficiaries to Alpaca | Yes | None | `{ success, message }` |
 
+**Social Security Numbers.** A beneficiary's SSN is stored encrypted (AES-GCM, through
+`EncryptedStringConverter`) and is write-only:
+
+- `POST` must send `socialSecurityNumber` as `XXX-XX-XXXX`.
+- `PUT` may leave `socialSecurityNumber` out. That keeps the number on file. Sending one replaces it
+  and sets the beneficiary back to `PENDING`.
+- No response carries `socialSecurityNumber`. Every `Beneficiary` in a response carries `ssnLast4`
+  (the last four digits) instead.
+- A body that fails validation gets `400 { error }` naming the rule that failed, never the value sent.
+- The full number is decrypted only to send the beneficiary list to Alpaca (submit, submit-all, and
+  the automatic resend after a delete).
+
 ---
 
 ## 10. PIN Security (`/api/user/pin`)

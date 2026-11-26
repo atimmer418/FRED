@@ -5,6 +5,7 @@ import com.investingapp.backend.model.Beneficiary.BeneficiaryStatus;
 import com.investingapp.backend.model.Beneficiary.BeneficiaryType;
 import com.investingapp.backend.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -82,12 +83,9 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary, Long> 
     @Query("SELECT COUNT(b) FROM Beneficiary b WHERE b.user.id = :userId AND b.beneficiaryType = :beneficiaryType AND b.status != 'INACTIVE'")
     long countByUserIdAndBeneficiaryType(@Param("userId") Long userId, @Param("beneficiaryType") BeneficiaryType beneficiaryType);
     
-    /**
-     * Find beneficiaries with SSN (for compliance checks)
-     */
-    @Query("SELECT b FROM Beneficiary b WHERE b.user.id = :userId AND b.socialSecurityNumber IS NOT NULL AND b.socialSecurityNumber != ''")
-    List<Beneficiary> findBeneficiariesWithSSN(@Param("userId") Long userId);
-    
+    // No query may filter or compare on socialSecurityNumber: the column is encrypted with a random
+    // IV, so the same number is stored differently in every row.
+
     /**
      * Find beneficiaries missing required information
      */
@@ -119,6 +117,13 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary, Long> 
      */
     Optional<Beneficiary> findByIdAndUserId(Long id, Long userId);
 
-    /** User deletion: beneficiaries.user_id has no ON DELETE CASCADE (V1:40). */
-    void deleteAllByUser(User user);
+    /**
+     * User deletion: beneficiaries.user_id has no ON DELETE CASCADE (V1:40).
+     *
+     * One DELETE statement on purpose. A derived delete would load every row first, and loading a
+     * row decrypts its Social Security Number. Closing an account must not depend on that working.
+     */
+    @Modifying
+    @Query("DELETE FROM Beneficiary b WHERE b.user = :user")
+    void deleteAllByUser(@Param("user") User user);
 }

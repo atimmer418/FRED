@@ -218,12 +218,25 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
     }
   }
 
+  /**
+   * Editing a beneficiary whose number the server already holds. The server never sends the number
+   * back, only its last four digits, so the field starts empty and may stay empty: leaving it blank
+   * keeps the number on file.
+   */
+  get hasNumberOnFile(): boolean {
+    return this.editMode && !!this.beneficiary.ssnLast4;
+  }
+
+  get ssnPlaceholder(): string {
+    return this.hasNumberOnFile ? `•••-••-${this.beneficiary.ssnLast4}` : 'XXX-XX-XXXX';
+  }
+
   get isFormComplete(): boolean {
     const isComplete = !!(
       this.beneficiary.firstName?.trim() &&
       this.beneficiary.lastName?.trim() &&
       this.beneficiary.dateOfBirth &&
-      this.beneficiary.socialSecurityNumber?.trim() &&
+      (this.hasNumberOnFile || this.beneficiary.socialSecurityNumber?.trim()) &&
       this.beneficiary.relationship &&
       this.beneficiary.percentageAllocation && 
       this.beneficiary.percentageAllocation > 0
@@ -274,7 +287,8 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
         phone: this.beneficiary.phone,
         // Already the backend's YYYY-MM-DD: the sheet returns it and parseBackendDate normalises to it.
         dateOfBirth: this.beneficiary.dateOfBirth,
-        socialSecurityNumber: this.beneficiary.socialSecurityNumber,
+        // Left out when blank: on an edit that tells the server to keep the number on file.
+        socialSecurityNumber: this.beneficiary.socialSecurityNumber?.trim() || undefined,
         addressLine1: this.beneficiary.addressLine1,
         addressLine2: this.beneficiary.addressLine2,
         city: this.beneficiary.city,
@@ -380,7 +394,7 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
       return false;
     }
 
-    if (!this.beneficiary.socialSecurityNumber?.trim()) {
+    if (!this.hasNumberOnFile && !this.beneficiary.socialSecurityNumber?.trim()) {
       this.toastService.showToast('Social Security Number is required', 'danger');
       return false;
     }
@@ -472,7 +486,13 @@ export class AddBeneficiaryPage implements OnInit, ViewWillLeave {
     } else if (value.length >= 4) {
       value = value.replace(/(\d{3})(\d{0,2})/, '$1-$2');
     }
-    this.beneficiary.socialSecurityNumber = value;
+    // Cleared means absent, not '': the edit form compares against what was loaded, and what was
+    // loaded has no number at all.
+    if (value) {
+      this.beneficiary.socialSecurityNumber = value;
+    } else {
+      delete this.beneficiary.socialSecurityNumber;
+    }
     (event.target as HTMLInputElement).value = value;
   }
 

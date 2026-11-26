@@ -88,6 +88,12 @@ public class BeneficiaryService {
         // A create always makes a new row: the id comes from the database, never from the client.
         beneficiary.setId(null);
 
+        // An edit may leave the number out to keep the one on file. A new beneficiary has none on
+        // file, and the broker will not take one without it.
+        if (beneficiary.getSocialSecurityNumber() == null || beneficiary.getSocialSecurityNumber().isBlank()) {
+            throw new RuntimeException("Social Security Number is required");
+        }
+
         // Validation
         validateBeneficiary(user, beneficiary);
         
@@ -414,7 +420,11 @@ public class BeneficiaryService {
         existing.setEmail(updated.getEmail());
         existing.setPhone(updated.getPhone());
         existing.setDateOfBirth(updated.getDateOfBirth());
-        existing.setSocialSecurityNumber(updated.getSocialSecurityNumber());
+        // Responses never carry the full number, so the app cannot send back what it was not given.
+        // No number in an edit means "keep the one on file".
+        if (sendsNumber(updated)) {
+            existing.setSocialSecurityNumber(updated.getSocialSecurityNumber());
+        }
         existing.setAddressLine1(updated.getAddressLine1());
         existing.setAddressLine2(updated.getAddressLine2());
         existing.setCity(updated.getCity());
@@ -426,6 +436,16 @@ public class BeneficiaryService {
         existing.setNotes(updated.getNotes());
     }
     
+    /** 50 and 50.00 are the same allocation. BigDecimal.equals says they are not. */
+    private static boolean sameAmount(BigDecimal a, BigDecimal b) {
+        return a == null || b == null ? a == b : a.compareTo(b) == 0;
+    }
+
+    /** True when the request carries a Social Security Number, as opposed to leaving it alone. */
+    private static boolean sendsNumber(Beneficiary request) {
+        return request.getSocialSecurityNumber() != null && !request.getSocialSecurityNumber().isBlank();
+    }
+
     /**
      * Check if changes require re-submission to Alpaca
      * This checks all fields that are sent to Alpaca and would affect the beneficiary designation
@@ -434,9 +454,10 @@ public class BeneficiaryService {
         return !Objects.equals(existing.getFirstName(), updated.getFirstName()) ||
                !Objects.equals(existing.getLastName(), updated.getLastName()) ||
                !Objects.equals(existing.getDateOfBirth(), updated.getDateOfBirth()) ||
-               !Objects.equals(existing.getSocialSecurityNumber(), updated.getSocialSecurityNumber()) ||
+               (sendsNumber(updated)
+                       && !Objects.equals(existing.getSocialSecurityNumber(), updated.getSocialSecurityNumber())) ||
                !Objects.equals(existing.getRelationship(), updated.getRelationship()) ||
-               !Objects.equals(existing.getPercentageAllocation(), updated.getPercentageAllocation()) ||
+               !sameAmount(existing.getPercentageAllocation(), updated.getPercentageAllocation()) ||
                !Objects.equals(existing.getBeneficiaryType(), updated.getBeneficiaryType());
     }
     

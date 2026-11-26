@@ -11,12 +11,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * REST Controller for managing account beneficiaries
@@ -258,6 +262,29 @@ public class BeneficiaryController {
         }
     }
     
+    /**
+     * A request body that fails validation (a mistyped SSN, a missing name).
+     *
+     * Handled here so the answer and the log line are ours. Left to Spring, the log line would
+     * include the rejected value, and the rejected value can be a Social Security Number typed
+     * without its dashes. This says which rule failed and never what was sent.
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidBody(MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(FieldError::getDefaultMessage)
+                .filter(Objects::nonNull)
+                .sorted()
+                .distinct()
+                .collect(Collectors.joining(". "));
+        if (message.isEmpty()) {
+            message = "Invalid beneficiary";
+        }
+        logger.warn("Beneficiary request failed validation on: {}", e.getBindingResult().getFieldErrors().stream()
+                .map(FieldError::getField).sorted().distinct().collect(Collectors.joining(", ")));
+        return ResponseEntity.badRequest().body(new ErrorResponse(message));
+    }
+
     /**
      * Helper method to get current authenticated user
      */

@@ -104,8 +104,16 @@ public class EmailChangeController {
         User user = userRepository.findByEmailWithProgress(outcome.newEmail()).orElse(null);
         String nextStep = (user != null && user.getUserProgress() != null)
                 ? user.getUserProgress().getNextStep() : "get-started";
-        String newToken = jwtUtils.generateTokenFromUsername(
-                outcome.newEmail(), sessionId, nextStep, user != null ? user.getPublicId() : null);
+        // Same session, same session end: changing email does not buy the session more time.
+        String newToken = currentToken == null ? null : jwtUtils.renameSessionToken(
+                currentToken, outcome.newEmail(), nextStep, user != null ? user.getPublicId() : null).orElse(null);
+        if (newToken == null) {
+            // The email is changed, but this device's session ran out in the meantime. Its token
+            // has expired too, so the app asks for the passkey again.
+            return ResponseEntity.ok(Map.of(
+                    "message", "Email updated successfully. Sign in again to continue.",
+                    "newEmail", outcome.newEmail()));
+        }
 
         return ResponseEntity.ok(Map.of(
                 "message", "Email updated successfully",

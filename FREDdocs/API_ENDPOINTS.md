@@ -14,8 +14,8 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 | Method | Endpoint | Description | Auth | Request Body | Response |
 |--------|----------|-------------|------|-------------|----------|
-| `POST` | `/api/auth/login` | Login with credentials (triggers 2FA OTP) | No | `LoginRequest { email, password }` | 202 `{ message, email, twoFactorRequired }` or 200 `{ jwtToken, id, email }` |
-| `POST` | `/api/auth/refresh` | Refresh JWT token (called proactively by frontend). The new token keeps the old one's session id, so it can still be revoked | Yes | None | `{ success, jwtToken, id, email }` |
+| `POST` | `/api/auth/login` | Legacy password login. Never issues a token (sign-in is by passkey) | No | `LoginRequest { email, password }` | 202 `{ message, email, twoFactorRequired }` or 401 |
+| `POST` | `/api/auth/refresh` | Refresh JWT token (called proactively by frontend). The new token stays in the same session and keeps the same session end (12 hours after the passkey sign-in), so it can still be revoked and refreshing never extends the sign-in. `401` once the session has ended | Yes | None | `{ success, jwtToken, id, email }` |
 | `GET` | `/api/auth/testuser` | Debug: returns authenticated user info | Yes | None | String |
 
 ### WebAuthn/Passkey Controller (`/api/passkey`)
@@ -267,7 +267,7 @@ Every profile, prod included; curl only. Each call needs `X-Admin-Key` (`ADMIN_T
 ## Authentication Notes
 
 - JWT tokens go in the `Authorization: Bearer <token>` header.
-- Tokens are 1-hour expiry, HS512 signed. Frontend refreshes proactively.
+- Tokens last up to 1 hour, HS256 signed, and always belong to a session. Frontend refreshes proactively. A passkey sign-in lasts 12 hours at most, however often it is refreshed.
 - Primary auth is via passkey (biometric). Login with email/password triggers 2FA OTP.
 - `/api/dev/*` endpoints are development-only, disabled in production.
 - `/api/admin/*` endpoints exist in every profile and take `X-Admin-Key` plus `X-Admin-Actor`, never a JWT (section 15).

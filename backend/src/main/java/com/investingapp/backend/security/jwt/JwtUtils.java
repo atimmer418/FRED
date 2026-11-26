@@ -30,6 +30,13 @@ public class JwtUtils {
     @Value("${jwt.expiration.ms}")
     private int jwtExpirationMs;
 
+    /**
+     * How long one passkey sign-in lasts, however often its token is refreshed. 12 hours by default.
+     * After that the user signs in again with their passkey.
+     */
+    @Value("${jwt.session.max.ms:43200000}")
+    private long sessionMaxMs;
+
     private SecretKey key;
 
     @PostConstruct
@@ -37,6 +44,11 @@ public class JwtUtils {
         // CRITICAL LOGGING FOR DEBUGGING:
         logger.info("============================================================");
         logger.info("JwtUtils jwt.expiration.ms: {}", jwtExpirationMs);
+        logger.info("JwtUtils jwt.session.max.ms: {}", sessionMaxMs);
+        if (sessionMaxMs < jwtExpirationMs) {
+            logger.warn("jwt.session.max.ms ({}) is shorter than jwt.expiration.ms ({}): every token will last "
+                    + "only as long as the session.", sessionMaxMs, jwtExpirationMs);
+        }
         logger.info("============================================================");
 
         byte[] keyBytes;
@@ -57,37 +69,33 @@ public class JwtUtils {
         logger.info("JwtUtils SecretKey initialized successfully.");
     }
 
-    /**
-     * Core token builder. All generate* methods funnel through here so the
-     * ns (next-step) claim is applied consistently.
-     *
-     * @param subject   JWT subject (user email)
-     * @param sessionId optional session ID claim; null to omit
-     * @param nextStep  optional "ns" next-step hint; null to omit
-     */
-    private String buildToken(String subject, Long sessionId, String nextStep) {
-        return buildToken(subject, sessionId, nextStep, null);
-    }
+    /** Claim holding the session a token belongs to. */
+    public static final String SESSION_ID_CLAIM = "sessionId";
+    /** Claim holding the moment the session ends for good, in seconds since the epoch. */
+    public static final String SESSION_END_CLAIM = "sx";
 
     /**
-     * @param publicId opaque analytics identity ("pid" claim); null to omit. The client reads it on
-     *                 cold start so it can identify the user without an extra round trip.
+     * The one place a token is built.
+     *
+     * <p>Every token belongs to a session and carries the moment that session ends ("sx"). The
+     * session end is fixed when the user signs in with their passkey and is copied, never moved,
+     * each time the token is refreshed. A token never outlives its session: its own expiry is the
+     * usual lifetime or the session end, whichever comes first.
      */
-    private String buildToken(String subject, Long sessionId, String nextStep, String publicId) {
+    private String buildToken(String subject, long sessionId, Date sessionEnd, String nextStep, String publicId) {
         String jwtId = UUID.randomUUID().toString();
         Date issuedAt = new Date();
-        Date expiration = new Date(issuedAt.getTime() + jwtExpirationMs);
+        Date expiration = new Date(Math.min(issuedAt.getTime() + jwtExpirationMs, sessionEnd.getTime()));
 
         JwtBuilder builder = Jwts.builder()
                 .setSubject(subject)
                 .setId(jwtId)
                 .setIssuedAt(issuedAt)
                 .setExpiration(expiration)
-                .setIssuer("FRED");
+                .setIssuer("FRED")
+                .claim(SESSION_ID_CLAIM, sessionId)
+                .claim(SESSION_END_CLAIM, sessionEnd.getTime() / 1000);
 
-        if (sessionId != null) {
-            builder.claim("sessionId", sessionId);
-        }
         if (nextStep != null && !nextStep.isEmpty()) {
             builder.claim("ns", nextStep);
         }
@@ -98,70 +106,124 @@ public class JwtUtils {
         return builder.signWith(key, SignatureAlgorithm.HS256).compact();
     }
 
-    public String generateJwtToken(Authentication authentication) {
-        UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
-
-        logger.info("JwtUtils generateJwtToken - Using key object: {}", System.identityHashCode(this.key));
-        logger.info("JwtUtils generateJwtToken - for user: {}", userPrincipal.getUsername());
-
-        return buildToken(userPrincipal.getUsername(), null, null, publicIdOf(userPrincipal));
+    /**
+     * The first token of a new sign-in. Call this only after the user has proved who they are
+     * (passkey sign-in or sign-up), with the session that sign-in started. The session clock
+     * starts now and runs for {@code jwt.session.max.ms}.
+     *
+     * @param sessionId the session row this sign-in created; required, because a token with no
+     *                  session could never be revoked
+     * @param nextStep  optional "ns" next-step hint; null to omit
+     * @param publicId  opaque analytics identity ("pid" claim); null to omit
+     */
+    public String startSessionToken(String username, Long sessionId, String nextStep, String publicId) {
+        if (sessionId == null) {
+            throw new IllegalArgumentException("A token must belong to a session");
+        }
+        Date sessionEnd = new Date(System.currentTimeMillis() + sessionMaxMs);
+        logger.info("Starting session {} (ns={}), good until {}", sessionId, nextStep, sessionEnd.toInstant());
+        return buildToken(username, sessionId, sessionEnd, nextStep, publicId);
     }
 
-    public String generateJwtToken(Authentication authentication, String nextStep) {
-        UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
-
-        logger.info("JwtUtils generateJwtToken(ns) - for user: {}, ns: {}", userPrincipal.getUsername(), nextStep);
-
-        return buildToken(userPrincipal.getUsername(), null, nextStep, publicIdOf(userPrincipal));
-    }
-
-    public String generateJwtToken(Authentication authentication, Long sessionId) {
-        UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
-
-        return buildToken(userPrincipal.getUsername(), sessionId, null, publicIdOf(userPrincipal));
-    }
-
+    /** Same, taking the user from an Authentication (its principal supplies the name and public id). */
     public String generateJwtToken(Authentication authentication, Long sessionId, String nextStep) {
         UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
+        return startSessionToken(userPrincipal.getUsername(), sessionId, nextStep, publicIdOf(userPrincipal));
+    }
 
-        logger.info("JwtUtils generateJwtToken(sessionId, ns) - for user: {}, ns: {}", userPrincipal.getUsername(), nextStep);
+    /**
+     * A new token for a session that is already running: token refresh, or an email change that
+     * renames the token's subject. The session id and the session end are copied from the current
+     * token unchanged, so refreshing never buys a session more time.
+     *
+     * @return the new token, or empty when the current token has no session, has no session end
+     *         (issued before sessions had one), or its session has already ended. The user then
+     *         signs in again with their passkey.
+     */
+    public java.util.Optional<String> continueSessionToken(String currentToken, String username,
+            String nextStep, String publicId) {
+        Claims claims;
+        try {
+            claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(currentToken).getBody();
+        } catch (Exception e) {
+            return java.util.Optional.empty();
+        }
+        Long sessionId = claims.get(SESSION_ID_CLAIM, Long.class);
+        Date sessionEnd = sessionEndOf(claims);
+        if (sessionId == null || sessionEnd == null || !new Date().before(sessionEnd)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(buildToken(username, sessionId, sessionEnd, nextStep, publicId));
+    }
 
-        return buildToken(userPrincipal.getUsername(), sessionId, nextStep, publicIdOf(userPrincipal));
+    /**
+     * A token for the same session under a new name, for an email change (the email is the
+     * token's subject). Never lasts longer than the token it replaces would have:
+     * a token with a session end is continued as usual; a token from before sessions had an end
+     * gets a replacement that expires exactly when the old one would, still with no session end,
+     * so it still cannot be refreshed.
+     *
+     * @return the new token, or empty when the current token has no session or its session has ended
+     */
+    public java.util.Optional<String> renameSessionToken(String currentToken, String newUsername,
+            String nextStep, String publicId) {
+        Claims claims;
+        try {
+            claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(currentToken).getBody();
+        } catch (Exception e) {
+            return java.util.Optional.empty();
+        }
+        Long sessionId = claims.get(SESSION_ID_CLAIM, Long.class);
+        if (sessionId == null) {
+            return java.util.Optional.empty();
+        }
+        if (sessionEndOf(claims) != null) {
+            return continueSessionToken(currentToken, newUsername, nextStep, publicId);
+        }
+        JwtBuilder builder = Jwts.builder()
+                .setSubject(newUsername)
+                .setId(UUID.randomUUID().toString())
+                .setIssuedAt(new Date())
+                .setExpiration(claims.getExpiration())
+                .setIssuer("FRED")
+                .claim(SESSION_ID_CLAIM, sessionId);
+        if (nextStep != null && !nextStep.isEmpty()) {
+            builder.claim("ns", nextStep);
+        }
+        if (publicId != null && !publicId.isEmpty()) {
+            builder.claim("pid", publicId);
+        }
+        return java.util.Optional.of(builder.signWith(key, SignatureAlgorithm.HS256).compact());
+    }
+
+    /** When the token's session ends, or null when the token carries no session end or cannot be read. */
+    public Date getSessionEndFromJwtToken(String token) {
+        try {
+            return sessionEndOf(Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** True when the token says its session is over. A token with no session end is not ended by this rule. */
+    public boolean sessionHasEnded(String token) {
+        Date sessionEnd = getSessionEndFromJwtToken(token);
+        return sessionEnd != null && !new Date().before(sessionEnd);
+    }
+
+    private static Date sessionEndOf(Claims claims) {
+        Number seconds = claims.get(SESSION_END_CLAIM, Number.class);
+        return seconds == null ? null : new Date(seconds.longValue() * 1000);
     }
 
     public Long getSessionIdFromJwtToken(String token) {
         try {
             Claims claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
-            return claims.get("sessionId", Long.class);
+            return claims.get(SESSION_ID_CLAIM, Long.class);
         } catch (Exception e) {
             logger.error("Could not extract sessionId from token: {}", e.getMessage());
             return null;
         }
-    }
-
-    public String generateTokenFromUsername(String username) {
-        logger.info("JwtUtils generateTokenFromUsername - for user: {}", username);
-        return buildToken(username, null, null);
-    }
-
-    public String generateTokenFromUsername(String username, String nextStep) {
-        logger.info("JwtUtils generateTokenFromUsername(ns) - for user: {}, ns: {}", username, nextStep);
-        return buildToken(username, null, nextStep);
-    }
-
-    /** Used where there is no Authentication principal to read the public id from (refresh, email change). */
-    public String generateTokenFromUsername(String username, String nextStep, String publicId) {
-        logger.info("JwtUtils generateTokenFromUsername(ns,pid) - for user: {}, ns: {}", username, nextStep);
-        return buildToken(username, null, nextStep, publicId);
-    }
-
-    /**
-     * Same, but keeps the token tied to a session so it can still be revoked. Used when the email
-     * (the token's subject) changes mid-session. A null sessionId gives a token with no session.
-     */
-    public String generateTokenFromUsername(String username, Long sessionId, String nextStep, String publicId) {
-        logger.info("JwtUtils generateTokenFromUsername(session,ns,pid) - for user: {}, ns: {}", username, nextStep);
-        return buildToken(username, sessionId, nextStep, publicId);
     }
 
     /** Opaque analytics identity, or null on an older token issued before the claim existed. */
@@ -252,21 +314,6 @@ public class JwtUtils {
             return headerAuth.substring(7);
         }
         return null;
-    }
-
-    public String generateJwtTokenFromUsername(String username) {
-        return buildToken(username, null, null);
-    }
-
-    /** Used where there is no Authentication principal (account recovery). */
-    public String generateJwtTokenFromUsername(String username, String nextStep, String publicId) {
-        logger.info("JwtUtils generateJwtTokenFromUsername(ns,pid) - for user: {}, ns: {}", username, nextStep);
-        return buildToken(username, null, nextStep, publicId);
-    }
-
-    public String generateJwtTokenFromUsername(String username, String nextStep) {
-        logger.info("JwtUtils generateJwtTokenFromUsername(ns) - for user: {}, ns: {}", username, nextStep);
-        return buildToken(username, null, nextStep);
     }
 
     /**

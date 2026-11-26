@@ -100,8 +100,10 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
 - [ ] **Add rate limiting** on public auth endpoints and on AI chat. (M) *prod-config-infra*
 - [ ] **Session revoke does not work after the first token refresh**, tokens refresh forever, and
       there is no server logout or sign-out button. `AuthController.java:152-194`. (M) *security-auth*
-      Part done 2026-11-23: a refreshed token now keeps its session id, so revoke reaches it. Still
-      open: tokens refresh forever, tokens from sign-up carry no session, no server logout.
+      Part done 2026-11-23: a refreshed token now keeps its session id, so revoke reaches it.
+      Part done 2026-11-25: every token belongs to a session (sign-up included) and a passkey
+      sign-in lasts 12 hours at most, however often it is refreshed. Still open: no server logout
+      and no sign-out button.
 - [ ] **Step-up auth for money is frontend only.** A bare JWT can relink the bank, withdraw,
       liquidate or close the account. (L) *security-auth*
 - [ ] **Email change needs no re-auth and no verification** of the new address. It is also broken

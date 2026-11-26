@@ -67,6 +67,9 @@ public class AuthController {
     @Autowired
     com.investingapp.backend.security.TokenCutoffRegistry tokenCutoffs;
 
+    @Autowired
+    com.investingapp.backend.repository.UserSessionRepository userSessionRepository;
+
     @GetMapping("/testuser")
     public ResponseEntity<String> userAccess() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -130,11 +133,9 @@ public class AuthController {
                 } else {
                     /* ... error handling ... */ }
             } else {
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-                String nsLogin = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
-                String jwt = jwtUtils.generateJwtToken(authentication, nsLogin);
-                logger.info("JWT generated for logged-in user (2FA not enabled): {} (ns={})", loginRequest.getEmail(), nsLogin);
-                return ResponseEntity.ok(new JwtResponse(jwt, userDetails.getId(), userDetails.getUsername()));
+                // Password login never issues a token. Sign-in is by passkey, which starts a session.
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new MessageResponse("Login failed."));
             }
         } catch (Exception e) { /* ... error handling ... */
             logger.error("Login failed for {}: {}", loginRequest.getEmail(), e.getMessage());
@@ -178,18 +179,34 @@ public class AuthController {
                     .body(new MessageResponse("User not found"));
         }
 
-        // Keep the token tied to its session. A refreshed token that dropped the session id could
-        // never be revoked again: signing a device out, or recovering the account, would not reach it.
-        Long sessionId = (oldToken != null) ? jwtUtils.getSessionIdFromJwtToken(oldToken) : null;
-
         // Account recovery may have ended this token after it passed the filter. Look again here,
         // as late as possible, so a refresh in flight cannot turn a dead token into a live one.
-        if (oldToken != null && tokenCutoffs.isEnded(user.getId(), jwtUtils.getIssuedAtFromToken(oldToken))) {
+        if (oldToken == null || tokenCutoffs.isEnded(user.getId(), jwtUtils.getIssuedAtFromToken(oldToken))) {
             logger.warn("Token refresh refused for user {}: token was ended by account recovery", user.getId());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new MessageResponse("Session has been revoked"));
         }
-        String newToken = jwtUtils.generateTokenFromUsername(username, sessionId, ns, user.getPublicId());
+
+        // A sign-in on the same device may have replaced this session after the token passed the
+        // filter. A new token for a session that is already over would be dead on arrival, and the
+        // app would store it over the good one it just got.
+        Long sessionId = jwtUtils.getSessionIdFromJwtToken(oldToken);
+        if (sessionId == null || !userSessionRepository.existsByIdAndUserIdAndActiveTrue(sessionId, user.getId())) {
+            logger.info("Token refresh refused for user {}: its session is no longer active", user.getId());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new MessageResponse("Session has been revoked"));
+        }
+
+        // The new token stays in the same session and keeps the same session end. Refreshing keeps
+        // an active user signed in; it never extends how long one passkey sign-in lasts. When the
+        // session has run out (or the token is from before sessions had an end), the answer is
+        // 401 and the app asks for the passkey again.
+        String newToken = jwtUtils.continueSessionToken(oldToken, username, ns, user.getPublicId()).orElse(null);
+        if (newToken == null) {
+            logger.info("Token refresh refused for user {}: the session has ended", user.getId());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new MessageResponse("Session has ended. Sign in again."));
+        }
 
         logger.info("JWT token refreshed for user: {}", username);
         

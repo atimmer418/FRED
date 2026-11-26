@@ -36,11 +36,14 @@ public class SimulatedAttestationService {
     private final UserDetailsService userDetailsService;
     private final JwtUtils jwtUtils;
     private final DevToolsKeyValidator keyValidator;
+    private final UserSessionService userSessionService;
 
     public SimulatedAttestationService(UserRepository userRepository,
             UserDetailsService userDetailsService,
             JwtUtils jwtUtils,
-            DevToolsKeyValidator keyValidator) {
+            DevToolsKeyValidator keyValidator,
+            UserSessionService userSessionService) {
+        this.userSessionService = userSessionService;
         this.userRepository = userRepository;
         this.userDetailsService = userDetailsService;
         this.jwtUtils = jwtUtils;
@@ -70,7 +73,7 @@ public class SimulatedAttestationService {
             UserProgress userProgress = new UserProgress();
             user.setUserProgress(userProgress);
 
-            userRepository.save(user);
+            user = userRepository.save(user);
         }
 
         UserDetails userDetails = userDetailsService.loadUserByUsername(email);
@@ -79,7 +82,8 @@ public class SimulatedAttestationService {
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         String nextStep = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
-        String jwt = jwtUtils.generateJwtToken(authentication, nextStep);
+        // Same rule as a real sign-up: the token belongs to a session.
+        String jwt = jwtUtils.generateJwtToken(authentication, userSessionService.start(user).getId(), nextStep);
 
         return new RegistrationFinishResponse(
                 true,

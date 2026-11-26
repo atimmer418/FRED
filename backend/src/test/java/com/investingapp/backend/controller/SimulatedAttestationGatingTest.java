@@ -115,7 +115,8 @@ class SimulatedAttestationGatingTest {
                 mock(com.investingapp.backend.repository.UserRepository.class),
                 mock(org.springframework.security.core.userdetails.UserDetailsService.class),
                 mock(com.investingapp.backend.security.jwt.JwtUtils.class),
-                new DevToolsKeyValidator(KEY));
+                new DevToolsKeyValidator(KEY),
+                mock(com.investingapp.backend.service.UserSessionService.class));
 
         assertThat(service.register(EMAIL, null)).isNull();
         assertThat(service.register(EMAIL, "wrong")).isNull();

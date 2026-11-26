@@ -10,7 +10,6 @@ import com.investingapp.backend.model.UserSession;
 import com.investingapp.backend.repository.PasskeyCredentialRepository;
 import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.repository.UserProgressRepository;
-import com.investingapp.backend.repository.UserSessionRepository;
 import com.investingapp.backend.security.jwt.JwtUtils;
 import com.investingapp.backend.security.services.UserDetailsServiceImpl;
 import com.investingapp.backend.util.AnalyticsBands;
@@ -231,9 +230,13 @@ public class WebAuthnService {
             SecurityContextHolder.getContext().setAuthentication(authentication);
             logger.info("User {} authenticated via passkey registration and set in SecurityContext.", userEmail);
 
+            // The new account's first sign-in. Like every sign-in it gets a session, so this token
+            // can be revoked and cannot outlive the session. No session, no token: a failure here
+            // fails the registration (and rolls it back) instead of handing out a loose token.
+            UserSession session = userSessionService.start(user);
             String nsReg = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
-            String jwt = jwtUtils.generateJwtToken(authentication, nsReg);
-            logger.info("JWT generated for user {} (ns={}).", userEmail, nsReg);
+            String jwt = jwtUtils.generateJwtToken(authentication, session.getId(), nsReg);
+            logger.info("JWT generated for user {} (ns={}, session={}).", userEmail, nsReg, session.getId());
 
             return new RegistrationFinishResponse(
                     true, // Success is true because no exception was thrown and we saved the credential
@@ -419,7 +422,7 @@ public class WebAuthnService {
     }
 
     @Autowired
-    private UserSessionRepository userSessionRepository;
+    private UserSessionService userSessionService;
 
     /**
      * Finish authentication flow - discovers user from passkey response
@@ -479,54 +482,14 @@ public class WebAuthnService {
                     logger.debug("No device ID header provided during authentication for user {}", user.getEmail());
                 }
 
-                // Create or Update User Session
-                UserSession session = null;
-                try {
-                    // Try to find existing session for this device
-                    if (deviceId != null) {
-                        session = userSessionRepository.findByUserIdAndDeviceId(user.getId(), deviceId).orElse(null);
-                    }
-                    
-                    if (session == null) {
-                        session = new UserSession();
-                        session.setUser(user);
-                        session.setDeviceId(deviceId);
-                    }
-                    
-                    // Update fields
-                    // Use X-Device-Name header if available (from Capacitor), otherwise fallback to User-Agent
-                    String deviceName = httpRequest.getHeader("X-Device-Name");
-                    String userAgent = httpRequest.getHeader("User-Agent");
-                    
-                    if (deviceName != null && !deviceName.isEmpty()) {
-                        session.setDeviceInfo(deviceName);
-                    } else {
-                        session.setDeviceInfo(userAgent != null ? userAgent : "Unknown Device");
-                    }
-                    
-                    session.setIpAddress(httpRequest.getRemoteAddr());
-                    session.setActive(true);
-                    session.setLastActive(java.time.LocalDateTime.now());
-                    
-                    session = userSessionRepository.save(session);
-                    logger.info("Updated/Created active session for user {} on device {}", user.getEmail(), deviceId);
-                } catch (Exception e) {
-                    logger.error("Failed to manage user session: {}", e.getMessage());
-                    // Don't fail auth if session creation fails
-                    session = new UserSession(); // Fallback
-                    session.setId(-1L);
-                }
-                
+                // Every sign-in starts a new session. If that fails the sign-in fails: a token with
+                // no session could never be revoked, so none is ever issued.
+                UserSession session = userSessionService.start(user);
+
                 // Compute next-step hint for the JWT "ns" claim
                 String ns = (user.getUserProgress() != null) ? user.getUserProgress().getNextStep() : "get-started";
 
-                // Generate JWT token
-                String jwt;
-                if (session.getId() != null && session.getId() != -1L) {
-                    jwt = jwtUtils.generateJwtToken(authentication, session.getId(), ns);
-                } else {
-                    jwt = jwtUtils.generateJwtToken(authentication, ns);
-                }
+                String jwt = jwtUtils.generateJwtToken(authentication, session.getId(), ns);
                 logger.info("JWT generated for authenticated user: {} (ns={})", user.getEmail(), ns);
                 
                 return new AuthenticationFinishResponse(

@@ -35,6 +35,7 @@ class PublicIdClaimTest {
         jwtUtils = new JwtUtils();
         ReflectionTestUtils.setField(jwtUtils, "jwtSecretString", SECRET);
         ReflectionTestUtils.setField(jwtUtils, "jwtExpirationMs", 300000);
+        ReflectionTestUtils.setField(jwtUtils, "sessionMaxMs", 43_200_000L);
         jwtUtils.init();
     }
 
@@ -49,7 +50,7 @@ class PublicIdClaimTest {
     void tokenCarriesPublicId() {
         String publicId = UUID.randomUUID().toString();
 
-        String token = jwtUtils.generateJwtToken(authenticationFor(publicId), "complete");
+        String token = jwtUtils.generateJwtToken(authenticationFor(publicId), 42L, "complete");
 
         assertThat(jwtUtils.getPublicIdFromJwtToken(token)).isEqualTo(publicId);
         assertThat(jwtUtils.getUserNameFromJwtToken(token)).isEqualTo("user@fredvested.com");
@@ -71,15 +72,17 @@ class PublicIdClaimTest {
     void tokenFromUsernameCarriesPublicId() {
         String publicId = UUID.randomUUID().toString();
 
-        String token = jwtUtils.generateTokenFromUsername("user@fredvested.com", "complete", publicId);
+        String first = jwtUtils.startSessionToken("user@fredvested.com", 42L, "complete", publicId);
+        String token = jwtUtils.continueSessionToken(first, "new@fredvested.com", "complete", publicId).orElseThrow();
 
         assertThat(jwtUtils.getPublicIdFromJwtToken(token)).isEqualTo(publicId);
+        assertThat(jwtUtils.getUserNameFromJwtToken(token)).isEqualTo("new@fredvested.com");
     }
 
     @Test
     @DisplayName("an older token with no pid claim reads as null rather than failing")
     void olderTokenHasNoClaim() {
-        String token = jwtUtils.generateTokenFromUsername("user@fredvested.com", "complete");
+        String token = jwtUtils.startSessionToken("user@fredvested.com", 42L, "complete", null);
 
         assertThat(jwtUtils.getPublicIdFromJwtToken(token)).isNull();
     }
@@ -89,7 +92,7 @@ class PublicIdClaimTest {
     void claimIsOpaque() {
         String publicId = UUID.randomUUID().toString();
 
-        String token = jwtUtils.generateJwtToken(authenticationFor(publicId), "complete");
+        String token = jwtUtils.generateJwtToken(authenticationFor(publicId), 42L, "complete");
         String pid = jwtUtils.getPublicIdFromJwtToken(token);
 
         assertThat(pid).doesNotContain("@").isNotEqualTo("1");

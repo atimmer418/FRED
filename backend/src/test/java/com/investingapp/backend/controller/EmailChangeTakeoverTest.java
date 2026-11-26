@@ -378,7 +378,7 @@ class EmailChangeTakeoverTest {
         Long thisDevice = insertSession(userAId, "this-device");
         Long otherDevice = insertSession(userAId, "other-device");
         Long bDevice = insertSession(userBId, "b-device");
-        String currentToken = jwtUtils.generateTokenFromUsername(emailA, thisDevice, "tabs", "pid-a");
+        String currentToken = jwtUtils.startSessionToken(emailA, thisDevice, "tabs", "pid-a");
         MockHttpServletResponse response = post("/confirm", Map.of("code", code), currentToken);
 
         // This device stays signed in, A's other device is signed out, B is untouched.
@@ -398,6 +398,9 @@ class EmailChangeTakeoverTest {
         assertThat(jwtUtils.validateJwtToken(newToken)).isTrue();
         assertThat(jwtUtils.getUserNameFromJwtToken(newToken)).isEqualTo(newEmail);
         assertThat(jwtUtils.getSessionIdFromJwtToken(newToken)).isEqualTo(thisDevice);
+        // Changing email does not buy the session more time.
+        assertThat(jwtUtils.getSessionEndFromJwtToken(newToken))
+                .isEqualTo(jwtUtils.getSessionEndFromJwtToken(currentToken));
 
         // The old address was told the change happened.
         ArgumentCaptor<EmailMessage> done = ArgumentCaptor.forClass(EmailMessage.class);

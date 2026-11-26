@@ -12,7 +12,6 @@ import com.investingapp.backend.repository.UserRepository;
 import com.investingapp.backend.security.jwt.JwtUtils;
 import com.investingapp.backend.dto.JwtResponse;
 import com.investingapp.backend.model.UserSession;
-import com.investingapp.backend.repository.UserSessionRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -43,7 +42,7 @@ public class DevAuthController {
     private JwtUtils jwtUtils;
 
     @Autowired
-    private UserSessionRepository userSessionRepository;
+    private com.investingapp.backend.service.UserSessionService userSessionService;
 
     @Autowired
     private UserDetailsService userDetailsService;
@@ -110,35 +109,9 @@ public class DevAuthController {
                 return ResponseEntity.ok(new DevAuthResponse(false, message, null, null, null));
             }
             
-            // --- CREATE SESSION FOR DEV AUTH ---
-            String deviceId = httpRequest.getHeader("X-Device-ID");
-            String deviceName = httpRequest.getHeader("X-Device-Name");
-            String userAgent = httpRequest.getHeader("User-Agent");
+            // Same as a real sign-in: a new session, and a token that belongs to it.
+            UserSession session = userSessionService.start(user);
 
-            UserSession session = null;
-            if (deviceId != null) {
-                session = userSessionRepository.findByUserIdAndDeviceId(user.getId(), deviceId).orElse(null);
-            }
-
-            if (session == null) {
-                session = new UserSession();
-                session.setUser(user);
-                session.setDeviceId(deviceId);
-            }
-
-            if (deviceName != null && !deviceName.isEmpty()) {
-                session.setDeviceInfo(deviceName);
-            } else {
-                session.setDeviceInfo(userAgent != null ? userAgent : "Unknown Device (Dev Auth)");
-            }
-
-            session.setIpAddress(httpRequest.getRemoteAddr());
-            session.setActive(true);
-            session.setLastActive(LocalDateTime.now());
-            
-            session = userSessionRepository.save(session);
-            logger.info("[DevAuthController] Created/Updated session for user {} on device {}", user.getEmail(), deviceId);
-            
             // Load UserDetails to ensure we have the correct principal object for JwtUtils
             UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
 

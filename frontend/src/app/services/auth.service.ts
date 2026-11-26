@@ -459,6 +459,11 @@ export class AuthService {
 
     this.tokenRefreshInProgress = true;
 
+    // The token this refresh is for. A passkey sign-in can finish while the request is in
+    // flight and store a newer token; the answer to this request must never replace that one.
+    const sentToken = localStorage.getItem('jwtToken');
+    const stillCurrent = () => localStorage.getItem('jwtToken') === sentToken;
+
     return this.http.post<any>(`${BACKEND_API_URL}/auth/refresh`, {}, {
       headers: this.getAuthHeaders()
     }).pipe(
@@ -467,12 +472,21 @@ export class AuthService {
       // under the 60s refresh tick, so the latch always clears before the next attempt.
       timeout(15000),
       tap(response => {
-        if (response?.success && response.jwtToken) {
+        if (response?.success && response.jwtToken && stillCurrent()) {
           JwtTokenUtils.storeJwtToken(response.jwtToken, response.id, response.email);
         }
       }),
       catchError(err => {
         console.error('[AuthService] Token refresh failed:', err);
+        // 401 means the server no longer honours this token: its session ended, was revoked, or
+        // was replaced. Drop the token (and only the token: the user is still known), so the
+        // next expiry check (within a minute) asks for the passkey. This only helps once a
+        // refresh is attempted, which is in the token's last 30 minutes; a 401 on any other
+        // request is still not handled. Any other failure (offline, timeout, 5xx) keeps the token.
+        if (err?.status === 401 && stillCurrent()) {
+          localStorage.removeItem('jwtToken');
+          localStorage.removeItem('jwtExpiration');
+        }
         return of(false);
       }),
       // finalize is the single guaranteed reset point — it runs on success, error,

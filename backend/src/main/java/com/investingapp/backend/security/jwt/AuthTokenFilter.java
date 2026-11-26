@@ -78,41 +78,25 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
             if (jwt != null) {
                 boolean isValid = jwtUtils.validateJwtToken(jwt);
                 if (isValid) {
-                    // Check for Session Revocation
-                    Long sessionId = jwtUtils.getSessionIdFromJwtToken(jwt);
-                    if (sessionId != null) {
-                        boolean isSessionActive = userSessionRepository.findById(sessionId)
-                                .map(com.investingapp.backend.model.UserSession::isActive)
-                                .orElse(false);
-                        
-                        if (!isSessionActive) {
-                            logger.warn("AuthTokenFilter: Session {} is revoked. Blocking request to {}.", sessionId, request.getRequestURI());
-                            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session has been revoked");
-                            return;
-                        }
-                    }
-
                     String email = jwtUtils.getUserNameFromJwtToken(jwt);
-
                     UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
-                    // Account recovery ends every token the user held, including ones with no
-                    // session id that the check above cannot reach.
-                    if (userDetails instanceof com.investingapp.backend.security.services.UserDetailsImpl known
-                            && tokenCutoffs.isEnded(known.getId(), jwtUtils.getIssuedAtFromToken(jwt))) {
-                        logger.warn("AuthTokenFilter: token for user {} was ended by account recovery. Blocking request to {}.",
-                                known.getId(), request.getRequestURI());
-                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session has been revoked");
-                        return;
-                    }
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            userDetails,
-                            null,
-                            userDetails.getAuthorities());
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    String refusal = whyRefused(jwt, userDetails);
+                    if (refusal != null) {
+                        // Treated exactly like a request with no token: protected routes answer 401,
+                        // and the public sign-in routes still work, so a device holding a dead
+                        // token can always sign in again.
+                        logger.warn("AuthTokenFilter: token not honoured for {} ({}).", request.getRequestURI(), refusal);
+                    } else {
+                        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                                userDetails,
+                                null,
+                                userDetails.getAuthorities());
+                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                    logger.debug("AuthTokenFilter: User '{}' authenticated for {}.", email, request.getRequestURI());
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                        logger.debug("AuthTokenFilter: User '{}' authenticated for {}.", email, request.getRequestURI());
+                    }
                 } else {
                     logger.debug("AuthTokenFilter: Invalid JWT token for request {}.", request.getRequestURI());
                 }
@@ -124,6 +108,33 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Why a correctly signed, unexpired token is still not good enough, or null when it is.
+     *
+     * <p>A token must belong to a session, that session must be active and belong to the same
+     * user, the session must not have reached its end, and account recovery must not have ended
+     * the token.
+     */
+    private String whyRefused(String jwt, UserDetails userDetails) {
+        Long sessionId = jwtUtils.getSessionIdFromJwtToken(jwt);
+        if (sessionId == null) {
+            return "token has no session";
+        }
+        if (!(userDetails instanceof com.investingapp.backend.security.services.UserDetailsImpl known)) {
+            return "user could not be identified";
+        }
+        if (!userSessionRepository.existsByIdAndUserIdAndActiveTrue(sessionId, known.getId())) {
+            return "session " + sessionId + " is revoked or is not this user's";
+        }
+        if (jwtUtils.sessionHasEnded(jwt)) {
+            return "session " + sessionId + " has reached its end";
+        }
+        if (tokenCutoffs.isEnded(known.getId(), jwtUtils.getIssuedAtFromToken(jwt))) {
+            return "token was ended by account recovery";
+        }
+        return null;
     }
 
     private String parseJwt(HttpServletRequest request) {

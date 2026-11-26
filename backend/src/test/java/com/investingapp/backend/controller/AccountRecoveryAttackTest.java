@@ -312,7 +312,7 @@ class AccountRecoveryAttackTest {
     @Test
     @DisplayName("a stolen session token cannot register a passkey on an account that was just recovered")
     void stolenTokenCannotRegisterAfterRecovery() throws Exception {
-        String stolen = jwtUtils.generateJwtTokenFromUsername(emailA);
+        String stolen = jwtUtils.startSessionToken(emailA, insertSession(userAId, "thief"), null, null);
         recover(emailA);
 
         assertThat(startPasskey(null, stolen)).isEqualTo(401);
@@ -323,7 +323,7 @@ class AccountRecoveryAttackTest {
     @Test
     @DisplayName("a session token cannot register a passkey on any account with none, recovered or not")
     void sessionTokenNeverRegistersAPasskey() throws Exception {
-        String token = jwtUtils.generateJwtTokenFromUsername(emailA);
+        String token = jwtUtils.startSessionToken(emailA, insertSession(userAId, "phone"), null, null);
         assertThat(useToken(token)).as("the token itself is good").isEqualTo(200);
 
         assertThat(startPasskey(null, token)).isEqualTo(401);
@@ -331,26 +331,43 @@ class AccountRecoveryAttackTest {
     }
 
     @Test
-    @DisplayName("every token the account held stops working once it is recovered, with or without a session id")
+    @DisplayName("every token the account held stops working once it is recovered, on every device")
     void recoveryEndsEverySession() throws Exception {
-        Long sessionId = insertSession(userAId, "phone");
-        String sessionToken = jwtUtils.generateTokenFromUsername(emailA, sessionId, null, null);
-        String looseToken = jwtUtils.generateJwtTokenFromUsername(emailA);
-        assertThat(useToken(sessionToken)).isEqualTo(200);
-        assertThat(useToken(looseToken)).isEqualTo(200);
+        // Tokens with no session at all are refused outright now: see SessionLifetimeTest.
+        Long phone = insertSession(userAId, "phone");
+        Long tablet = insertSession(userAId, "tablet");
+        String phoneToken = jwtUtils.startSessionToken(emailA, phone, null, null);
+        String tabletToken = jwtUtils.startSessionToken(emailA, tablet, null, null);
+        assertThat(useToken(phoneToken)).isEqualTo(200);
+        assertThat(useToken(tabletToken)).isEqualTo(200);
 
         recover(emailA);
 
-        assertThat(sessionActive(sessionId)).isFalse();
-        assertThat(useToken(sessionToken)).isEqualTo(401);
-        assertThat(useToken(looseToken)).isEqualTo(401);
+        assertThat(sessionActive(phone)).isFalse();
+        assertThat(sessionActive(tablet)).isFalse();
+        assertThat(useToken(phoneToken)).isEqualTo(401);
+        assertThat(useToken(tabletToken)).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("a session started in the same moment as the recovery is ended too")
+    void recoveryCutoffReachesASessionItDidNotSee() throws Exception {
+        String token = jwtUtils.startSessionToken(emailA, insertSession(userAId, "phone"), null, null);
+        recover(emailA);
+        // A sign-in racing the recovery could leave an active session behind. The token cutoff
+        // still ends its token, because the token was issued before the recovery finished.
+        Long raced = insertSession(userAId, "raced");
+        jdbc.update("UPDATE user_sessions SET active = 1 WHERE user_id = ?", userAId);
+        assertThat(sessionActive(raced)).isTrue();
+
+        assertThat(useToken(token)).isEqualTo(401);
     }
 
     @Test
     @DisplayName("a device still sending its dead token can go through recovery again")
     void aDeadTokenDoesNotBlockRecovery() throws Exception {
         Long sessionId = insertSession(userAId, "phone");
-        String dead = jwtUtils.generateTokenFromUsername(emailA, sessionId, null, null);
+        String dead = jwtUtils.startSessionToken(emailA, sessionId, null, null);
         String recoveryToken = recover(emailA);
         assertThat(useToken(dead)).isEqualTo(401);
 
@@ -424,8 +441,8 @@ class AccountRecoveryAttackTest {
         insertPasskey(userBId);
         Long sessionA = insertSession(userAId, "a-phone");
         Long sessionB = insertSession(userBId, "b-phone");
-        String tokenA = jwtUtils.generateTokenFromUsername(emailA, sessionA, null, null);
-        String tokenB = jwtUtils.generateTokenFromUsername(emailB, sessionB, null, null);
+        String tokenA = jwtUtils.startSessionToken(emailA, sessionA, null, null);
+        String tokenB = jwtUtils.startSessionToken(emailB, sessionB, null, null);
 
         String recoveryA = recover(emailA);
 
@@ -469,7 +486,7 @@ class AccountRecoveryAttackTest {
     @DisplayName("a refreshed token keeps its session id, so signing the device out still reaches it")
     void refreshKeepsTheSession() throws Exception {
         Long sessionId = insertSession(userAId, "phone");
-        String token = jwtUtils.generateTokenFromUsername(emailA, sessionId, null, null);
+        String token = jwtUtils.startSessionToken(emailA, sessionId, null, null);
 
         MockHttpServletResponse refreshed = post("/api/auth/refresh", Map.of(), token);
         assertThat(refreshed.getStatus()).isEqualTo(200);

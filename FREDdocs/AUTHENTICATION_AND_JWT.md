@@ -47,10 +47,44 @@ In the browser, pass it once as `?devKey=...` alongside `?devPage=...`; it is re
   "jti": "a1b2c3d4-e5f6-7890-1234",
   "iat": 1638360000,
   "exp": 1638363600,
-  "iss": "investingapp"
+  "iss": "FRED",
+  "sessionId": 42,
+  "sx": 1638403200,
+  "ns": "complete",
+  "pid": "opaque-analytics-id"
 }
 ```
-Signed with HS512 (HMAC-SHA512).
+Signed with HS256.
+
+- `sessionId` is the `user_sessions` row the token belongs to. Every token has one. A token with
+  none is not honoured.
+- `sx` is when that session ends for good, in seconds since the epoch. It is set once, at the
+  passkey sign-in, and is 12 hours later (`jwt.session.max.ms`).
+
+### Sessions
+
+Every passkey sign-in, and sign-up, starts a new session row and a token that belongs to it
+(`UserSessionService.start`, then `JwtUtils.startSessionToken`). There is no other way to get a
+first token. If the session cannot be saved, the sign-in fails.
+
+- **A sign-in lasts 12 hours at most.** Refresh copies `sessionId` and `sx` into the new token
+  unchanged (`JwtUtils.continueSessionToken`). Refreshing keeps an active user signed in; it never
+  moves the session end. A token never expires later than `sx`, so near the end of a session the
+  refreshed token is shorter than an hour. After the session ends, refresh answers 401 and the
+  app asks for the passkey again, which starts a new 12 hour session.
+- **Every token can be taken back.** The filter honours a token only if its session exists, is
+  active and belongs to the same user. Revoking a session (`POST /api/user/sessions/{id}/revoke`),
+  changing email (other devices) and account recovery (all devices) end sessions.
+- **Signing in again on a device replaces that device's older session** (matched on
+  `X-Device-ID`): the old row is removed and a new one starts. Session rows are never reused, so a
+  revoked token stays dead after the next sign-in. Sessions that were already ended, or started more
+  than 14 hours ago, are removed at the same time, so the table holds only sessions that can still
+  be in use.
+- **A token that is not honoured is treated like no token.** Protected routes answer 401. The
+  public sign-in and recovery routes still work, so a device holding a dead token can always
+  sign in again.
+- A token issued before sessions had an end (`sx` missing) keeps working until it expires, within
+  the hour, and cannot be refreshed.
 
 ### localStorage Keys
 
@@ -63,10 +97,10 @@ Signed with HS512 (HMAC-SHA512).
 
 ### Token Lifecycle
 
-1. **Creation** — On passkey login, passkey re-auth, dev login, or token refresh.
+1. **Creation** — On passkey login, passkey re-auth, sign-up or dev login (each starts a new session), or token refresh (same session).
 2. **Storage** — `JwtTokenUtils.storeJwtToken()` decodes the JWT to extract `exp` and stores all 4 localStorage keys.
 3. **Usage** — Every HTTP request includes `Authorization: Bearer <token>`.
-4. **Refresh** — `AppLockService` checks every 60 seconds: if user was active within 5 minutes AND token expires within 30 minutes → `POST /api/auth/refresh` issues a new 1-hour token. Net effect: token never expires while the user is actively using the app.
+4. **Refresh** — `AppLockService` checks every 60 seconds: if user was active within 5 minutes AND token expires within 30 minutes → `POST /api/auth/refresh` issues a new token in the same session. Net effect: an active user stays signed in until the session ends, 12 hours after the passkey sign-in.
 5. **Expiry → Lock** — When token expires (user inactive), `checkTokenExpiry()` detects it and shows the lock screen. Passkey re-auth (no JWT required — endpoints are `permitAll`) issues a fresh token → app unlocks.
 
 ### Inactivity & App Lock
@@ -76,7 +110,7 @@ There is **no separate inactivity timer**. The JWT expiry IS the inactivity time
 ```
 User active → activity tracked (touch/click/keydown/scroll/HTTP requests)
            → token refreshed proactively when nearing expiry
-           → token never expires
+           → stays signed in until the session ends (12 hours after the passkey sign-in)
 
 User inactive → no activity events after 5 minutes
              → token stops being refreshed
@@ -214,7 +248,7 @@ Everything else under /api/**
 
 **AuthTokenFilter** — Intercepts every request, extracts/validates JWT from `Authorization` header, sets `SecurityContext`.
 
-**POST /api/auth/refresh** — Requires valid JWT. Issues fresh 1-hour token for same user.
+**POST /api/auth/refresh** — Requires a valid JWT. Issues a new token in the same session with the same session end (up to 1 hour, never past the end). 401 when the session has ended or the token has no session end.
 
 **POST /api/passkey/authenticate/start** — Start usernameless authentication (no email needed).
 

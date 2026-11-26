@@ -38,6 +38,8 @@ class DevToolsGatingTest {
                         "jwt.expiration.ms=300000")
                 .withBean(UserRepository.class, () -> mock(UserRepository.class))
                 .withBean(UserSessionRepository.class, () -> mock(UserSessionRepository.class))
+                .withBean(com.investingapp.backend.service.UserSessionService.class,
+                        () -> mock(com.investingapp.backend.service.UserSessionService.class))
                 .withBean(UserDetailsService.class, () -> mock(UserDetailsService.class))
                 .withBean(JwtUtils.class, () -> mock(JwtUtils.class))
                 .withBean(DevToolsKeyValidator.class, () -> new DevToolsKeyValidator("test-key"))

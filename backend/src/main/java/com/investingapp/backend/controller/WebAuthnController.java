@@ -78,6 +78,9 @@ public class WebAuthnController {
     @Autowired(required = false)
     private SimulatedAttestationService simulatedAttestationService;
 
+    @Autowired(required = false)
+    private com.investingapp.backend.service.UserSessionService userSessionService;
+
     @Autowired
     public WebAuthnController(WebAuthnService webAuthnService,
             Cache<String, PublicKeyCredentialCreationOptions> challengeCache,
@@ -388,6 +391,11 @@ public class WebAuthnController {
                         boolean tokenNamesAnAccount = Boolean.TRUE.equals(userRepository.existsByEmail(loggedInEmail));
                         if (tokenNamesAnAccount && !loggedInEmail.equalsIgnoreCase(authenticatedEmail)) {
                             logger.warn("Step-Up Auth Mismatch! Logged in: {}, Authenticated: {}", loggedInEmail, authenticatedEmail);
+                            // The passkey was good, so a session was started for its owner, but its
+                            // token is not being handed out. End it; nobody should hold it.
+                            if (userSessionService != null) {
+                                userSessionService.end(jwtUtils.getSessionIdFromJwtToken(serviceResponse.getJwtToken()));
+                            }
                             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                                 .body("Authentication failed: You must authenticate with the currently logged-in account.");
                         }

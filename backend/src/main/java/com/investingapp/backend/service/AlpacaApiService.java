@@ -84,9 +84,8 @@ public class AlpacaApiService {
         logger.info("Creating Alpaca account for user: {}", email);
 
         // Add parameter validation and logging
-        logger.debug(
-                "Parameters received - email: {}, firstName: {}, lastName: {}, dateOfBirth: {}, ssn: {}, phone: {}, address: {}",
-                email, firstName, lastName, dateOfBirth, ssn, phone, address);
+        // The Social Security Number is never logged, at any level.
+        logger.debug("Parameters received - email: {}, ssn present: {}", email, ssn != null && !ssn.isBlank());
 
         if (address != null) {
             logger.debug("Address details - street_address: {}, city: {}, state: {}, postal_code: {}",
@@ -158,7 +157,8 @@ public class AlpacaApiService {
 
         try {
             String jsonBody = objectMapper.writeValueAsString(accountData);
-            logger.debug("Alpaca account creation request: {}", jsonBody);
+            // Length only: the body holds the applicant's Social Security Number.
+            logger.debug("Alpaca account creation request: {} chars", jsonBody.length());
 
             HttpEntity<String> entity = new HttpEntity<>(jsonBody, createHeaders());
             ResponseEntity<String> response = restTemplate.exchange(

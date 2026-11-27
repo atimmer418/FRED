@@ -108,14 +108,14 @@ describe('KycVerificationComponent — analytics', () => {
     expect(analytics.trackOnboardingStepViewed).toHaveBeenCalledWith('kyc_verification', 1, false);
   });
 
-  it('reports part 2 as viewed and resumed when a draft put the user back on the second page', () => {
+  it('reports part 1 as viewed and resumed when a draft was restored (the SSN is never in it, so part 1 is not done)', () => {
     localStorage.setItem(draftKey, JSON.stringify({ givenName: 'Test' }));
 
     component = build();
     component.ngOnInit();
 
-    expect(component.currentStep).toBe(2);
-    expect(analytics.trackOnboardingStepViewed).toHaveBeenCalledWith('kyc_verification', 2, true);
+    expect(component.currentStep).toBe(1);
+    expect(analytics.trackOnboardingStepViewed).toHaveBeenCalledWith('kyc_verification', 1, true);
   });
 
   it('reports the move to part 2 as a second viewed event', async () => {
@@ -281,6 +281,19 @@ describe('KycVerificationComponent: date of birth sheet', () => {
   const phoneInput = () => el().querySelector('#phoneNumberInput') as HTMLInputElement;
   const control = () => component.step1Form.controls.dateOfBirth;
   const text = (node: Element | null) => (node?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+  it('the SSN field says it is stored securely, or after a resume that it must be typed again', () => {
+    const hints = () => Array.from(el().querySelectorAll('#taxIdInput ~ .field-hint')).map(text);
+    expect(hints()).toEqual(['Encrypted and stored securely.']);
+
+    component.resumedFromDraft = true;
+    fixture.detectChanges();
+    expect(hints()).toEqual(['Never saved on this phone. Please enter it again.']);
+
+    component.step1Form.patchValue({ taxId: '000-00-0000' });
+    fixture.detectChanges();
+    expect(hints()).toEqual(['Encrypted and stored securely.']);
+  });
 
   it('the date of birth is a value button with the calendar glyph; nothing types it and nothing autofills it', () => {
     expect(dobBtn()).not.toBeNull();

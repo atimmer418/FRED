@@ -131,7 +131,8 @@
             <div *ngIf="!editMode" class="form-field" [class.field-error]="step1Form.get('taxId')?.invalid && step1Form.get('taxId')?.touched">
               <span class="field-label">SOCIAL SECURITY NUMBER</span>
               <input id="taxIdInput" class="field-input" type="text" formControlName="taxId" placeholder="XXX-XX-XXXX" inputmode="numeric" maxlength="11" (input)="onTaxIdInput($event)" autocomplete="off" />
-              <div class="field-hint">Encrypted and stored securely.</div>
+              <div class="field-hint" *ngIf="!showSsnNotSavedHint">Encrypted and stored securely.</div>
+              <div class="field-hint" *ngIf="showSsnNotSavedHint" data-testid="ssn-not-saved">Never saved on this phone. Please enter it again.</div>
               <div class="error-msg" *ngIf="step1Form.get('taxId')?.invalid && step1Form.get('taxId')?.touched">Format: XXX-XX-XXXX</div>
             </div>
             <div class="form-field" [class.field-error]="step1Form.get('fundingSource')?.invalid && step1Form.get('fundingSource')?.touched">

@@ -1,4 +1,5 @@
 import { Component, OnInit, HostListener, inject } from '@angular/core';
+import { KycDraftUtils } from './utils/kyc-draft.utils';
 import { Router } from '@angular/router';
 import { IonApp, IonRouterOutlet, NavController } from '@ionic/angular/standalone';
 import { CommonModule } from '@angular/common';
@@ -77,6 +78,10 @@ export class AppComponent implements OnInit {
     private screenTracking: ScreenTrackingService
   ) {
     addIcons({ lockClosedOutline, fingerPrintOutline });
+
+    // Builds before 2026-11-26 saved the applicant's Social Security Number in the KYC draft.
+    // Take it out of every draft on this phone before anything else runs.
+    KycDraftUtils.scrubSavedSsns();
 
     // Setup activity tracker with throttling to avoid performance issues
     this.userActivity$.pipe(

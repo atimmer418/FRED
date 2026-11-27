@@ -16,6 +16,7 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analytics-error.utils';
 import { AlpacaService, CreateAlpacaAccountRequest, UpdateKycRequest } from '../../services/alpaca.service';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
+import { KycDraftUtils } from '../../utils/kyc-draft.utils';
 
 // US states list
 const US_STATES = [
@@ -130,6 +131,14 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     { value: 'business_income', label: 'Business Income' }
   ];
 
+  /** True when part 1 was filled from a saved draft, so the SSN field can say why it is empty. */
+  resumedFromDraft = false;
+
+  /** The "enter it again" note: only for a restored draft, and only until the number is typed. */
+  get showSsnNotSavedHint(): boolean {
+    return this.resumedFromDraft && !this.step1Form.controls.taxId.value;
+  }
+
   // Step 1 form — contact + identity
   step1Form = new FormGroup({
     givenName: new FormControl('', [Validators.required]),
@@ -181,13 +190,16 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
       const agreementsCtrl = this.step2Form.get('agreementsChecked');
       agreementsCtrl?.setValue(true);
       agreementsCtrl?.disable();
+      // This account has finished sign-up, so there is nothing to resume. Older builds also wrote
+      // a draft from this settings form and never removed it.
+      this.clearStep1Draft();
       this.loadKycDataForEdit();
     } else {
       this.prefillUserData();
+      // A resumed applicant stays on part 1: the draft brings back everything except the Social
+      // Security Number, which is never saved, so that one field is still to fill in.
       const resumedFromDraft = this.loadStep1Draft();
-      if (resumedFromDraft) {
-        this.currentStep = 2;
-      }
+      this.resumedFromDraft = resumedFromDraft;
       // Onboarding only. In editMode this screen is a settings form, not a funnel step.
       this.analytics.trackOnboardingStepViewed('kyc_verification', this.currentStep, resumedFromDraft);
     }
@@ -262,28 +274,27 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     });
   }
 
-  private get kycDraftKey(): string {
-    const userId = localStorage.getItem('userId') || 'anon';
-    return `fred_kyc_step1_${userId}`;
-  }
-
+  // The draft never holds the Social Security Number. KycDraftUtils enforces that on every write
+  // and every read, so nothing here needs to remember to leave it out.
   private saveStep1Draft() {
-    localStorage.setItem(this.kycDraftKey, JSON.stringify(this.step1Form.value));
+    KycDraftUtils.save(this.step1Form.value);
   }
 
   private loadStep1Draft(): boolean {
-    const raw = localStorage.getItem(this.kycDraftKey);
-    if (!raw) return false;
+    const draft = KycDraftUtils.load();
+    if (!draft) return false;
     try {
-      this.step1Form.patchValue(JSON.parse(raw));
+      this.step1Form.patchValue(draft);
       return true;
     } catch {
+      // A draft the form cannot take is worth less than a screen that opens.
+      KycDraftUtils.clear();
       return false;
     }
   }
 
   private clearStep1Draft() {
-    localStorage.removeItem(this.kycDraftKey);
+    KycDraftUtils.clear();
   }
 
   private prefillUserData() {
@@ -450,7 +461,10 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
     if (this.editMode && !this.step1Changed) {
       return;
     }
-    this.saveStep1Draft();
+    // Sign-up only. The settings form edits a finished account and has nothing to resume.
+    if (!this.editMode) {
+      this.saveStep1Draft();
+    }
     await this.animateStep(2);
     if (!this.editMode) {
       // Part 2 is now on screen. The sub-step pair is how the two halves of the form are told apart.

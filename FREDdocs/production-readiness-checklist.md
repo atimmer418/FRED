@@ -93,7 +93,9 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
       Done 2026-11-25: the column is encrypted with the app's AES-GCM field encryption, responses
       carry only `ssnLast4`, and an edit may leave the number out to keep the one on file. Rows
       written before the change were not converted (decision: dev only, no production data).
-- [ ] **Applicant SSN sits unencrypted in a localStorage KYC draft** (FRED-221). (S) *onboarding-kyc-lifecycle*
+- [x] **Applicant SSN sits unencrypted in a localStorage KYC draft** (FRED-221). (S) *onboarding-kyc-lifecycle*
+      Done 2026-11-26: the draft never holds the SSN, a resumed applicant retypes only that field,
+      and drafts saved by older builds are scrubbed at launch. The rest of the draft is kept.
 - [x] **Recovery code can be brute-forced.** No attempt limit, no rate limit, and success gives a
       full token (FRED-219). (M) *security-auth*
       Fixed 2026-11-23: 5 wrong tries per code, limits per account and per network address, and a
@@ -105,8 +107,8 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
       there is no server logout or sign-out button. `AuthController.java:152-194`. (M) *security-auth*
       Part done 2026-11-23: a refreshed token now keeps its session id, so revoke reaches it.
       Part done 2026-11-25: every token belongs to a session (sign-up included) and a passkey
-      sign-in lasts 12 hours at most, however often it is refreshed. Still open: no server logout
-      and no sign-out button.
+      sign-in lasts 12 hours at most, however often it is refreshed. Server logout and the
+      sign-out button were dropped by Andy on 2026-11-26.
 - [ ] **Step-up auth for money is frontend only.** A bare JWT can relink the bank, withdraw,
       liquidate or close the account. (L) *security-auth*
 - [ ] **Email change needs no re-auth and no verification** of the new address. It is also broken

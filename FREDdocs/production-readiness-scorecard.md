@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-25. Latest change: Beneficiary SSNs are encrypted in the database and never returned by the API.
+Last updated: 2026-11-26. Latest change: The applicant's SSN is no longer saved in the on-device KYC draft.
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **8 of 174** (18 more are part done) |
-| Readiness, weighted by size | **9.0%** (42 of 468 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 11.4% (42 of 370 points, 146 items) |
+| Items done | **9 of 173** (18 more are part done; 1 dropped item is not counted) |
+| Readiness, weighted by size | **9.2%** (43 of 467 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 11.7% (43 of 369 points, 145 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -28,7 +28,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | Area | Done | Part | Open | Points | Weighted |
 |---|---|---|---|---|---|
 | A. Protect the work | 1 | 1 | 0 | 1.5 of 2 | 75% |
-| B. Security | 6 | 1 | 12 | 15.5 of 42 | 37% |
+| B. Security | 7 | 1 | 10 | 16.5 of 41 | 40% |
 | C. A shippable iOS build | 0 | 0 | 8 | 0 of 14 | 0% |
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
@@ -47,6 +47,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | 2026-11-25 | Starting point (develop at `a2aa48d1`) | 6 of 172 | 7.7% |
 | 2026-11-25 | Sessions: every token belongs to a session and a sign-in lasts 12 hours at most | 7 of 173 | 8.4% |
 | 2026-11-25 | Beneficiary SSNs: encrypted in the database, last four digits only in responses (one new item found: L23) | 8 of 174 | 9.0% |
+| 2026-11-26 | Applicant SSN removed from the on-device KYC draft. B8 (server logout and sign-out button) dropped by Andy and no longer counted | 9 of 173 | 9.2% |
 
 ## Decisions needed from Andy
 
@@ -103,11 +104,11 @@ found after the audit.
 | B1 | Alpaca endpoints leak other users' accounts | small | Done |  | Commit eda5229f. AlpacaController.java:56-67 GET /account now returns only the caller's own account; :258-268 and :277-287 return 404 unless isOwnAlpacaAccount (:90-92). |
 | B2 | Beneficiary cross-user writes | small | Done |  | Commit eda5229f. BeneficiaryService.java:89 forces setId(null) on create; :190-193 findOwned uses findByIdAndUserId for update, delete and submit; submitToAlpaca now takes the user. |
 | B3 | Beneficiary SSNs stored in plaintext and returned in full by the API | medium | Done |  | Done 2026-11-25. The column is encrypted with the app's AES-GCM field encryption (EncryptedStringConverter on Beneficiary.socialSecurityNumber), responses carry only ssnLast4, an edit may leave the number out to keep the one on file, and a mistyped number is never logged. Proved by BeneficiarySsnAtRestTest against a real database. Rows written before the change were not converted (decision: dev only, no production data). The column was widened by a repeatable migration because V12 is held by an unpushed branch. |
-| B4 | Applicant SSN sits unencrypted in a localStorage KYC draft (FRED-221) | small | Open |  | Leave taxId (and date of birth) out of the draft or drop the draft, and clear it on failure and sign-out. |
+| B4 | Applicant SSN sits unencrypted in a localStorage KYC draft (FRED-221) | small | Done |  | Done 2026-11-26. KycDraftUtils is the only way in or out of the draft and never writes or returns taxId; a resumed applicant lands on part 1 and retypes only the number; every draft on the phone is scrubbed at launch (AppComponent); the settings form writes no draft and removes an old one. The rest of the draft, date of birth included, is kept on purpose. Two dead debug log lines that could print the number on the server were also removed. |
 | B5 | Recovery code can be brute-forced (FRED-219) | medium | Done |  | Commit f3776f10. AccountRecoveryService.java:156-165 and :218-227 hold per-account, per-email and per-address AttemptLimiters; 5 wrong tries per code; a right code gives a one-time recovery token, not a session. |
 | B6 | Add rate limiting on public auth endpoints and on AI chat | medium | Part |  | Still no limits on: passkey sign-up and sign-in start and finish (/api/passkey/**), /api/auth/login and /api/auth/refresh, /api/user/should-prompt-reauth, and chat messages (POST /api/chat and GET /api/chat/stream need a per-user ... |
 | B7 | Sessions: every token belongs to a session that can be revoked, and no session lasts forever | medium | Done |  | Fixed 2026-11-25. Every token belongs to a session (sign-up included), a token with no session is refused, and a passkey sign-in lasts 12 hours at most however often it is refreshed. Signing in again on a device replaces its old session, so a revoked token stays dead. |
-| B8 | Server logout and a working sign-out button | small | Open |  | No logout endpoint exists, the Profile tab sign-out handler only logs, and signing out only clears the phone. |
+| B8 | Server logout and a working sign-out button | small | Dropped |  | Dropped by Andy on 2026-11-26. Not counted in the totals. |
 | B9 | Step-up auth for money is frontend only | large | Open |  | Server must require a fresh passkey (or PIN proof) for withdraw, liquidate, bank relink, large lump sum and account close. |
 | B10 | Email change needs no re-auth and no verification, and is broken (no Authorization header) | medium | Done |  | Commit 6b632c95. POST /api/user/update-email is gone from UserController. |
 | B11 | Sign-up takes any email with no ownership check, and an abandoned sign-up locks that email | medium | Open |  | Verify the email (code or link) before or during sign-up, and let an unfinished sign-up with no passkey be replaced or expire. |
@@ -327,4 +328,5 @@ found after the audit.
 
 Update this file in the same commit as every fix: change the item's status and note, re-count the
 score table and the area table, and add a row to the score history. New problems found along the way
-are added as new items with the N flag, which lowers the percentage; that is expected.
+are added as new items with the N flag, which lowers the percentage; that is expected. An item Andy
+drops is marked Dropped, kept in its table for the record, and left out of every count and total.

@@ -1,5 +1,6 @@
 package com.investingapp.backend.controller;
 
+import com.investingapp.backend.security.ratelimit.RateLimiter;
 import com.investingapp.backend.dto.ChatRequest;
 import com.investingapp.backend.dto.ChatResponse;
 import com.investingapp.backend.service.ChatService;
@@ -27,10 +28,38 @@ public class ChatController {
     private final ChatService chatService;
     private final com.investingapp.backend.service.DailyQuestionService dailyQuestionService;
 
+    private final RateLimiter rateLimiter;
+
+    /** Far longer than anyone types in a chat box, far shorter than a pasted book. */
+    static final int MAX_MESSAGE_CHARACTERS = 4000;
+
     public ChatController(ChatService chatService,
-            com.investingapp.backend.service.DailyQuestionService dailyQuestionService) {
+            com.investingapp.backend.service.DailyQuestionService dailyQuestionService,
+            RateLimiter rateLimiter) {
         this.chatService = chatService;
         this.dailyQuestionService = dailyQuestionService;
+        this.rateLimiter = rateLimiter;
+    }
+
+    /**
+     * Every chat message costs a model call, so each user gets a set number a minute and a day.
+     * Both ways of sending (POST and the stream) draw on the same budget. Returns the user's id.
+     */
+    private Long countMessage(String message) {
+        // One message can set off several model calls, and the model is paid by size.
+        if (message != null && message.length() > MAX_MESSAGE_CHARACTERS) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Message is too long. Keep it under " + MAX_MESSAGE_CHARACTERS + " characters.");
+        }
+        Long userId = authenticatedUserId();
+        if (userId == null) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.UNAUTHORIZED);
+        }
+        rateLimiter.require(RateLimiter.Rule.CHAT_MESSAGES_PER_MINUTE, String.valueOf(userId));
+        rateLimiter.require(RateLimiter.Rule.CHAT_MESSAGES_PER_DAY, String.valueOf(userId));
+        return userId;
     }
 
     // Preserved for fallback — prefer GET /stream for new clients
@@ -38,7 +67,7 @@ public class ChatController {
     public ResponseEntity<ChatResponse> chat(@RequestBody ChatRequest request) {
         // SECURITY: never trust a client-supplied userId — personalization must
         // follow the authenticated principal.
-        ChatRequest bound = new ChatRequest(request.message(), authenticatedUserId(),
+        ChatRequest bound = new ChatRequest(request.message(), countMessage(request.message()),
                 sessionOrDefault(request.sessionId()), request.generateTitle());
         ChatResponse response = chatService.processChat(bound);
         return ResponseEntity.ok(response);
@@ -53,7 +82,7 @@ public class ChatController {
         // SECURITY: the userId query param is ignored — the chat tools read the
         // real portfolio of whichever user the request binds, so it must always
         // be the authenticated principal, never client input.
-        ChatRequest request = new ChatRequest(message, authenticatedUserId(),
+        ChatRequest request = new ChatRequest(message, countMessage(message),
                 sessionOrDefault(sessionId), generateTitle);
         return chatService.streamChat(request);
     }
@@ -105,6 +134,7 @@ public class ChatController {
         if (authenticatedUserId == null) {
             return ResponseEntity.status(401).build();
         }
+        rateLimiter.require(RateLimiter.Rule.CHAT_READS_PER_MINUTE, String.valueOf(authenticatedUserId));
         if (sessionId != null && !sessionId.trim().isEmpty()) {
             return ResponseEntity.ok(chatService.getChatHistoryForUser(sessionId, authenticatedUserId));
         }
@@ -125,6 +155,7 @@ public class ChatController {
         if (authenticatedUserId == null) {
             return ResponseEntity.status(401).build();
         }
+        rateLimiter.require(RateLimiter.Rule.CHAT_READS_PER_MINUTE, String.valueOf(authenticatedUserId));
         return ResponseEntity.ok(dailyQuestionService.getTodayQuestionsForUser(authenticatedUserId));
     }
 }

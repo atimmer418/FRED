@@ -1,6 +1,7 @@
 // src/main/java/com/investingapp/backend/controller/WebAuthnController.java
 package com.investingapp.backend.controller;
 
+import com.investingapp.backend.security.ratelimit.RateLimiter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 
@@ -82,6 +83,9 @@ public class WebAuthnController {
     private com.investingapp.backend.service.UserSessionService userSessionService;
 
     @Autowired
+    private RateLimiter rateLimiter;
+
+    @Autowired
     public WebAuthnController(WebAuthnService webAuthnService,
             Cache<String, PublicKeyCredentialCreationOptions> challengeCache,
             Cache<String, PublicKeyCredentialRequestOptions> authChallengeCache,
@@ -95,6 +99,9 @@ public class WebAuthnController {
     @PostMapping("/register/start")
     public ResponseEntity<?> startRegistration(@Valid @RequestBody RegistrationStartRequest registrationRequest,
             HttpServletRequest request) {
+        // Per email, whatever address it comes from: the per-address limit in the filter can be
+        // dodged by changing address, this one cannot.
+        rateLimiter.require(RateLimiter.Rule.SIGN_UP_PER_EMAIL, registrationRequest.getEmail());
         logger.info("Received passkey registration start request for email: {}", registrationRequest.getEmail());
         String origin = request.getHeader("Origin");
         logger.info("Received request from ORIGIN: {}", origin);

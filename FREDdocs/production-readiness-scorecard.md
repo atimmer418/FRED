@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-26. Latest change: The applicant's SSN is no longer saved in the on-device KYC draft.
+Last updated: 2026-11-26. Latest change: Request limits on the public sign-in routes and on chat.
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **9 of 173** (18 more are part done; 1 dropped item is not counted) |
-| Readiness, weighted by size | **9.2%** (43 of 467 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 11.7% (43 of 369 points, 145 items) |
+| Items done | **10 of 174** (17 more are part done; 1 dropped item is not counted) |
+| Readiness, weighted by size | **9.5%** (44.5 of 468 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 12.0% (44.5 of 370 points, 146 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -28,7 +28,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | Area | Done | Part | Open | Points | Weighted |
 |---|---|---|---|---|---|
 | A. Protect the work | 1 | 1 | 0 | 1.5 of 2 | 75% |
-| B. Security | 7 | 1 | 10 | 16.5 of 41 | 40% |
+| B. Security | 8 | 0 | 11 | 18 of 42 | 43% |
 | C. A shippable iOS build | 0 | 0 | 8 | 0 of 14 | 0% |
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
@@ -48,6 +48,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | 2026-11-25 | Sessions: every token belongs to a session and a sign-in lasts 12 hours at most | 7 of 173 | 8.4% |
 | 2026-11-25 | Beneficiary SSNs: encrypted in the database, last four digits only in responses (one new item found: L23) | 8 of 174 | 9.0% |
 | 2026-11-26 | Applicant SSN removed from the on-device KYC draft. B8 (server logout and sign-out button) dropped by Andy and no longer counted | 9 of 173 | 9.2% |
+| 2026-11-26 | Request limits on passkey sign-up and sign-in, token refresh, the old login, the re-auth check and chat (one new item found: B20) | 10 of 174 | 9.5% |
 
 ## Decisions needed from Andy
 
@@ -83,6 +84,7 @@ Work on these items cannot start, or cannot finish, until the question is answer
 28. **One-time purchase of any single stock has no asset checks** (small). Should buying a single stock stay in the app at launch? The audit suggests asking counsel, because it makes FRED a self-directed trading app as well as an automated portfolio.
 29. **Small contributions silently skip portfolio slices, and an all-skipped run is reported as a success** (medium). When a slice of a paycheck is under $1, should FRED raise the minimum contribution, fold that money into the other funds, or leave it as cash and tell the user?
 30. **Older chat conversations exist only on the phone** (medium). Should older conversations be kept on the server and listed in the app, or is losing them on sign-out acceptable?
+31. **Per-address limits trust headers that can be forged if the backend is reachable directly** (small). In production, will the backend be reachable only through Cloudflare (direct access blocked), or can it be reached at the host's own address too? The answer decides which header the limits may trust.
 
 ## Every item
 
@@ -106,7 +108,7 @@ found after the audit.
 | B3 | Beneficiary SSNs stored in plaintext and returned in full by the API | medium | Done |  | Done 2026-11-25. The column is encrypted with the app's AES-GCM field encryption (EncryptedStringConverter on Beneficiary.socialSecurityNumber), responses carry only ssnLast4, an edit may leave the number out to keep the one on file, and a mistyped number is never logged. Proved by BeneficiarySsnAtRestTest against a real database. Rows written before the change were not converted (decision: dev only, no production data). The column was widened by a repeatable migration because V12 is held by an unpushed branch. |
 | B4 | Applicant SSN sits unencrypted in a localStorage KYC draft (FRED-221) | small | Done |  | Done 2026-11-26. KycDraftUtils is the only way in or out of the draft and never writes or returns taxId; a resumed applicant lands on part 1 and retypes only the number; every draft on the phone is scrubbed at launch (AppComponent); the settings form writes no draft and removes an old one. The rest of the draft, date of birth included, is kept on purpose. Two dead debug log lines that could print the number on the server were also removed. |
 | B5 | Recovery code can be brute-forced (FRED-219) | medium | Done |  | Commit f3776f10. AccountRecoveryService.java:156-165 and :218-227 hold per-account, per-email and per-address AttemptLimiters; 5 wrong tries per code; a right code gives a one-time recovery token, not a session. |
-| B6 | Add rate limiting on public auth endpoints and on AI chat | medium | Part |  | Still no limits on: passkey sign-up and sign-in start and finish (/api/passkey/**), /api/auth/login and /api/auth/refresh, /api/user/should-prompt-reauth, and chat messages (POST /api/chat and GET /api/chat/stream need a per-user ... |
+| B6 | Add rate limiting on public auth endpoints and on AI chat | medium | Done |  | Done 2026-11-26. Per network address: passkey sign-up 30 and sign-in 120 per 10 minutes, the old login 10, token refresh 300, the re-auth check 120. Per email, whatever the address: sign-up 10 an hour, login 10 an hour. Per signed-in user: 12 chat messages a minute and 300 a day, 120 chat reads a minute, and a 4000 character cap on one message. The numbers are settings (app.rate-limit.*), the same in every environment. Recovery, email change, the PIN and chat actions already had their own limits. Proved by RateLimitTest against a real database. |
 | B7 | Sessions: every token belongs to a session that can be revoked, and no session lasts forever | medium | Done |  | Fixed 2026-11-25. Every token belongs to a session (sign-up included), a token with no session is refused, and a passkey sign-in lasts 12 hours at most however often it is refreshed. Signing in again on a device replaces its old session, so a revoked token stays dead. |
 | B8 | Server logout and a working sign-out button | small | Dropped |  | Dropped by Andy on 2026-11-26. Not counted in the totals. |
 | B9 | Step-up auth for money is frontend only | large | Open |  | Server must require a fresh passkey (or PIN proof) for withdraw, liquidate, bank relink, large lump sum and account close. |
@@ -115,11 +117,12 @@ found after the audit.
 | B12 | Investment history, dashboard and execution endpoints serialize the whole User entity | small | Open | A | Add JsonIgnore on user or return a DTO, or remove the unused routes. |
 | B13 | SSN lookup hash is plain unsalted SHA-256 | medium | Open | A | Switch to a keyed hash (HMAC with a secret) and re-hash existing rows. |
 | B14 | Upload and request-size validation is thin | small | Open | A | Allow-list document and mime types, cap the base64 size, and set a JSON request body limit. |
-| B15 | Anyone who knows an email can block that account's recovery for a day | small | Open | N | Recovery limits count requests per account, so a stranger can use them up. |
-| B16 | Per-address limits trust headers that can be forged if the backend is reachable directly | small | Open | N | Only trust CF-Connecting-IP and X-Forwarded-For when the request came through the proxy, or block direct access to the backend. |
+| B15 | Anyone who knows an email can block that account's recovery for a day | small | Open | N | Recovery limits count requests per account, so a stranger can use them up. The new per-email sign-up limit has the same shape: 10 requests an hour naming an email block that email's sign-up for the hour. Fixing either needs something only the owner has (a link sent to the mailbox, or a per-device allowance), which is a design change, not a limit. |
+| B16 | Per-address limits trust headers that can be forged if the backend is reachable directly | small | Open | N D | Still open, and now one setting away from closed. All address reading goes through ClientAddressResolver, and app.rate-limit.address-headers names the trusted headers. What is missing is a hosting fact: either direct access to the backend is blocked so only the proxy can reach it, or the one header the host itself sets is named there. IPv6 callers are now counted by their /64 block, and the per-email and per-user limits do not depend on the address at all. |
 | B17 | Sign-up and recovery answers reveal whether an email has an account | small | Open | N | Sign-up returns a 409 for a taken email, and response timing differs. |
 | B18 | Login limits, recovery codes and token cutoffs live in memory | medium | Open | N | They are lost on restart and assume one backend instance. |
 | B19 | Two phones restored from one backup share a device id and sign each other out | small | Open | N | The device id is a random value kept in web storage, which a phone restore copies. |
+| B20 | Limits to tune before a wide launch: one sign-in budget per shared address, and waits that overstate | small | Open | N | Everyone behind one address (an office, a mobile carrier) shares 60 passkey sign-ins per 10 minutes. Fine for a private beta; before a wide launch raise it or count only failed sign-ins. Retry-After always gives the whole window, not the time left. |
 
 ### C. A shippable iOS build
 

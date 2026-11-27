@@ -71,6 +71,24 @@ const KNOWN_ACTIONS = ['update_investment_amount', 'pause_investing', 'resume_in
   ]
 })
 export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
+  /**
+   * What FRED says when a message could not be sent. The server answers 429 when messages come too
+   * fast (wait about a minute) or the day's allowance is used up (wait much longer), and 413 when
+   * one message is too long.
+   */
+  static streamErrorCopy(err: unknown): string {
+    const failure = err as { message?: string; retryAfterSeconds?: number } | null;
+    if (failure?.message === 'HTTP 429') {
+      return (failure.retryAfterSeconds ?? 0) > 3600
+        ? "That's all the messages I can take today. Come back tomorrow and we'll pick it up."
+        : "You're sending messages faster than I can keep up. Give it a minute and try again.";
+    }
+    if (failure?.message === 'HTTP 413') {
+      return "That message is too long for me. Try a shorter one.";
+    }
+    return "I'm sorry, I'm having trouble connecting right now. Please try again.";
+  }
+
   @ViewChild(IonContent) content!: IonContent;
 
   readonly FRED_STORY_TRIGGER = "What's your story FRED?";
@@ -634,7 +652,8 @@ export class AiChatPage implements OnInit, AfterViewInit, OnDestroy {
           if (this.messages[userMsgIndex]) {
             this.messages[userMsgIndex].failed = true;
           }
-          this.messages[assistantMsgIndex].content = "I'm sorry, I'm having trouble connecting right now. Please try again.";
+          // The server answers 429 when messages come too fast (or the day's allowance is used up).
+          this.messages[assistantMsgIndex].content = AiChatPage.streamErrorCopy(err);
           this.cdr.detectChanges();
         },
         complete: () => {

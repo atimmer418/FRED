@@ -15,12 +15,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * maxKeys bounds memory; when it is reached the least recently used keys are forgotten, so use a
  * separate limiter for keys an outsider can invent freely.
  */
-final class AttemptLimiter<K> {
+public final class AttemptLimiter<K> {
 
     private final int limit;
     private final Cache<K, AtomicInteger> counts;
 
-    AttemptLimiter(int limit, Duration window, long maxKeys, Ticker ticker) {
+    public AttemptLimiter(int limit, Duration window, long maxKeys, Ticker ticker) {
         this.limit = limit;
         this.counts = Caffeine.newBuilder()
                 .ticker(ticker)
@@ -30,13 +30,13 @@ final class AttemptLimiter<K> {
     }
 
     /** True once the key has used its whole limit in this window. Does not count as a try. */
-    boolean usedUp(K key) {
+    public boolean usedUp(K key) {
         AtomicInteger count = counts.getIfPresent(key);
         return count != null && count.get() >= limit;
     }
 
     /** Counts one try. False once the key has had more than the limit in this window. */
-    boolean allow(K key) {
+    public boolean allow(K key) {
         return counts.get(key, k -> new AtomicInteger()).incrementAndGet() <= limit;
     }
 }

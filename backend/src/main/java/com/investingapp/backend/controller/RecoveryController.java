@@ -1,5 +1,6 @@
 package com.investingapp.backend.controller;
 
+import com.investingapp.backend.security.ratelimit.ClientAddressResolver;
 import com.investingapp.backend.dto.RecoveryInitiateRequest;
 import com.investingapp.backend.dto.RecoveryResponse;
 import com.investingapp.backend.dto.RecoveryVerifyRequest;
@@ -31,16 +32,18 @@ public class RecoveryController {
             "Account recovery is not available right now. Contact help@fredvested.com.";
 
     private final AccountRecoveryService accountRecoveryService;
+    private final ClientAddressResolver clientAddresses;
 
-    public RecoveryController(AccountRecoveryService accountRecoveryService) {
+    public RecoveryController(AccountRecoveryService accountRecoveryService, ClientAddressResolver clientAddresses) {
         this.accountRecoveryService = accountRecoveryService;
+        this.clientAddresses = clientAddresses;
     }
 
     @PostMapping("/initiate")
     public ResponseEntity<RecoveryResponse> initiateRecovery(
             @RequestBody(required = false) RecoveryInitiateRequest request, HttpServletRequest httpRequest) {
         String email = request == null ? null : request.getEmail();
-        SendStatus status = accountRecoveryService.sendCode(email, clientAddress(httpRequest));
+        SendStatus status = accountRecoveryService.sendCode(email, clientAddresses.resolve(httpRequest));
         return switch (status) {
             case SENT -> ResponseEntity.ok(new RecoveryResponse(true, SENT_MESSAGE, null));
             case THROTTLED -> refused(HttpStatus.TOO_MANY_REQUESTS, THROTTLED_MESSAGE);
@@ -53,7 +56,7 @@ public class RecoveryController {
             @RequestBody(required = false) RecoveryVerifyRequest request, HttpServletRequest httpRequest) {
         String email = request == null ? null : request.getEmail();
         String code = request == null ? null : request.getOtp();
-        VerifyOutcome outcome = accountRecoveryService.verifyCode(email, code, clientAddress(httpRequest));
+        VerifyOutcome outcome = accountRecoveryService.verifyCode(email, code, clientAddresses.resolve(httpRequest));
         return switch (outcome.status()) {
             case OK -> ResponseEntity.ok(new RecoveryResponse(true,
                     "Code accepted. Create a new passkey to finish.", outcome.recoveryToken()));
@@ -64,27 +67,5 @@ public class RecoveryController {
 
     private static ResponseEntity<RecoveryResponse> refused(HttpStatus status, String message) {
         return ResponseEntity.status(status).body(new RecoveryResponse(false, message, null));
-    }
-
-    /**
-     * The caller's network address, for the per-address limits. Cloudflare's own header comes first:
-     * the caller cannot set it when the request really came through Cloudflare. Otherwise the first
-     * X-Forwarded-For entry, the header the device fingerprint already reads.
-     *
-     * Either header can be forged by a caller who reaches the backend directly, so the per-address
-     * limits are best effort: they slow down an honest network and a lazy attacker. The per-account
-     * limits are the ones that cannot be dodged.
-     */
-    private static String clientAddress(HttpServletRequest request) {
-        for (String header : new String[] { "CF-Connecting-IP", "X-Forwarded-For" }) {
-            String value = request.getHeader(header);
-            if (value != null && !value.isBlank()) {
-                String first = value.split(",")[0].trim();
-                if (!first.isEmpty()) {
-                    return first.length() > 64 ? first.substring(0, 64) : first;
-                }
-            }
-        }
-        return request.getRemoteAddr();
     }
 }

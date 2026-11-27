@@ -404,7 +404,9 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
         },
         error: (err) => {
           this.isLoading = false;
-          this.errorMessage = `Could not start registration: ${err.error || 'Server error.'}`;
+          // The body is a plain sentence for "email taken" and a { message } object for a 429.
+          const reason = err.error?.message || (typeof err.error === 'string' ? err.error : '') || 'Server error.';
+          this.errorMessage = `Could not start registration: ${reason}`;
           console.error('Error starting registration:', err);
         }
       });

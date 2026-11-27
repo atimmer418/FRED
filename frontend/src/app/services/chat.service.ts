@@ -78,7 +78,13 @@ export class ChatService {
       fetch(`${this.apiUrl}/stream?${params.toString()}`, { headers, signal: undefined })
         .then(response => {
           if (!response.ok || !response.body) {
-            observer.error(new Error(`HTTP ${response.status}`));
+            // Retry-After says how long a 429 lasts: about a minute, or the rest of the day.
+            const failure = new Error(`HTTP ${response.status}`) as Error & { retryAfterSeconds?: number };
+            const retryAfter = Number(response.headers.get('Retry-After'));
+            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+              failure.retryAfterSeconds = retryAfter;
+            }
+            observer.error(failure);
             return;
           }
           const reader = response.body.getReader();

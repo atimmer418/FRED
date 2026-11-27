@@ -1,6 +1,7 @@
 // src/main/java/com/investingapp/backend/config/SecurityConfig.java
 package com.investingapp.backend.config;
 
+import com.investingapp.backend.security.ratelimit.PublicEndpointRateLimitFilter;
 import com.investingapp.backend.security.jwt.AuthEntryPointJwt;
 import com.investingapp.backend.security.jwt.AuthTokenFilter;
 import com.investingapp.backend.security.services.UserDetailsServiceImpl;
@@ -32,6 +33,12 @@ import java.util.List; // Import List
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.investingapp.backend.security.ratelimit.RateLimiter rateLimiter;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.investingapp.backend.security.ratelimit.ClientAddressResolver clientAddressResolver;
 
     @Autowired
     private UserDetailsServiceImpl userDetailsService;
@@ -94,7 +101,8 @@ public class SecurityConfig {
         // Custom response headers the app reads; the browser hides any header not listed here.
         // X-Fred-Capped: a Missed one on POST /api/goals/{id}/ledger stopped at $0.
         // X-Fred-Moved: how far that ledger POST moved the tally (2 decimals).
-        configuration.setExposedHeaders(List.of("X-Fred-Capped", "X-Fred-Moved"));
+        // Retry-After: how long to wait after a 429 (the chat screen reads it).
+        configuration.setExposedHeaders(List.of("X-Fred-Capped", "X-Fred-Moved", "Retry-After"));
         configuration.setAllowCredentials(true);
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -129,6 +137,9 @@ public class SecurityConfig {
 
         http.authenticationProvider(authenticationProvider());
         http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
+        // Before the token filter: a caller over the limit is turned away before any database work.
+        http.addFilterBefore(new PublicEndpointRateLimitFilter(rateLimiter, clientAddressResolver),
+                com.investingapp.backend.security.jwt.AuthTokenFilter.class);
 
         return http.build();
     }

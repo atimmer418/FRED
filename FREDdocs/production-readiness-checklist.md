@@ -102,7 +102,11 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
       right code gives a one-time recovery token (not a session) that is the only way to register
       the new passkey. Recovery also ends every session and token the account had. The limits are
       held in memory, so they assume one backend instance.
-- [ ] **Add rate limiting** on public auth endpoints and on AI chat. (M) *prod-config-infra*
+- [x] **Add rate limiting** on public auth endpoints and on AI chat. (M) *prod-config-infra*
+      Done 2026-11-26: per-address limits on passkey sign-up and sign-in, the old login, token
+      refresh and the re-auth check; per-email limits on sign-up and login; per-user limits on chat.
+      Settings are `app.rate-limit.*`. Still open on the scorecard: which address header can be
+      trusted in production (B16).
 - [ ] **Session revoke does not work after the first token refresh**, tokens refresh forever, and
       there is no server logout or sign-out button. `AuthController.java:152-194`. (M) *security-auth*
       Part done 2026-11-23: a refreshed token now keeps its session id, so revoke reaches it.

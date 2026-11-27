@@ -1,6 +1,7 @@
 // src/main/java/com/investingapp/backend/controller/AuthController.java
 package com.investingapp.backend.controller;
 
+import com.investingapp.backend.security.ratelimit.RateLimiter;
 import com.investingapp.backend.dto.JwtResponse;
 import com.investingapp.backend.dto.LoginRequest;
 import com.investingapp.backend.dto.MessageResponse; // You created this earlier
@@ -65,6 +66,9 @@ public class AuthController {
     JwtUtils jwtUtils;
 
     @Autowired
+    com.investingapp.backend.security.ratelimit.RateLimiter rateLimiter;
+
+    @Autowired
     com.investingapp.backend.security.TokenCutoffRegistry tokenCutoffs;
 
     @Autowired
@@ -113,6 +117,8 @@ public class AuthController {
         // ... (existing login logic that checks if 2FA is enabled and returns 202
         // Accepted if so) ...
         // This was the refined version from before.
+        // Password guesses at one account are counted per email, whatever address they come from.
+        rateLimiter.require(RateLimiter.Rule.LOGIN_PER_EMAIL, loginRequest.getEmail());
         logger.info("Attempting to authenticate user: {}", loginRequest.getEmail());
         try {
             Authentication authentication = authenticationManager.authenticate(

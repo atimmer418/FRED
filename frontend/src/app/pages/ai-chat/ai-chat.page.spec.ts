@@ -593,3 +593,27 @@ describe('AiChatPage on a shared phone', () => {
     expect(c.messages.length).toBe(1); // untouched: the page is gone
   });
 });
+
+describe('AiChatPage: what FRED says when a message cannot be sent', () => {
+  const failure = (message: string, retryAfterSeconds?: number) => Object.assign(new Error(message), { retryAfterSeconds });
+
+  it('too many messages in a minute: wait a minute', () => {
+    expect(AiChatPage.streamErrorCopy(failure('HTTP 429', 60))).toContain('Give it a minute');
+    expect(AiChatPage.streamErrorCopy(failure('HTTP 429'))).toContain('Give it a minute');
+  });
+
+  it('the day\'s allowance is used up: come back tomorrow, not "in a minute"', () => {
+    const copy = AiChatPage.streamErrorCopy(failure('HTTP 429', 86400));
+    expect(copy).toContain('today');
+    expect(copy).not.toContain('minute');
+  });
+
+  it('a message that is too long says so', () => {
+    expect(AiChatPage.streamErrorCopy(failure('HTTP 413'))).toContain('too long');
+  });
+
+  it('anything else is the usual connection message', () => {
+    expect(AiChatPage.streamErrorCopy(failure('HTTP 500'))).toContain('trouble connecting');
+    expect(AiChatPage.streamErrorCopy(null)).toContain('trouble connecting');
+  });
+});

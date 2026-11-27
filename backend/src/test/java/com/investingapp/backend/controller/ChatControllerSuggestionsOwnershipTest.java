@@ -42,7 +42,9 @@ class ChatControllerSuggestionsOwnershipTest {
         when(dailyQuestionService.getTodayQuestionsForUser(USER_A)).thenReturn(List.of("a1", "a2", "a3"));
         when(dailyQuestionService.getTodayQuestionsForUser(USER_B)).thenReturn(List.of("b1", "b2", "b3"));
         mvc = MockMvcBuilders
-                .standaloneSetup(new ChatController(mock(ChatService.class), dailyQuestionService))
+                .standaloneSetup(new ChatController(mock(ChatService.class), dailyQuestionService,
+                        new com.investingapp.backend.security.ratelimit.RateLimiter(
+                                new org.springframework.mock.env.MockEnvironment())))
                 .build();
     }
 

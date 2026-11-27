@@ -50,6 +50,38 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 ---
 
+### Request limits
+
+Over a limit, the answer is `429` with a `Retry-After` header (seconds) and
+`{ "message": "Too many requests. Please wait a few minutes and try again." }`. The numbers are
+settings (`app.rate-limit.*` in `application.properties`) and are the same in every environment.
+Counts are held in memory: they assume one backend instance and restart from zero on a deploy.
+
+| What | Limit | Counted per |
+|---|---|---|
+| Passkey sign-up: every `/api/passkey/register/**` route, one shared budget | 30 per 10 minutes | network address |
+| Passkey sign-up start for one email | 10 per hour | email, whatever the address |
+| Passkey sign-in: `/api/passkey/authenticate/**`, one shared budget | 120 per 10 minutes | network address |
+| `/api/auth/login` and any other `/api/auth/**` route except refresh and recovery | 10 per 10 minutes | network address |
+| `/api/auth/login` for one email | 10 per hour | email, whatever the address |
+| `/api/auth/refresh` | 300 per 10 minutes | network address |
+| `/api/user/should-prompt-reauth` | 120 per 10 minutes | network address |
+| Chat messages: `POST /api/chat` and `GET /api/chat/stream`, one shared budget | 12 per minute and 300 per day | signed-in user |
+| Chat history and suggestions | 120 per minute | signed-in user |
+| Chat actions (`POST /api/chat/action`) | 6 per minute | signed-in user (FredChatActionService) |
+
+Account recovery, email change and the PIN have their own limits, described on their rows.
+
+One chat message may be at most 4000 characters (`413` over that). An IPv6 caller is counted by
+its /64 block, not the single address.
+
+The network address comes from the first of `CF-Connecting-IP`, `X-Forwarded-For` that is present
+(`app.rate-limit.address-headers`), else the socket. A caller who reaches the backend without going
+through the proxy can forge those headers, so per-address limits are best effort. The per-email and
+per-user limits do not depend on the address.
+
+---
+
 ## 2. User Management (`/api/user`)
 
 | Method | Endpoint | Description | Auth | Request Body | Response |

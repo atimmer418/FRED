@@ -78,7 +78,7 @@ public class PortfolioService {
         if (!portfolio.isValid()) {
             logger.error("Portfolio validation failed for user: {}. Total percentage: {}",
                         user.getEmail(), portfolio.getTotalPercentage());
-            throw new RuntimeException("Portfolio percentages must add up to 100%");
+            throw new com.investingapp.backend.web.UserFacingException("Portfolio percentages must add up to 100%");
         }
 
         portfolio.setIsDefault(isDefaultAllocation(portfolioItemRequests));

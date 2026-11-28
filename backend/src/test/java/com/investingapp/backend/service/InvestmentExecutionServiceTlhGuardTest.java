@@ -55,7 +55,7 @@ class InvestmentExecutionServiceTlhGuardTest {
         InvestmentExecution execution = new InvestmentExecution(
                 user, LocalDateTime.now(), new BigDecimal("100.00"), "stock", "VTI", "bank");
 
-        IllegalArgumentException rejection = assertThrows(IllegalArgumentException.class,
+        com.investingapp.backend.web.UserFacingException rejection = assertThrows(com.investingapp.backend.web.UserFacingException.class,
                 () -> service.processInvestmentExecutionImmediately(execution));
 
         // Dated, user-comprehensible message; nothing queued, no ACH

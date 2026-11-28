@@ -1346,15 +1346,17 @@ public class AlpacaService {
                         jsonResponse.get("submitted_at").asText(),
                         null);
             } else {
+                // The broker's own text stays in the log: this message is shown to the user.
+                logger.error("Sell order refused for account {} - Symbol: {} - HTTP {}: {}",
+                        accountId, symbol, response.getStatusCode(), response.getBody());
                 return new AlpacaOrderResponse(null, symbol, "FAILED", null, null,
-                        BigDecimal.ZERO, null, null,
-                        "HTTP " + response.getStatusCode() + ": " + response.getBody());
+                        BigDecimal.ZERO, null, null, "The sell order could not be placed. Please try again.");
             }
 
         } catch (Exception e) {
             logger.error("Error placing sell order for account {} - Symbol: {}", accountId, symbol, e);
             return new AlpacaOrderResponse(null, symbol, "FAILED", null, null,
-                    BigDecimal.ZERO, null, null, e.getMessage());
+                    BigDecimal.ZERO, null, null, "The sell order could not be placed. Please try again.");
         }
     }
 
@@ -1383,15 +1385,16 @@ public class AlpacaService {
                         java.time.Instant.now().toString(),
                         null);
             } else {
+                logger.error("Liquidation refused for account {} - HTTP {}: {}",
+                        accountId, response.getStatusCode(), response.getBody());
                 return new AlpacaOrderResponse(null, "ALL", "FAILED", null, null,
-                        BigDecimal.ZERO, null, null,
-                        "HTTP " + response.getStatusCode() + ": " + response.getBody());
+                        BigDecimal.ZERO, null, null, "Your holdings could not be sold. Please try again.");
             }
 
         } catch (Exception e) {
             logger.error("Error liquidating portfolio for account {}", accountId, e);
             return new AlpacaOrderResponse(null, "ALL", "FAILED", null, null,
-                    BigDecimal.ZERO, null, null, e.getMessage());
+                    BigDecimal.ZERO, null, null, "Your holdings could not be sold. Please try again.");
         }
     }
 
@@ -1424,13 +1427,16 @@ public class AlpacaService {
                         jsonResponse.get("created_at").asText(),
                         null);
             } else {
+                logger.error("Withdrawal refused for account {} - HTTP {}: {}",
+                        accountId, response.getStatusCode(), response.getBody());
                 return new AlpacaTransferResponse(null, "FAILED", amount, null,
-                        "HTTP " + response.getStatusCode() + ": " + response.getBody());
+                        "The withdrawal could not be started. Please try again.");
             }
 
         } catch (Exception e) {
             logger.error("Error initiating withdrawal for account {}", accountId, e);
-            return new AlpacaTransferResponse(null, "FAILED", amount, null, e.getMessage());
+            return new AlpacaTransferResponse(null, "FAILED", amount, null,
+                    "The withdrawal could not be started. Please try again.");
         }
     }
 

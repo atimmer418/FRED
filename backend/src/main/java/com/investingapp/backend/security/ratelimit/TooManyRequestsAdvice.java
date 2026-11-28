@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /** One answer for every limit: 429, how long to wait, and a sentence a person can read. */
 @RestControllerAdvice
+@org.springframework.core.annotation.Order(0) // ahead of the last-resort handler in web/UnexpectedErrorAdvice
 public class TooManyRequestsAdvice {
 
     public static final String MESSAGE = "Too many requests. Please wait a few minutes and try again.";

@@ -99,7 +99,7 @@ public class MarketBreakdownController {
             logger.error("Market breakdown preview failed", e);
             return ResponseEntity.internalServerError()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(new MessageResponse("Preview failed: " + e.getMessage()));
+                    .body(new MessageResponse("Preview failed"));
         }
     }
 
@@ -125,11 +125,12 @@ public class MarketBreakdownController {
             return ResponseEntity.ok(new MessageResponse(
                     "Market breakdown for " + target + " is " + breakdown.getStatus()));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage()));
+            return ResponseEntity.badRequest()
+                    .body(new MessageResponse("Market breakdown can only be generated for completed months."));
         } catch (Exception e) {
             logger.error("Manual market breakdown generation failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("Generation failed: " + e.getMessage()));
+                    .body(new MessageResponse("Generation failed"));
         }
     }
 

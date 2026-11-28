@@ -74,10 +74,9 @@ public class PortfolioController {
                        updatedPortfolio.getId(), user.getEmail());
             return ResponseEntity.ok(response);
             
-        } catch (RuntimeException e) {
-            logger.error("Validation error updating portfolio: {}", e.getMessage());
+        } catch (com.investingapp.backend.web.UserFacingException e) {
             return ResponseEntity.badRequest()
-                    .body(new MessageResponse("Portfolio validation failed: " + e.getMessage()));
+                    .body(new MessageResponse("Portfolio validation failed: " + e.getMessage())); // user-facing
         } catch (Exception e) {
             logger.error("Error updating portfolio: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

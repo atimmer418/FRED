@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-27. Latest change: Five new backlog stories added (FRED-241 to FRED-245).
+Last updated: 2026-11-27. Latest change: Upload and request-size limits, no internal error text in replies, and the chat session id check.
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **12 of 180** (17 more are part done; 1 dropped item is not counted) |
-| Readiness, weighted by size | **9.2%** (46.5 of 504 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 11.7% (46.5 of 398 points, 151 items) |
+| Items done | **15 of 182** (18 more are part done; 1 dropped item is not counted) |
+| Readiness, weighted by size | **10.3%** (52 of 506 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 13.0% (52 of 400 points, 153 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -28,7 +28,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | Area | Done | Part | Open | Points | Weighted |
 |---|---|---|---|---|---|
 | A. Protect the work | 1 | 1 | 0 | 1.5 of 2 | 75% |
-| B. Security | 9 | 0 | 11 | 19 of 45 | 42% |
+| B. Security | 10 | 0 | 11 | 20 of 46 | 43% |
 | C. A shippable iOS build | 0 | 0 | 9 | 0 of 22 | 0% |
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
@@ -36,9 +36,9 @@ remaining items are equally urgent: one open security or money item can block a 
 | G. Onboarding and account lifecycle | 1 | 1 | 20 | 1.5 of 43 | 3% |
 | H. Production environment | 0 | 2 | 5 | 3 of 26 | 12% |
 | I. Tiers and billing | 0 | 2 | 30 | 3 of 124 | 2% |
-| J. Ask FRED chat | 1 | 1 | 4 | 2.5 of 14 | 18% |
-| K. Before the public App Store launch | 0 | 4 | 17 | 5 of 60 | 8% |
-| L. Should fix soon | 0 | 4 | 19 | 6.5 of 52 | 13% |
+| J. Ask FRED chat | 2 | 1 | 4 | 3.5 of 15 | 23% |
+| K. Before the public App Store launch | 0 | 5 | 16 | 5.5 of 60 | 9% |
+| L. Should fix soon | 1 | 4 | 18 | 9.5 of 52 | 18% |
 
 ### Score history
 
@@ -52,6 +52,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | 2026-11-27 | Closed accounts: signed out for good on every device and shown a closed screen; a brokerage close that cannot delete the row still shuts the account (two new items found: G20, G21) | 11 of 176 | 9.6% |
 | 2026-11-27 | Investment history, dashboard and execution routes return a fixed list of fields; the user record can no longer be written into any response | 12 of 176 | 9.9% |
 | 2026-11-27 | Five backlog stories added: FRED-241 (B21), FRED-242 (C9), FRED-243 (G22), FRED-245 (I32) as new items, and FRED-244 as the written scope of K13, resized from medium to large. No work done, so the percentage drops | 12 of 180 | 9.2% |
+| 2026-11-27 | Upload and request-size limits (B14), no internal error text in replies (L4, and the backend half of K19), chat session id check (J7, found and fixed). One new item found: B22 | 15 of 182 | 10.3% |
 
 ## Decisions needed from Andy
 
@@ -121,7 +122,7 @@ found after the audit.
 | B11 | Sign-up takes any email with no ownership check, and an abandoned sign-up locks that email | medium | Open |  | Verify the email (code or link) before or during sign-up, and let an unfinished sign-up with no passkey be replaced or expire. |
 | B12 | Investment history, dashboard and execution endpoints serialize the whole User entity | small | Done | A | Run against the old code, all three routes answered 200 with the PIN hash, SSN ciphertext and hash, recovery code and bank and broker ids in the body. They now return fixed shapes (InvestmentExecutionResponse, InvestmentTradeResponse). A sweep of every route found no other one that returns the user record. Second guard: the User record cannot be written into JSON at all (only its id), and every record that points at a user hides that link. The schedule answer also stopped sending the broker's bank-link id. |
 | B13 | SSN lookup hash is plain unsalted SHA-256 | medium | Open | A | Switch to a keyed hash (HMAC with a secret) and re-hash existing rows. |
-| B14 | Upload and request-size validation is thin | small | Open | A | Allow-list document and mime types, cap the base64 size, and set a JSON request body limit. |
+| B14 | Upload and request-size validation is thin | small | Done | A | The identity-document upload takes only a JPEG, PNG or PDF of a document type the app offers, at most 10 MB once encoded (the broker's limit), and checks the file is what it says it is. Every request body is capped at 256 KB (413 over that); the upload has its own larger cap. Values of the wrong type in a request are a 400, not a server error. Also fixed while checking the broker's documentation: the upload was sent as a single object, and the broker takes a list. Not yet tried against the broker's sandbox. |
 | B15 | Anyone who knows an email can block that account's recovery for a day | small | Open | N | Recovery limits count requests per account, so a stranger can use them up. The new per-email sign-up limit has the same shape: 10 requests an hour naming an email block that email's sign-up for the hour. Fixing either needs something only the owner has (a link sent to the mailbox, or a per-device allowance), which is a design change, not a limit. |
 | B16 | Per-address limits trust headers that can be forged if the backend is reachable directly | small | Open | N D | Still open, and now one setting away from closed. All address reading goes through ClientAddressResolver, and app.rate-limit.address-headers names the trusted headers. What is missing is a hosting fact: either direct access to the backend is blocked so only the proxy can reach it, or the one header the host itself sets is named there. IPv6 callers are now counted by their /64 block, and the per-email and per-user limits do not depend on the address at all. |
 | B17 | Sign-up and recovery answers reveal whether an email has an account | small | Open | N | Sign-up returns a 409 for a taken email, and response timing differs. |
@@ -129,6 +130,7 @@ found after the audit.
 | B19 | Two phones restored from one backup share a device id and sign each other out | small | Open | N | The device id is a random value kept in web storage, which a phone restore copies. |
 | B20 | Limits to tune before a wide launch: one sign-in budget per shared address, and waits that overstate | small | Open | N | Everyone behind one address (an office, a mobile carrier) shares 60 passkey sign-ins per 10 minutes. Fine for a private beta; before a wide launch raise it or count only failed sign-ins. Retry-After always gives the whole window, not the time left. |
 | B21 | New bank links send raw account and routing numbers through FRED; switch to Plaid processor tokens (FRED-241) | medium | Open | N | PlaidToAlpacaService reads the full account and routing number from Plaid and passes them to Alpaca. Ask Plaid for a processor token for Alpaca instead and send that, so the backend never sees a full account number. Existing bank links are left as they are. Best done before the first real user links a bank, and before FRED-242 and FRED-243. Ends with a sandbox check that a new link reaches APPROVED. |
+| B22 | Two replies send the brokerage account id to the app | small | Open | N | The create-account reply and the positions reply include the broker's account id (and the account number on create). The app does not need either. Remove them from both replies, after checking nothing in the app reads them. Found in the error-text sweep. |
 
 ### C. A shippable iOS build
 
@@ -283,6 +285,7 @@ found after the audit.
 | J4 | Local chat history is not user-scoped and is not cleared on logout | small | Done | A | Fixed in commit a2aa48d1 ('chat kept on the phone is private to one account'). |
 | J5 | Almost no automated tests for the chat path | medium | Part | A | Still no backend tests for: FredChatActionService (rejects unknown actions, amount range, 6 per minute rate limit, audit rows written); FredChatToolsService (the tool executor); the streaming trigger-tag holdback in LLMService ... |
 | J6 | Older chat conversations exist only on the phone | medium | Open | D N | The server restores only the latest conversation if it is under 2 hours old. |
+| J7 | A chat session id longer than 100 characters caused a server error | small | Done | N | Found while fixing request limits. The id went to the database, which refused it, after the message had been counted against the user's limit. Now a 400 before anything is counted or saved, on all four chat routes. A message with no text is a 400 too. |
 
 ### K. Before the public App Store launch
 
@@ -306,7 +309,7 @@ found after the audit.
 | K16 | Accessibility: zoom disabled, text does not scale, icons read out by name | medium | Open |  | Remove the zoom lock, hide icon spans from VoiceOver, turn clickable divs into buttons, label PIN, bank link and recovery controls, then one VoiceOver pass. |
 | K17 | Real-device pass on everything still marked pending (tabs, tour, sheets, trays, skeletons, date sheet) | medium | Open |  | Andy runs each feature on a real iPhone and logs the result. |
 | K18 | The four money events in beta-qa-checklist.md, seen on the first real account | small | Open | X | Wait for the first real account with Alpaca production and a production PostHog project, then check each event in the outbox and in PostHog. |
-| K19 | No global exception handling on backend or frontend | small | Open | A | One backend @RestControllerAdvice with a consistent error shape and full stack traces in logs, and one Angular ErrorHandler. |
+| K19 | No global exception handling on backend or frontend | small | Part | A | Backend done: one last-resort handler logs the full stack trace and answers with a fixed sentence, and bad JSON gets a 400 with a sentence. Still open: one Angular ErrorHandler for errors no screen catches. |
 | K20 | API contract suite is read-only and thin, with no end-to-end test of the money path | medium | Open | A | All of it: a stubbed end-to-end run of the money path in the CI gate (create a schedule, run an investment, sell/withdraw, ideally KYC and Plaid link against stubs); add chat.sh to run-all.sh; make DB-backed backend tests fail or ... |
 | K21 | Analytics publisher is off by default, nothing alerts when it stops, and the production PostHog key is empty | small | Open | X A | Create the production PostHog project and keys, set the publisher flag in production, add an alert for a stalled publisher or failed outbox rows. |
 
@@ -317,7 +320,7 @@ found after the audit.
 | L1 | Strip console.log calls from production builds | small | Open |  | Add a console-drop step to the production build and remove the lines that print tokens, email and passkey options. |
 | L2 | Remove @CrossOrigin("*") from controllers and the hardcoded dev origins | small | Open |  | Delete the annotations and move the allowed origin list to per-profile config. |
 | L3 | Remove the legacy test and password-login endpoints that are still public | small | Open |  | Delete testuser, the password login handler and /hello (or replace /hello with a real health endpoint). |
-| L4 | Error responses return internal exception messages; raw backend error text reaches users | medium | Open |  | Add a global error handler with safe messages and stop passing exception text to responses and to the screen. |
+| L4 | Error responses return internal exception messages; raw backend error text reaches users | medium | Done |  | No route puts exception text in a reply any more: 44 places across 13 controllers now log the detail and answer with a fixed sentence, and the broker's and the bank's own error text no longer rides along in sell, withdraw, bank-link, sign-up and identity replies. Messages written for the user (a beneficiary rule, a referral refusal, not enough buying power) still arrive, through one marked exception type. A test reads the controller sources and fails if a new route breaks the rule. In the app, no screen falls back to the browser's own 'Http failure response for <address>' text. Fixed on the way: a refused referral code answered with a server error because of how two database transactions met; it now answers with the reason. |
 | L5 | JWT in localStorage with no Content Security Policy; passkey user verification is only preferred | medium | Open |  | Add a CSP, move the token to the Keychain plugin (or accept the risk), and switch user verification to REQUIRED. |
 | L6 | Market-open and holiday logic is hand-rolled and incomplete | medium | Open |  | Use the Alpaca clock or calendar for market open, and fix the holiday list. |
 | L7 | Small contributions silently skip portfolio slices, and an all-skipped run is reported as a success | medium | Open | D | Decide how to treat sub-$1 slices (raise the minimum, roll the cash into another slice, or tell the user) and never mark a run with zero trades as complete. |

@@ -42,6 +42,7 @@ import { ToastService } from '../services/toast.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 import { presentConfirmSheet } from '../components/fred-confirm-sheet/fred-confirm-sheet.component';
+import { serverMessage } from '../utils/server-message.utils';
 
 @Component({
   selector: 'app-beneficiaries',
@@ -232,12 +233,7 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
       );
       
       // Show more detailed error information
-      let errorMessage = 'Failed to submit beneficiary. Please try again.';
-      if (error?.error?.message) {
-        errorMessage = `Submission failed: ${error.error.message}`;
-      } else if (error?.message) {
-        errorMessage = `Submission failed: ${error.message}`;
-      }
+      const errorMessage = serverMessage(error, 'Failed to submit beneficiary. Please try again.');
       
       this.toastService.showToast(errorMessage, 'danger');
     } finally {
@@ -279,12 +275,7 @@ export class BeneficiariesPage implements OnInit, ViewWillEnter {
       );
       
       // Show more detailed error information  
-      let errorMessage = 'Failed to submit beneficiaries. Please try again.';
-      if (error?.error?.message) {
-        errorMessage = `Submission failed: ${error.error.message}`;
-      } else if (error?.message) {
-        errorMessage = `Submission failed: ${error.message}`;
-      }
+      const errorMessage = serverMessage(error, 'Failed to submit beneficiaries. Please try again.');
       
       this.toastService.showToast(errorMessage, 'danger');
     } finally {

@@ -39,7 +39,7 @@
       <!-- File picker drop zone -->
       <div class="form-section">
         <span class="field-label">FILE</span>
-        <input id="file-input" type="file" accept="image/*,.pdf" class="hidden-file-input" (change)="onFileSelected($event)" />
+        <input id="file-input" type="file" accept="image/jpeg,image/png,application/pdf,.pdf" class="hidden-file-input" (change)="onFileSelected($event)" />
 
         <!-- Drop zone (tap to pick file) -->
         <div class="drop-zone" (click)="triggerFilePicker()" [class.drop-zone-has-file]="selectedFile">
@@ -48,7 +48,7 @@
           <ng-container *ngIf="!selectedFile">
             <span class="material-symbols-outlined drop-icon">attach_file</span>
             <p class="drop-text">Tap to select a file</p>
-            <p class="drop-hint">Images or PDF, max 10 MB</p>
+            <p class="drop-hint">JPEG, PNG or PDF, up to 7 MB</p>
           </ng-container>
 
           <!-- File selected: image preview -->

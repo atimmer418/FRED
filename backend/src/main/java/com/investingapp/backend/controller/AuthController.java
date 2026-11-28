@@ -146,7 +146,7 @@ public class AuthController {
         } catch (Exception e) { /* ... error handling ... */
             logger.error("Login failed for {}: {}", loginRequest.getEmail(), e.getMessage());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new MessageResponse("Login failed: " + e.getMessage()));
+                    .body(new MessageResponse("Login failed"));
         }
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new MessageResponse("Login process error.")); // Should not reach here

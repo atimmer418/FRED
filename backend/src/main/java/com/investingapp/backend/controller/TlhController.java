@@ -85,7 +85,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("TLH status failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH status failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH status failed"));
         }
     }
 
@@ -113,7 +113,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("TLH enroll failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH enroll failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH enroll failed"));
         }
     }
 
@@ -136,7 +136,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("TLH unenroll failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH unenroll failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH unenroll failed"));
         }
     }
 
@@ -166,7 +166,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("TLH summary failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH summary failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH summary failed"));
         }
     }
 
@@ -189,7 +189,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("TLH events failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH events failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH events failed"));
         }
     }
 
@@ -212,7 +212,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("TLH preview failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH preview failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH preview failed"));
         }
     }
 
@@ -257,7 +257,7 @@ public class TlhController {
         } catch (Exception e) {
             logger.error("Manual TLH run failed", e);
             return ResponseEntity.internalServerError()
-                    .body(new MessageResponse("TLH run failed: " + e.getMessage()));
+                    .body(new MessageResponse("TLH run failed"));
         }
     }
 

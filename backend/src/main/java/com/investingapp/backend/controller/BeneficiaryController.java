@@ -105,9 +105,8 @@ public class BeneficiaryController {
             logger.info("Created beneficiary {} for user: {}", createdBeneficiary.getId(), user.getEmail());
             return ResponseEntity.ok(createdBeneficiary);
             
-        } catch (RuntimeException e) {
-            logger.warn("Validation error creating beneficiary: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage())); // user-facing
             
         } catch (Exception e) {
             logger.error("Error creating beneficiary: {}", e.getMessage(), e);
@@ -135,9 +134,8 @@ public class BeneficiaryController {
             logger.warn("Beneficiary {} not found for the signed-in user", beneficiaryId);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Beneficiary not found"));
 
-        } catch (RuntimeException e) {
-            logger.warn("Error updating beneficiary {}: {}", beneficiaryId, e.getMessage());
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage())); // user-facing
             
         } catch (Exception e) {
             logger.error("Error updating beneficiary {}: {}", beneficiaryId, e.getMessage(), e);
@@ -164,9 +162,8 @@ public class BeneficiaryController {
             logger.warn("Beneficiary {} not found for the signed-in user", beneficiaryId);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Beneficiary not found"));
 
-        } catch (RuntimeException e) {
-            logger.warn("Error deleting beneficiary {}: {}", beneficiaryId, e.getMessage());
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage())); // user-facing
             
         } catch (Exception e) {
             logger.error("Error deleting beneficiary {}: {}", beneficiaryId, e.getMessage(), e);
@@ -193,9 +190,8 @@ public class BeneficiaryController {
             logger.warn("Beneficiary {} not found for the signed-in user", beneficiaryId);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Beneficiary not found"));
 
-        } catch (RuntimeException e) {
-            logger.warn("Error submitting beneficiary {} to Alpaca: {}", beneficiaryId, e.getMessage());
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage())); // user-facing
             
         } catch (Exception e) {
             logger.error("Error submitting beneficiary {} to Alpaca: {}", beneficiaryId, e.getMessage(), e);
@@ -216,9 +212,8 @@ public class BeneficiaryController {
             logger.info("Submitted all beneficiaries to Alpaca for user: {}", user.getEmail());
             return ResponseEntity.ok().body(new SuccessResponse("All beneficiaries submitted to Alpaca successfully"));
             
-        } catch (RuntimeException e) {
-            logger.warn("Error submitting all beneficiaries to Alpaca for user {}: {}", authentication.getName(), e.getMessage());
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage())); // user-facing
             
         } catch (Exception e) {
             logger.error("Error submitting all beneficiaries to Alpaca for user {}: {}", authentication.getName(), e.getMessage(), e);
@@ -293,7 +288,7 @@ public class BeneficiaryController {
         Optional<User> userOpt = userRepository.findByEmail(email);
         
         if (userOpt.isEmpty()) {
-            throw new RuntimeException("User not found: " + email);
+            throw new IllegalStateException("Signed-in user has no account row");
         }
         
         return userOpt.get();

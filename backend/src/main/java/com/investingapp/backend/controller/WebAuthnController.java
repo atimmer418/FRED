@@ -306,7 +306,7 @@ public class WebAuthnController {
         logger.info("Authentication request from ORIGIN: {}", origin);
         
         try {
-            String email = (body != null) ? (String) body.get("email") : null;
+            String email = (body != null && body.get("email") instanceof String text) ? text : null;
             
             PublicKeyCredentialRequestOptions options;
             if (email != null && !email.isBlank() && Boolean.TRUE.equals(userRepository.existsByEmail(email))) {
@@ -349,7 +349,7 @@ public class WebAuthnController {
      */
     @PostMapping("/authenticate/finish")
     public ResponseEntity<?> finishAuthentication(@RequestBody Map<String, Object> request, HttpServletRequest httpRequest) {
-        String sessionId = (String) request.get("sessionId");
+        String sessionId = request.get("sessionId") instanceof String text ? text : null;
         Object credentialObj = request.get("credential");
         
         logger.info("Processing passkey authentication finish for session: {}", sessionId);

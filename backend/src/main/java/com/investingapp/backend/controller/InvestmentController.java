@@ -155,14 +155,14 @@ public class InvestmentController {
             }
 
             if (request.containsKey("payFrequency")) {
-                String frequency = (String) request.get("payFrequency");
+                String frequency = com.investingapp.backend.web.RequestValues.string(request, "payFrequency");
                 if (isValidPayFrequency(frequency)) {
                     user.setPayFrequency(frequency);
                 }
             }
 
             if (request.containsKey("nextInvestmentDate")) {
-                String dateStr = (String) request.get("nextInvestmentDate");
+                String dateStr = com.investingapp.backend.web.RequestValues.string(request, "nextInvestmentDate");
                 try {
                     LocalDate nextDate = LocalDate.parse(dateStr);
                     user.setNextInvestmentDate(nextDate);
@@ -174,16 +174,22 @@ public class InvestmentController {
 
             userRepository.save(user);
 
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "message", "Investment schedule updated successfully",
-                    "nextInvestmentDate", user.getNextInvestmentDate(),
-                    "monthlyInvestment", user.getMonthlyInvestment(),
-                    "payFrequency", user.getPayFrequency()));
+            // A HashMap, not Map.of: any of these three can be unset, and Map.of throws on null,
+            // which used to turn a saved update into a 500.
+            Map<String, Object> updated = new HashMap<>();
+            updated.put("success", true);
+            updated.put("message", "Investment schedule updated successfully");
+            updated.put("nextInvestmentDate", user.getNextInvestmentDate());
+            updated.put("monthlyInvestment", user.getMonthlyInvestment());
+            updated.put("payFrequency", user.getPayFrequency());
+            return ResponseEntity.ok(updated);
 
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            throw e; // a bad value in the request: answered as a 400 by ApiExceptionAdvice
         } catch (Exception e) {
+            logger.error("Error updating investment schedule", e);
             return ResponseEntity.internalServerError()
-                    .body(Map.of("success", false, "message", "Error updating investment schedule: " + e.getMessage()));
+                    .body(Map.of("success", false, "message", "Error updating investment schedule"));
         }
     }
 
@@ -243,7 +249,7 @@ public class InvestmentController {
             // Parse investment type (portfolio vs individual stock)
             String investmentType = "portfolio"; // default
             if (request.containsKey("type")) {
-                investmentType = (String) request.get("type");
+                investmentType = com.investingapp.backend.web.RequestValues.string(request, "type");
             }
 
             String selectedSymbol = null;
@@ -253,7 +259,7 @@ public class InvestmentController {
                             .body(Map.of("success", false, "message",
                                     "Symbol is required for individual stock investments"));
                 }
-                selectedSymbol = (String) request.get("symbol");
+                selectedSymbol = com.investingapp.backend.web.RequestValues.string(request, "symbol");
 
                 if (selectedSymbol.trim().isEmpty()) {
                     return ResponseEntity.badRequest()
@@ -264,7 +270,7 @@ public class InvestmentController {
             // Parse funding source
             String fundingSource = "bank"; // default
             if (request.containsKey("fundingSource")) {
-                fundingSource = (String) request.get("fundingSource");
+                fundingSource = com.investingapp.backend.web.RequestValues.string(request, "fundingSource");
             }
 
             // Idempotency (decision 18): one row per tap. A retry carrying the same clientUuid
@@ -341,35 +347,46 @@ public class InvestmentController {
                             "queued", true));
                 }
 
-            } catch (IllegalArgumentException rejectedException) {
-                // Request rejected before any money moved (e.g. TLH wash-sale
-                // window on an explicit stock buy) — a 400 with the reason
+            } catch (com.investingapp.backend.web.UserFacingException refused) {
+                // Refused before any money moved, for a reason written for the user: a tax-loss
+                // harvest window on a stock buy, or not enough buying power. A 400 with the reason.
+                String reason = refused.getMessage(); // user-facing
                 execution.setStatus(InvestmentExecution.ExecutionStatus.FAILED);
-                execution.setErrorMessage(rejectedException.getMessage());
+                execution.setErrorMessage(reason);
                 executionRepository.save(execution);
 
                 return ResponseEntity.badRequest()
                         .body(Map.of(
                                 "success", false,
-                                "message", rejectedException.getMessage(),
+                                "message", reason,
                                 "executionId", execution.getId()));
             } catch (Exception processingException) {
-                // If processing fails, update execution status and inform user
+                // Anything else is ours or the broker's to explain, not the user's to read. The
+                // detail stays in the log and on the execution row (which no reply carries).
+                logger.error("Failed to initiate investment for execution {}", execution.getId(), processingException);
                 execution.setStatus(InvestmentExecution.ExecutionStatus.FAILED);
-                execution.setErrorMessage("Failed to initiate investment: " + processingException.getMessage());
+                execution.setErrorMessage("Failed to initiate investment: " + detailOf(processingException));
                 executionRepository.save(execution);
 
                 return ResponseEntity.internalServerError()
                         .body(Map.of(
                                 "success", false,
-                                "message", "Failed to initiate investment: " + processingException.getMessage(),
+                                "message", "Failed to initiate investment. Please try again.",
                                 "executionId", execution.getId()));
             }
 
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            throw e; // a bad value in the request: answered as a 400 by ApiExceptionAdvice
         } catch (Exception e) {
+            logger.error("Error creating lump sum investment", e);
             return ResponseEntity.internalServerError()
-                    .body(Map.of("success", false, "message", "Error creating lump sum investment: " + e.getMessage()));
+                    .body(Map.of("success", false, "message", "Error creating lump sum investment"));
         }
+    }
+
+    /** The detail of a failure, for the execution row only. It is never put in a reply. */
+    private static String detailOf(Exception failure) {
+        return String.valueOf(failure.getMessage());
     }
 
     /**

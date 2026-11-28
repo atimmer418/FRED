@@ -58,7 +58,7 @@ public class PortfolioDashboardController {
             
         } catch (IllegalArgumentException e) {
             logger.warn("Invalid request for portfolio dashboard: {}", e.getMessage());
-            return ResponseEntity.badRequest().body("{\"error\":\"" + e.getMessage() + "\"}");
+            return ResponseEntity.badRequest().body("{\"error\":\"User does not have an Alpaca account\"}");
         } catch (Exception e) {
             logger.error("Error fetching portfolio dashboard", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

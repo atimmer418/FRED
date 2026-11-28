@@ -324,7 +324,9 @@ public class UserController {
         return ResponseEntity.ok(Map.of("valid", exists));
     }
 
-    @Transactional
+    // Not @Transactional here: UserService.applyReferralCode owns the transaction. When this route
+    // had one of its own, a refusal thrown inside the service doomed the shared transaction, the
+    // commit then failed, and the user got a server error in place of the reason.
     @PostMapping("/referral/apply")
     public ResponseEntity<?> applyReferralCode(Authentication authentication, @RequestBody Map<String, String> payload) {
         String email = authentication.getName();
@@ -344,8 +346,8 @@ public class UserController {
                 default -> "Referral code applied successfully.";
             };
             return ResponseEntity.ok(Map.of("message", message, "status", status));
-        } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage())); // user-facing
         }
     }
 
@@ -446,19 +448,19 @@ public class UserController {
 
             // Update progress fields based on the request
             if (progressUpdate.containsKey("getStartedCompleted")) {
-                userProgress.setGetStartedCompleted((Boolean) progressUpdate.get("getStartedCompleted"));
+                userProgress.setGetStartedCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "getStartedCompleted"));
             }
             if (progressUpdate.containsKey("surveyInitialCompleted")) {
-                userProgress.setSurveyInitialCompleted((Boolean) progressUpdate.get("surveyInitialCompleted"));
+                userProgress.setSurveyInitialCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "surveyInitialCompleted"));
             }
             if (progressUpdate.containsKey("fiPlanResultsCompleted")) {
-                userProgress.setFiPlanResultsCompleted((Boolean) progressUpdate.get("fiPlanResultsCompleted"));
+                userProgress.setFiPlanResultsCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "fiPlanResultsCompleted"));
             }
             if (progressUpdate.containsKey("authFinalizeCompleted")) {
-                userProgress.setAuthFinalizeCompleted((Boolean) progressUpdate.get("authFinalizeCompleted"));
+                userProgress.setAuthFinalizeCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "authFinalizeCompleted"));
 
                 // Record IP address and device ID when user completes authfinalize
-                if ((Boolean) progressUpdate.get("authFinalizeCompleted")) {
+                if (com.investingapp.backend.web.RequestValues.bool(progressUpdate, "authFinalizeCompleted")) {
                     String ipAddress = getClientIpAddress(request);
                     user.setRegistrationIpAddress(ipAddress);
                     logger.info("[UserController] Recorded IP address {} for user {} completing authfinalize",
@@ -474,18 +476,18 @@ public class UserController {
                 }
             }
             if (progressUpdate.containsKey("kycVerificationCompleted")) {
-                userProgress.setKycVerificationCompleted((Boolean) progressUpdate.get("kycVerificationCompleted"));
+                userProgress.setKycVerificationCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "kycVerificationCompleted"));
             }
             if (progressUpdate.containsKey("linkPlaidCompleted")) {
-                userProgress.setLinkPlaidCompleted((Boolean) progressUpdate.get("linkPlaidCompleted"));
+                userProgress.setLinkPlaidCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "linkPlaidCompleted"));
             }
             if (progressUpdate.containsKey("investmentScheduleCompleted")) {
                 userProgress
-                        .setInvestmentScheduleCompleted((Boolean) progressUpdate.get("investmentScheduleCompleted"));
+                        .setInvestmentScheduleCompleted(com.investingapp.backend.web.RequestValues.bool(progressUpdate, "investmentScheduleCompleted"));
             }
             if (progressUpdate.containsKey("investmentConfirmationCompleted")) {
                 userProgress.setInvestmentConfirmationCompleted(
-                        (Boolean) progressUpdate.get("investmentConfirmationCompleted"));
+                        com.investingapp.backend.web.RequestValues.bool(progressUpdate, "investmentConfirmationCompleted"));
             }
 
             // Ensure logical consistency: if later steps are completed, earlier steps
@@ -500,6 +502,8 @@ public class UserController {
 
             return ResponseEntity.ok(updatedProgress);
 
+        } catch (com.investingapp.backend.web.UserFacingException e) {
+            throw e; // a bad value in the request: answered as a 400 by ApiExceptionAdvice
         } catch (Exception e) {
             logger.error("[UserController] Error updating user progress: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().build();

@@ -342,7 +342,7 @@ public class InvestmentScheduleService {
 
         if (scheduleOpt.isEmpty()) {
             logger.error("Investment schedule ID: {} not found for user: {}", scheduleId, user.getEmail());
-            throw new RuntimeException("Investment schedule not found");
+            throw new java.util.NoSuchElementException("Investment schedule not found");
         }
 
         InvestmentSchedule schedule = scheduleOpt.get();
@@ -398,7 +398,7 @@ public class InvestmentScheduleService {
 
         if (scheduleOpt.isEmpty()) {
             logger.error("Investment schedule ID: {} not found for user: {}", scheduleId, user.getEmail());
-            throw new RuntimeException("Investment schedule not found");
+            throw new java.util.NoSuchElementException("Investment schedule not found");
         }
 
         InvestmentSchedule schedule = scheduleOpt.get();
@@ -451,7 +451,7 @@ public class InvestmentScheduleService {
 
         if (scheduleOpt.isEmpty()) {
             logger.error("Investment schedule ID: {} not found for user: {}", scheduleId, user.getEmail());
-            throw new RuntimeException("Investment schedule not found");
+            throw new java.util.NoSuchElementException("Investment schedule not found");
         }
 
         InvestmentSchedule schedule = scheduleOpt.get();

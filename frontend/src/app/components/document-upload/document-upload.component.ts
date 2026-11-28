@@ -8,13 +8,19 @@ import {
 import { AlpacaService } from '../../services/alpaca.service';
 import { AccountStatusService } from '../../services/account-status.service';
 import { ToastService } from '../../services/toast.service';
+import { serverMessage } from '../../utils/server-message.utils';
 
 interface DocumentTypeOption {
   value: string;
   label: string;
 }
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+// The broker accepts at most 10 MB once the file is encoded for sending, and encoding adds a
+// third. 7 MB of file is about 9.3 MB encoded, which leaves room.
+export const MAX_FILE_SIZE_BYTES = 7 * 1024 * 1024;
+
+/** The only kinds of file the broker accepts. The server checks the same list. */
+export const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
 
 @Component({
   selector: 'app-document-upload',
@@ -73,8 +79,14 @@ export class DocumentUploadComponent implements OnDestroy {
     this.selectedFile = null;
     this.filePreviewUrl = null;
 
+    if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
+      // For example a HEIC photo picked from Files, which the broker does not take.
+      this.fileError = 'Please choose a JPEG, PNG or PDF.';
+      return;
+    }
+
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      this.fileError = 'File exceeds 10 MB limit. Please choose a smaller file.';
+      this.fileError = 'That file is over 7 MB. Please choose a smaller one.';
       return;
     }
 
@@ -120,7 +132,7 @@ export class DocumentUploadComponent implements OnDestroy {
           },
           error: (err) => {
             this.isLoading = false;
-            const msg = err.error?.message || err.message || 'Upload failed. Please try again.';
+            const msg = serverMessage(err, 'Upload failed. Please try again.');
             this.toastService.showToast(msg, 'danger');
           }
         });

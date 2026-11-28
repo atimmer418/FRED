@@ -18,6 +18,7 @@ import { AuthService } from '../../services/auth.service';
 import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { create } from '@github/webauthn-json';
+import { serverMessage } from '../../utils/server-message.utils';
 
 @Component({
   selector: 'app-authfinalize',
@@ -330,7 +331,7 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
                     }
                   },
                   error: (err) => {
-                    this.errorMessage = err.error?.message || err.message || 'An unknown error occurred during simulated finish.';
+                    this.errorMessage = serverMessage(err, 'An unknown error occurred during simulated finish.');
                     console.error('Error finishing simulated registration:', err);
                   }
                 });
@@ -388,7 +389,7 @@ export class AuthFinalizeComponent implements OnInit, OnDestroy {
                   }
                 },
                 error: (err) => {
-                  this.errorMessage = err.error?.message || err.message || 'An unknown error occurred during registration finish.';
+                  this.errorMessage = serverMessage(err, 'An unknown error occurred during registration finish.');
                   console.error('Error finishing passkey registration:', err);
                 }
               });

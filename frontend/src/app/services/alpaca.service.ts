@@ -43,7 +43,6 @@ export interface AlpacaAccountResponse {
   account_id: string;
   status: string;
   created_at: string;
-  raw_response: string;
   error?: string;
 }
 

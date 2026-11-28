@@ -51,6 +51,14 @@ public class SecurityConfig {
     private String additionalCorsOrigin;
 
 
+    /** The largest request body any route accepts, except the document upload. */
+    @org.springframework.beans.factory.annotation.Value("${app.request.max-body-bytes:262144}")
+    private long maxBodyBytes;
+
+    /** The largest body the document upload accepts: the broker's 10 MB of content plus the wrapper. */
+    @org.springframework.beans.factory.annotation.Value("${app.request.max-upload-body-bytes:10551296}")
+    private long maxUploadBodyBytes;
+
     @Bean
     public AuthTokenFilter authenticationJwtTokenFilter() {
         return new AuthTokenFilter();
@@ -140,6 +148,11 @@ public class SecurityConfig {
         // Before the token filter: a caller over the limit is turned away before any database work.
         http.addFilterBefore(new PublicEndpointRateLimitFilter(rateLimiter, clientAddressResolver),
                 com.investingapp.backend.security.jwt.AuthTokenFilter.class);
+        // First of the three (but after CORS, so a refusal still reaches a browser): an oversized
+        // body is turned away before it is counted, authenticated or read into memory. Made with
+        // `new`, not as a bean, so Spring Boot does not also register it a second time.
+        http.addFilterBefore(new com.investingapp.backend.web.RequestBodySizeFilter(maxBodyBytes, maxUploadBodyBytes),
+                PublicEndpointRateLimitFilter.class);
 
         return http.build();
     }

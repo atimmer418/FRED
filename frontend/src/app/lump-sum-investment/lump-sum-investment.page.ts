@@ -42,6 +42,7 @@ import { PinService } from '../services/pin.service';
 import { ToastService } from '../services/toast.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+import { serverMessage } from '../utils/server-message.utils';
 
 interface AcatsTransferResponse {
   transferId: string;
@@ -432,12 +433,7 @@ export class LumpSumInvestmentPage implements OnInit, OnDestroy, ViewWillLeave {
             false,
           );
 
-          let errorMessage = 'Failed to process investment. Please try again.';
-          if (error.error?.message) {
-            errorMessage = error.error.message;
-          } else if (error.message) {
-            errorMessage = error.message;
-          }
+          const errorMessage = serverMessage(error, 'Failed to process investment. Please try again.');
 
           this.toastService.showToast(errorMessage, 'danger');
         }

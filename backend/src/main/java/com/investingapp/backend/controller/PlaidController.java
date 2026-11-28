@@ -58,7 +58,7 @@ public class PlaidController {
         try {
             mode = PlaidService.LinkMode.fromRequest(body == null ? null : body.getMode());
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(new MessageResponse("mode must be \"link\" or \"update\""));
         }
         logger.info("Request received for /create_link_token (mode={}). User ID: {}", mode, userDetails.getId());
 
@@ -121,7 +121,7 @@ public class PlaidController {
         } catch (IOException e) {
             logger.error("Error exchanging Plaid public token for user {}: {}", appUser.getId(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new MessageResponse("Error exchanging Plaid public token: " + e.getMessage()));
+                    .body(new MessageResponse("Could not link your bank account. Please try again."));
         }
     }
 

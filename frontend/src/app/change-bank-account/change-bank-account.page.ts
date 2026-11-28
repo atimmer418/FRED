@@ -21,6 +21,7 @@ import {
 import { ToastService } from '../services/toast.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
+import { serverMessage } from '../utils/server-message.utils';
 
 declare var Plaid: any;
 
@@ -214,7 +215,7 @@ export class ChangeBankAccountPage implements OnInit, OnDestroy {
         httpStatusOf(error),
         false,
       );
-      this.statusMessage = `Error: ${error.message || 'Could not initialize bank linking.'}`;
+      this.statusMessage = `Error: ${serverMessage(error, 'Could not initialize bank linking.')}`;
       this.isLoading = false;
     }
   }

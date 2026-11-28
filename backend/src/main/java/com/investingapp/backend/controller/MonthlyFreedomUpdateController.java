@@ -106,7 +106,7 @@ public class MonthlyFreedomUpdateController {
         } catch (Exception e) {
             logger.error("Error generating Monthly Freedom Update", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to generate monthly update: " + e.getMessage()));
+                    .body(Map.of("error", "Failed to generate monthly update"));
         }
     }
 

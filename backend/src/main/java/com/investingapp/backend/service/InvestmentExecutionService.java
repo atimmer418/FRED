@@ -138,7 +138,7 @@ public class InvestmentExecutionService {
                     execution.getUser().getId(), execution.getTargetSymbol(),
                     LocalDate.now(MARKET_TIMEZONE));
             if (window != null) {
-                throw new IllegalArgumentException("Buying " + execution.getTargetSymbol()
+                throw new com.investingapp.backend.web.UserFacingException("Buying " + execution.getTargetSymbol()
                         + " right now would undo the tax savings from your recent tax-loss harvest. "
                         + "You can buy it again after " + window.getEndDate().plusDays(1) + ".");
             }
@@ -491,7 +491,7 @@ public class InvestmentExecutionService {
                     "Insufficient buying power. Available: $" + buyingPower + ", Required: $" + execution.getAmount());
             executionRepository.save(execution);
 
-            throw new RuntimeException("Insufficient buying power. Available: $" + buyingPower);
+            throw new com.investingapp.backend.web.UserFacingException("Insufficient buying power. Available: $" + buyingPower);
         }
     }
 

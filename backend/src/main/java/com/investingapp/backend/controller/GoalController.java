@@ -124,7 +124,7 @@ public class GoalController {
         try {
             return action.apply(user);
         } catch (GoalValidationException e) {
-            return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage())); // user-facing
         } catch (TierLimitException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(new ErrorCodeResponse("TIER_LIMIT", "Piggy Plus unlocks more than one goal."));

@@ -122,14 +122,14 @@ public class UserService {
     public String applyReferralCode(Long userId, String code) {
         User user = getUserById(userId);
         if (user == null) throw new RuntimeException("User not found");
-        if (Boolean.TRUE.equals(user.getHasAppliedReferral())) throw new RuntimeException("You've already applied a referral code.");
+        if (Boolean.TRUE.equals(user.getHasAppliedReferral())) throw new com.investingapp.backend.web.UserFacingException("You've already applied a referral code.");
         if (user.getReferralCode() != null && user.getReferralCode().equalsIgnoreCase(code))
-            throw new RuntimeException("You cannot apply your own referral code.");
+            throw new com.investingapp.backend.web.UserFacingException("You cannot apply your own referral code.");
 
         Optional<User> referrerOpt = userRepository.findByReferralCode(code);
-        if (referrerOpt.isEmpty()) throw new RuntimeException("Invalid referral code.");
+        if (referrerOpt.isEmpty()) throw new com.investingapp.backend.web.UserFacingException("Invalid referral code.");
         User referrer = referrerOpt.get();
-        if (referrer.getId().equals(user.getId())) throw new RuntimeException("You cannot apply your own referral code.");
+        if (referrer.getId().equals(user.getId())) throw new com.investingapp.backend.web.UserFacingException("You cannot apply your own referral code.");
 
         user.setHasAppliedReferral(true);
         user.setReferralAppliedAt(LocalDateTime.now());

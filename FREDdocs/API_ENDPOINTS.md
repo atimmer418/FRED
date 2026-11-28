@@ -50,6 +50,27 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 ---
 
+### Errors and request size
+
+- **No reply carries exception text.** A failure is logged in full on the server and answered with a
+  fixed sentence. The only text that may be passed on is a refusal written for the user, thrown as
+  `UserFacingException` (a beneficiary rule, a referral code refusal, not enough buying power).
+  `RepliesNeverEchoExceptionTextTest` reads the controller sources and fails if a route breaks this.
+- **The sentence is under `message`, `error`, or both**, depending on the route. The app reads either
+  (`utils/server-message.utils.ts`) and never shows the browser's own "Http failure response" text.
+- **Bad input is `400`.** JSON that cannot be read, or a value of the wrong type, answers
+  `{ success: false, message, error }`. A failure nothing else handled answers `500` with the same shape.
+- **Request bodies are capped** (`RequestBodySizeFilter`): 256 KB for every route
+  (`app.request.max-body-bytes`), and about 10 MB for `POST /api/alpaca/upload-document`
+  (`app.request.max-upload-body-bytes`). Over the cap is `413`. The same in every environment.
+- **`POST /api/alpaca/upload-document`** takes `{ documentType, mimeType, content }`. `documentType` is
+  one of `identity_verification`, `address_verification`, `date_of_birth_verification`,
+  `tax_id_verification`. `mimeType` is `application/pdf`, `image/png` or `image/jpeg`. `content` is
+  standard base64, at most 10 MB encoded (Alpaca's limit), and must really be that kind of file.
+  `400` or `413` with a sentence otherwise. Success is `{ success: true }`. The document is sent to
+  Alpaca as a list of one, which is what `POST /v1/accounts/{account_id}/documents/upload` takes.
+- **Chat:** a `sessionId` over 100 characters, or a missing or blank `message`, is `400` on every chat route.
+
 ### Closed accounts
 
 A closed account cannot come back in, and the server says so, so the app can show a clear screen

@@ -15,6 +15,7 @@ import { AnalyticsService } from '../../services/analytics/analytics.service';
 import { httpStatusOf } from '../../services/analytics/analytics-error.utils';
 import { clearPlaidLinkSession, PlaidLinkMode, readPlaidLinkMode, readPlaidLinkReturn, readPlaidLinkToken, storePlaidLinkSession, storePlaidOAuthReturnHref } from '../../utils/plaid-link-session';
 import { UpdateModeCompleteResponse } from '../../models/primary-bank-account';
+import { serverMessage } from '../../utils/server-message.utils';
 
 // Make sure Plaid global object is available (from script in index.html)
 declare var Plaid: any;
@@ -296,12 +297,7 @@ export class LinkPlaidComponent implements OnInit, OnDestroy {
 
   private handleError(error: HttpErrorResponse) {
     console.error('API Error:', error);
-    let userMessage = 'An unexpected error occurred. Please try again.';
-    if (error.error && typeof error.error.message === 'string') {
-      userMessage = error.error.message;
-    } else if (typeof error.message === 'string') {
-      userMessage = error.message;
-    }
+    const userMessage = serverMessage(error, 'An unexpected error occurred. Please try again.');
     // Potentially update this.statusMessage here as well, or ensure calling code does
     return throwError(() => new Error(userMessage));
   }

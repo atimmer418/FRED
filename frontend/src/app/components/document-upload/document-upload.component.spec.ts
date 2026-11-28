@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { NavController } from '@ionic/angular/standalone';
 import { of, throwError } from 'rxjs';
@@ -47,6 +48,47 @@ describe('DocumentUploadComponent toasts', () => {
     expect(toastService.showToast).toHaveBeenCalledOnceWith('Document too blurry.', 'danger');
     expect(accountStatusService.clearActionRequired).not.toHaveBeenCalled();
     expect(component.isLoading).toBeFalse();
+  });
+
+  it('never shows the browser\'s "Http failure response for <address>" text when the server sent no sentence', async () => {
+    alpacaService.uploadDocument.and.returnValue(throwError(() =>
+      new HttpErrorResponse({ status: 500, url: 'https://api.example.test/api/alpaca/upload-document' })));
+
+    await component.uploadDocument();
+
+    expect(toastService.showToast).toHaveBeenCalledOnceWith('Upload failed. Please try again.', 'danger');
+  });
+
+  function pick(file: File): void {
+    component.selectedFile = null;
+    component.onFileSelected({ target: { files: [file] } } as unknown as Event);
+  }
+
+  it('refuses a file type the broker does not take, with a sentence the user can act on', () => {
+    for (const type of ['image/heic', 'image/gif', 'image/webp', 'text/html', '']) {
+      pick(new File(['x'], 'photo', { type }));
+
+      expect(component.selectedFile).toBeNull();
+      expect(component.fileError).toBe('Please choose a JPEG, PNG or PDF.');
+      expect(component.canUpload).toBeFalse();
+    }
+  });
+
+  it('refuses a file over 7 MB, the most that fits the broker\'s limit once encoded', () => {
+    const big = new File([new Uint8Array(7 * 1024 * 1024 + 1)], 'id.jpg', { type: 'image/jpeg' });
+    pick(big);
+
+    expect(component.selectedFile).toBeNull();
+    expect(component.fileError).toBe('That file is over 7 MB. Please choose a smaller one.');
+  });
+
+  it('accepts a JPEG, a PNG and a PDF', () => {
+    for (const type of ['image/jpeg', 'image/png', 'application/pdf']) {
+      pick(new File(['x'], 'doc', { type }));
+
+      expect(component.fileError).toBeNull();
+      expect(component.selectedFile).not.toBeNull();
+    }
   });
 
   it('marks a file that could not be read as danger, before anything is sent', async () => {

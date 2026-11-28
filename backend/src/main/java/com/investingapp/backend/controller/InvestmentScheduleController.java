@@ -81,7 +81,7 @@ public class InvestmentScheduleController {
         } catch (Exception e) {
             logger.error("Error creating investment schedule: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new MessageResponse("Error creating investment schedule: " + e.getMessage()));
+                    .body(new MessageResponse("Error creating investment schedule"));
         }
     }
     
@@ -157,10 +157,9 @@ public class InvestmentScheduleController {
             
             return ResponseEntity.ok(response);
             
-        } catch (RuntimeException e) {
-            logger.error("Runtime error pausing schedule: {}", e.getMessage(), e);
+        } catch (java.util.NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(new MessageResponse(e.getMessage()));
+                    .body(new MessageResponse("Investment schedule not found"));
         } catch (Exception e) {
             logger.error("Error pausing investment schedule: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -193,12 +192,11 @@ public class InvestmentScheduleController {
                         .body(new MessageResponse("Your account is not yet active."));
             }
             logger.error("Illegal state error resuming schedule: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new MessageResponse(e.getMessage()));
-        } catch (RuntimeException e) {
-            logger.error("Runtime error resuming schedule: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new MessageResponse("Error resuming investment schedule"));
+        } catch (java.util.NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(new MessageResponse(e.getMessage()));
+                    .body(new MessageResponse("Investment schedule not found"));
         } catch (Exception e) {
             logger.error("Error resuming investment schedule: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

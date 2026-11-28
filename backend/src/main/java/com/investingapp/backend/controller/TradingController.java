@@ -375,7 +375,7 @@ public class TradingController {
                     "brokerage account closed, FRED row deletion deferred",
                     Map.of("reason", "ACCOUNT_CLOSED", "deferral", String.valueOf(deferred.reason)));
             if (brokerClosed) {
-                return shutWithRowKept(closingUser, deferred);
+                return shutWithRowKept(closingUser, deferred); // not in the reply
             }
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorCodeResponse("DELETION_DEFERRED", deferred.reason));
@@ -389,7 +389,7 @@ public class TradingController {
                         closingUserId == null ? OpsAlertService.GLOBAL_SUBJECT : String.valueOf(closingUserId),
                         "brokerage account closed, FRED row deletion failed",
                         Map.of("reason", "ACCOUNT_CLOSED", "deferral", "DELETE_FAILED"));
-                return shutWithRowKept(closingUser, e);
+                return shutWithRowKept(closingUser, e); // not in the reply
             }
             // RETHROW rather than return. The rollback itself is no longer this method's doing:
             // the deletes run inside UserDeletionService's TransactionTemplate, which rolls back

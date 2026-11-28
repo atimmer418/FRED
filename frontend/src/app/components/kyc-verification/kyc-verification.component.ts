@@ -17,6 +17,7 @@ import { httpStatusOf, isNetworkFailure } from '../../services/analytics/analyti
 import { AlpacaService, CreateAlpacaAccountRequest, UpdateKycRequest } from '../../services/alpaca.service';
 import { JwtTokenUtils } from '../../utils/jwt-token.utils';
 import { KycDraftUtils } from '../../utils/kyc-draft.utils';
+import { serverMessage } from '../../utils/server-message.utils';
 
 // US states list
 const US_STATES = [
@@ -546,7 +547,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
             httpStatusOf(err),
             true,
           );
-          const msg = err.error?.message || err.message || 'Account creation failed. Please try again.';
+          const msg = serverMessage(err, 'Account creation failed. Please try again.');
           this.toastService.showToast(msg, 'danger');
         }
       });
@@ -579,7 +580,7 @@ export class KycVerificationComponent implements OnInit, OnDestroy {
         },
         error: (err) => {
           this.isLoading = false;
-          const msg = err.error?.error || err.error?.message || err.message || 'Update failed. Please try again.';
+          const msg = serverMessage(err, 'Update failed. Please try again.');
           this.toastService.showToast(msg, 'danger');
         }
       });

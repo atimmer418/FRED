@@ -91,7 +91,7 @@ public class BeneficiaryService {
         // An edit may leave the number out to keep the one on file. A new beneficiary has none on
         // file, and the broker will not take one without it.
         if (beneficiary.getSocialSecurityNumber() == null || beneficiary.getSocialSecurityNumber().isBlank()) {
-            throw new RuntimeException("Social Security Number is required");
+            throw new com.investingapp.backend.web.UserFacingException("Social Security Number is required");
         }
 
         // Validation
@@ -209,7 +209,7 @@ public class BeneficiaryService {
         
         // Check if user has an Alpaca account
         if (user.getAlpacaAccountId() == null || user.getAlpacaAccountId().trim().isEmpty()) {
-            throw new RuntimeException("User does not have an Alpaca account ID: " + user.getEmail());
+            throw new RuntimeException("User " + user.getId() + " does not have an Alpaca account ID");
         }
         
         try {
@@ -272,7 +272,8 @@ public class BeneficiaryService {
             logger.error("Failed to submit beneficiaries to Alpaca for user {}: {}", user.getEmail(), e.getMessage(), e);
             
             beneficiary.setStatus(BeneficiaryStatus.REJECTED);
-            beneficiary.setNotes("Failed to submit to Alpaca: " + e.getMessage());
+            // Notes come back to the app in the beneficiary list, so no exception text goes in them.
+            beneficiary.setNotes("Could not be submitted. Please try again.");
             beneficiary.setUpdatedAt(LocalDateTime.now());
             beneficiaryRepository.save(beneficiary);
             
@@ -289,7 +290,7 @@ public class BeneficiaryService {
     public void submitAllBeneficiariesToAlpaca(User user) {
         // Check if user has an Alpaca account
         if (user.getAlpacaAccountId() == null || user.getAlpacaAccountId().trim().isEmpty()) {
-            throw new RuntimeException("User does not have an Alpaca account ID: " + user.getEmail());
+            throw new RuntimeException("User " + user.getId() + " does not have an Alpaca account ID");
         }
         
         try {
@@ -372,7 +373,7 @@ public class BeneficiaryService {
         
         BigDecimal newTotal = totalAllocation.add(beneficiary.getPercentageAllocation());
         if (newTotal.compareTo(BigDecimal.valueOf(100)) > 0) {
-            throw new RuntimeException("Total allocation cannot exceed 100% for " + 
+            throw new com.investingapp.backend.web.UserFacingException("Total allocation cannot exceed 100% for " + 
                 beneficiary.getBeneficiaryType().name().toLowerCase() + " beneficiaries. " +
                 "Current total: " + totalAllocation + "%, attempting to add: " + beneficiary.getPercentageAllocation() + "%");
         }
@@ -390,7 +391,7 @@ public class BeneficiaryService {
             MAX_PRIMARY_BENEFICIARIES : MAX_CONTINGENT_BENEFICIARIES;
         
         if (count >= maxAllowed) {
-            throw new RuntimeException("Maximum of " + maxAllowed + " " + 
+            throw new com.investingapp.backend.web.UserFacingException("Maximum of " + maxAllowed + " " + 
                 beneficiary.getBeneficiaryType().name().toLowerCase() + " beneficiaries allowed");
         }
         
@@ -405,7 +406,7 @@ public class BeneficiaryService {
             );
             
             if (!duplicates.isEmpty()) {
-                throw new RuntimeException("Beneficiary with same name and date of birth already exists");
+                throw new com.investingapp.backend.web.UserFacingException("Beneficiary with same name and date of birth already exists");
             }
         }
     }

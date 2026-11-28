@@ -45,9 +45,16 @@ public class ChatController {
      * Every chat message costs a model call, so each user gets a set number a minute and a day.
      * Both ways of sending (POST and the stream) draw on the same budget. Returns the user's id.
      */
-    private Long countMessage(String message) {
+    private Long countMessage(String message, String sessionId) {
+        // Refusals for a malformed request come first, before the message is counted against
+        // the user's limit and long before the database or the model is touched.
+        checkSessionId(sessionId);
+        if (message == null || message.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "A message is required.");
+        }
         // One message can set off several model calls, and the model is paid by size.
-        if (message != null && message.length() > MAX_MESSAGE_CHARACTERS) {
+        if (message.length() > MAX_MESSAGE_CHARACTERS) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE,
                     "Message is too long. Keep it under " + MAX_MESSAGE_CHARACTERS + " characters.");
@@ -62,12 +69,26 @@ public class ChatController {
         return userId;
     }
 
+    /** The width of the session id columns (chat_messages, chat_action_audit, conversation_insights). */
+    static final int MAX_SESSION_ID_CHARACTERS = 100;
+
+    /**
+     * A session id longer than its column used to reach the database and come back as a 500. The
+     * app's own ids are about 20 characters, so anything over the column width is not the app.
+     */
+    private static void checkSessionId(String sessionId) {
+        if (sessionId != null && sessionId.length() > MAX_SESSION_ID_CHARACTERS) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Session id is too long.");
+        }
+    }
+
     // Preserved for fallback — prefer GET /stream for new clients
     @PostMapping
     public ResponseEntity<ChatResponse> chat(@RequestBody ChatRequest request) {
         // SECURITY: never trust a client-supplied userId — personalization must
         // follow the authenticated principal.
-        ChatRequest bound = new ChatRequest(request.message(), countMessage(request.message()),
+        ChatRequest bound = new ChatRequest(request.message(), countMessage(request.message(), request.sessionId()),
                 sessionOrDefault(request.sessionId()), request.generateTitle());
         ChatResponse response = chatService.processChat(bound);
         return ResponseEntity.ok(response);
@@ -82,7 +103,7 @@ public class ChatController {
         // SECURITY: the userId query param is ignored — the chat tools read the
         // real portfolio of whichever user the request binds, so it must always
         // be the authenticated principal, never client input.
-        ChatRequest request = new ChatRequest(message, countMessage(message),
+        ChatRequest request = new ChatRequest(message, countMessage(message, sessionId),
                 sessionOrDefault(sessionId), generateTitle);
         return chatService.streamChat(request);
     }
@@ -103,6 +124,7 @@ public class ChatController {
     @PostMapping("/action")
     public ResponseEntity<java.util.Map<String, Object>> executeAction(
             @RequestBody com.investingapp.backend.dto.ChatActionRequest request) {
+        checkSessionId(request.sessionId());
         Long authenticatedUserId = authenticatedUserId();
         if (authenticatedUserId == null) {
             return ResponseEntity.status(401).build();
@@ -134,6 +156,7 @@ public class ChatController {
         if (authenticatedUserId == null) {
             return ResponseEntity.status(401).build();
         }
+        checkSessionId(sessionId);
         rateLimiter.require(RateLimiter.Rule.CHAT_READS_PER_MINUTE, String.valueOf(authenticatedUserId));
         if (sessionId != null && !sessionId.trim().isEmpty()) {
             return ResponseEntity.ok(chatService.getChatHistoryForUser(sessionId, authenticatedUserId));

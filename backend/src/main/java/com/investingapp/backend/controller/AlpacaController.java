@@ -170,7 +170,8 @@ public class AlpacaController {
         } catch (Exception e) {
             logger.error("Error creating Alpaca account", e);
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
+            error.put("error", "Account creation failed. Please try again.");
+            error.put("message", "Account creation failed. Please try again.");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }
@@ -196,8 +197,16 @@ public class AlpacaController {
 
     @PostMapping("/upload-document")
     public ResponseEntity<Map<String, Object>> uploadDocument(
-            @Valid @RequestBody UploadDocumentRequest request) {
+            @RequestBody UploadDocumentRequest request) {
         try {
+            // Before anything else, and before the broker sees it: the right kind of document,
+            // the right kind of file, not too large, and really what it says it is.
+            var refusal = com.investingapp.backend.web.DocumentUploadRules.check(
+                    request.getDocumentType(), request.getMimeType(), request.getContent());
+            if (refusal.isPresent()) {
+                return ResponseEntity.status(refusal.get().status()).body(uploadError(refusal.get().message()));
+            }
+
             User user = getCurrentUser();
             if (user == null) {
                 Map<String, Object> err = new HashMap<>();
@@ -226,17 +235,26 @@ public class AlpacaController {
                     request.getContent());
 
             if (result.containsKey("error")) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
+                // The service has logged what the broker said. The user gets a fixed sentence.
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(uploadError("The document could not be uploaded. Please try again."));
             }
 
-            return ResponseEntity.ok(result);
+            return ResponseEntity.ok(Map.of("success", true));
 
         } catch (Exception e) {
             logger.error("Error uploading document", e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(uploadError("The document could not be uploaded. Please try again."));
         }
+    }
+
+    /** Both keys carry the sentence: the app's screens read one or the other. */
+    private static Map<String, Object> uploadError(String message) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("error", message);
+        body.put("message", message);
+        return body;
     }
 
     @GetMapping("/assets")
@@ -295,11 +313,9 @@ public class AlpacaController {
 
     // DTO for document upload request
     public static class UploadDocumentRequest {
-        @jakarta.validation.constraints.NotBlank(message = "Document type is required")
+        // Checked by DocumentUploadRules, which answers with a sentence for the user.
         private String documentType;
-        @jakarta.validation.constraints.NotBlank(message = "MIME type is required")
         private String mimeType;
-        @jakarta.validation.constraints.NotBlank(message = "Document content is required")
         private String content;
 
         public String getDocumentType() { return documentType; }
@@ -338,7 +354,7 @@ public class AlpacaController {
         } catch (Exception e) {
             logger.error("Error initiating ACATS transfer", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Failed to initiate transfer: " + e.getMessage()));
+                .body(Map.of("error", "Failed to initiate transfer"));
         }
     }
 
@@ -375,7 +391,7 @@ public class AlpacaController {
         } catch (Exception e) {
             logger.error("Error fetching KYC data for current user", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to retrieve KYC data: " + e.getMessage()));
+                    .body(Map.of("error", "Failed to retrieve KYC data"));
         }
     }
 
@@ -416,7 +432,8 @@ public class AlpacaController {
         } catch (Exception e) {
             logger.error("Error patching KYC for current user", e);
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage() != null ? e.getMessage() : "Failed to update KYC data");
+            error.put("error", "Failed to update your details. Please check them and try again.");
+            error.put("message", "Failed to update your details. Please check them and try again.");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }

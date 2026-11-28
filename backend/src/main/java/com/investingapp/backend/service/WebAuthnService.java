@@ -251,7 +251,8 @@ public class WebAuthnService {
             // This catches exceptions from relyingParty.finishRegistration(), JSON parsing, or user not found.
             logger.error("Passkey registration failed for user {}: {}", userEmail, e.getMessage(), e);
             // Optionally, you could provide more specific error messages based on the exception type if needed.
-            return new RegistrationFinishResponse(false, "Passkey registration failed: " + e.getMessage(), null, null, userEmail);
+            // The library's text names origins, challenges and Java classes; it stays in the log.
+            return new RegistrationFinishResponse(false, "Passkey registration failed. Please try again.", null, null, userEmail);
         } catch (Exception e) { // Catch any other unexpected errors during the process
             logger.error("Unexpected error during passkey registration finish for user {}: {}", userEmail, e.getMessage(), e);
             return new RegistrationFinishResponse(false, "An unexpected error occurred during registration.", null, null, userEmail);
@@ -521,7 +522,7 @@ public class WebAuthnService {
             
         } catch (AssertionFailedException e) {
             logger.error("Passkey authentication failed: {}", e.getMessage(), e);
-            return new AuthenticationFinishResponse(false, "Authentication failed: " + e.getMessage(), null, null, null);
+            return new AuthenticationFinishResponse(false, "Authentication failed", null, null, null);
         } catch (Exception e) {
             logger.error("Unexpected error during passkey authentication: {}", e.getMessage(), e);
             return new AuthenticationFinishResponse(false, "An unexpected error occurred", null, null, null);

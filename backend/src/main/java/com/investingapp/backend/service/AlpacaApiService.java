@@ -28,6 +28,10 @@ import java.nio.charset.StandardCharsets;
 @Service
 public class AlpacaApiService {
 
+    /** What a caller is told when a broker call fails. The detail is in the log. */
+    private static final String GENERIC_FAILURE = "Something went wrong. Please try again.";
+
+
     private static final Logger logger = LoggerFactory.getLogger(AlpacaApiService.class);
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
@@ -177,7 +181,6 @@ public class AlpacaApiService {
             }
             result.put("status", responseNode.get("status").asText());
             result.put("created_at", responseNode.get("created_at").asText());
-            result.put("raw_response", responseBody);
 
             logger.info("Successfully created Alpaca account: {}", accountId);
 
@@ -190,12 +193,12 @@ public class AlpacaApiService {
         } catch (JsonProcessingException e) {
             logger.error("Error processing JSON", e);
             Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("error", "Failed to process JSON: " + e.getMessage());
+            errorResult.put("error", GENERIC_FAILURE);
             return errorResult;
         } catch (Exception e) {
             logger.error("Error creating Alpaca account for {}: {}", email, e.getMessage());
             Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("error", "Failed to create account: " + e.getMessage());
+            errorResult.put("error", "Account creation failed. Please try again.");
             return errorResult;
         }
     }
@@ -286,7 +289,6 @@ public class AlpacaApiService {
             }
             result.put("status", responseNode.get("status").asText());
             result.put("created_at", responseNode.get("created_at").asText());
-            result.put("raw_response", responseBody);
 
             logger.info("Successfully created Alpaca account (full KYC): {}", accountId);
 
@@ -299,12 +301,12 @@ public class AlpacaApiService {
         } catch (JsonProcessingException e) {
             logger.error("Error processing JSON for full KYC account creation", e);
             Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("error", "Failed to process JSON: " + e.getMessage());
+            errorResult.put("error", GENERIC_FAILURE);
             return errorResult;
         } catch (Exception e) {
             logger.error("Error creating Alpaca account (full KYC) for {}: {}", request.getEmailAddress(), e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("error", "Failed to create account: " + e.getMessage());
+            errorResult.put("error", "Account creation failed. Please try again.");
             return errorResult;
         }
     }
@@ -323,38 +325,39 @@ public class AlpacaApiService {
         logger.info("Uploading document type {} for account {}", documentType, accountId);
 
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("document_type", documentType);
-            // document_sub_type omitted — let Alpaca infer from document_type
-            payload.put("content", base64Content);
-            payload.put("mime_type", mimeType);
+            Map<String, Object> document = new HashMap<>();
+            document.put("document_type", documentType);
+            // document_sub_type omitted: it is optional
+            document.put("content", base64Content);
+            document.put("mime_type", mimeType);
 
-            String jsonBody = objectMapper.writeValueAsString(payload);
+            // Alpaca Broker API, POST /v1/accounts/{account_id}/documents/upload: the body is a
+            // LIST of documents, even for one. (A single object, as this used to send, is not
+            // what the endpoint accepts.) Success is 204 with no body.
+            String jsonBody = objectMapper.writeValueAsString(java.util.List.of(document));
 
             HttpEntity<String> entity = new HttpEntity<>(jsonBody, createHeaders());
-            ResponseEntity<String> response = restTemplate.exchange(
+            restTemplate.exchange(
                     brokerBaseUrl + "/accounts/" + accountId + "/documents/upload",
                     HttpMethod.POST,
                     entity,
                     String.class);
 
-            String responseBody = response.getBody();
             logger.info("Successfully uploaded document for account {}", accountId);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("raw_response", responseBody);
             return result;
 
         } catch (JsonProcessingException e) {
             logger.error("Error processing JSON for document upload", e);
             Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("error", "Failed to process JSON: " + e.getMessage());
+            errorResult.put("error", GENERIC_FAILURE);
             return errorResult;
         } catch (Exception e) {
             logger.error("Error uploading document for account {}: {}", accountId, e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("error", "Failed to upload document: " + e.getMessage());
+            errorResult.put("error", "The document could not be uploaded. Please try again.");
             return errorResult;
         }
     }
@@ -438,7 +441,6 @@ public class AlpacaApiService {
             result.put("id", responseNode.get("id").asText());
             result.put("status", responseNode.get("status").asText());
             result.put("created_at", responseNode.get("created_at").asText());
-            result.put("raw_response", responseBody);
             logger.info("Successfully created ACH relationship: {}", result.get("id"));
             return result;
 

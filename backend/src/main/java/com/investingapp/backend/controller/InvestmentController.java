@@ -1,5 +1,7 @@
 package com.investingapp.backend.controller;
 
+import com.investingapp.backend.dto.InvestmentExecutionResponse;
+import com.investingapp.backend.dto.InvestmentTradeResponse;
 import com.investingapp.backend.model.InvestmentExecution;
 import com.investingapp.backend.model.InvestmentExecution.ExecutionStatus;
 import com.investingapp.backend.model.InvestmentTrade;
@@ -32,6 +34,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/investments")
 @CrossOrigin(origins = "*")
 public class InvestmentController {
+
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(InvestmentController.class);
 
     @Autowired
     private InvestmentExecutionRepository executionRepository;
@@ -68,7 +72,9 @@ public class InvestmentController {
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("executions", executions);
+            // A fixed list of fields per execution. The entity itself must never go in a response:
+            // it leads to the whole user record.
+            response.put("executions", executions.stream().map(InvestmentExecutionResponse::of).toList());
             response.put("nextInvestmentDate", user.getNextInvestmentDate());
             response.put("monthlyInvestment", user.getMonthlyInvestment());
             response.put("payFrequency", user.getPayFrequency());
@@ -76,9 +82,9 @@ public class InvestmentController {
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
+            logger.error("Error retrieving investment history", e);
             return ResponseEntity.internalServerError()
-                    .body(Map.of("success", false, "message",
-                            "Error retrieving investment history: " + e.getMessage()));
+                    .body(Map.of("success", false, "message", "Error retrieving investment history"));
         }
     }
 
@@ -98,34 +104,27 @@ public class InvestmentController {
                         .body(Map.of("success", false, "message", "User not found"));
             }
 
-            Optional<InvestmentExecution> executionOpt = executionRepository.findById(executionId);
-
-            if (executionOpt.isEmpty()) {
-                return ResponseEntity.badRequest()
+            // Not there, or somebody else's: the same answer, so an id cannot be probed.
+            InvestmentExecution execution = executionRepository.findById(executionId)
+                    .filter(found -> found.getUser().getId().equals(userOpt.get().getId()))
+                    .orElse(null);
+            if (execution == null) {
+                return ResponseEntity.status(404)
                         .body(Map.of("success", false, "message", "Investment execution not found"));
             }
 
-            InvestmentExecution execution = executionOpt.get();
-
-            // Verify the execution belongs to the authenticated user
-            if (!execution.getUser().getId().equals(userOpt.get().getId())) {
-                return ResponseEntity.status(403)
-                        .body(Map.of("success", false, "message", "Access denied"));
-            }
-
-            // Get associated trades
-            List<InvestmentTrade> trades = tradeRepository.findByInvestmentExecutionId(executionId);
-
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("execution", execution);
-            response.put("trades", trades);
+            response.put("execution", InvestmentExecutionResponse.of(execution));
+            response.put("trades", tradeRepository.findByInvestmentExecutionId(executionId).stream()
+                    .map(InvestmentTradeResponse::of).toList());
 
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
+            logger.error("Error retrieving execution details", e);
             return ResponseEntity.internalServerError()
-                    .body(Map.of("success", false, "message", "Error retrieving execution details: " + e.getMessage()));
+                    .body(Map.of("success", false, "message", "Error retrieving execution details"));
         }
     }
 
@@ -415,13 +414,14 @@ public class InvestmentController {
             dashboard.put("nextInvestmentDate", user.getNextInvestmentDate());
             dashboard.put("monthlyInvestment", user.getMonthlyInvestment() != null ? user.getMonthlyInvestment() : 0.0);
             dashboard.put("payFrequency", user.getPayFrequency() != null ? user.getPayFrequency() : "Not set");
-            dashboard.put("recentExecutions", recentExecutions);
+            dashboard.put("recentExecutions", recentExecutions.stream().map(InvestmentExecutionResponse::of).toList());
 
             return ResponseEntity.ok(dashboard);
         } catch (Exception e) {
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
-            errorResponse.put("message", "Failed to load dashboard: " + e.getMessage());
+            logger.error("Failed to load investment dashboard", e);
+            errorResponse.put("message", "Failed to load dashboard");
             return ResponseEntity.status(500).body(errorResponse);
         }
     }

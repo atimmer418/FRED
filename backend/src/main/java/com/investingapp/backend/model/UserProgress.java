@@ -26,6 +26,7 @@ public class UserProgress {
     // Bidirectional mapping - UserProgress owns the relationship
     @OneToOne
     @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private User user;
 
     // Onboarding status flags - tracking the complete user flow

@@ -133,7 +133,7 @@ per-user limits do not depend on the address.
 
 **DTOs:**
 - `CreateInvestmentScheduleRequest`: `{ investmentAmount, frequency, startDate }` — frequency: WEEKLY, BIWEEKLY, SEMI_MONTHLY, MONTHLY
-- `InvestmentScheduleResponse`: `{ id, monthlyAmount, investmentAmount, frequency, startDate, nextInvestmentDate, achRequestId, isPaused, createdAt, updatedAt }`
+- `InvestmentScheduleResponse`: `{ id, monthlyAmount, investmentAmount, frequency, startDate, nextInvestmentDate, isPaused, createdAt, updatedAt }`
 
 ---
 
@@ -143,9 +143,19 @@ per-user limits do not depend on the address.
 |--------|----------|-------------|------|-------------|----------|
 | `POST` | `/api/investments/execute` | Create lump-sum investment | Yes | `{ amount, type?, symbol?, fundingSource? }` | `{ success, message, executionId, amount, status, queued }` |
 | `POST` | `/api/investments/schedule` | Update investment schedule settings | Yes | `{ monthlyInvestment?, payFrequency?, nextInvestmentDate? }` | `{ success, message, ... }` |
-| `GET` | `/api/investments/history` | Get last 6 months of executions | Yes | None | `{ success, executions, nextInvestmentDate, monthlyInvestment, payFrequency }` |
-| `GET` | `/api/investments/execution/{executionId}` | Get execution details + trades | Yes | None | `{ success, execution, trades }` |
-| `GET` | `/api/investments/dashboard` | Investment dashboard summary | Yes | None | `{ success, totalInvested, pendingCount, failedCount, nextInvestmentDate, monthlyInvestment, payFrequency, recentExecutions }` |
+| `GET` | `/api/investments/history` | Get last 6 months of executions. Each execution is the fixed shape below, never the database record | Yes | None | `{ success, executions: [execution], nextInvestmentDate, monthlyInvestment, payFrequency }` |
+| `GET` | `/api/investments/execution/{executionId}` | Get execution details + trades. `404` when the execution does not exist or belongs to someone else (the same answer for both) | Yes | None | `{ success, execution, trades: [trade] }` |
+| `GET` | `/api/investments/dashboard` | Investment dashboard summary (last 10 executions) | Yes | None | `{ success, totalInvested, pendingCount, failedCount, nextInvestmentDate, monthlyInvestment, payFrequency, recentExecutions: [execution] }` |
+
+`execution` is `{ id, amount, status, investmentType, targetSymbol, fundingSource, scheduledDate, executionDate, fundingCompletedAt, tradingCompletedAt, createdAt }`.
+`trade` is `{ id, symbol, quantity, notionalAmount, filledQuantity, filledAvgPrice, status, submittedAt, filledAt, canceledAt, failedAt }`.
+Neither carries the user record, the brokerage account id, the broker's transfer or order id, the
+internal de-duplication keys or the broker's raw error text. The app does not call these three
+routes today.
+
+**Rule for every route:** a response is built from a DTO or a map of plain values, never from a
+database record. As a second guard, the `User` record cannot be written into JSON at all (only its
+`id`), and every record that points at a user has that link hidden from JSON.
 
 **Execute request details:**
 - `amount`: Required, $1–$1,000,000

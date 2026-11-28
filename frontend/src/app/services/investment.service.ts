@@ -67,7 +67,6 @@ export interface InvestmentSchedule {
   startDate: string | number[]; // Can be ISO string or Java LocalDate array [year, month, day]
   nextInvestmentDate: string | number[]; // Can be ISO string or Java LocalDate array [year, month, day]
   chosenDate?: string | number[]; // The user's preferred anchor date, unaffected by holiday adjustments
-  achRequestId?: string;
   isPaused: boolean;
   scheduleDescription: string;
   monthlyStreak: number;

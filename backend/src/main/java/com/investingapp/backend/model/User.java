@@ -30,6 +30,16 @@ import java.util.Set; // Import Set
 @Getter
 @Setter
 @NoArgsConstructor
+// This record holds the PIN hash, the SSN, the recovery code and the bank and broker ids, so it is
+// never to be written into an API response. Two guards make that true even if a route returns an
+// entity by mistake:
+//  - JsonIgnoreType: a property of type User on any other object is skipped outright.
+//  - JsonIncludeProperties: if a User is written directly, only the fields named here go out. It
+//    is an allow list on purpose, so a column added later is private until someone decides
+//    otherwise.
+// Responses are built from DTOs (see dto/), never from this class.
+@com.fasterxml.jackson.annotation.JsonIgnoreType
+@com.fasterxml.jackson.annotation.JsonIncludeProperties({"id"})
 @ToString(exclude = {"userProgress", "plaidSyncCursor"}) // userProgress is circular; the cursor never goes in a log line (spec 12.3)
 public class User {
 

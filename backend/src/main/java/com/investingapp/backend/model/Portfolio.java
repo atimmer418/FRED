@@ -21,6 +21,7 @@ public class Portfolio {
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private User user;
 
     @Column(name = "name", length = 100)

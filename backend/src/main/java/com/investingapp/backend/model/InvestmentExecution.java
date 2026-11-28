@@ -17,6 +17,7 @@ public class InvestmentExecution {
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private User user;
     
     @Column(name = "scheduled_date", nullable = false)
@@ -33,12 +34,15 @@ public class InvestmentExecution {
     private ExecutionStatus status;
     
     @Column(name = "alpaca_transfer_id")
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String alpacaTransferId;
     
     @Column(name = "alpaca_account_id", length = 512)
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String alpacaAccountId;
     
     @Column(name = "error_message", columnDefinition = "TEXT")
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String errorMessage;
     
     @Column(name = "investment_type")
@@ -74,10 +78,12 @@ public class InvestmentExecution {
 
     /** SCHED:{scheduleId}:{dueDate} or LUMP:{userId}:{clientUuid}; UNIQUE in V6. */
     @Column(name = "source_key", length = 120, unique = true)
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String sourceKey;
 
     /** {userId}:{queuedNightET}, recurring only; UNIQUE in V6, NULLs allowed. */
     @Column(name = "night_key", length = 40, unique = true)
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String nightKey;
 
     @Column(name = "batch_night")

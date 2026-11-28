@@ -25,6 +25,7 @@ public class InvestmentSchedule {
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private User user;
 
     // Core investment schedule fields for cron processing

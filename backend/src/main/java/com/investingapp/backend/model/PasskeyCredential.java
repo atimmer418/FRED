@@ -23,12 +23,15 @@ public class PasskeyCredential {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private User user;
 
     @Column(nullable = false, unique = true, length = 512) // Credential ID from the authenticator
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String externalId; // Store as Base64URL encoded string
 
     @Column(nullable = false, length = 1024) // Public key from the authenticator
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; never written into a response
     private String publicKeyCose; // Store as Base64URL encoded string
 
     @Column(nullable = false)

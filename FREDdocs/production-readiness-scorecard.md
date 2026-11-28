@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-27. Latest change: A closed account cannot get back into the app and lands on a clear screen.
+Last updated: 2026-11-27. Latest change: The investment routes no longer send the whole user record.
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **11 of 176** (17 more are part done; 1 dropped item is not counted) |
-| Readiness, weighted by size | **9.6%** (45.5 of 472 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 12.2% (45.5 of 374 points, 148 items) |
+| Items done | **12 of 176** (17 more are part done; 1 dropped item is not counted) |
+| Readiness, weighted by size | **9.9%** (46.5 of 472 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 12.4% (46.5 of 374 points, 148 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -28,7 +28,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | Area | Done | Part | Open | Points | Weighted |
 |---|---|---|---|---|---|
 | A. Protect the work | 1 | 1 | 0 | 1.5 of 2 | 75% |
-| B. Security | 8 | 0 | 11 | 18 of 42 | 43% |
+| B. Security | 9 | 0 | 10 | 19 of 42 | 45% |
 | C. A shippable iOS build | 0 | 0 | 8 | 0 of 14 | 0% |
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
@@ -50,6 +50,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | 2026-11-26 | Applicant SSN removed from the on-device KYC draft. B8 (server logout and sign-out button) dropped by Andy and no longer counted | 9 of 173 | 9.2% |
 | 2026-11-26 | Request limits on passkey sign-up and sign-in, token refresh, the old login, the re-auth check and chat (one new item found: B20) | 10 of 174 | 9.5% |
 | 2026-11-27 | Closed accounts: signed out for good on every device and shown a closed screen; a brokerage close that cannot delete the row still shuts the account (two new items found: G20, G21) | 11 of 176 | 9.6% |
+| 2026-11-27 | Investment history, dashboard and execution routes return a fixed list of fields; the user record can no longer be written into any response | 12 of 176 | 9.9% |
 
 ## Decisions needed from Andy
 
@@ -116,7 +117,7 @@ found after the audit.
 | B9 | Step-up auth for money is frontend only | large | Open |  | Server must require a fresh passkey (or PIN proof) for withdraw, liquidate, bank relink, large lump sum and account close. |
 | B10 | Email change needs no re-auth and no verification, and is broken (no Authorization header) | medium | Done |  | Commit 6b632c95. POST /api/user/update-email is gone from UserController. |
 | B11 | Sign-up takes any email with no ownership check, and an abandoned sign-up locks that email | medium | Open |  | Verify the email (code or link) before or during sign-up, and let an unfinished sign-up with no passkey be replaced or expire. |
-| B12 | Investment history, dashboard and execution endpoints serialize the whole User entity | small | Open | A | Add JsonIgnore on user or return a DTO, or remove the unused routes. |
+| B12 | Investment history, dashboard and execution endpoints serialize the whole User entity | small | Done | A | Run against the old code, all three routes answered 200 with the PIN hash, SSN ciphertext and hash, recovery code and bank and broker ids in the body. They now return fixed shapes (InvestmentExecutionResponse, InvestmentTradeResponse). A sweep of every route found no other one that returns the user record. Second guard: the User record cannot be written into JSON at all (only its id), and every record that points at a user hides that link. The schedule answer also stopped sending the broker's bank-link id. |
 | B13 | SSN lookup hash is plain unsalted SHA-256 | medium | Open | A | Switch to a keyed hash (HMAC with a secret) and re-hash existing rows. |
 | B14 | Upload and request-size validation is thin | small | Open | A | Allow-list document and mime types, cap the base64 size, and set a JSON request body limit. |
 | B15 | Anyone who knows an email can block that account's recovery for a day | small | Open | N | Recovery limits count requests per account, so a stranger can use them up. The new per-email sign-up limit has the same shape: 10 requests an hour naming an email block that email's sign-up for the hour. Fixing either needs something only the owner has (a link sent to the mailbox, or a per-device allowance), which is a design change, not a limit. |

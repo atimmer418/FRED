@@ -18,6 +18,7 @@ public class PortfolioItem {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "portfolio_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private Portfolio portfolio;
 
     @Column(name = "symbol", length = 10, nullable = false)

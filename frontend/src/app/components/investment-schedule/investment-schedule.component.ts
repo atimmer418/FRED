@@ -37,7 +37,6 @@ export interface InvestmentScheduleResponse {
   id: number;
   monthlyAmount: number;
   frequency: string;
-  achRequestId?: string;
   isPaused: boolean;
   createdAt: string;
   updatedAt: string;

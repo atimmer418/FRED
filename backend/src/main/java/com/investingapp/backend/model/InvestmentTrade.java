@@ -17,6 +17,7 @@ public class InvestmentTrade {
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "investment_execution_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private InvestmentExecution investmentExecution;
     
     @Column(name = "symbol", nullable = false)
@@ -35,6 +36,7 @@ public class InvestmentTrade {
     private BigDecimal filledAvgPrice;
     
     @Column(name = "alpaca_order_id")
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String alpacaOrderId;
     
     @Enumerated(EnumType.STRING)
@@ -42,6 +44,7 @@ public class InvestmentTrade {
     private TradeStatus status;
     
     @Column(name = "error_message", columnDefinition = "TEXT")
+    @com.fasterxml.jackson.annotation.JsonIgnore // internal; responses use the DTOs in dto/
     private String errorMessage;
     
     @Column(name = "submitted_at")

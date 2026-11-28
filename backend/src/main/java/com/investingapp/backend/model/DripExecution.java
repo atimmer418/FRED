@@ -22,6 +22,7 @@ public class DripExecution {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore // never written into a response; see User
     private User user;
 
     /** Unique activity ID from Alpaca's DIV/CDIV response — dedup key */

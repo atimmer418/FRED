@@ -118,6 +118,8 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
 - [ ] **Email change needs no re-auth and no verification** of the new address. It is also broken
       today because the request has no Authorization header (`change-email.page.ts:158-164`). (M)
 - [ ] **Sign-up takes any email with no ownership check**, and an abandoned sign-up locks that email. (M)
+- [ ] **New bank links pass raw account and routing numbers through FRED.** Switch to Plaid processor
+      tokens so the backend never sees a full account number (FRED-241). (M)
 
 ### 4b. A shippable iOS build
 
@@ -132,6 +134,8 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
 - [ ] **Archive scheme uses Debug.** `App.xcscheme:71-74`. (S)
 - [ ] **Add universal links** (applinks domain, AASA section, `appUrlOpen` listener). Without them
       Plaid OAuth banks such as Chase cannot return to the app. (M)
+- [ ] **Plaid Hosted Link on iPhone** (FRED-242). First run the sandbox OAuth bank test on the iPhone
+      build; build Hosted Link only if the bank does not return to the app. (L, decision)
 - [ ] Add `NSCameraUsageDescription` (document upload opens the camera). (S)
 - [ ] Fill in the production environment values, which are placeholders. (S)
 
@@ -194,6 +198,8 @@ referral "lifetime" price lines are copy only. Nothing in code backs them.
 - [ ] Failed loads shown as empty states. On Sell & Withdraw this enables Close My Account, and on
       Portfolio Allocation a save overwrites the real allocation with the default. (M) *frontend-ux-debt*
 - [ ] Profile tab shows a hardcoded "Hi, Firstname". (S)
+- [ ] Prefill the KYC form from the linked bank, with bank linking moved ahead of KYC (FRED-243).
+      Not a blocker; do after FRED-241 and FRED-242. (L)
 
 ### 4g. Production environment
 
@@ -227,6 +233,8 @@ Billing itself waits on counsel. Everything below is needed whichever payment ra
 - [ ] Emit the billing analytics events that are defined but never fired. (S)
 - [ ] Make plan names and prices consistent across the app, chat knowledge and FAQ. (S)
 - [ ] Tests for tier and subscription code. There are none. (M)
+- [ ] **Per-paycheck billing in place of the Apple subscription** (FRED-245). The price function and
+      pricing screen can be built now; collecting the fee waits on Alpaca, counsel and App Review. (L)
 
 ### Build or stop promising (decide per feature)
 
@@ -263,7 +271,8 @@ Billing itself waits on counsel. Everything below is needed whichever payment ra
 - [ ] Chat: output-side compliance check, retention and deletion of chat data, fix the regex safety
       gate, scope history to the user. (M)
 - [ ] Bank re-link flow and processing of Plaid webhooks, which are stored but ignored. (M)
-- [ ] Bank balance check before an ACH pull. (M)
+- [ ] **Bank balance check before every ACH pull** (FRED-244). Alpaca requires it. Plaid Balance,
+      every pull including paycheck-detected ones (decided 2026-11-27). (L)
 - [ ] ACATS transfer form is live but half built: finish or hide (FRED-175). (decision)
 - [ ] One-time purchase of any single stock has no asset checks. (decision)
 - [ ] Accessibility: zoom is disabled, text does not scale, icons are read out by name. (M)

@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-27. Latest change: The investment routes no longer send the whole user record.
+Last updated: 2026-11-27. Latest change: Five new backlog stories added (FRED-241 to FRED-245).
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **12 of 176** (17 more are part done; 1 dropped item is not counted) |
-| Readiness, weighted by size | **9.9%** (46.5 of 472 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 12.4% (46.5 of 374 points, 148 items) |
+| Items done | **12 of 180** (17 more are part done; 1 dropped item is not counted) |
+| Readiness, weighted by size | **9.2%** (46.5 of 504 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 11.7% (46.5 of 398 points, 151 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -28,16 +28,16 @@ remaining items are equally urgent: one open security or money item can block a 
 | Area | Done | Part | Open | Points | Weighted |
 |---|---|---|---|---|---|
 | A. Protect the work | 1 | 1 | 0 | 1.5 of 2 | 75% |
-| B. Security | 9 | 0 | 10 | 19 of 42 | 45% |
-| C. A shippable iOS build | 0 | 0 | 8 | 0 of 14 | 0% |
+| B. Security | 9 | 0 | 11 | 19 of 45 | 42% |
+| C. A shippable iOS build | 0 | 0 | 9 | 0 of 22 | 0% |
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
 | F. Money safety | 0 | 0 | 13 | 0 of 56 | 0% |
-| G. Onboarding and account lifecycle | 1 | 1 | 19 | 1.5 of 35 | 4% |
+| G. Onboarding and account lifecycle | 1 | 1 | 20 | 1.5 of 43 | 3% |
 | H. Production environment | 0 | 2 | 5 | 3 of 26 | 12% |
-| I. Tiers and billing | 0 | 2 | 29 | 3 of 116 | 3% |
+| I. Tiers and billing | 0 | 2 | 30 | 3 of 124 | 2% |
 | J. Ask FRED chat | 1 | 1 | 4 | 2.5 of 14 | 18% |
-| K. Before the public App Store launch | 0 | 4 | 17 | 5 of 55 | 9% |
+| K. Before the public App Store launch | 0 | 4 | 17 | 5 of 60 | 8% |
 | L. Should fix soon | 0 | 4 | 19 | 6.5 of 52 | 13% |
 
 ### Score history
@@ -51,6 +51,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | 2026-11-26 | Request limits on passkey sign-up and sign-in, token refresh, the old login, the re-auth check and chat (one new item found: B20) | 10 of 174 | 9.5% |
 | 2026-11-27 | Closed accounts: signed out for good on every device and shown a closed screen; a brokerage close that cannot delete the row still shuts the account (two new items found: G20, G21) | 11 of 176 | 9.6% |
 | 2026-11-27 | Investment history, dashboard and execution routes return a fixed list of fields; the user record can no longer be written into any response | 12 of 176 | 9.9% |
+| 2026-11-27 | Five backlog stories added: FRED-241 (B21), FRED-242 (C9), FRED-243 (G22), FRED-245 (I32) as new items, and FRED-244 as the written scope of K13, resized from medium to large. No work done, so the percentage drops | 12 of 180 | 9.2% |
 
 ## Decisions needed from Andy
 
@@ -75,7 +76,7 @@ Work on these items cannot start, or cannot finish, until the question is answer
 17. **Priority support: any support channel, then a Pro lane** (medium). Can a 24 hour human reply be staffed at launch? If not, mark the row Coming Soon or soften the copy.
 18. **Early access: a feature flag mechanism, or drop the line** (medium). Build a feature flag system for Pro early access, or drop the line from the Pro card?
 19. **Trial, "cancel anytime", yearly and lifetime price copy: back with code or remove** (medium). For each of trial, cancel anytime, yearly prices and lifetime referral prices: keep and build it, or take it off the tier screen until billing exists?
-20. **No billing at all: no charge, failed payment handling, receipts or billing history** (large). Is the private beta free? If yes, billing can follow the beta. If no, which payment rail (Apple in-app purchase or ACH) once counsel answers?
+20. **No billing at all: no charge, failed payment handling, receipts or billing history** (large). Is the private beta free? If yes, billing can follow the beta. The payment rail is now chosen in FRED-245 (a per-paycheck fee collected with the investment pull and moved by an Alpaca journal), subject to three outside answers: Alpaca on fee journals, counsel on the fee and its disclosure, and App Review on billing outside in-app purchase.
 21. **Auto-invest keeps running when the subscription is missing or expired** (medium). When a user has no active plan, should FRED keep pulling and investing their paycheck money, pause it, or keep investing during a grace period?
 22. **Changing the portfolio only affects future buys, and the save screen does not say so** (small). When a user changes their portfolio, should FRED move existing holdings, or just say clearly that only new money follows the new mix?
 23. **Plus users see most of the Monte Carlo results locked as Pro, and the methodology sheet describes scenarios they cannot run** (small). Is it acceptable that about half of a Plus user's results screen is a locked Pro upsell?
@@ -88,6 +89,7 @@ Work on these items cannot start, or cannot finish, until the question is answer
 30. **Older chat conversations exist only on the phone** (medium). Should older conversations be kept on the server and listed in the app, or is losing them on sign-out acceptable?
 31. **Per-address limits trust headers that can be forged if the backend is reachable directly** (small). In production, will the backend be reachable only through Cloudflare (direct access blocked), or can it be reached at the host's own address too? The answer decides which header the limits may trust.
 32. **A closed account whose row is kept waits for a person to delete it** (medium). When the brokerage account is closed but the FRED row has to stay (up to 60 days while a transfer can still be returned), should FRED delete the row by itself once that time is up, or should it stay a manual step for an operator? Until it is deleted the person cannot sign up again with that email. Recommendation: delete it automatically with a daily job, and alert only if that fails.
+33. **Move bank linking on iPhone to Plaid Hosted Link (FRED-242)** (large). This one starts with a test only you can run: on the iPhone build, link the sandbox OAuth bank (ins_127287) with today's Link and see whether the bank returns you to FRED. If it does, do you still want the switch to Hosted Link? Recommendation: if it returns reliably, do only the universal links item (C5) for now and keep Hosted Link for later.
 
 ## Every item
 
@@ -126,6 +128,7 @@ found after the audit.
 | B18 | Login limits, recovery codes and token cutoffs live in memory | medium | Open | N | They are lost on restart and assume one backend instance. |
 | B19 | Two phones restored from one backup share a device id and sign each other out | small | Open | N | The device id is a random value kept in web storage, which a phone restore copies. |
 | B20 | Limits to tune before a wide launch: one sign-in budget per shared address, and waits that overstate | small | Open | N | Everyone behind one address (an office, a mobile carrier) shares 60 passkey sign-ins per 10 minutes. Fine for a private beta; before a wide launch raise it or count only failed sign-ins. Retry-After always gives the whole window, not the time left. |
+| B21 | New bank links send raw account and routing numbers through FRED; switch to Plaid processor tokens (FRED-241) | medium | Open | N | PlaidToAlpacaService reads the full account and routing number from Plaid and passes them to Alpaca. Ask Plaid for a processor token for Alpaca instead and send that, so the backend never sees a full account number. Existing bank links are left as they are. Best done before the first real user links a bank, and before FRED-242 and FRED-243. Ends with a sandbox check that a new link reaches APPROVED. |
 
 ### C. A shippable iOS build
 
@@ -139,6 +142,7 @@ found after the audit.
 | C6 | Add NSCameraUsageDescription | small | Open |  | Add the camera usage string and test Take Photo on the document upload screen. |
 | C7 | Fill in the production environment values | small | Open | X | Set the real API host and PostHog key once the prod backend and prod PostHog project exist. |
 | C8 | Dev mock toggles are committed in the ON position | small | Open | A | Commit the toggles off and add a check that fails a production build when any mock is on. |
+| C9 | Move bank linking on iPhone to Plaid Hosted Link in a system browser sheet (FRED-242) | large | Open | N D | Starts with a test, not a build: link the sandbox OAuth bank (ins_127287) from the iPhone build with today's web Link. If the bank returns to the app, stop and decide. If it does not, build Hosted Link: a native plugin for the browser sheet, link token changes, and all three entry points (onboarding, change bank, reconnect). The universal link work is item C5 and is needed either way. |
 
 ### D. Email and notifications
 
@@ -216,6 +220,9 @@ found after the audit.
 | G17 | AI chat sends the message text in the URL and has no stream timeout | medium | Open | A | Move the stream to a POST with a JSON body, and add an inactivity timeout that fails the message into the existing retry state. |
 | G18 | No route guards: a signed-in user whose progress fails to load is sent to the tabs even if onboarding is not finished | small | Open | A | In the fallback, use the next-step hint in the JWT: go to the tabs only when onboarding is complete, otherwise stay put and show a retry. |
 | G19 | Changing email in FRED does not update the contact email at Alpaca | small | Open | N | Alpaca keeps sending statements and notices to the old address. |
+| G20 | A closed account whose row is kept is only finished by hand, and a broker close that times out is not noticed | medium | Open | N D | 1. Delete CLOSED rows automatically once nothing is in flight (today an operator must run the admin delete; until then the email cannot sign up again). 2. If the broker call times out after the broker closed the account, nothing is marked: check the broker's account status after a failed close and shut the account if it says closed. 3. Decide whether the user gets an email when the close completes (see D5). |
+| G21 | The lock screen has no way out when the phone has no passkey the server will accept | small | Open | N | Fixed for the case where the server has no record of the passkey (two refusals running sign the device out to a screen that offers recovery). Still stuck: the phone offers no passkey at all, for example the account was re-created on another phone with the same email. Add a quiet 'Trouble signing in?' link on the lock screen that signs the device out and offers recovery. Related to G9 and G12. |
+| G22 | Prefill the KYC form from the linked bank, with bank linking moved ahead of KYC (FRED-243) | large | Open | N | Not a launch blocker: it shortens onboarding. New order is link bank, then KYC. A backend route returns name, email, phone and address from Plaid Identity (nothing stored), the form fills only empty fields, and a user caught mid-onboarding under the old order must still land on the right step. Do after FRED-241 and FRED-242, which change the same bank-link code. The privacy policy list needs a check for bank identity data. |
 
 ### H. Production environment
 
@@ -264,6 +271,7 @@ found after the audit.
 | I29 | Mocked sends count as already sent, and a month that fails on days 1 to 3 is skipped with no alert | small | Open | A | Do not treat MOCKED as sent once a real provider is on, add an alert when a month produces nothing, and add a way to backfill a missed month. |
 | I30 | TLH engine has never run live; go-live gates are open | large | Open | X A | Counsel and likely Alpaca sign-off, sign-off on the replacement ETF pairs, an end-to-end live-mode run in sandbox, and a multi-instance safe lock. |
 | I31 | Scenario labels and return assumptions do not match the tier copy and need a compliance look | small | Open | X A | Make the names match, and have counsel review calling an 8% stock return "Conservative" and offering 12%. |
+| I32 | Per-paycheck billing in place of the Apple subscription (FRED-245) | large | Open | N D X | This is the payment rail for I20. Buildable now: the price function (monthly price spread over the real pay frequency, rounded up to 10 cents, pinned by tests on both sides) and the pricing screen. Gated on three outside answers before any money moves: Alpaca allows fee journals to the firm account, counsel signs off on the fee and its disclosure, and App Review accepts billing outside in-app purchase. Then: fee added to each pull, journal after settlement, no fee when nothing was invested, reversal on a returned pull, a fee ledger the user can see. Needs I2 (subscription record) and K13 (balance check) first. |
 
 ### J. Ask FRED chat
 
@@ -292,7 +300,7 @@ found after the audit.
 | K10 | Behaviour tests for auth (JWT filter, login, passkey, recovery, PIN) | medium | Part |  | JWT filter tests: an expired, tampered, wrongly signed or missing token gets 401 on a protected route, and public routes stay open. |
 | K11 | Chat: output compliance check, retention and deletion, regex safety gate, history scoped to the user | medium | Part | D | Fix the regex gate in SafetyService.java so ordinary questions ("how much", "recession", "correction", "scam") are not blocked. |
 | K12 | Bank re-link flow and processing of Plaid webhooks | medium | Part |  | Turn the webhook processor on where real users are: set PAYCHECK_AUTOPILOT_ENABLED=true in prod, or decouple the ITEM webhook handling from the autopilot flag so bank-health webhooks run even when paycheck detection is off. |
-| K13 | Bank balance check before an ACH pull | medium | Open |  | All of it. The audit notes that whether a check is required is partly an Alpaca and Plaid contract question, and the Plaid Balance or Signal product has to be enabled on the Plaid account. |
+| K13 | Bank balance check before every ACH pull (FRED-244) | large | Open |  | Alpaca requires it, so treat it as needed before any real pull, not only before the App Store launch. Decided by Andy on 2026-11-27: Plaid Balance only (not Signal), and every pull is checked, paycheck-detected ones included. Check the live balance before manual, detected and one-time pulls; too little money means no transfer, a recorded skip reason and one calm notice; a failed check means no pull, with the retry ladder in the story. Resized from medium to large now that the scope is written down. Andy: confirm Balance is enabled on the Plaid account for sandbox and production. |
 | K14 | ACATS transfer form is live but half built: finish or hide (FRED-175) | small | Open | D | Hide the card (small), or finish it properly (large: review step, stored record, status, no fake id). |
 | K15 | One-time purchase of any single stock has no asset checks | small | Open | D | Hide the tab and reject type 'stock' on the server, or validate the symbol with Alpaca before the bank pull and filter the search list. |
 | K16 | Accessibility: zoom disabled, text does not scale, icons read out by name | medium | Open |  | Remove the zoom lock, hide icon spans from VoiceOver, turn clickable divs into buttons, label PIN, bank link and recovery controls, then one VoiceOver pass. |
@@ -329,8 +337,6 @@ found after the audit.
 | L21 | Plaid sandbox secret rotation is still owed, and credentials once in git history must not be reused | small | Part | A | Andy rotates the leaked sandbox secret in the Plaid dashboard, sets the new value on Railway dev and test and in the local gitignored file, then confirms the rotation so the old secret stops working. |
 | L22 | Backend test run silently skips database-gated tests when no MySQL is reachable | small | Part | A | Make a skip impossible to miss in CI. |
 | L23 | Beneficiary list is marked approved on any 2xx from Alpaca, and the payload has never been checked against the Alpaca sandbox | small | Open | N | Send a real beneficiary list to the Alpaca sandbox, confirm the field names and that the list is stored, and only then mark rows approved. Found in the audit and confirmed while encrypting the SSNs. |
-| G20 | A closed account whose row is kept is only finished by hand, and a broker close that times out is not noticed | medium | Open | N D | 1. Delete CLOSED rows automatically once nothing is in flight (today an operator must run the admin delete; until then the email cannot sign up again). 2. If the broker call times out after the broker closed the account, nothing is marked: check the broker's account status after a failed close and shut the account if it says closed. 3. Decide whether the user gets an email when the close completes (see D5). |
-| G21 | The lock screen has no way out when the phone has no passkey the server will accept | small | Open | N | Fixed for the case where the server has no record of the passkey (two refusals running sign the device out to a screen that offers recovery). Still stuck: the phone offers no passkey at all, for example the account was re-created on another phone with the same email. Add a quiet 'Trouble signing in?' link on the lock screen that signs the device out and offers recovery. Related to G9 and G12. |
 
 ## Keeping this current
 

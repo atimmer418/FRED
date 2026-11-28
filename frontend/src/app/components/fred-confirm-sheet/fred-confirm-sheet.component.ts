@@ -113,7 +113,9 @@ export class FredConfirmSheetComponent implements OnInit, OnDestroy {
       else console.error('FredConfirmSheet: onConfirm failed', err);
       return;
     }
-    await this.modalCtrl.dismiss(undefined, FRED_CONFIRM_SHEET_ROLE);
+    // The action may have closed this sheet itself (closing the account signs the device out and
+    // clears every sheet). Dismissing a sheet that is already gone rejects; that is not an error.
+    await this.modalCtrl.dismiss(undefined, FRED_CONFIRM_SHEET_ROLE).catch(() => false);
   }
 
   close(): void {

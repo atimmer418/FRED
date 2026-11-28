@@ -1,0 +1,117 @@
+// --- Force light mode regardless of system theme ---
+:host {
+  --closed-primary: #2563EB;
+  --closed-bg: #f8fafc;
+  --closed-text: #111827;
+  --closed-gray: #6b7280;
+
+  --ion-background-color: #f8fafc;
+  --ion-text-color: #111827;
+  --ion-color-primary: #2563EB;
+}
+
+ion-content {
+  --background: var(--closed-bg);
+}
+
+.content-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 16px 18px;
+  padding-top: calc(env(safe-area-inset-top) + 16px);
+}
+
+.hero-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 15vh;
+}
+
+.hero-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  margin-bottom: 28px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.hero-title {
+  font-family: 'Manrope', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--closed-text);
+  margin: 0 0 12px;
+}
+
+.hero-subtitle {
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--closed-gray);
+  max-width: 320px;
+  margin: 0;
+}
+
+ion-footer {
+  background: var(--closed-bg);
+}
+
+.cta-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px calc(env(safe-area-inset-bottom) + 16px);
+}
+
+.cta-button,
+.cta-secondary {
+  width: 100%;
+  height: 54px;
+  border-radius: 12px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cta-button {
+  border: none;
+  background: var(--closed-primary);
+  color: #ffffff;
+
+  &:active {
+    opacity: 0.9;
+  }
+}
+
+.cta-secondary {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: var(--closed-text);
+
+  &:active {
+    background: #f3f4f6;
+  }
+}
+
+.support-link {
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--closed-gray);
+  text-align: center;
+  margin: 6px 0 0;
+
+  a {
+    color: var(--closed-primary);
+    font-weight: 600;
+    text-decoration: none;
+  }
+}

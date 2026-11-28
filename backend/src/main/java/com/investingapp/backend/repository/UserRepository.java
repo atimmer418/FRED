@@ -73,10 +73,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     List<User> findByDeviceIdAndAuthFinalizeCompleted(@Param("deviceId") String deviceId,
             @Param("completed") boolean authFinalizeCompleted);
 
-    // Find users whose account status is non-terminal (i.e., not ACTIVE or REJECTED)
+    // Find users whose account status is non-terminal (i.e., not ACTIVE, REJECTED or CLOSED)
     // and non-null — used by the account status poller.
-    @Query("SELECT u FROM User u WHERE u.accountStatus IS NOT NULL AND u.accountStatus NOT IN ('ACTIVE', 'REJECTED')")
+    @Query("SELECT u FROM User u WHERE u.accountStatus IS NOT NULL AND u.accountStatus NOT IN ('ACTIVE', 'REJECTED', 'CLOSED')")
     List<User> findUsersWithPendingAccountStatus();
+
+    /** The user behind a token's pid claim; empty once the account has been deleted. */
+    Optional<User> findByPublicId(String publicId);
 
     // Find ACTIVE users who have Plaid data but no ACH relationship yet —
     // used by the ACH setup retry scheduler.

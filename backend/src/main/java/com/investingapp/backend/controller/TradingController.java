@@ -63,6 +63,9 @@ public class TradingController {
     @Autowired
     private OpsAlertService opsAlertService;
 
+    @Autowired
+    private com.investingapp.backend.service.AccountClosureService accountClosureService;
+
 
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -315,6 +318,10 @@ public class TradingController {
     @PostMapping("/account/close")
     public ResponseEntity<?> closeAccount(Authentication authentication) {
         Long closingUserId = null;
+        User closingUser = null;
+        // True from the moment the broker has closed the brokerage account. After that there is
+        // no way back, so whatever goes wrong next, the FRED account must end up shut.
+        boolean brokerClosed = false;
         try {
             if (authentication == null || authentication.getPrincipal() == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -328,6 +335,7 @@ public class TradingController {
                     .body(Map.of("error", "User or Alpaca account not found"));
             }
             closingUserId = user.getId();
+            closingUser = user;
 
             // Refuse before touching the broker: closing the brokerage account and then keeping
             // the FRED row would leave the user half deleted.
@@ -341,6 +349,7 @@ public class TradingController {
 
             // Close the Alpaca brokerage account
             alpacaService.closeAccount(accountId);
+            brokerClosed = true;
 
             // One path for every row that references the user (schedules, sessions, portfolio, ...),
             // with the cancellation recorded as the first statement inside that same transaction:
@@ -365,10 +374,23 @@ public class TradingController {
                     closingUserId == null ? OpsAlertService.GLOBAL_SUBJECT : String.valueOf(closingUserId),
                     "brokerage account closed, FRED row deletion deferred",
                     Map.of("reason", "ACCOUNT_CLOSED", "deferral", String.valueOf(deferred.reason)));
+            if (brokerClosed) {
+                return shutWithRowKept(closingUser, deferred);
+            }
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorCodeResponse("DELETION_DEFERRED", deferred.reason));
         } catch (Exception e) {
             logger.error("Error closing account: {}", e.getMessage(), e);
+            if (brokerClosed) {
+                // The brokerage account is closed and the deletion rolled back. Same position as
+                // a deferred deletion: an operator finishes it, and the user is shut out now.
+                logger.error("alert.user_deletion.deferred reason=ACCOUNT_CLOSED deferral=DELETE_FAILED");
+                opsAlertService.raise(OpsAlerts.USER_DELETION_DEFERRED,
+                        closingUserId == null ? OpsAlertService.GLOBAL_SUBJECT : String.valueOf(closingUserId),
+                        "brokerage account closed, FRED row deletion failed",
+                        Map.of("reason", "ACCOUNT_CLOSED", "deferral", "DELETE_FAILED"));
+                return shutWithRowKept(closingUser, e);
+            }
             // RETHROW rather than return. The rollback itself is no longer this method's doing:
             // the deletes run inside UserDeletionService's TransactionTemplate, which rolls back
             // on its own when a statement throws. What this keeps is the other half of the fix,
@@ -377,6 +399,32 @@ public class TradingController {
             // same response the caller used to get.
             throw new AccountCloseFailedException(e);
         }
+    }
+
+    /**
+     * The brokerage account is closed but the FRED row is staying for now. To the user the account
+     * IS closed, so every way into it is removed and the app is told the close succeeded; it then
+     * shows the closed screen like any other close. The row waits for an operator (the ops alert
+     * has already been raised by the caller).
+     *
+     * <p>If even this fails, the close is reported as the hard failure it is.
+     */
+    private ResponseEntity<?> shutWithRowKept(User user, Exception why) {
+        try {
+            // The user's schedule is over as of now, so the cancellation is recorded here, in the
+            // same transaction as the CLOSED mark: the deletion that would have recorded it did
+            // not happen, and the operator's later delete records an admin action, not this.
+            accountClosureService.shut(user.getId(), () -> recordScheduleCancelled(user));
+        } catch (RuntimeException shutFailed) {
+            logger.error("Could not shut account after the broker closed it user={}: {}",
+                    user.getId(), shutFailed.getMessage(), shutFailed);
+            throw new AccountCloseFailedException(why);
+        }
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Your account has been permanently closed.",
+            "deletionPending", true
+        ));
     }
 
     /** Signals a failed account closure after the transaction has been rolled back. */

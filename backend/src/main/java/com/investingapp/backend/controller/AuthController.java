@@ -168,6 +168,14 @@ public class AuthController {
         if (authentication == null || !authentication.isAuthenticated()
                 || "anonymousUser".equals(authentication.getPrincipal().toString())) {
             logger.warn("Token refresh attempted without valid authentication");
+            if (com.investingapp.backend.security.ClosedAccountSignal.isMarked(request)) {
+                // The token is one of ours but its account is closed: say so, so the app shows
+                // the closed screen instead of asking for a passkey nobody can accept.
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new com.investingapp.backend.dto.ErrorCodeResponse(
+                                com.investingapp.backend.security.ClosedAccountSignal.CODE,
+                                "This account is closed."));
+            }
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new MessageResponse("No valid token to refresh"));
         }

@@ -44,6 +44,14 @@ describe('FredConfirmSheetComponent', () => {
   const confirmBtn = () => fixture.nativeElement.querySelector('.cs-confirm') as HTMLButtonElement;
   const cancelBtn = () => fixture.nativeElement.querySelector('.gs-cancel') as HTMLButtonElement;
 
+  it('does not fail when the action already closed the sheet itself', async () => {
+    // Closing the account signs the device out and clears every sheet, this one included.
+    create({ onConfirm: () => Promise.resolve() });
+    modal.dismiss.and.rejectWith(new Error('overlay does not exist'));
+
+    await expectAsync(fixture.componentInstance.confirm()).toBeResolved();
+  });
+
   it('renders title, body, labels and the destructive button recipe', () => {
     create({ cancelLabel: 'Keep investing', icon: 'pause_circle' });
     const el: HTMLElement = fixture.nativeElement;

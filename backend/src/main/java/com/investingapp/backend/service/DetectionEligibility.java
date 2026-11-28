@@ -30,7 +30,8 @@ public final class DetectionEligibility {
         if (!props.isEnabled()) {
             return Optional.of(ExclusionReason.DISABLED);
         }
-        if (ACCOUNT_STATUS_REJECTED.equals(user.getAccountStatus())) {
+        // A closed account waiting to be deleted is out for the same reason a rejected one is.
+        if (ACCOUNT_STATUS_REJECTED.equals(user.getAccountStatus()) || user.isClosed()) {
             return Optional.of(ExclusionReason.ACCOUNT_REJECTED);
         }
         if (Boolean.TRUE.equals(user.getPaycheckAutopilotOptOut())) {

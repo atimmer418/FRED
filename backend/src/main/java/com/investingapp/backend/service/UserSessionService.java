@@ -53,6 +53,11 @@ public class UserSessionService {
      */
     @Transactional
     public UserSession start(User user) {
+        // Every sign-in comes through here, so this one line is what keeps a closed account out,
+        // whichever way it tries to sign in.
+        if (user.isClosed()) {
+            throw new IllegalStateException("account is closed");
+        }
         HttpServletRequest request = currentRequest();
         String deviceId = clean(header(request, "X-Device-ID"), DEVICE_ID_MAX);
         String deviceName = header(request, "X-Device-Name");

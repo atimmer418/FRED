@@ -7,6 +7,7 @@ import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../services/toast.service';
 import { NativePasskeyService } from '../../services/native-passkey.service';
 import { timeout } from 'rxjs';
+import { AccountClosedService } from '../../services/account-closed.service';
 
 @Component({
   selector: 'app-passkey-prompt',
@@ -19,6 +20,10 @@ export class PasskeyPromptComponent implements AfterViewInit, OnDestroy {
 
   @Input() userEmail?: string;
   @Input() jwtExpired = false;
+  /** True only when this is the app lock screen (not a step-up prompt inside the app). */
+  @Input() lockScreen = false;
+  /** How many times running the server said it has no record of the passkey offered. */
+  private unknownPasskeyTries = 0;
   @Input() onLottieReady?: () => void;
   @Input() onReauthSuccess?: () => void;
 
@@ -43,7 +48,8 @@ export class PasskeyPromptComponent implements AfterViewInit, OnDestroy {
     private authService: AuthService,
     private toastService: ToastService,
     private nativePasskeyService: NativePasskeyService,
-    private zone: NgZone
+    private zone: NgZone,
+    private accountClosed: AccountClosedService
   ) {
     this.authService.userProgress$.subscribe(progress => {
       this.isFounder = progress?.privateBeta === true;
@@ -321,6 +327,21 @@ export class PasskeyPromptComponent implements AfterViewInit, OnDestroy {
             },
             error: (err) => {
               console.error('Passkey finish error', err);
+              if (this.lockScreen && err?.status === 401 && err?.error?.code === 'PASSKEY_NOT_REGISTERED') {
+                // The server has no record of this passkey. Once could be a slip: a phone can
+                // hold an old FRED passkey next to the current one, so the user gets Unlock back
+                // and can pick the other. Twice running means nothing here will unlock, and
+                // showing Unlock for ever would trap them, so the device is signed out and shown
+                // the screen that explains it. (A step-up prompt inside the app is left alone:
+                // there the user is signed in and simply picked the wrong passkey.)
+                this.unknownPasskeyTries++;
+                if (this.unknownPasskeyTries >= 2) {
+                  void this.accountClosed.leave('passkey');
+                  return;
+                }
+              } else {
+                this.unknownPasskeyTries = 0;
+              }
               // this.showToast('Authentication failed. Please try again.', 'danger');
               this.revealUnlockButton();
             }

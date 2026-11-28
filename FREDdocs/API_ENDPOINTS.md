@@ -50,6 +50,29 @@ All available API endpoints in the backend. Keep this file updated when adding n
 
 ---
 
+### Closed accounts
+
+A closed account cannot come back in, and the server says so, so the app can show a clear screen
+instead of asking for a passkey that can never work.
+
+| Answer | When | What the app does |
+|---|---|---|
+| `401` with `"code": "ACCOUNT_CLOSED"` | Any protected route, or `POST /api/auth/refresh`, called with a token this server signed whose account no longer exists or is marked `CLOSED` | Signs the device out, wipes it, shows `/account-closed` |
+| `401` with `"code": "PASSKEY_NOT_REGISTERED"` | `POST /api/passkey/authenticate/finish` with a passkey this server has no record of (the account was closed, or recovery replaced its passkeys) | On the lock screen: signs the device out and shows `/account-closed?reason=passkey`, which also offers recovery |
+| `401` with no code | Everything else: no token, a bad token, a session that ended or was revoked | Asks for the passkey, as before |
+
+`ACCOUNT_CLOSED` is decided from the token's `pid` claim, not its email, because an email can
+change while the account lives on. A token without a `pid` gets the plain `401`. Only a token with
+this server's signature can get the code, so it cannot be used to ask whether an account exists.
+
+`POST /api/trading/account/close` answers `200 { success: true }` once the brokerage account is
+closed. Normally the FRED user row is deleted in the same call. If the row cannot be deleted yet (a
+transfer landed in between, or the delete failed), the answer also carries `deletionPending: true`:
+the row is marked `account_status = CLOSED`, its passkeys and sessions are removed, it can no
+longer sign in, refresh or recover, an ops alert (`user_deletion.deferred`) is raised, and an
+operator finishes with `POST /api/admin/users/{id}/delete`. Until then the email cannot be used to
+sign up again. `409 DELETION_DEFERRED` now only ever means "nothing was closed, try later".
+
 ### Request limits
 
 Over a limit, the answer is `429` with a `Retry-After` header (seconds) and

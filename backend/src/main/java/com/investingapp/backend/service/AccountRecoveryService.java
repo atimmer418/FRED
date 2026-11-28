@@ -244,6 +244,11 @@ public class AccountRecoveryService {
 
         String email = normalise(requestedEmail);
         User user = email.isEmpty() ? null : userRepository.findByEmail(email).orElse(null);
+        // A closed account that is still waiting to be deleted is treated exactly like an address
+        // nobody has: the same answer, and no code.
+        if (user != null && user.isClosed()) {
+            user = null;
+        }
 
         boolean allowed = codesPerAddressHour.allow(addressKey(clientAddress));
         if (user != null) {
@@ -300,6 +305,9 @@ public class AccountRecoveryService {
         String email = normalise(requestedEmail);
         String code = submittedCode == null ? "" : submittedCode.trim();
         User user = email.isEmpty() ? null : userRepository.findByEmail(email).orElse(null);
+        if (user != null && user.isClosed()) {
+            user = null;
+        }
 
         boolean allowed = checksPerAddressHour.allow(addressKey(clientAddress));
         allowed &= (user != null)

@@ -47,6 +47,7 @@ import { AmountTraySlotComponent } from '../components/plan-amount-tray/amount-t
 import { SkeletonComponent } from '../components/skeleton/skeleton.component';
 import { buildAmountScale } from '../utils/plan-amount-scale';
 import { AnalyticsService } from '../services/analytics/analytics.service';
+import { AccountClosedService } from '../services/account-closed.service';
 import { httpStatusOf, isNetworkFailure } from '../services/analytics/analytics-error.utils';
 
 /** The one tray field on this page. */
@@ -146,6 +147,7 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
     private navCtrl: NavController,
     private analytics: AnalyticsService,
     host: ElementRef<HTMLElement>,
+    private accountClosed: AccountClosedService,
   ) {
     this.tray = new AmountTrayHost<TrayField>({
       root: host,
@@ -614,16 +616,12 @@ export class SellWithdrawPage implements OnInit, OnDestroy {
       const response = await this.tradingService.closeAccount().toPromise();
 
       if (response?.success) {
-        this.showToast('Your account has been permanently closed.', 'success');
-        // Clear any stored auth tokens and navigate to root
-        // Drop the analytics identity BEFORE the store is wiped: reset() needs the vendor's own
-        // localStorage entries to still be there, and the next user on this device must not inherit
-        // this one's identity.
-        this.analytics.reset();
-
-        localStorage.clear();
-        sessionStorage.clear();
-        this.router.navigateByUrl('/', { replaceUrl: true });
+        // No toast: the closed screen is the message.
+        // One exit for a closed account: it signs the app out in memory as well as on disk
+        // (analytics identity first, then storage and the Keychain email) and shows the closed
+        // screen. Clearing storage alone left the app believing it was still signed in, and
+        // the next resume sent the closed account back to the tabs.
+        await this.accountClosed.leave('closed');
       } else {
         this.analytics.trackErrorShown('save_failed', 'portfolio', 'toast', null, false);
         this.showToast(response?.error || 'Failed to close account. Please try again.', 'danger');

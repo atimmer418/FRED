@@ -1,6 +1,6 @@
 # FRED production readiness scorecard
 
-Last updated: 2026-11-26. Latest change: Request limits on the public sign-in routes and on chat.
+Last updated: 2026-11-27. Latest change: A closed account cannot get back into the app and lands on a clear screen.
 
 Every item needed before FRED is production ready, with a size and a status. It is built from
 `production-readiness-checklist.md`, `production-readiness-audit-findings.md` (blocker, high and
@@ -12,9 +12,9 @@ from the checklist's tick boxes.
 
 | | |
 |---|---|
-| Items done | **10 of 174** (17 more are part done; 1 dropped item is not counted) |
-| Readiness, weighted by size | **9.5%** (44.5 of 468 points) |
-| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 12.0% (44.5 of 370 points, 146 items) |
+| Items done | **11 of 176** (17 more are part done; 1 dropped item is not counted) |
+| Readiness, weighted by size | **9.6%** (45.5 of 472 points) |
+| App work only (leaving out items that wait on counsel, Alpaca, Apple or a vendor) | 12.2% (45.5 of 374 points, 148 items) |
 
 How it is worked out: small = 1 point, medium = 3, large = 8 (roughly days of work: under a day, a
 few days, a week or more). A done item earns all its points, a part done item earns half, an open
@@ -33,7 +33,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | D. Email and notifications | 0 | 2 | 8 | 4.5 of 39 | 12% |
 | E. Legal slots in the app | 0 | 0 | 15 | 0 of 21 | 0% |
 | F. Money safety | 0 | 0 | 13 | 0 of 56 | 0% |
-| G. Onboarding and account lifecycle | 0 | 1 | 18 | 0.5 of 31 | 2% |
+| G. Onboarding and account lifecycle | 1 | 1 | 19 | 1.5 of 35 | 4% |
 | H. Production environment | 0 | 2 | 5 | 3 of 26 | 12% |
 | I. Tiers and billing | 0 | 2 | 29 | 3 of 116 | 3% |
 | J. Ask FRED chat | 1 | 1 | 4 | 2.5 of 14 | 18% |
@@ -49,6 +49,7 @@ remaining items are equally urgent: one open security or money item can block a 
 | 2026-11-25 | Beneficiary SSNs: encrypted in the database, last four digits only in responses (one new item found: L23) | 8 of 174 | 9.0% |
 | 2026-11-26 | Applicant SSN removed from the on-device KYC draft. B8 (server logout and sign-out button) dropped by Andy and no longer counted | 9 of 173 | 9.2% |
 | 2026-11-26 | Request limits on passkey sign-up and sign-in, token refresh, the old login, the re-auth check and chat (one new item found: B20) | 10 of 174 | 9.5% |
+| 2026-11-27 | Closed accounts: signed out for good on every device and shown a closed screen; a brokerage close that cannot delete the row still shuts the account (two new items found: G20, G21) | 11 of 176 | 9.6% |
 
 ## Decisions needed from Andy
 
@@ -85,6 +86,7 @@ Work on these items cannot start, or cannot finish, until the question is answer
 29. **Small contributions silently skip portfolio slices, and an all-skipped run is reported as a success** (medium). When a slice of a paycheck is under $1, should FRED raise the minimum contribution, fold that money into the other funds, or leave it as cash and tell the user?
 30. **Older chat conversations exist only on the phone** (medium). Should older conversations be kept on the server and listed in the app, or is losing them on sign-out acceptable?
 31. **Per-address limits trust headers that can be forged if the backend is reachable directly** (small). In production, will the backend be reachable only through Cloudflare (direct access blocked), or can it be reached at the host's own address too? The answer decides which header the limits may trust.
+32. **A closed account whose row is kept waits for a person to delete it** (medium). When the brokerage account is closed but the FRED row has to stay (up to 60 days while a transfer can still be returned), should FRED delete the row by itself once that time is up, or should it stay a manual step for an operator? Until it is deleted the person cannot sign up again with that email. Recommendation: delete it automatically with a daily job, and alert only if that fails.
 
 ## Every item
 
@@ -209,7 +211,7 @@ found after the audit.
 | G13 | One-time invest runs on a single tap with no confirmation step | small | Open | A | Put a confirm sheet in front of Make Investment that states the amount and the bank it is pulled from. |
 | G14 | Change Bank Account shows errors in a green success card and dead-ends when the link token fails | small | Open | A | Track status as a typed state, use plain error copy, make Try again re-run the Plaid setup, and show nothing when the user simply closes Plaid. |
 | G15 | Security settings: silent failures and a hardcoded 'Verified via Alpaca' | small | Open | A | Drive the KYC row from the real account status, add a confirm sheet and error toast to device revoke, and put the PIN switch back with a toast when removing the PIN fails. |
-| G16 | Close account clears storage but does not reset in-memory sign-in state | small | Open | A | Call AuthService.logout() before clearing storage and navigating, so a closed account is not routed back into the tabs on the next resume. |
+| G16 | Close account clears storage but does not reset in-memory sign-in state | small | Done | A | Closing an account now goes through one exit (AccountClosedService): sign out in memory, wipe the device and the Keychain email, close any lock screen, show the new Account closed screen. The server marks a closed account's 401 with ACCOUNT_CLOSED, so a second device is signed out the same way instead of sitting on a lock screen it could never pass. When the brokerage account closes but the row cannot be deleted, the account is still shut (status CLOSED, passkeys and sessions removed, no sign-in, refresh or recovery). |
 | G17 | AI chat sends the message text in the URL and has no stream timeout | medium | Open | A | Move the stream to a POST with a JSON body, and add an inactivity timeout that fails the message into the existing retry state. |
 | G18 | No route guards: a signed-in user whose progress fails to load is sent to the tabs even if onboarding is not finished | small | Open | A | In the fallback, use the next-step hint in the JWT: go to the tabs only when onboarding is complete, otherwise stay put and show a retry. |
 | G19 | Changing email in FRED does not update the contact email at Alpaca | small | Open | N | Alpaca keeps sending statements and notices to the old address. |
@@ -326,6 +328,8 @@ found after the audit.
 | L21 | Plaid sandbox secret rotation is still owed, and credentials once in git history must not be reused | small | Part | A | Andy rotates the leaked sandbox secret in the Plaid dashboard, sets the new value on Railway dev and test and in the local gitignored file, then confirms the rotation so the old secret stops working. |
 | L22 | Backend test run silently skips database-gated tests when no MySQL is reachable | small | Part | A | Make a skip impossible to miss in CI. |
 | L23 | Beneficiary list is marked approved on any 2xx from Alpaca, and the payload has never been checked against the Alpaca sandbox | small | Open | N | Send a real beneficiary list to the Alpaca sandbox, confirm the field names and that the list is stored, and only then mark rows approved. Found in the audit and confirmed while encrypting the SSNs. |
+| G20 | A closed account whose row is kept is only finished by hand, and a broker close that times out is not noticed | medium | Open | N D | 1. Delete CLOSED rows automatically once nothing is in flight (today an operator must run the admin delete; until then the email cannot sign up again). 2. If the broker call times out after the broker closed the account, nothing is marked: check the broker's account status after a failed close and shut the account if it says closed. 3. Decide whether the user gets an email when the close completes (see D5). |
+| G21 | The lock screen has no way out when the phone has no passkey the server will accept | small | Open | N | Fixed for the case where the server has no record of the passkey (two refusals running sign the device out to a screen that offers recovery). Still stuck: the phone offers no passkey at all, for example the account was re-created on another phone with the same email. Add a quiet 'Trouble signing in?' link on the lock screen that signs the device out and offers recovery. Related to G9 and G12. |
 
 ## Keeping this current
 

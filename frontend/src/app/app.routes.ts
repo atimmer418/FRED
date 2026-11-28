@@ -63,6 +63,11 @@ export const routes: Routes = [
     path: 'change-email',
     loadComponent: () => import('./pages/change-email/change-email.page').then(m => m.ChangeEmailPage)
   },
+  // Where a device lands when its account is closed (see AccountClosedService).
+  {
+    path: 'account-closed',
+    loadComponent: () => import('./pages/account-closed/account-closed.page').then(m => m.AccountClosedPage)
+  },
   {
     path: 'get-started',
     loadComponent: () => import('./components/get-started/get-started.component').then(m => m.GetStartedComponent),

@@ -63,6 +63,9 @@ public class PaydayNotificationService {
             }
             User user = schedule.getUser();
             if (user == null) continue;
+            // A closed account whose row is waiting to be deleted still has its schedule row.
+            // Nothing will be invested for it, so it must not be told that something will.
+            if (user.isClosed()) continue;
             String amount = String.format("$%.0f", schedule.getInvestmentAmount());
             emailService.sendEmail(user.getEmail(), D1_MANUAL_SUBJECT, String.format(D1_MANUAL_BODY, amount));
             sendPushIfTokenPresent(user, D1_MANUAL_PUSH_TITLE, String.format(D1_MANUAL_PUSH_BODY, amount));

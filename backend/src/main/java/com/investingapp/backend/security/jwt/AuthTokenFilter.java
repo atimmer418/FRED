@@ -33,6 +33,9 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
     @Autowired
     private com.investingapp.backend.security.TokenCutoffRegistry tokenCutoffs;
 
+    @Autowired
+    private com.investingapp.backend.security.ClosedAccountSignal closedAccountSignal;
+
     private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
 
     /**
@@ -79,10 +82,21 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
                 boolean isValid = jwtUtils.validateJwtToken(jwt);
                 if (isValid) {
                     String email = jwtUtils.getUserNameFromJwtToken(jwt);
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+                    UserDetails userDetails;
+                    try {
+                        userDetails = userDetailsService.loadUserByUsername(email);
+                    } catch (org.springframework.security.core.userdetails.UsernameNotFoundException gone) {
+                        // Our signature, but nobody has this email any more. Usually the account
+                        // was closed; the 401 then says so (see ClosedAccountSignal).
+                        closedAccountSignal.noteIfClosed(request, jwt);
+                        logger.warn("AuthTokenFilter: token for {} names no account.", request.getRequestURI());
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
 
                     String refusal = whyRefused(jwt, userDetails);
                     if (refusal != null) {
+                        closedAccountSignal.noteIfClosed(request, jwt);
                         // Treated exactly like a request with no token: protected routes answer 401,
                         // and the public sign-in routes still work, so a device holding a dead
                         // token can always sign in again.
@@ -124,6 +138,11 @@ public class AuthTokenFilter extends OncePerRequestFilter { // Extend OncePerReq
         }
         if (!(userDetails instanceof com.investingapp.backend.security.services.UserDetailsImpl known)) {
             return "user could not be identified";
+        }
+        // Checked on every request, not only when a session starts: a sign-in that overlapped
+        // the closing of the account could otherwise leave a session behind that still worked.
+        if (known.isClosed()) {
+            return "account is closed";
         }
         if (!userSessionRepository.existsByIdAndUserIdAndActiveTrue(sessionId, known.getId())) {
             return "session " + sessionId + " is revoked or is not this user's";

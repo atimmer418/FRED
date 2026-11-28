@@ -138,6 +138,8 @@ jobs:
           npx ng test --include='**/beneficiaries/*.spec.ts' --watch=false --browsers=ChromeHeadless
           # The applicant's SSN is never in the on-device KYC draft, and old drafts are scrubbed at launch.
           npx ng test --include='**/components/kyc-verification/*.spec.ts' --include='**/utils/kyc-draft.utils.spec.ts' --watch=false --browsers=ChromeHeadless
+          # A closed account is signed out for good and shown the closed screen, never routed back in.
+          npx ng test --include='**/services/account-closed.service.spec.ts' --include='**/interceptors/*.spec.ts' --include='**/pages/account-closed/*.spec.ts' --include='**/components/passkey-prompt/*.spec.ts' --include='**/components/fred-confirm-sheet/*.spec.ts' --include='**/sell-withdraw/*.spec.ts' --include='**/app.component.spec.ts' --watch=false --browsers=ChromeHeadless
           # Analytics specs: these are new and green, so they are gated from the start.
           npx ng test --include='**/services/analytics/*.spec.ts' --include='**/dev-tools-key.utils.spec.ts' --watch=false --browsers=ChromeHeadless
           # Paycheck Autopilot Phase 1: the Plaid OAuth return capture (cold start, onboarding and

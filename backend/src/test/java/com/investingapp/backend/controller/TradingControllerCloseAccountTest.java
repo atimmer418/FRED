@@ -53,6 +53,7 @@ class TradingControllerCloseAccountTest {
     private UserDeletionService userDeletionService;
     private AnalyticsOutboxService analyticsOutboxService;
     private OpsAlertService opsAlertService;
+    private com.investingapp.backend.service.AccountClosureService accountClosureService;
     private Authentication authentication;
     private User user;
 
@@ -73,6 +74,8 @@ class TradingControllerCloseAccountTest {
         ReflectionTestUtils.setField(controller, "analyticsOutboxService", analyticsOutboxService);
         opsAlertService = mock(OpsAlertService.class);
         ReflectionTestUtils.setField(controller, "opsAlertService", opsAlertService);
+        accountClosureService = mock(com.investingapp.backend.service.AccountClosureService.class);
+        ReflectionTestUtils.setField(controller, "accountClosureService", accountClosureService);
 
         user = new User(EMAIL);
         user.setId(42L);
@@ -116,8 +119,8 @@ class TradingControllerCloseAccountTest {
     }
 
     @Test
-    @DisplayName("a deferral raised by the delete itself still answers 409, not 500")
-    void lateDeferralIs409() {
+    @DisplayName("a deferral raised after the broker closed shuts the account and reports it closed")
+    void lateDeferralShutsTheAccount() {
         when(userDeletionService.deferralReason(user)).thenReturn(Optional.empty());
         doThrow(new DeletionDeferredException("SETTLEMENT_WINDOW"))
                 .when(userDeletionService).delete(eq(user),
@@ -125,13 +128,28 @@ class TradingControllerCloseAccountTest {
 
         ResponseEntity<?> response = controller.closeAccount(authentication);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(response.getBody()).isEqualTo(new ErrorCodeResponse("DELETION_DEFERRED", "SETTLEMENT_WINDOW"));
+        // The brokerage account is gone, so telling the user "not yet" would be untrue. Every way
+        // into the account is removed and the app is told the close happened.
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEqualTo(Map.of("success", true,
+                "message", "Your account has been permanently closed.", "deletionPending", true));
+        verify(accountClosureService).shut(eq(42L), any(Runnable.class));
         // The deferral is raised before the hook runs, so no cancellation was recorded for a
         // deletion that did not happen. That is the whole point of handing the event to the
         // deletion transaction instead of committing it here first.
         verify(analyticsOutboxService, never()).record(anyString(), any(), anyMap());
         verify(opsAlertService).raise(eq(OpsAlerts.USER_DELETION_DEFERRED), eq("42"), anyString(),
                 eq(Map.of("reason", "ACCOUNT_CLOSED", "deferral", "SETTLEMENT_WINDOW")));
+    }
+
+    @Test
+    @DisplayName("a refusal before the broker call shuts nothing")
+    void earlyDeferralShutsNothing() {
+        when(userDeletionService.deferralReason(user)).thenReturn(Optional.of("SETTLEMENT_WINDOW"));
+
+        ResponseEntity<?> response = controller.closeAccount(authentication);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        verify(accountClosureService, never()).shut(any(), any());
     }
 }

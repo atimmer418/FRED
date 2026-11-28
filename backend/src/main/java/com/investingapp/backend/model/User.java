@@ -228,7 +228,20 @@ public class User {
     private Boolean paycheckAutopilotOptOut = false;
 
     @Column(name = "account_status", length = 30)
-    private String accountStatus; // SUBMITTED, APPROVAL_PENDING, APPROVED, ACTIVE, REJECTED, ACTION_REQUIRED
+    private String accountStatus; // SUBMITTED, APPROVAL_PENDING, APPROVED, ACTIVE, REJECTED, ACTION_REQUIRED, CLOSED
+
+    /**
+     * The brokerage account is closed but this row could not be deleted yet (money was still in
+     * flight, or the delete failed). Set only by AccountClosureService. Such a user can never sign
+     * in, refresh or recover; an operator finishes the deletion with the admin verb.
+     */
+    public static final String ACCOUNT_STATUS_CLOSED = "CLOSED";
+
+    /** True for a closed account whose row is still waiting to be deleted. */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public boolean isClosed() {
+        return ACCOUNT_STATUS_CLOSED.equals(accountStatus);
+    }
 
     /**
      * When the most recent KYC submission was sent to the broker. Stamped on every submission, and

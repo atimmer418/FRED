@@ -1,0 +1,36 @@
+<ion-content>
+  <div class="content-inner">
+    <div class="hero-section">
+      <img class="hero-logo" src="assets/images/fred-logo.svg" alt="" draggable="false" />
+
+      @if (passkeyUnknown) {
+        <h1 class="hero-title">We couldn't sign you in</h1>
+        <p class="hero-subtitle">
+          This passkey is no longer linked to a FRED account. If you closed your account, you can start a new one.
+          If you still have an account, you can recover it with your email.
+        </p>
+      } @else {
+        <h1 class="hero-title">Your account is closed</h1>
+        <p class="hero-subtitle">
+          This FRED account has been closed and you're signed out on this device.
+          If you'd like to come back, you can start a new account any time.
+        </p>
+      }
+    </div>
+  </div>
+</ion-content>
+
+<ion-footer class="ion-no-border">
+  <div class="cta-footer">
+    @if (passkeyUnknown) {
+      <button type="button" class="cta-button" (click)="recover()">Recover my account</button>
+      <button type="button" class="cta-secondary" (click)="startOver()">Start a new account</button>
+    } @else {
+      <button type="button" class="cta-button" (click)="startOver()">Start over</button>
+    }
+    <p class="support-link">
+      Questions?
+      <a href="mailto:help@fredvested.com?subject=FRED%20Account%20Help">Contact support</a>
+    </p>
+  </div>
+</ion-footer>

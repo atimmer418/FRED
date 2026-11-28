@@ -53,6 +53,12 @@ class DetectionEligibilityTest {
     }
 
     @Test
+    void closedAccountExcluded() {
+        user.setAccountStatus("CLOSED");
+        assertThat(DetectionEligibility.exclusion(user, ON)).contains(ExclusionReason.ACCOUNT_REJECTED);
+    }
+
+    @Test
     void optedOutExcluded() {
         user.setPaycheckAutopilotOptOut(true);
         assertThat(DetectionEligibility.exclusion(user, ON)).contains(ExclusionReason.OPTED_OUT);

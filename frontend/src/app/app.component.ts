@@ -25,6 +25,7 @@ import { AnalyticsService } from './services/analytics/analytics.service';
 import { ScreenTrackingService } from './services/analytics/screen-tracking.service';
 import { combineLatest, debounceTime, distinctUntilChanged, filter, Subject, throttleTime } from 'rxjs';
 import { addIcons } from 'ionicons';
+import { ACCOUNT_CLOSED_ROUTE, AccountClosedService } from './services/account-closed.service';
 import { lockClosedOutline, fingerPrintOutline } from 'ionicons/icons';
 
 register();
@@ -75,7 +76,8 @@ export class AppComponent implements OnInit {
     private pushNotificationService: PushNotificationService,
     private portfolioStore: PortfolioStoreService,
     private analytics: AnalyticsService,
-    private screenTracking: ScreenTrackingService
+    private screenTracking: ScreenTrackingService,
+    private accountClosed: AccountClosedService
   ) {
     addIcons({ lockClosedOutline, fingerPrintOutline });
 
@@ -326,7 +328,11 @@ export class AppComponent implements OnInit {
           unifiedProgress.surveyInitialCompleted ||
           unifiedProgress.fiPlanResultsCompleted;
 
-        if (hasAnyProgress) {
+        if (this.onAccountClosedScreen()) {
+          // Signed out because the account is closed: the closed screen is where they belong
+          // until they choose to leave it.
+          this.hideCoversWhenReady(ACCOUNT_CLOSED_ROUTE);
+        } else if (hasAnyProgress) {
           this.navigateBasedOnProgress(unifiedProgress);
         } else {
           this.router.navigate(['/get-started'], { replaceUrl: true }).finally(() => {
@@ -335,6 +341,12 @@ export class AppComponent implements OnInit {
         }
       }
     });
+  }
+
+  /** On the closed-account screen, or on the way to it (the sign-out is still running). */
+  private onAccountClosedScreen(): boolean {
+    return this.accountClosed.isLeaving
+      || this.router.url.split('?')[0].split('#')[0] === ACCOUNT_CLOSED_ROUTE;
   }
 
   navigateBasedOnProgress(progress: UserProgress): void {
@@ -376,6 +388,12 @@ export class AppComponent implements OnInit {
     // Don't navigate if already on the target route
     if (currentBaseUrl === targetRoute) {
       this.hideCoversWhenReady(targetRoute);
+      return;
+    }
+
+    // Never move a signed-out user off the closed-account screen; they leave it by its buttons.
+    if (this.onAccountClosedScreen()) {
+      this.hideCoversWhenReady(ACCOUNT_CLOSED_ROUTE);
       return;
     }
 

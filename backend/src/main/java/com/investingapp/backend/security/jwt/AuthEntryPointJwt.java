@@ -34,6 +34,10 @@ public class AuthEntryPointJwt implements AuthenticationEntryPoint {
         body.put("error", "Unauthorized");
         body.put("message", authException.getMessage());
         body.put("path", request.getServletPath());
+        // Lets the app tell a closed account from a session that is merely over.
+        if (com.investingapp.backend.security.ClosedAccountSignal.isMarked(request)) {
+            body.put("code", com.investingapp.backend.security.ClosedAccountSignal.CODE);
+        }
 
         final ObjectMapper mapper = new ObjectMapper();
         mapper.writeValue(response.getOutputStream(), body);

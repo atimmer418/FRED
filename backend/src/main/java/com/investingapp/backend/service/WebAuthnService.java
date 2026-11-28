@@ -424,6 +424,9 @@ public class WebAuthnService {
     @Autowired
     private UserSessionService userSessionService;
 
+    /** The code sent when a sign-in offers a passkey this server has no record of. */
+    public static final String PASSKEY_NOT_REGISTERED = "PASSKEY_NOT_REGISTERED";
+
     /**
      * Finish authentication flow - discovers user from passkey response
      */
@@ -434,6 +437,16 @@ public class WebAuthnService {
         try {
             PublicKeyCredential<AuthenticatorAssertionResponse, ClientAssertionExtensionOutputs> credential =
                 PublicKeyCredential.parseAssertionResponseJson(credentialResponse.toString());
+
+            // A passkey this server has no record of: the account was closed, or its passkeys
+            // were replaced by account recovery. Nothing can make it work, so it gets its own
+            // code and the app can stop asking for it. A passkey id is a long random value only
+            // its holder has, so naming it as unknown gives nothing away.
+            if (passkeyCredentialRepository.findByExternalId(credential.getId().getBase64Url()).isEmpty()) {
+                logger.warn("Passkey authentication refused: the passkey is not registered here");
+                return AuthenticationFinishResponse.refused(PASSKEY_NOT_REGISTERED,
+                        "This passkey is no longer registered.");
+            }
             
             FinishAssertionOptions options = FinishAssertionOptions.builder()
                 .request(originalRequestOptions)
@@ -519,6 +532,17 @@ public class WebAuthnService {
      * Response class for authentication finish
      */
     public static class AuthenticationFinishResponse {
+        /** Why a sign-in was refused, when the app can act on the reason; null otherwise. */
+        private String code;
+
+        static AuthenticationFinishResponse refused(String code, String message) {
+            AuthenticationFinishResponse response = new AuthenticationFinishResponse(false, message, null, null, null);
+            response.code = code;
+            return response;
+        }
+
+        public String getCode() { return code; }
+
         private boolean success;
         private String message;
         private String jwtToken;

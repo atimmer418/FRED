@@ -307,6 +307,7 @@ export class AppLockService {
       component: PasskeyPromptComponent,
       componentProps: {
         jwtExpired,
+        lockScreen: true,
         userEmail: localStorage.getItem('userEmail') ?? undefined,
         onLottieReady: () => {
           clearTimeout(overlayFallback);
@@ -334,6 +335,11 @@ export class AppLockService {
     if (data && data.authenticated) {
       this.failedLockRetries = 0;
       this.unlockApp();
+    } else if (!this.isUserLoggedIn()) {
+      // The device was signed out while the lock screen was up (the account is closed, see
+      // AccountClosedService). There is no session left to protect, so do not lock again.
+      this.failedLockRetries = 0;
+      this.isLockedSubject.next(false);
     } else {
       // Modal closed without a successful auth (abnormal — PasskeyPromptComponent never
       // dismisses on failure; it leaves the modal open with a retry button). Retry the

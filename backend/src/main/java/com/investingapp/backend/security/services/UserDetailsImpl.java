@@ -48,6 +48,14 @@ public class UserDetailsImpl implements UserDetails {
         this.authorities = authorities;
     }
 
+    /** True when the account is closed and its row is only waiting to be deleted. */
+    private boolean closed;
+
+    /** A closed account's token is never honoured, even if one of its sessions somehow survived. */
+    public boolean isClosed() {
+        return closed;
+    }
+
     /** Opaque analytics identity; carried here so JwtUtils can stamp it into the token. */
     public String getPublicId() {
         return publicId;
@@ -62,11 +70,13 @@ public class UserDetailsImpl implements UserDetails {
         // .map(role -> new SimpleGrantedAuthority(role.getName().name()))
         // .collect(Collectors.toList());
 
-        return new UserDetailsImpl(
+        UserDetailsImpl details = new UserDetailsImpl(
                 user.getId(),
                 user.getPublicId(),
                 user.getEmail(),
                 authorities);
+        details.closed = user.isClosed();
+        return details;
     }
 
     @Override

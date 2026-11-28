@@ -20,6 +20,7 @@ import { ToastService } from '../services/toast.service';
 import { PasskeyService } from '../services/passkey.service';
 import { PinService } from '../services/pin.service';
 import { AnalyticsService } from '../services/analytics/analytics.service';
+import { AccountClosedService } from '../services/account-closed.service';
 
 /**
  * Analytics call sites on sell-withdraw.
@@ -37,6 +38,7 @@ describe('SellWithdrawPage — analytics', () => {
   let modalCtrl: jasmine.SpyObj<ModalController>;
   let toast: jasmine.SpyObj<ToastService>;
   let router: jasmine.SpyObj<Router>;
+  let accountClosed: jasmine.SpyObj<AccountClosedService>;
   let page: SellWithdrawPage;
 
   const position: Position = {
@@ -90,6 +92,8 @@ describe('SellWithdrawPage — analytics', () => {
     modalCtrl = jasmine.createSpyObj<ModalController>('ModalController', ['create']);
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['showToast']);
     router = jasmine.createSpyObj<Router>('Router', ['navigateByUrl']);
+    accountClosed = jasmine.createSpyObj<AccountClosedService>('AccountClosedService', ['leave']);
+    accountClosed.leave.and.resolveTo();
 
     page = new SellWithdrawPage(
       router,
@@ -102,6 +106,7 @@ describe('SellWithdrawPage — analytics', () => {
       jasmine.createSpyObj<NavController>('NavController', ['navigateBack']),
       analytics,
       new ElementRef(document.createElement('div')),
+      accountClosed,
     );
   });
 
@@ -339,7 +344,7 @@ describe('SellWithdrawPage — analytics', () => {
     expect(analytics.trackErrorShown).not.toHaveBeenCalled();
   }));
 
-  it('confirming through the sheet closes the account, then toasts, resets analytics and goes home', fakeAsync(() => {
+  it('confirming through the sheet closes the account, then hands the device to the one closed-account exit', fakeAsync(() => {
     passkeyThenConfirmSheet('close');
     trading.closeAccount.and.returnValue(of({ success: true, message: 'closed' }));
     spyOn(Storage.prototype, 'clear');
@@ -348,13 +353,26 @@ describe('SellWithdrawPage — analytics', () => {
     tick();
 
     expect(trading.closeAccount).toHaveBeenCalledTimes(1);
-    expect(toast.showToast).toHaveBeenCalledOnceWith('Your account has been permanently closed.', 'success');
-    expect(analytics.reset).toHaveBeenCalledTimes(1);
-    expect(Storage.prototype.clear).toHaveBeenCalledTimes(2);
-    expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/', { replaceUrl: true });
+    // The exit signs the app out in memory as well as on disk and shows the closed screen. The
+    // page must not wipe storage or navigate by itself any more: doing only that is what left
+    // the app believing it was still signed in.
+    expect(accountClosed.leave).toHaveBeenCalledOnceWith('closed');
+    expect(Storage.prototype.clear).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+    expect(toast.showToast).not.toHaveBeenCalled();
     expect(page.isClosingAccount).toBeFalse();
     expect(analytics.track).not.toHaveBeenCalled();
     expect(analytics.trackErrorShown).not.toHaveBeenCalled();
+  }));
+
+  it('a close that the server refuses leaves the device signed in', fakeAsync(() => {
+    passkeyThenConfirmSheet('close');
+    trading.closeAccount.and.returnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+
+    page.initiateCloseAccount();
+    tick();
+
+    expect(accountClosed.leave).not.toHaveBeenCalled();
   }));
 
   it('a close that fails inside the sheet reports save_failed and toasts, and the sheet still settles', fakeAsync(() => {
@@ -492,6 +510,7 @@ describe('SellWithdrawPage: withdraw tray', () => {
         { provide: PinService, useValue: pin },
         { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
         { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown']) },
+        { provide: AccountClosedService, useValue: jasmine.createSpyObj<AccountClosedService>('AccountClosedService', ['leave']) },
       ],
     })
       // Ionic's elements render as plain custom elements; the tray's slot is the real thing.
@@ -748,6 +767,7 @@ describe('SellWithdrawPage: loading skeleton', () => {
         { provide: PinService, useValue: pin },
         { provide: NavController, useValue: jasmine.createSpyObj<NavController>('NavController', ['navigateBack']) },
         { provide: AnalyticsService, useValue: jasmine.createSpyObj<AnalyticsService>('AnalyticsService', ['track', 'trackErrorShown']) },
+        { provide: AccountClosedService, useValue: jasmine.createSpyObj<AccountClosedService>('AccountClosedService', ['leave']) },
       ],
     })
       // Ionic's elements render as plain custom elements; the skeleton and the tray slot are real.

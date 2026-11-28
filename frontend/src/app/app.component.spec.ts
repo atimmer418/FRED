@@ -12,6 +12,7 @@ import { PushNotificationService } from './services/push-notification.service';
 import { PortfolioStoreService } from './services/portfolio-store.service';
 import { FirstTimeTourService } from './services/first-time-tour.service';
 import { LastScreenUtils } from './utils/last-screen.utils';
+import { AccountClosedService } from './services/account-closed.service';
 
 // ---------------------------------------------------------------------------
 // Lightweight stubs — only the surface AppComponent uses
@@ -492,6 +493,115 @@ describe('AppComponent — onboarded landing restores the last screen on a cold 
 // ---------------------------------------------------------------------------
 // Baseline smoke test (keep original)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// A closed account stays on the closed screen
+// ---------------------------------------------------------------------------
+
+describe('AppComponent: a closed account is not routed back into the app', () => {
+  const ONBOARDED = {
+    getStartedCompleted: true, surveyInitialCompleted: true, fiPlanResultsCompleted: true,
+    authFinalizeCompleted: true, kycVerificationCompleted: true, linkPlaidCompleted: true,
+    investmentScheduleCompleted: true, investmentConfirmationCompleted: true,
+  } as UserProgress;
+
+  let router: Router;
+  let loggedIn: BehaviorSubject<boolean>;
+  let progress: BehaviorSubject<UserProgress | null>;
+  let authStub: ReturnType<typeof makeAuthServiceStub>;
+  let navigate: jasmine.Spy;
+
+  async function setup(startLoggedIn: boolean, startProgress: UserProgress | null, url: string) {
+    loggedIn = new BehaviorSubject<boolean>(startLoggedIn);
+    progress = new BehaviorSubject<UserProgress | null>(startProgress);
+    authStub = makeAuthServiceStub(startLoggedIn, startProgress);
+    authStub.isLoggedIn$ = loggedIn.asObservable();
+    authStub.userProgress$ = progress.asObservable();
+
+    await TestBed.configureTestingModule({
+      imports: [AppComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: AuthService, useValue: authStub },
+        { provide: AppLockService, useValue: makeAppLockStub() },
+        { provide: PasskeyService, useValue: passkeyServiceStub },
+        { provide: PushNotificationService, useValue: pushNotificationServiceStub },
+        { provide: PortfolioStoreService, useValue: portfolioStoreStub },
+        { provide: FirstTimeTourService, useValue: firstTimeTourStub },
+      ],
+    }).compileComponents();
+
+    router = TestBed.inject(Router);
+    Object.defineProperty(router, 'url', { get: () => url, configurable: true });
+    spyOn(router, 'navigateByUrl').and.returnValue(Promise.resolve(true));
+    navigate = spyOn(router, 'navigate').and.returnValue(Promise.resolve(true));
+  }
+
+  afterEach(() => clearToken());
+
+  it('signing out on the closed screen does not bounce the user to Get Started', async () => {
+    await setup(false, null, '/account-closed');
+
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    await settle(400); // past the navigation stream's 300ms debounce
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('a signed-out user anywhere else still goes to Get Started (unchanged)', async () => {
+    await setup(false, null, '/');
+
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    await settle(400);
+
+    expect(navigate).toHaveBeenCalledWith(['/get-started'], jasmine.objectContaining({ replaceUrl: true }));
+  });
+
+  it('while the sign-out is still running, the signed-out rule does not get to Get Started first', async () => {
+    // The page the user closed the account from; the closed screen has not been reached yet.
+    await setup(false, null, '/sell-withdraw');
+    spyOnProperty(TestBed.inject(AccountClosedService), 'isLeaving', 'get').and.returnValue(true);
+
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    await settle(400);
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('saved onboarding progress never pulls a signed-out user off the closed screen', async () => {
+    await setup(false, null, '/account-closed');
+    authStub.getUnifiedProgress.and.returnValue(ONBOARDED);
+
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    await settle(400);
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('a resume on the closed screen never sends the user to the tabs, even on stale progress', async () => {
+    await setup(false, null, '/account-closed');
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    await settle(400);
+    (router.navigateByUrl as jasmine.Spy).calls.reset();
+
+    // The exact stale state the old close-account left behind: memory still says fully set up.
+    authStub.getCurrentProgress.and.returnValue(ONBOARDED);
+    fixture.componentInstance.checkSurveyStatusAndNavigate();
+    await settle();
+
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+});
 
 describe('AppComponent', () => {
   it('should create the app', async () => {
